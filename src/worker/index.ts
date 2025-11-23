@@ -5,6 +5,13 @@ import { getCookie, setCookie } from "hono/cookie";
 import { zValidator } from "@hono/zod-validator";
 import { OnboardingRequestSchema, CompleteMissionRequestSchema, FoodScanRequestSchema, UpdateDailyMetricsRequestSchema, FriendRequestSchema, MiniGameChallengeRequestSchema, MiniGameCompleteRequestSchema } from "@/shared/types";
 
+interface ClaudeResponse {
+  content: Array<{
+    type: string;
+    text: string;
+  }>;
+}
+
 const app = new Hono<{ Bindings: Env }>();
 
 app.use("/*", cors());
@@ -830,5 +837,507 @@ async function createDailyMissions(db: D1Database, userId: string) {
     }
   }
 }
+
+// ====================================
+// ADICIONE ESTAS ROTAS AO SEU src/worker/index.ts
+// Cole após as rotas existentes, antes do "export default app"
+// ====================================
+
+// AI-powered endpoints
+
+// 1. Generate personalized missions using AI
+app.post("/api/ai/generate-missions", authMiddleware, async (c) => {
+  const user = c.get("user");
+  if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+  try {
+    // Get user data for personalization
+    const [profile, progression, attributes, skills] = await Promise.all([
+      c.env.DB.prepare("SELECT * FROM user_profiles WHERE user_id = ?").bind(user.id).first(),
+      c.env.DB.prepare("SELECT * FROM user_progression WHERE user_id = ?").bind(user.id).first(),
+      c.env.DB.prepare("SELECT * FROM user_attributes WHERE user_id = ?").bind(user.id).first(),
+      c.env.DB.prepare(`
+        SELECT s.* FROM skills s
+        INNER JOIN user_skills us ON s.id = us.skill_id
+        WHERE us.user_id = ?
+      `).bind(user.id).all(),
+    ]);
+
+    // Build AI prompt with user context
+    const prompt = `Você é um personal trainer virtual especializado em gamificação fitness. 
+
+Perfil do usuário:
+- Nome: ${profile?.full_name}
+- Nível: ${progression?.level}
+- Objetivo: ${profile?.main_goal}
+- Condicionamento: ${profile?.initial_conditioning}
+- Equipamentos: ${profile?.equipment || "nenhum"}
+- Lesões: ${profile?.injuries || "nenhuma"}
+
+Atributos atuais:
+- Força: ${attributes?.strength}
+- Constituição: ${attributes?.constitution}
+- Vitalidade: ${attributes?.vitality}
+- Destreza: ${attributes?.dexterity}
+- Foco: ${attributes?.focus}
+
+Skills desbloqueadas: ${skills.results.map((s: any) => s.name).join(", ")}
+
+Crie 3 missões diárias DESAFIADORAS mas ALCANÇÁVEIS para este usuário. As missões devem:
+1. Ser progressivas e adequadas ao nível atual
+2. Variar entre diferentes tipos de exercício
+3. Considerar os equipamentos disponíveis
+4. Evitar áreas com lesões
+5. Focar no objetivo principal
+
+Responda APENAS com um JSON no formato:
+{
+  "missions": [
+    {
+      "title": "título curto",
+      "description": "descrição motivadora",
+      "skill_name": "nome da skill",
+      "target_reps": número,
+      "xp_reward": número,
+      "points_reward": número,
+      "difficulty": "easy|medium|hard"
+    }
+  ]
+}`;
+
+    // Call Claude API
+    const aiResponse = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 2000,
+        messages: [{ role: "user", content: prompt }],
+      }),
+    });
+
+    if (!aiResponse.ok) {
+      throw new Error("AI API error");
+    }
+
+    const aiData = await aiResponse.json() as ClaudeResponse;;
+    const content = aiData.content[0].text;
+    
+    // Parse JSON from response
+    const jsonMatch = content.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      throw new Error("Invalid AI response format");
+    }
+    
+    const missionsData = JSON.parse(jsonMatch[0]);
+    
+    // Insert missions into database
+    const tomorrow = new Date(Date.now() + 86400000).toISOString();
+    
+    for (const mission of missionsData.missions) {
+      // Find skill ID by name
+      const skill = skills.results.find((s: any) => 
+        s.name.toLowerCase().includes(mission.skill_name.toLowerCase())
+      );
+      
+      await c.env.DB.prepare(`
+        INSERT INTO missions (user_id, type, title, description, skill_id, target_reps, xp_reward, points_reward, deadline, updated_at)
+        VALUES (?, 'daily', ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+      `).bind(
+        user.id,
+        mission.title,
+        mission.description,
+        skill?.id || null,
+        mission.target_reps,
+        mission.xp_reward,
+        mission.points_reward,
+        tomorrow
+      ).run();
+    }
+
+    return c.json({ 
+      success: true, 
+      missions: missionsData.missions,
+      message: "Missões geradas com IA!"
+    });
+
+  } catch (error) {
+    console.error("AI generation error:", error);
+    return c.json({ error: "Failed to generate missions" }, 500);
+  }
+});
+
+// 2. AI Fitness Chatbot
+app.post("/api/ai/chat", authMiddleware, async (c) => {
+  const user = c.get("user");
+  if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+  try {
+    const body = await c.req.json();
+    const userMessage = body.message;
+    const conversationHistory = body.history || [];
+
+    if (!userMessage) {
+      return c.json({ error: "Message required" }, 400);
+    }
+
+    // Get user context
+    const [profile, progression, attributes] = await Promise.all([
+      c.env.DB.prepare("SELECT * FROM user_profiles WHERE user_id = ?").bind(user.id).first(),
+      c.env.DB.prepare("SELECT * FROM user_progression WHERE user_id = ?").bind(user.id).first(),
+      c.env.DB.prepare("SELECT * FROM user_attributes WHERE user_id = ?").bind(user.id).first(),
+    ]);
+
+    const systemPrompt = `Você é o FitBot, um assistente fitness virtual motivador e especializado em gamificação. 
+
+Contexto do usuário:
+- Nome: ${profile?.full_name}
+- Nível: ${progression?.level}
+- XP: ${progression?.xp}
+- Streak: ${progression?.current_streak} dias
+- Objetivo: ${profile?.main_goal}
+- Condicionamento: ${profile?.initial_conditioning}
+
+Atributos:
+- Força: ${attributes?.strength}
+- Constituição: ${attributes?.constitution}
+- Vitalidade: ${attributes?.vitality}
+- Destreza: ${attributes?.dexterity}
+- Foco: ${attributes?.focus}
+
+Sua missão:
+1. Seja motivador e use linguagem de RPG/games
+2. Forneça dicas práticas de treino
+3. Responda dúvidas sobre exercícios
+4. Ajude o usuário a atingir suas metas
+5. Seja conciso (máximo 3 parágrafos)
+6. Use emojis relevantes 💪🔥⚡
+
+Responda em português brasileiro de forma amigável e motivadora!`;
+
+    // Build messages array
+    const messages = [
+      ...conversationHistory,
+      { role: "user", content: userMessage }
+    ];
+
+    const aiResponse = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 1000,
+        system: systemPrompt,
+        messages: messages,
+      }),
+    });
+
+    if (!aiResponse.ok) {
+      throw new Error("AI API error");
+    }
+
+    const aiData = await aiResponse.json() as ClaudeResponse;;
+    const botResponse = aiData.content[0].text;
+
+    return c.json({ 
+      success: true,
+      message: botResponse,
+      user_level: progression?.level,
+      user_xp: progression?.xp
+    });
+
+  } catch (error) {
+    console.error("Chatbot error:", error);
+    return c.json({ error: "Failed to process message" }, 500);
+  }
+});
+
+// 3. AI Recommendations Engine
+app.get("/api/ai/recommendations", authMiddleware, async (c) => {
+  const user = c.get("user");
+  if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+  try {
+    // Get comprehensive user data
+    const [profile, progression, attributes, skills, completedMissions] = await Promise.all([
+      c.env.DB.prepare("SELECT * FROM user_profiles WHERE user_id = ?").bind(user.id).first(),
+      c.env.DB.prepare("SELECT * FROM user_progression WHERE user_id = ?").bind(user.id).first(),
+      c.env.DB.prepare("SELECT * FROM user_attributes WHERE user_id = ?").bind(user.id).first(),
+      c.env.DB.prepare(`
+        SELECT s.*, us.total_reps, us.best_reps 
+        FROM skills s
+        INNER JOIN user_skills us ON s.id = us.skill_id
+        WHERE us.user_id = ?
+        ORDER BY us.total_reps DESC
+      `).bind(user.id).all(),
+      c.env.DB.prepare(`
+        SELECT COUNT(*) as count 
+        FROM missions 
+        WHERE user_id = ? AND is_completed = 1
+      `).bind(user.id).first(),
+    ]);
+
+    const prompt = `Analise este perfil fitness gamificado e gere recomendações personalizadas.
+
+DADOS DO USUÁRIO:
+Nível: ${progression?.level}
+XP Total: ${progression?.xp}
+Missões Completas: ${completedMissions?.count}
+Streak Atual: ${progression?.current_streak} dias
+Objetivo: ${profile?.main_goal}
+
+ATRIBUTOS:
+Força: ${attributes?.strength}
+Constituição: ${attributes?.constitution}
+Vitalidade: ${attributes?.vitality}
+Destreza: ${attributes?.dexterity}
+Foco: ${attributes?.focus}
+
+SKILLS MAIS USADAS:
+${skills.results.slice(0, 5).map((s: any) => `${s.name}: ${s.total_reps} reps`).join("\n")}
+
+Analise e responda APENAS com JSON:
+{
+  "next_skill_recommendation": {
+    "name": "nome da skill",
+    "reason": "por que o usuário deve focar nisso"
+  },
+  "weak_attribute": {
+    "name": "nome do atributo mais fraco",
+    "suggestion": "como melhorar"
+  },
+  "training_focus": {
+    "type": "tipo de treino recomendado",
+    "reason": "justificativa baseada no objetivo"
+  },
+  "motivation_message": "mensagem motivadora personalizada"
+}`;
+
+    const aiResponse = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 1500,
+        messages: [{ role: "user", content: prompt }],
+      }),
+    });
+
+    if (!aiResponse.ok) {
+      throw new Error("AI API error");
+    }
+
+    const aiData = await aiResponse.json() as ClaudeResponse;;
+    const content = aiData.content[0].text;
+    
+    const jsonMatch = content.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      throw new Error("Invalid AI response format");
+    }
+    
+    const recommendations = JSON.parse(jsonMatch[0]);
+
+    return c.json({ 
+      success: true,
+      recommendations,
+      user_stats: {
+        level: progression?.level,
+        total_missions: completedMissions?.count,
+        streak: progression?.current_streak
+      }
+    });
+
+  } catch (error) {
+    console.error("Recommendations error:", error);
+    return c.json({ error: "Failed to generate recommendations" }, 500);
+  }
+});
+
+// 4. AI Food Analysis (Enhanced)
+app.post("/api/ai/analyze-food", authMiddleware, async (c) => {
+  const user = c.get("user");
+  if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+  try {
+    const body = await c.req.json();
+    const { food_description, image_base64 } = body;
+
+    if (!food_description && !image_base64) {
+      return c.json({ error: "Food description or image required" }, 400);
+    }
+
+    let prompt = "";
+    let messages: any[] = [];
+
+    if (image_base64) {
+      // Image-based analysis
+      prompt = `Analise esta imagem de comida e retorne APENAS um JSON com:
+{
+  "food_name": "nome do alimento",
+  "calories": número estimado de calorias,
+  "protein": gramas de proteína,
+  "carbs": gramas de carboidratos,
+  "fats": gramas de gordura,
+  "healthy_score": número de 1-10,
+  "suggestions": "sugestões para tornar mais saudável"
+}`;
+
+      messages = [{
+        role: "user",
+        content: [
+          {
+            type: "image",
+            source: {
+              type: "base64",
+              media_type: "image/jpeg",
+              data: image_base64
+            }
+          },
+          { type: "text", text: prompt }
+        ]
+      }];
+    } else {
+      // Text-based analysis
+      prompt = `Analise este alimento: "${food_description}"
+
+Retorne APENAS um JSON com:
+{
+  "food_name": "nome do alimento",
+  "calories": número estimado de calorias,
+  "protein": gramas de proteína,
+  "carbs": gramas de carboidratos,
+  "fats": gramas de gordura,
+  "healthy_score": número de 1-10,
+  "suggestions": "sugestões para tornar mais saudável ou alternativas"
+}`;
+
+      messages = [{ role: "user", content: prompt }];
+    }
+
+    const aiResponse = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 1000,
+        messages: messages,
+      }),
+    });
+
+    if (!aiResponse.ok) {
+      throw new Error("AI API error");
+    }
+
+    const aiData = await aiResponse.json() as ClaudeResponse;;
+    const content = aiData.content[0].text;
+    
+    const jsonMatch = content.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      throw new Error("Invalid AI response format");
+    }
+    
+    const foodData = JSON.parse(jsonMatch[0]);
+
+    // Save to food diary
+    await c.env.DB.prepare(`
+      INSERT INTO food_diary (user_id, food_name, calories, meal_type, updated_at)
+      VALUES (?, ?, ?, ?, datetime('now'))
+    `).bind(
+      user.id,
+      foodData.food_name,
+      foodData.calories,
+      'lanche'
+    ).run();
+
+    return c.json({ 
+      success: true,
+      food_data: foodData
+    });
+
+  } catch (error) {
+    console.error("Food analysis error:", error);
+    return c.json({ error: "Failed to analyze food" }, 500);
+  }
+});
+
+// Helper: Get AI-powered workout suggestions based on user state
+app.get("/api/ai/workout-suggestions", authMiddleware, async (c) => {
+  const user = c.get("user");
+  if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+  try {
+    const [profile, progression, metrics] = await Promise.all([
+      c.env.DB.prepare("SELECT * FROM user_profiles WHERE user_id = ?").bind(user.id).first(),
+      c.env.DB.prepare("SELECT * FROM user_progression WHERE user_id = ?").bind(user.id).first(),
+      c.env.DB.prepare(`
+        SELECT * FROM daily_metrics 
+        WHERE user_id = ? AND date = ?
+      `).bind(user.id, new Date().toISOString().split('T')[0]).first(),
+    ]);
+
+    const prompt = `Baseado nestes dados de hoje, sugira um treino:
+
+Usuário: Nível ${progression?.level}
+Objetivo: ${profile?.main_goal}
+Atividade hoje: ${metrics?.steps || 0} passos, ${metrics?.calories_burned || 0} calorias
+
+Responda APENAS com JSON:
+{
+  "workout_type": "tipo de treino ideal para agora",
+  "duration_minutes": número,
+  "intensity": "low|medium|high",
+  "exercises": ["exercício 1", "exercício 2", "exercício 3"],
+  "motivation": "mensagem motivadora"
+}`;
+
+    const aiResponse = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 1000,
+        messages: [{ role: "user", content: prompt }],
+      }),
+    });
+
+    if (!aiResponse.ok) {
+      throw new Error("AI API error");
+    }
+
+    const aiData = await aiResponse.json() as ClaudeResponse;;
+    const content = aiData.content[0].text;
+    
+    const jsonMatch = content.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      throw new Error("Invalid AI response format");
+    }
+    
+    const workout = JSON.parse(jsonMatch[0]);
+
+    return c.json({ 
+      success: true,
+      workout
+    });
+
+  } catch (error) {
+    console.error("Workout suggestions error:", error);
+    return c.json({ error: "Failed to generate workout suggestions" }, 500);
+  }
+});
 
 export default app;
