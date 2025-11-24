@@ -1,10 +1,13 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
-import { useAuth } from "@getmocha/users-service/react";
+import { useAuth } from "@/react-app/App";
 import BottomNav from "@/react-app/components/BottomNav";
 import MissionCard from "@/react-app/components/MissionCard";
 import LevelUpModal from "@/react-app/components/LevelUpModal";
+import AIRecommendations from "@/react-app/components/AIRecommendations"
+import AIMissionGenerator from "@/react-app/components/AIMissionGenerator"
 import { Flame, Footprints, Target, Zap } from "lucide-react";
+import { Bot } from "lucide-react";
 import type { Mission, UserProgression, DailyMetrics, UserProfile, Title } from "@/shared/types";
 
 export default function Dashboard() {
@@ -144,6 +147,7 @@ export default function Dashboard() {
 
       {/* Missions */}
       <div className="px-6 py-6 space-y-6">
+        <AIMissionGenerator onMissionsGenerated={loadData} />
         <MissionSection
           title="Missões Diárias"
           icon={<Target className="w-5 h-5" />}
@@ -168,7 +172,16 @@ export default function Dashboard() {
             onComplete={handleMissionComplete}
           />
         )}
+        <AIRecommendations />
       </div>
+      
+      {/* Floating Chatbot Button */}
+      <button
+        onClick={() => navigate("/ai-chat")}
+        className="fixed bottom-28 right-6 bg-emerald-600 text-white p-4 rounded-full shadow-lg hover:bg-emerald-700 transition-all"
+      >
+        <Bot className="w-6 h-6" />
+      </button>
 
       <BottomNav active="missions" />
       

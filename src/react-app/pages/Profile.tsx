@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
-import { useAuth } from "@getmocha/users-service/react";
+import { useAuth } from "@/react-app/App";
 import BottomNav from "@/react-app/components/BottomNav";
 import { LogOut, Trophy, Award, Dumbbell, Target } from "lucide-react";
 import type { UserProfile, UserAttributes, UserProgression } from "@/shared/types";
 
 export default function Profile() {
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
   const navigate = useNavigate();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [attributes, setAttributes] = useState<UserAttributes | null>(null);
@@ -49,11 +49,10 @@ export default function Profile() {
     }
   };
 
-  const handleLogout = async () => {
-    await logout();
-    navigate("/app");
-  };
-
+const handleLogout = async () => {
+  await fetch('/api/logout', { credentials: 'include' });
+  navigate('/app');
+};
   const handleActivateTitle = async (titleId: number) => {
     try {
       await fetch(`/api/titles/${titleId}/activate`, { method: "POST" });

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useAuth } from "@getmocha/users-service/react";
+import { useAuth } from "@/react-app/App";
 import { useNavigate, useSearchParams } from "react-router";
 import BottomNav from "@/react-app/components/BottomNav";
 import { Swords, Trophy, Clock, Zap, Target, Users, Loader2, ChevronRight } from "lucide-react";

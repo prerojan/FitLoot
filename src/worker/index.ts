@@ -1,10 +1,9 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import { authMiddleware, getOAuthRedirectUrl, exchangeCodeForSessionToken, deleteSession, MOCHA_SESSION_TOKEN_COOKIE_NAME } from "@getmocha/users-service/backend";
-import { getCookie, setCookie } from "hono/cookie";
 import { zValidator } from "@hono/zod-validator";
 import { OnboardingRequestSchema, CompleteMissionRequestSchema, FoodScanRequestSchema, UpdateDailyMetricsRequestSchema, FriendRequestSchema, MiniGameChallengeRequestSchema, MiniGameCompleteRequestSchema } from "@/shared/types";
 
+// Tipos para a API do Claude
 interface ClaudeResponse {
   content: Array<{
     type: string;
@@ -12,39 +11,125 @@ interface ClaudeResponse {
   }>;
 }
 
-const app = new Hono<{ Bindings: Env }>();
+// Tipo do usuário autenticado
+interface AuthUser {
+  id: string;
+  email: string;
+  name: string;
+  avatar_url?: string;
+}
+
+// Context type para Hono
+type AppContext = {
+  Bindings: Env;
+  Variables: {
+    user: AuthUser;
+  };
+};
+
+// Middleware de autenticação próprio
+async function authMiddleware(c: any, next: any) {
+  const sessionId = c.req.header('Cookie')?.match(/session_id=([^;]+)/)?.[1];
+  
+  if (!sessionId) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+
+  const session = await c.env.DB.prepare(
+    'SELECT s.*, u.* FROM sessions s JOIN users u ON s.user_id = u.id WHERE s.id = ? AND s.expires_at > datetime("now")'
+  ).bind(sessionId).first();
+
+  if (!session) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+
+  c.set('user', {
+    id: session.user_id,
+    email: session.email,
+    name: session.name,
+    avatar_url: session.avatar_url
+  });
+
+  await next();
+}
+
+const app = new Hono<AppContext>();
 
 app.use("/*", cors());
 
 // Auth endpoints
-app.get("/api/oauth/google/redirect_url", async (c) => {
-  const redirectUrl = await getOAuthRedirectUrl("google", {
-    apiUrl: (c.env as any).MOCHA_USERS_SERVICE_API_URL,
-    apiKey: (c.env as any).MOCHA_USERS_SERVICE_API_KEY,
-  });
-  return c.json({ redirectUrl }, 200);
+// Auth endpoints
+app.get("/api/auth/google", async (c) => {
+  const clientId = c.env.GOOGLE_CLIENT_ID;
+  const redirectUri = `${new URL(c.req.url).origin}/api/auth/google/callback`;
+  
+  const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
+    `client_id=${clientId}&` +
+    `redirect_uri=${encodeURIComponent(redirectUri)}&` +
+    `response_type=code&` +
+    `scope=email profile`;
+
+  return c.redirect(authUrl);
 });
 
-app.post("/api/sessions", async (c) => {
-  const body = await c.req.json();
-  if (!body.code) {
-    return c.json({ error: "No authorization code provided" }, 400);
+app.get("/api/auth/google/callback", async (c) => {
+  const code = c.req.query('code');
+  
+  if (!code) {
+    return c.json({ error: 'No code provided' }, 400);
   }
 
-  const sessionToken = await exchangeCodeForSessionToken(body.code, {
-    apiUrl: (c.env as any).MOCHA_USERS_SERVICE_API_URL,
-    apiKey: (c.env as any).MOCHA_USERS_SERVICE_API_KEY,
-  });
+  try {
+    const redirectUri = `${new URL(c.req.url).origin}/api/auth/google/callback`;
+    
+    const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        code,
+        client_id: c.env.GOOGLE_CLIENT_ID,
+        client_secret: c.env.GOOGLE_CLIENT_SECRET,
+        redirect_uri: redirectUri,
+        grant_type: 'authorization_code'
+      })
+    });
 
-  setCookie(c, MOCHA_SESSION_TOKEN_COOKIE_NAME, sessionToken, {
-    httpOnly: true,
-    path: "/",
-    sameSite: "none",
-    secure: true,
-    maxAge: 60 * 24 * 60 * 60,
-  });
+    const tokens = await tokenResponse.json() as any;
 
-  return c.json({ success: true }, 200);
+    const userResponse = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+      headers: { Authorization: `Bearer ${tokens.access_token}` }
+    });
+
+    const googleUser = await userResponse.json() as any;
+
+    let user = await c.env.DB.prepare(
+      'SELECT * FROM users WHERE google_id = ?'
+    ).bind(googleUser.id).first();
+
+    if (!user) {
+      const userId = crypto.randomUUID();
+      await c.env.DB.prepare(
+        'INSERT INTO users (id, email, name, google_id, avatar_url) VALUES (?, ?, ?, ?, ?)'
+      ).bind(userId, googleUser.email, googleUser.name, googleUser.id, googleUser.picture).run();
+
+      user = await c.env.DB.prepare(
+        'SELECT * FROM users WHERE google_id = ?'
+      ).bind(googleUser.id).first();
+    }
+
+    const sessionId = crypto.randomUUID();
+    const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+
+    await c.env.DB.prepare(
+      'INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, ?)'
+    ).bind(sessionId, user.id, expiresAt).run();
+
+c.header('Set-Cookie', `session_id=${sessionId}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${30 * 24 * 60 * 60}`);
+return c.redirect('/dashboard');
+  } catch (error) {
+    console.error('Auth error:', error);
+    return c.json({ error: 'Authentication failed' }, 500);
+  }
 });
 
 app.get("/api/users/me", authMiddleware, async (c) => {
@@ -52,23 +137,14 @@ app.get("/api/users/me", authMiddleware, async (c) => {
 });
 
 app.get("/api/logout", async (c) => {
-  const sessionToken = getCookie(c, MOCHA_SESSION_TOKEN_COOKIE_NAME);
-  if (typeof sessionToken === "string") {
-    await deleteSession(sessionToken, {
-      apiUrl: (c.env as any).MOCHA_USERS_SERVICE_API_URL,
-      apiKey: (c.env as any).MOCHA_USERS_SERVICE_API_KEY,
-    });
+  const sessionId = c.req.header('Cookie')?.match(/session_id=([^;]+)/)?.[1];
+  
+  if (sessionId) {
+    await c.env.DB.prepare('DELETE FROM sessions WHERE id = ?').bind(sessionId).run();
   }
 
-  setCookie(c, MOCHA_SESSION_TOKEN_COOKIE_NAME, "", {
-    httpOnly: true,
-    path: "/",
-    sameSite: "none",
-    secure: true,
-    maxAge: 0,
-  });
-
-  return c.json({ success: true }, 200);
+c.header('Set-Cookie', 'session_id=; Path=/; HttpOnly; Max-Age=0');
+  return c.redirect('/');
 });
 
 // User profile endpoints

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useAuth } from "@getmocha/users-service/react";
+import { useAuth } from "@/react-app/App";
 import { useNavigate } from "react-router";
 import BottomNav from "@/react-app/components/BottomNav";
 import { Users, Search, UserPlus, Check, X, Swords, TrendingUp, Loader2 } from "lucide-react";
