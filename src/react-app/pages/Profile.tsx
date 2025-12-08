@@ -4,6 +4,7 @@ import { useAuth } from "@/react-app/App";
 import BottomNav from "@/react-app/components/BottomNav";
 import { LogOut, Trophy, Award, Dumbbell, Target } from "lucide-react";
 import type { UserProfile, UserAttributes, UserProgression } from "@/shared/types";
+import { api } from "@/react-app/utils/api";
 
 export default function Profile() {
   const { user } = useAuth();
@@ -28,12 +29,12 @@ export default function Profile() {
   const loadData = async () => {
     try {
       const [profileRes, attrsRes, progRes, skillsRes, achievementsRes, titlesRes] = await Promise.all([
-        fetch("/api/profile"),
-        fetch("/api/attributes"),
-        fetch("/api/progression"),
-        fetch("/api/skills"),
-        fetch("/api/achievements"),
-        fetch("/api/titles"),
+        api("/api/profile"),
+        api("/api/attributes"),
+        api("/api/progression"),
+        api("/api/skills"),
+        api("/api/achievements"),
+        api("/api/titles"),
       ]);
 
       setProfile(await profileRes.json());
@@ -50,12 +51,12 @@ export default function Profile() {
   };
 
 const handleLogout = async () => {
-  await fetch('/api/logout', { credentials: 'include' });
+  await api('/api/logout', { credentials: 'include' });
   navigate('/app');
 };
   const handleActivateTitle = async (titleId: number) => {
     try {
-      await fetch(`/api/titles/${titleId}/activate`, { method: "POST" });
+      await api(`/api/titles/${titleId}/activate`, { method: "POST" });
       await loadData();
     } catch (error) {
       console.error("Error activating title:", error);

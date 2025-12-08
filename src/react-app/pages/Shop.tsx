@@ -4,6 +4,7 @@ import { useAuth } from "@/react-app/App";
 import BottomNav from "@/react-app/components/BottomNav";
 import { ShoppingBag, Coins, QrCode, Package } from "lucide-react";
 import type { UserProgression } from "@/shared/types";
+import { api } from "@/react-app/utils/api";
 
 export default function Shop() {
   const { user } = useAuth();
@@ -27,9 +28,9 @@ export default function Shop() {
   const loadData = async () => {
     try {
       const [productsRes, ordersRes, progressionRes] = await Promise.all([
-        fetch("/api/shop/products"),
-        fetch("/api/shop/orders"),
-        fetch("/api/progression"),
+        api("/api/shop/products"),
+        api("/api/shop/orders"),
+        api("/api/progression"),
       ]);
 
       setProducts(await productsRes.json());
@@ -44,7 +45,7 @@ export default function Shop() {
 
   const handlePurchase = async (productId: number) => {
     try {
-      const response = await fetch(`/api/shop/purchase/${productId}`, {
+      const response = await api(`/api/shop/purchase/${productId}`, {
         method: "POST",
       });
 

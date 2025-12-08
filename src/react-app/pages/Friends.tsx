@@ -3,6 +3,7 @@ import { useAuth } from "@/react-app/App";
 import { useNavigate } from "react-router";
 import BottomNav from "@/react-app/components/BottomNav";
 import { Users, Search, UserPlus, Check, X, Swords, TrendingUp, Loader2 } from "lucide-react";
+import { api } from "@/react-app/utils/api";
 
 interface Friend {
   id: number;
@@ -44,8 +45,8 @@ export default function Friends() {
   const loadFriends = async () => {
     try {
       const [friendsRes, requestsRes] = await Promise.all([
-        fetch("/api/friends/list"),
-        fetch("/api/friends/requests")
+        api("/api/friends/list"),
+        api("/api/friends/requests")
       ]);
 
       if (friendsRes.ok) {
@@ -72,7 +73,7 @@ export default function Friends() {
 
     setSearching(true);
     try {
-      const response = await fetch(`/api/users/search?q=${encodeURIComponent(searchQuery)}`);
+      const response = await api(`/api/users/search?q=${encodeURIComponent(searchQuery)}`);
       if (response.ok) {
         const data = await response.json();
         setSearchResults(data);
@@ -86,7 +87,7 @@ export default function Friends() {
 
   const sendFriendRequest = async (friendUserId: string) => {
     try {
-      const response = await fetch("/api/friends/request", {
+      const response = await api("/api/friends/request", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ friend_user_id: friendUserId })
@@ -104,7 +105,7 @@ export default function Friends() {
 
   const acceptFriendRequest = async (requestId: number) => {
     try {
-      const response = await fetch(`/api/friends/${requestId}/accept`, {
+      const response = await api(`/api/friends/${requestId}/accept`, {
         method: "POST"
       });
 
@@ -118,7 +119,7 @@ export default function Friends() {
 
   const rejectFriendRequest = async (requestId: number) => {
     try {
-      const response = await fetch(`/api/friends/${requestId}/reject`, {
+      const response = await api(`/api/friends/${requestId}/reject`, {
         method: "POST"
       });
 

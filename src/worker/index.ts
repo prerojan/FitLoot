@@ -1,7 +1,16 @@
 import { Hono } from "hono";
-import { cors } from "hono/cors";
 import { zValidator } from "@hono/zod-validator";
-import { OnboardingRequestSchema, CompleteMissionRequestSchema, FoodScanRequestSchema, UpdateDailyMetricsRequestSchema, FriendRequestSchema, MiniGameChallengeRequestSchema, MiniGameCompleteRequestSchema } from "@/shared/types";
+import {
+  OnboardingRequestSchema,
+  CompleteMissionRequestSchema,
+  FoodScanRequestSchema,
+  UpdateDailyMetricsRequestSchema,
+  FriendRequestSchema,
+  MiniGameChallengeRequestSchema,
+  MiniGameCompleteRequestSchema
+} from "../shared/types";
+
+
 
 // Tipos para a API do Claude
 interface ClaudeResponse {
@@ -27,16 +36,35 @@ type AppContext = {
   };
 };
 
+// ---------- TIPOS DO GOOGLE ----------
+interface GoogleUserInfo {
+  id: string;
+  email: string;
+  name: string;
+  picture?: string;
+}
+
+interface GoogleTokenResponse {
+  access_token: string;
+  expires_in?: number;
+  refresh_token?: string;
+  scope?: string;
+  token_type?: string;
+  id_token?: string;
+}
+// ------------------------------------
+
+
 // Middleware de autenticação próprio
 async function authMiddleware(c: any, next: any) {
   const sessionId = c.req.header('Cookie')?.match(/session_id=([^;]+)/)?.[1];
-  
+
   if (!sessionId) {
     return c.json({ error: 'Unauthorized' }, 401);
   }
 
-  const session = await c.env.DB.prepare(
-    'SELECT s.*, u.* FROM sessions s JOIN users u ON s.user_id = u.id WHERE s.id = ? AND s.expires_at > datetime("now")'
+  const session = await c.env.fitloot_db.prepare(
+    'SELECT s.id as session_id, s.user_id, s.expires_at, u.email, u.name, u.avatar_url FROM sessions s JOIN users u ON s.user_id = u.id WHERE s.id = ? AND s.expires_at > datetime("now")'
   ).bind(sessionId).first();
 
   if (!session) {
@@ -53,106 +81,193 @@ async function authMiddleware(c: any, next: any) {
   await next();
 }
 
+// ---------- ENV TYPES ----------
+export interface Env {
+  fitloot_db: D1Database;            // D1 Database
+  ASSETS: Fetcher;           // Static assets binding
+  GOOGLE_CLIENT_ID: string;  // OAuth config
+  GOOGLE_CLIENT_SECRET: string;
+  // R2_BUCKET?: R2Bucket;    // Se for usar R2 depois
+}
+// --------------------------------
+
+
 const app = new Hono<AppContext>();
 
-app.use("/*", cors());
 
-// Auth endpoints
-// Auth endpoints
-app.get("/api/auth/google", async (c) => {
-  const clientId = c.env.GOOGLE_CLIENT_ID;
-  const redirectUri = `${new URL(c.req.url).origin}/api/auth/google/callback`;
-  
-  const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
-    `client_id=${clientId}&` +
-    `redirect_uri=${encodeURIComponent(redirectUri)}&` +
-    `response_type=code&` +
-    `scope=email profile`;
-
-  return c.redirect(authUrl);
+app.get("/favicon.ico", (c) => {
+  return c.body(new Uint8Array(), {
+    status: 200,
+    headers: {
+      "Content-Type": "image/x-icon",
+    },
+  });
 });
 
+app.use("*", async (c, next) => {
+  const origin = c.req.header("Origin") || "";
+
+  c.header("Access-Control-Allow-Origin", origin);
+  c.header("Access-Control-Allow-Credentials", "true");
+  c.header("Access-Control-Allow-Headers", "Content-Type, Cookie, Authorization");
+  c.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+
+  if (c.req.method === "OPTIONS") {
+    return c.newResponse("", {
+      status: 204,
+    });
+  }
+
+  await next();
+});
+
+// Helper: Gera cookie com configurações corretas
+export function generateCookie(sessionId: string) {
+  return `session_id=${sessionId}; Path=/; HttpOnly; Secure; SameSite=None; Max-Age=2592000`;
+}
+
+
+
+// Auth endpoints
+app.get("/api/auth/google", (c) => {
+  if (!c.env.GOOGLE_CLIENT_ID) {
+    return c.json({ error: "Server configuration error" }, 500);
+  }
+
+  const url = new URL(c.req.url);
+  const redirectUri = `${url.origin}/api/auth/google/callback`;
+
+  const googleAuthUrl = new URL("https://accounts.google.com/o/oauth2/v2/auth");
+  googleAuthUrl.searchParams.set("client_id", c.env.GOOGLE_CLIENT_ID);
+  googleAuthUrl.searchParams.set("redirect_uri", redirectUri);
+  googleAuthUrl.searchParams.set("response_type", "code");
+  googleAuthUrl.searchParams.set("scope", "openid email profile");
+  googleAuthUrl.searchParams.set("access_type", "offline");
+  googleAuthUrl.searchParams.set("prompt", "consent");
+
+  return c.redirect(googleAuthUrl.toString());
+});
+
+
 app.get("/api/auth/google/callback", async (c) => {
-  const code = c.req.query('code');
-  
+  const code = c.req.query("code");
+
   if (!code) {
-    return c.json({ error: 'No code provided' }, 400);
+    return c.redirect("/app?error=no_code");
   }
 
   try {
-    const redirectUri = `${new URL(c.req.url).origin}/api/auth/google/callback`;
-    
-    const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    const url = new URL(c.req.url);
+    const origin = url.origin;
+    const redirectUri = `${origin}/api/auth/google/callback`;
+
+    // Troca código por token
+    const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
         code,
         client_id: c.env.GOOGLE_CLIENT_ID,
         client_secret: c.env.GOOGLE_CLIENT_SECRET,
         redirect_uri: redirectUri,
-        grant_type: 'authorization_code'
-      })
+        grant_type: "authorization_code",
+      }),
     });
 
-    const tokens = await tokenResponse.json() as any;
+    const tokens = (await tokenResponse.json()) as GoogleTokenResponse;
 
-    const userResponse = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
-      headers: { Authorization: `Bearer ${tokens.access_token}` }
-    });
-
-    const googleUser = await userResponse.json() as any;
-
-    let user = await c.env.DB.prepare(
-      'SELECT * FROM users WHERE google_id = ?'
-    ).bind(googleUser.id).first();
-
-    if (!user) {
-      const userId = crypto.randomUUID();
-      await c.env.DB.prepare(
-        'INSERT INTO users (id, email, name, google_id, avatar_url) VALUES (?, ?, ?, ?, ?)'
-      ).bind(userId, googleUser.email, googleUser.name, googleUser.id, googleUser.picture).run();
-
-      user = await c.env.DB.prepare(
-        'SELECT * FROM users WHERE google_id = ?'
-      ).bind(googleUser.id).first();
+    if (!tokens.access_token) {
+      return c.redirect("/app?error=token_failed");
     }
 
+    // Busca informações do usuário no Google
+    const userResponse = await fetch("https://www.googleapis.com/oauth2/v2/userinfo", {
+      headers: { Authorization: `Bearer ${tokens.access_token}` },
+    });
+
+    const googleUser = (await userResponse.json()) as GoogleUserInfo;
+
+    // Busca ou cria usuário
+    let user = await c.env.fitloot_db
+      .prepare("SELECT * FROM users WHERE google_id = ?")
+      .bind(googleUser.id)
+      .first();
+
+    if (!user) {
+      const newUserId = crypto.randomUUID();
+
+      await c.env.fitloot_db
+        .prepare(
+          "INSERT INTO users (id, email, name, google_id, avatar_url) VALUES (?, ?, ?, ?, ?)"
+        )
+        .bind(
+          newUserId,
+          googleUser.email,
+          googleUser.name,
+          googleUser.id,
+          googleUser.picture
+        )
+        .run();
+
+      user = await c.env.fitloot_db
+        .prepare("SELECT * FROM users WHERE google_id = ?")
+        .bind(googleUser.id)
+        .first();
+    }
+
+    // Cria sessão
     const sessionId = crypto.randomUUID();
     const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
 
-    await c.env.DB.prepare(
-      'INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, ?)'
-    ).bind(sessionId, user.id, expiresAt).run();
+    await c.env.fitloot_db
+      .prepare("INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, ?)")
+      .bind(sessionId, user.id, expiresAt)
+      .run();
 
-c.header('Set-Cookie', `session_id=${sessionId}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${30 * 24 * 60 * 60}`);
-return c.redirect('/dashboard');
-  } catch (error) {
-    console.error('Auth error:', error);
-    return c.json({ error: 'Authentication failed' }, 500);
+    // Define cookie com configurações corretas
+    const cookie = generateCookie(sessionId);
+    c.header("Set-Cookie", cookie);
+
+    // Redireciona para o frontend
+    const frontendCallback = `${origin}/auth/callback`;
+    return c.redirect(frontendCallback);
+
+  } catch (err) {
+    return c.redirect("/app?error=auth_failed");
   }
 });
+
 
 app.get("/api/users/me", authMiddleware, async (c) => {
   return c.json(c.get("user"));
 });
 
 app.get("/api/logout", async (c) => {
-  const sessionId = c.req.header('Cookie')?.match(/session_id=([^;]+)/)?.[1];
-  
+  const sessionId = c.req.header("Cookie")?.match(/session_id=([^;]+)/)?.[1];
+
   if (sessionId) {
-    await c.env.DB.prepare('DELETE FROM sessions WHERE id = ?').bind(sessionId).run();
+    await c.env.fitloot_db
+      .prepare("DELETE FROM sessions WHERE id = ?")
+      .bind(sessionId)
+      .run();
   }
 
-c.header('Set-Cookie', 'session_id=; Path=/; HttpOnly; Max-Age=0');
-  return c.redirect('/');
+  // Apaga o cookie corretamente
+  c.header(
+    "Set-Cookie",
+    "session_id=; Path=/; HttpOnly; Max-Age=0; Secure; SameSite=None"
+  );
+
+  return c.redirect("/");
 });
+
 
 // User profile endpoints
 app.get("/api/profile", authMiddleware, async (c) => {
   const user = c.get("user");
   if (!user) return c.json({ error: "Unauthorized" }, 401);
-  
-  const profile = await c.env.DB.prepare(
+
+  const profile = await c.env.fitloot_db.prepare(
     "SELECT * FROM user_profiles WHERE user_id = ?"
   ).bind(user.id).first();
 
@@ -166,7 +281,7 @@ app.post("/api/onboarding", authMiddleware, zValidator("json", OnboardingRequest
   const data = c.req.valid("json");
 
   // Check if username exists
-  const existingUsername = await c.env.DB.prepare(
+  const existingUsername = await c.env.fitloot_db.prepare(
     "SELECT id FROM user_profiles WHERE username = ?"
   ).bind(data.username).first();
 
@@ -190,37 +305,37 @@ app.post("/api/onboarding", authMiddleware, zValidator("json", OnboardingRequest
   initialAttrs.vitality += Math.floor(data.initial_squats / 5);
 
   // Create profile
-  await c.env.DB.prepare(
+  await c.env.fitloot_db.prepare(
     `INSERT INTO user_profiles (user_id, username, full_name, weight, height, initial_conditioning, injuries, equipment, main_goal, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`
   ).bind(user.id, data.username, data.full_name, data.weight, data.height, data.initial_conditioning, data.injuries || '', data.equipment || '', data.main_goal).run();
 
   // Create attributes
-  await c.env.DB.prepare(
+  await c.env.fitloot_db.prepare(
     `INSERT INTO user_attributes (user_id, strength, constitution, vitality, dexterity, focus, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, datetime('now'))`
+    VALUES (?, ?, ?, ?, ?, ?, datetime('now'))`
   ).bind(user.id, initialAttrs.strength, initialAttrs.constitution, initialAttrs.vitality, initialAttrs.dexterity, initialAttrs.focus).run();
 
   // Create progression
-  await c.env.DB.prepare(
+  await c.env.fitloot_db.prepare(
     `INSERT INTO user_progression (user_id, xp, level, points, current_streak, best_streak, updated_at)
-     VALUES (?, 0, 1, 0, 0, 0, datetime('now'))`
+    VALUES (?, 0, 1, 0, 0, 0, datetime('now'))`
   ).bind(user.id).run();
 
   // Unlock basic skills
-  const basicSkills = await c.env.DB.prepare(
+  const basicSkills = await c.env.fitloot_db.prepare(
     "SELECT id FROM skills WHERE required_level = 1"
   ).all();
 
   for (const skill of basicSkills.results) {
-    await c.env.DB.prepare(
+    await c.env.fitloot_db.prepare(
       `INSERT INTO user_skills (user_id, skill_id, total_reps, total_time, best_reps, updated_at)
-       VALUES (?, ?, 0, 0, 0, datetime('now'))`
+      VALUES (?, ?, 0, 0, 0, datetime('now'))`
     ).bind(user.id, skill.id).run();
   }
 
   // Create initial daily missions
-  await createDailyMissions(c.env.DB, user.id);
+  await createDailyMissions(c.env.fitloot_db, user.id);
 
   return c.json({ success: true }, 201);
 });
@@ -230,7 +345,7 @@ app.get("/api/progression", authMiddleware, async (c) => {
   const user = c.get("user");
   if (!user) return c.json({ error: "Unauthorized" }, 401);
   
-  const progression = await c.env.DB.prepare(
+  const progression = await c.env.fitloot_db.prepare(
     "SELECT * FROM user_progression WHERE user_id = ?"
   ).bind(user.id).first();
 
@@ -241,7 +356,7 @@ app.get("/api/attributes", authMiddleware, async (c) => {
   const user = c.get("user");
   if (!user) return c.json({ error: "Unauthorized" }, 401);
   
-  const attributes = await c.env.DB.prepare(
+  const attributes = await c.env.fitloot_db.prepare(
     "SELECT * FROM user_attributes WHERE user_id = ?"
   ).bind(user.id).first();
 
@@ -253,12 +368,12 @@ app.get("/api/skills", authMiddleware, async (c) => {
   const user = c.get("user");
   if (!user) return c.json({ error: "Unauthorized" }, 401);
   
-  const userSkills = await c.env.DB.prepare(
-    `SELECT s.*, us.total_reps, us.total_time, us.best_reps, us.unlocked_at
-     FROM skills s
-     INNER JOIN user_skills us ON s.id = us.skill_id
-     WHERE us.user_id = ?
-     ORDER BY s.required_level, s.id`
+  const userSkills = await c.env.fitloot_db.prepare(
+  `SELECT s.*, us.total_reps, us.total_time, us.best_reps, us.unlocked_at
+    FROM skills s
+    INNER JOIN user_skills us ON s.id = us.skill_id
+    WHERE us.user_id = ?
+    ORDER BY s.required_level, s.id`
   ).bind(user.id).all();
 
   return c.json(userSkills.results);
@@ -268,15 +383,15 @@ app.get("/api/skills/available", authMiddleware, async (c) => {
   const user = c.get("user");
   if (!user) return c.json({ error: "Unauthorized" }, 401);
   
-  const progression = await c.env.DB.prepare(
+  const progression = await c.env.fitloot_db.prepare(
     "SELECT level FROM user_progression WHERE user_id = ?"
   ).bind(user.id).first();
 
-  const availableSkills = await c.env.DB.prepare(
+  const availableSkills = await c.env.fitloot_db.prepare(
     `SELECT s.* FROM skills s
-     WHERE s.required_level <= ?
-     AND s.id NOT IN (SELECT skill_id FROM user_skills WHERE user_id = ?)
-     ORDER BY s.required_level, s.id`
+    WHERE s.required_level <= ?
+    AND s.id NOT IN (SELECT skill_id FROM user_skills WHERE user_id = ?)
+    ORDER BY s.required_level, s.id`
   ).bind(progression?.level || 1, user.id).all();
 
   return c.json(availableSkills.results);
@@ -287,11 +402,11 @@ app.get("/api/missions", authMiddleware, async (c) => {
   const user = c.get("user");
   if (!user) return c.json({ error: "Unauthorized" }, 401);
   
-  const missions = await c.env.DB.prepare(
+  const missions = await c.env.fitloot_db.prepare(
     `SELECT m.*, s.name as skill_name FROM missions m
-     LEFT JOIN skills s ON m.skill_id = s.id
-     WHERE m.user_id = ? AND m.is_completed = 0
-     ORDER BY m.type, m.created_at`
+    LEFT JOIN skills s ON m.skill_id = s.id
+    WHERE m.user_id = ? AND m.is_completed = 0
+    ORDER BY m.type, m.created_at`
   ).bind(user.id).all();
 
   return c.json(missions.results);
@@ -303,7 +418,7 @@ app.post("/api/missions/complete", authMiddleware, zValidator("json", CompleteMi
   
   const data = c.req.valid("json");
 
-  const mission = await c.env.DB.prepare(
+  const mission = await c.env.fitloot_db.prepare(
     "SELECT * FROM missions WHERE id = ? AND user_id = ? AND is_completed = 0"
   ).bind(data.mission_id, user.id).first();
 
@@ -312,14 +427,14 @@ app.post("/api/missions/complete", authMiddleware, zValidator("json", CompleteMi
   }
 
   // Update mission
-  await c.env.DB.prepare(
-    `UPDATE missions SET is_completed = 1, completed_at = datetime('now'), 
-     verified_by_sensor = ?, updated_at = datetime('now')
-     WHERE id = ?`
+  await c.env.fitloot_db.prepare(
+  `UPDATE missions SET is_completed = 1, completed_at = datetime('now'), 
+    verified_by_sensor = ?, updated_at = datetime('now')
+    WHERE id = ?`
   ).bind(data.sensor_verified ? 1 : 0, data.mission_id).run();
 
   // Get current streak and progression
-  const progression = await c.env.DB.prepare(
+  const progression = await c.env.fitloot_db.prepare(
     "SELECT * FROM user_progression WHERE user_id = ?"
   ).bind(user.id).first();
 
@@ -336,10 +451,10 @@ app.post("/api/missions/complete", authMiddleware, zValidator("json", CompleteMi
     
     streakMultiplier = 1 + (newStreak * 0.1);
     
-    await c.env.DB.prepare(
-      `UPDATE user_progression SET current_streak = ?, best_streak = MAX(best_streak, ?), 
-       last_activity_date = ?, updated_at = datetime('now')
-       WHERE user_id = ?`
+    await c.env.fitloot_db.prepare(
+    `UPDATE user_progression SET current_streak = ?, best_streak = MAX(best_streak, ?), 
+      last_activity_date = ?, updated_at = datetime('now')
+      WHERE user_id = ?`
     ).bind(newStreak, newStreak, today, user.id).run();
   } else {
     streakMultiplier = 1 + (Number(progression?.current_streak || 0) * 0.1);
@@ -349,13 +464,13 @@ app.post("/api/missions/complete", authMiddleware, zValidator("json", CompleteMi
   const xpGained = Math.floor(Number(mission.xp_reward || 0) * streakMultiplier);
   const pointsGained = Number(mission.points_reward || 0);
 
-  await c.env.DB.prepare(
+  await c.env.fitloot_db.prepare(
     `UPDATE user_progression SET xp = COALESCE(xp, 0) + ?, points = COALESCE(points, 0) + ?, updated_at = datetime('now')
-     WHERE user_id = ?`
+    WHERE user_id = ?`
   ).bind(xpGained, pointsGained, user.id).run();
 
   // Check for level up
-  const updatedProgression = await c.env.DB.prepare(
+  const updatedProgression = await c.env.fitloot_db.prepare(
     "SELECT * FROM user_progression WHERE user_id = ?"
   ).bind(user.id).first();
 
@@ -365,32 +480,32 @@ app.post("/api/missions/complete", authMiddleware, zValidator("json", CompleteMi
   let leveledUp = false;
 
   if (currentXp >= xpForNextLevel) {
-    await c.env.DB.prepare(
+    await c.env.fitloot_db.prepare(
       `UPDATE user_progression SET level = COALESCE(level, 1) + 1, xp = COALESCE(xp, 0) - ?, points = COALESCE(points, 0) + 100, updated_at = datetime('now')
-       WHERE user_id = ?`
+      WHERE user_id = ?`
     ).bind(xpForNextLevel, user.id).run();
     leveledUp = true;
   }
 
   // Update skill stats if applicable
   if (mission.skill_id && data.reps_completed) {
-    await c.env.DB.prepare(
-      `UPDATE user_skills SET total_reps = total_reps + ?, best_reps = MAX(best_reps, ?), updated_at = datetime('now')
-       WHERE user_id = ? AND skill_id = ?`
+    await c.env.fitloot_db.prepare(
+    `UPDATE user_skills SET total_reps = total_reps + ?, best_reps = MAX(best_reps, ?), updated_at = datetime('now')
+      WHERE user_id = ? AND skill_id = ?`
     ).bind(data.reps_completed, data.reps_completed, user.id, mission.skill_id).run();
 
     // Update attributes based on skill
-    const skill = await c.env.DB.prepare(
+    const skill = await c.env.fitloot_db.prepare(
       "SELECT * FROM skills WHERE id = ?"
     ).bind(mission.skill_id).first();
 
     if (skill) {
-      await c.env.DB.prepare(
-        `UPDATE user_attributes SET 
-         strength = strength + ?, constitution = constitution + ?, 
-         vitality = vitality + ?, dexterity = dexterity + ?, 
-         focus = focus + ?, updated_at = datetime('now')
-         WHERE user_id = ?`
+      await c.env.fitloot_db.prepare(
+      `UPDATE user_attributes SET 
+        strength = strength + ?, constitution = constitution + ?, 
+        vitality = vitality + ?, dexterity = dexterity + ?, 
+        focus = focus + ?, updated_at = datetime('now')
+        WHERE user_id = ?`
       ).bind(
         skill.strength_gain, skill.constitution_gain,
         skill.vitality_gain, skill.dexterity_gain,
@@ -413,12 +528,12 @@ app.get("/api/achievements", authMiddleware, async (c) => {
   const user = c.get("user");
   if (!user) return c.json({ error: "Unauthorized" }, 401);
   
-  const achievements = await c.env.DB.prepare(
-    `SELECT a.*, ua.unlocked_at, 
-     CASE WHEN ua.id IS NOT NULL THEN 1 ELSE 0 END as unlocked
-     FROM achievements a
-     LEFT JOIN user_achievements ua ON a.id = ua.achievement_id AND ua.user_id = ?
-     ORDER BY a.rarity, a.id`
+  const achievements = await c.env.fitloot_db.prepare(
+  `SELECT a.*, ua.unlocked_at, 
+    CASE WHEN ua.id IS NOT NULL THEN 1 ELSE 0 END as unlocked
+    FROM achievements a
+    LEFT JOIN user_achievements ua ON a.id = ua.achievement_id AND ua.user_id = ?
+    ORDER BY a.rarity, a.id`
   ).bind(user.id).all();
 
   return c.json(achievements.results);
@@ -428,12 +543,12 @@ app.get("/api/titles", authMiddleware, async (c) => {
   const user = c.get("user");
   if (!user) return c.json({ error: "Unauthorized" }, 401);
   
-  const titles = await c.env.DB.prepare(
+  const titles = await c.env.fitloot_db.prepare(
     `SELECT t.*, ut.is_active, ut.unlocked_at,
-     CASE WHEN ut.id IS NOT NULL THEN 1 ELSE 0 END as unlocked
-     FROM titles t
-     LEFT JOIN user_titles ut ON t.id = ut.title_id AND ut.user_id = ?
-     ORDER BY t.rarity, t.id`
+    CASE WHEN ut.id IS NOT NULL THEN 1 ELSE 0 END as unlocked
+    FROM titles t
+    LEFT JOIN user_titles ut ON t.id = ut.title_id AND ut.user_id = ?
+    ORDER BY t.rarity, t.id`
   ).bind(user.id).all();
 
   return c.json(titles.results);
@@ -446,12 +561,12 @@ app.post("/api/titles/:id/activate", authMiddleware, async (c) => {
   const titleId = parseInt(c.req.param("id"));
 
   // Deactivate all titles
-  await c.env.DB.prepare(
+  await c.env.fitloot_db.prepare(
     "UPDATE user_titles SET is_active = 0 WHERE user_id = ?"
   ).bind(user.id).run();
 
   // Activate selected title
-  await c.env.DB.prepare(
+  await c.env.fitloot_db.prepare(
     "UPDATE user_titles SET is_active = 1, updated_at = datetime('now') WHERE user_id = ? AND title_id = ?"
   ).bind(user.id, titleId).run();
 
@@ -460,12 +575,12 @@ app.post("/api/titles/:id/activate", authMiddleware, async (c) => {
 
 // Shop endpoints
 app.get("/api/shop/products", authMiddleware, async (c) => {
-  const products = await c.env.DB.prepare(
+  const products = await c.env.fitloot_db.prepare(
     `SELECT p.*, sp.name as partner_name, sp.logo_url as partner_logo
-     FROM shop_products p
-     INNER JOIN shop_partners sp ON p.partner_id = sp.id
-     WHERE p.is_available = 1
-     ORDER BY p.category, p.points_cost`
+    FROM shop_products p
+    INNER JOIN shop_partners sp ON p.partner_id = sp.id
+    WHERE p.is_available = 1
+    ORDER BY p.category, p.points_cost`
   ).all();
 
   return c.json(products.results);
@@ -477,7 +592,7 @@ app.post("/api/shop/purchase/:id", authMiddleware, async (c) => {
   
   const productId = parseInt(c.req.param("id"));
 
-  const product = await c.env.DB.prepare(
+  const product = await c.env.fitloot_db.prepare(
     "SELECT * FROM shop_products WHERE id = ? AND is_available = 1"
   ).bind(productId).first();
 
@@ -485,7 +600,7 @@ app.post("/api/shop/purchase/:id", authMiddleware, async (c) => {
     return c.json({ error: "Product not found" }, 404);
   }
 
-  const progression = await c.env.DB.prepare(
+  const progression = await c.env.fitloot_db.prepare(
     "SELECT points FROM user_progression WHERE user_id = ?"
   ).bind(user.id).first();
 
@@ -494,7 +609,7 @@ app.post("/api/shop/purchase/:id", authMiddleware, async (c) => {
   }
 
   // Deduct points
-  await c.env.DB.prepare(
+  await c.env.fitloot_db.prepare(
     "UPDATE user_progression SET points = points - ?, updated_at = datetime('now') WHERE user_id = ?"
   ).bind(product.points_cost, user.id).run();
 
@@ -502,9 +617,9 @@ app.post("/api/shop/purchase/:id", authMiddleware, async (c) => {
   const qrCode = `FITLOOT-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
   // Create order
-  await c.env.DB.prepare(
+  await c.env.fitloot_db.prepare(
     `INSERT INTO coupon_orders (user_id, product_id, points_spent, qr_code, updated_at)
-     VALUES (?, ?, ?, ?, datetime('now'))`
+    VALUES (?, ?, ?, ?, datetime('now'))`
   ).bind(user.id, productId, product.points_cost, qrCode).run();
 
   return c.json({ success: true, qr_code: qrCode });
@@ -514,12 +629,12 @@ app.get("/api/shop/orders", authMiddleware, async (c) => {
   const user = c.get("user");
   if (!user) return c.json({ error: "Unauthorized" }, 401);
   
-  const orders = await c.env.DB.prepare(
+  const orders = await c.env.fitloot_db.prepare(
     `SELECT co.*, p.name as product_name, p.image_url
-     FROM coupon_orders co
-     INNER JOIN shop_products p ON co.product_id = p.id
-     WHERE co.user_id = ?
-     ORDER BY co.created_at DESC`
+    FROM coupon_orders co
+    INNER JOIN shop_products p ON co.product_id = p.id
+    WHERE co.user_id = ?
+    ORDER BY co.created_at DESC`
   ).bind(user.id).all();
 
   return c.json(orders.results);
@@ -532,17 +647,17 @@ app.get("/api/metrics/today", authMiddleware, async (c) => {
   
   const today = new Date().toISOString().split('T')[0];
   
-  let metrics = await c.env.DB.prepare(
+  let metrics = await c.env.fitloot_db.prepare(
     "SELECT * FROM daily_metrics WHERE user_id = ? AND date = ?"
   ).bind(user.id, today).first();
 
   if (!metrics) {
-    await c.env.DB.prepare(
+    await c.env.fitloot_db.prepare(
       `INSERT INTO daily_metrics (user_id, date, steps, calories_burned, updated_at)
-       VALUES (?, ?, 0, 0, datetime('now'))`
+      VALUES (?, ?, 0, 0, datetime('now'))`
     ).bind(user.id, today).run();
     
-    metrics = await c.env.DB.prepare(
+    metrics = await c.env.fitloot_db.prepare(
       "SELECT * FROM daily_metrics WHERE user_id = ? AND date = ?"
     ).bind(user.id, today).first();
   }
@@ -557,11 +672,11 @@ app.post("/api/metrics/update", authMiddleware, zValidator("json", UpdateDailyMe
   const data = c.req.valid("json");
   const today = new Date().toISOString().split('T')[0];
 
-  await c.env.DB.prepare(
+  await c.env.fitloot_db.prepare(
     `INSERT INTO daily_metrics (user_id, date, steps, calories_burned, updated_at)
-     VALUES (?, ?, ?, ?, datetime('now'))
-     ON CONFLICT(user_id, date) DO UPDATE SET
-     steps = ?, calories_burned = ?, updated_at = datetime('now')`
+    VALUES (?, ?, ?, ?, datetime('now'))
+    ON CONFLICT(user_id, date) DO UPDATE SET
+    steps = ?, calories_burned = ?, updated_at = datetime('now')`
   ).bind(user.id, today, data.steps, data.calories_burned, data.steps, data.calories_burned).run();
 
   return c.json({ success: true });
@@ -574,9 +689,9 @@ app.post("/api/food/scan", authMiddleware, zValidator("json", FoodScanRequestSch
   
   const data = c.req.valid("json");
 
-  await c.env.DB.prepare(
+  await c.env.fitloot_db.prepare(
     `INSERT INTO food_diary (user_id, food_name, calories, meal_type, updated_at)
-     VALUES (?, ?, ?, ?, datetime('now'))`
+    VALUES (?, ?, ?, ?, datetime('now'))`
   ).bind(user.id, data.food_name, data.calories || 0, data.meal_type || 'lanche').run();
 
   return c.json({ success: true });
@@ -588,10 +703,10 @@ app.get("/api/food/today", authMiddleware, async (c) => {
   
   const today = new Date().toISOString().split('T')[0];
 
-  const foods = await c.env.DB.prepare(
+  const foods = await c.env.fitloot_db.prepare(
     `SELECT * FROM food_diary 
-     WHERE user_id = ? AND DATE(scanned_at) = ?
-     ORDER BY scanned_at DESC`
+    WHERE user_id = ? AND DATE(scanned_at) = ?
+    ORDER BY scanned_at DESC`
   ).bind(user.id, today).all();
 
   return c.json(foods.results);
@@ -599,12 +714,12 @@ app.get("/api/food/today", authMiddleware, async (c) => {
 
 // Ranking
 app.get("/api/ranking/global", authMiddleware, async (c) => {
-  const ranking = await c.env.DB.prepare(
+  const ranking = await c.env.fitloot_db.prepare(
     `SELECT up.username, up.full_name, pr.level, pr.xp, pr.current_streak, pr.points
-     FROM user_profiles up
-     INNER JOIN user_progression pr ON up.user_id = pr.user_id
-     ORDER BY pr.level DESC, pr.xp DESC
-     LIMIT 100`
+    FROM user_profiles up
+    INNER JOIN user_progression pr ON up.user_id = pr.user_id
+    ORDER BY pr.level DESC, pr.xp DESC
+    LIMIT 100`
   ).all();
 
   return c.json(ranking.results);
@@ -620,12 +735,12 @@ app.get("/api/users/search", authMiddleware, async (c) => {
     return c.json([]);
   }
 
-  const users = await c.env.DB.prepare(
-    `SELECT up.user_id, up.username, up.full_name, pr.level, pr.xp
-     FROM user_profiles up
-     INNER JOIN user_progression pr ON up.user_id = pr.user_id
-     WHERE up.user_id != ? AND up.username LIKE ?
-     LIMIT 20`
+  const users = await c.env.fitloot_db.prepare(
+  `SELECT up.user_id, up.username, up.full_name, pr.level, pr.xp
+    FROM user_profiles up
+    INNER JOIN user_progression pr ON up.user_id = pr.user_id
+    WHERE up.user_id != ? AND up.username LIKE ?
+    LIMIT 20`
   ).bind(user.id, `%${query}%`).all();
 
   return c.json(users.results);
@@ -638,19 +753,19 @@ app.post("/api/friends/request", authMiddleware, zValidator("json", FriendReques
   const data = c.req.valid("json");
 
   // Check if friendship already exists
-  const existing = await c.env.DB.prepare(
-    `SELECT id FROM friendships 
-     WHERE (user_id = ? AND friend_user_id = ?) 
-     OR (user_id = ? AND friend_user_id = ?)`
+  const existing = await c.env.fitloot_db.prepare(
+  `SELECT id FROM friendships 
+    WHERE (user_id = ? AND friend_user_id = ?) 
+    OR (user_id = ? AND friend_user_id = ?)`
   ).bind(user.id, data.friend_user_id, data.friend_user_id, user.id).first();
 
   if (existing) {
     return c.json({ error: "Friendship already exists" }, 400);
   }
 
-  await c.env.DB.prepare(
+  await c.env.fitloot_db.prepare(
     `INSERT INTO friendships (user_id, friend_user_id, status, updated_at)
-     VALUES (?, ?, 'pending', datetime('now'))`
+    VALUES (?, ?, 'pending', datetime('now'))`
   ).bind(user.id, data.friend_user_id).run();
 
   return c.json({ success: true }, 201);
@@ -660,15 +775,15 @@ app.get("/api/friends/requests", authMiddleware, async (c) => {
   const user = c.get("user");
   if (!user) return c.json({ error: "Unauthorized" }, 401);
   
-  const requests = await c.env.DB.prepare(
+  const requests = await c.env.fitloot_db.prepare(
     `SELECT f.id, f.user_id as friend_user_id, up.username as friend_username, 
-     up.full_name as friend_full_name, pr.level as friend_level, pr.xp as friend_xp,
-     pr.current_streak as friend_streak
-     FROM friendships f
-     INNER JOIN user_profiles up ON f.user_id = up.user_id
-     INNER JOIN user_progression pr ON f.user_id = pr.user_id
-     WHERE f.friend_user_id = ? AND f.status = 'pending'
-     ORDER BY f.created_at DESC`
+    up.full_name as friend_full_name, pr.level as friend_level, pr.xp as friend_xp,
+    pr.current_streak as friend_streak
+    FROM friendships f
+    INNER JOIN user_profiles up ON f.user_id = up.user_id
+    INNER JOIN user_progression pr ON f.user_id = pr.user_id
+    WHERE f.friend_user_id = ? AND f.status = 'pending'
+    ORDER BY f.created_at DESC`
   ).bind(user.id).all();
 
   return c.json(requests.results);
@@ -680,9 +795,9 @@ app.post("/api/friends/:id/accept", authMiddleware, async (c) => {
   
   const requestId = parseInt(c.req.param("id"));
 
-  await c.env.DB.prepare(
+  await c.env.fitloot_db.prepare(
     `UPDATE friendships SET status = 'accepted', updated_at = datetime('now') 
-     WHERE id = ? AND friend_user_id = ?`
+    WHERE id = ? AND friend_user_id = ?`
   ).bind(requestId, user.id).run();
 
   return c.json({ success: true });
@@ -694,7 +809,7 @@ app.post("/api/friends/:id/reject", authMiddleware, async (c) => {
   
   const requestId = parseInt(c.req.param("id"));
 
-  await c.env.DB.prepare(
+  await c.env.fitloot_db.prepare(
     "DELETE FROM friendships WHERE id = ? AND friend_user_id = ?"
   ).bind(requestId, user.id).run();
 
@@ -705,26 +820,26 @@ app.get("/api/friends/list", authMiddleware, async (c) => {
   const user = c.get("user");
   if (!user) return c.json({ error: "Unauthorized" }, 401);
   
-  const friends = await c.env.DB.prepare(
+  const friends = await c.env.fitloot_db.prepare(
     `SELECT f.id, f.friend_user_id, up.username as friend_username, 
-     up.full_name as friend_full_name, pr.level as friend_level, pr.xp as friend_xp,
-     pr.current_streak as friend_streak
-     FROM friendships f
-     INNER JOIN user_profiles up ON f.friend_user_id = up.user_id
-     INNER JOIN user_progression pr ON f.friend_user_id = pr.user_id
-     WHERE f.user_id = ? AND f.status = 'accepted'
-     
-     UNION
-     
-     SELECT f.id, f.user_id as friend_user_id, up.username as friend_username,
-     up.full_name as friend_full_name, pr.level as friend_level, pr.xp as friend_xp,
-     pr.current_streak as friend_streak
-     FROM friendships f
-     INNER JOIN user_profiles up ON f.user_id = up.user_id
-     INNER JOIN user_progression pr ON f.user_id = pr.user_id
-     WHERE f.friend_user_id = ? AND f.status = 'accepted'
-     
-     ORDER BY friend_level DESC`
+    up.full_name as friend_full_name, pr.level as friend_level, pr.xp as friend_xp,
+    pr.current_streak as friend_streak
+    FROM friendships f
+    INNER JOIN user_profiles up ON f.friend_user_id = up.user_id
+    INNER JOIN user_progression pr ON f.friend_user_id = pr.user_id
+    WHERE f.user_id = ? AND f.status = 'accepted'
+    
+    UNION
+    
+    SELECT f.id, f.user_id as friend_user_id, up.username as friend_username,
+    up.full_name as friend_full_name, pr.level as friend_level, pr.xp as friend_xp,
+    pr.current_streak as friend_streak
+    FROM friendships f
+    INNER JOIN user_profiles up ON f.user_id = up.user_id
+    INNER JOIN user_progression pr ON f.user_id = pr.user_id
+    WHERE f.friend_user_id = ? AND f.status = 'accepted'
+    
+    ORDER BY friend_level DESC`
   ).bind(user.id, user.id).all();
 
   return c.json(friends.results);
@@ -741,7 +856,7 @@ app.post("/api/mini-games/challenge", authMiddleware, zValidator("json", MiniGam
 
   // If random opponent, find a random user with similar level
   if (data.opponent_type === 'random') {
-    const progression = await c.env.DB.prepare(
+    const progression = await c.env.fitloot_db.prepare(
       "SELECT level FROM user_progression WHERE user_id = ?"
     ).bind(user.id).first();
 
@@ -749,11 +864,11 @@ app.post("/api/mini-games/challenge", authMiddleware, zValidator("json", MiniGam
     const minLevel = Math.max(1, level - 5);
     const maxLevel = level + 5;
 
-    const randomUser = await c.env.DB.prepare(
+    const randomUser = await c.env.fitloot_db.prepare(
       `SELECT user_id FROM user_progression 
-       WHERE user_id != ? AND level BETWEEN ? AND ?
-       ORDER BY RANDOM()
-       LIMIT 1`
+      WHERE user_id != ? AND level BETWEEN ? AND ?
+      ORDER BY RANDOM()
+      LIMIT 1`
     ).bind(user.id, minLevel, maxLevel).first();
 
     if (!randomUser) {
@@ -772,10 +887,10 @@ app.post("/api/mini-games/challenge", authMiddleware, zValidator("json", MiniGam
   const pointsReward = data.target_reps;
   const deadline = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(); // 24 hours
 
-  await c.env.DB.prepare(
+  await c.env.fitloot_db.prepare(
     `INSERT INTO mini_games (challenger_user_id, challenged_user_id, skill_id, 
-     target_reps, status, xp_reward, points_reward, deadline, updated_at)
-     VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, datetime('now'))`
+    target_reps, status, xp_reward, points_reward, deadline, updated_at)
+    VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, datetime('now'))`
   ).bind(user.id, challengedUserId, data.skill_id, data.target_reps, xpReward, pointsReward, deadline).run();
 
   return c.json({ success: true }, 201);
@@ -785,23 +900,23 @@ app.get("/api/mini-games/active", authMiddleware, async (c) => {
   const user = c.get("user");
   if (!user) return c.json({ error: "Unauthorized" }, 401);
   
-  const games = await c.env.DB.prepare(
+  const games = await c.env.fitloot_db.prepare(
     `SELECT mg.*, 
-     s.name as skill_name,
-     up1.username as challenger_username,
-     up2.username as challenged_username
-     FROM mini_games mg
-     INNER JOIN skills s ON mg.skill_id = s.id
-     INNER JOIN user_profiles up1 ON mg.challenger_user_id = up1.user_id
-     INNER JOIN user_profiles up2 ON mg.challenged_user_id = up2.user_id
-     WHERE (mg.challenger_user_id = ? OR mg.challenged_user_id = ?)
-     ORDER BY 
-       CASE mg.status 
-         WHEN 'active' THEN 1 
-         WHEN 'pending' THEN 2 
-         ELSE 3 
-       END,
-       mg.created_at DESC`
+    s.name as skill_name,
+    up1.username as challenger_username,
+    up2.username as challenged_username
+    FROM mini_games mg
+    INNER JOIN skills s ON mg.skill_id = s.id
+    INNER JOIN user_profiles up1 ON mg.challenger_user_id = up1.user_id
+    INNER JOIN user_profiles up2 ON mg.challenged_user_id = up2.user_id
+    WHERE (mg.challenger_user_id = ? OR mg.challenged_user_id = ?)
+    ORDER BY 
+      CASE mg.status 
+        WHEN 'active' THEN 1 
+        WHEN 'pending' THEN 2 
+        ELSE 3 
+      END,
+      mg.created_at DESC`
   ).bind(user.id, user.id).all();
 
   return c.json(games.results);
@@ -813,9 +928,9 @@ app.post("/api/mini-games/:id/accept", authMiddleware, async (c) => {
   
   const gameId = parseInt(c.req.param("id"));
 
-  await c.env.DB.prepare(
-    `UPDATE mini_games SET status = 'active', updated_at = datetime('now')
-     WHERE id = ? AND challenged_user_id = ? AND status = 'pending'`
+  await c.env.fitloot_db.prepare(
+  `UPDATE mini_games SET status = 'active', updated_at = datetime('now')
+    WHERE id = ? AND challenged_user_id = ? AND status = 'pending'`
   ).bind(gameId, user.id).run();
 
   return c.json({ success: true });
@@ -829,7 +944,7 @@ app.post("/api/mini-games/:id/complete", authMiddleware, zValidator("json", Mini
   // Note: Request data validation ensures proper format, but current implementation doesn't use performance metrics
   c.req.valid("json");
 
-  const game = await c.env.DB.prepare(
+  const game = await c.env.fitloot_db.prepare(
     "SELECT * FROM mini_games WHERE id = ? AND status = 'active'"
   ).bind(gameId).first();
 
@@ -851,20 +966,20 @@ app.post("/api/mini-games/:id/complete", authMiddleware, zValidator("json", Mini
   const loserXp = Math.floor(winnerXp / 2);
   const loserPoints = Math.floor(winnerPoints / 2);
 
-  await c.env.DB.prepare(
-    `UPDATE user_progression SET xp = xp + ?, points = points + ?, updated_at = datetime('now')
-     WHERE user_id = ?`
+  await c.env.fitloot_db.prepare(
+  `UPDATE user_progression SET xp = xp + ?, points = points + ?, updated_at = datetime('now')
+    WHERE user_id = ?`
   ).bind(winnerXp, winnerPoints, winnerUserId).run();
 
-  await c.env.DB.prepare(
-    `UPDATE user_progression SET xp = xp + ?, points = points + ?, updated_at = datetime('now')
-     WHERE user_id = ?`
+  await c.env.fitloot_db.prepare(
+  `UPDATE user_progression SET xp = xp + ?, points = points + ?, updated_at = datetime('now')
+    WHERE user_id = ?`
   ).bind(loserXp, loserPoints, loserUserId).run();
 
   // Update game status
-  await c.env.DB.prepare(
-    `UPDATE mini_games SET status = 'completed', winner_user_id = ?, updated_at = datetime('now')
-     WHERE id = ?`
+  await c.env.fitloot_db.prepare(
+  `UPDATE mini_games SET status = 'completed', winner_user_id = ?, updated_at = datetime('now')
+    WHERE id = ?`
   ).bind(winnerUserId, gameId).run();
 
   return c.json({ 
@@ -897,8 +1012,8 @@ async function createDailyMissions(db: D1Database, userId: string) {
 
     if (skill) {
       await db.prepare(
-        `INSERT INTO missions (user_id, type, title, description, skill_id, target_reps, xp_reward, points_reward, deadline, updated_at)
-         VALUES (?, 'daily', ?, ?, ?, ?, ?, ?, ?, datetime('now'))`
+      `INSERT INTO missions (user_id, type, title, description, skill_id, target_reps, xp_reward, points_reward, deadline, updated_at)
+        VALUES (?, 'daily', ?, ?, ?, ?, ?, ?, ?, datetime('now'))`
       ).bind(
         userId,
         'daily',
@@ -929,10 +1044,10 @@ app.post("/api/ai/generate-missions", authMiddleware, async (c) => {
   try {
     // Get user data for personalization
     const [profile, progression, attributes, skills] = await Promise.all([
-      c.env.DB.prepare("SELECT * FROM user_profiles WHERE user_id = ?").bind(user.id).first(),
-      c.env.DB.prepare("SELECT * FROM user_progression WHERE user_id = ?").bind(user.id).first(),
-      c.env.DB.prepare("SELECT * FROM user_attributes WHERE user_id = ?").bind(user.id).first(),
-      c.env.DB.prepare(`
+      c.env.fitloot_db.prepare("SELECT * FROM user_profiles WHERE user_id = ?").bind(user.id).first(),
+      c.env.fitloot_db.prepare("SELECT * FROM user_progression WHERE user_id = ?").bind(user.id).first(),
+      c.env.fitloot_db.prepare("SELECT * FROM user_attributes WHERE user_id = ?").bind(user.id).first(),
+      c.env.fitloot_db.prepare(`
         SELECT s.* FROM skills s
         INNER JOIN user_skills us ON s.id = us.skill_id
         WHERE us.user_id = ?
@@ -959,7 +1074,7 @@ Atributos atuais:
 
 Skills desbloqueadas: ${skills.results.map((s: any) => s.name).join(", ")}
 
-Crie 3 missões diárias DESAFIADORAS mas ALCANÇÁVEIS para este usuário. As missões devem:
+Crie 5 missões diárias DESAFIADORAS mas ALCANÇÁVEIS para este usuário. As missões devem:
 1. Ser progressivas e adequadas ao nível atual
 2. Variar entre diferentes tipos de exercício
 3. Considerar os equipamentos disponíveis
@@ -1019,7 +1134,7 @@ Responda APENAS com um JSON no formato:
         s.name.toLowerCase().includes(mission.skill_name.toLowerCase())
       );
       
-      await c.env.DB.prepare(`
+      await c.env.fitloot_db.prepare(`
         INSERT INTO missions (user_id, type, title, description, skill_id, target_reps, xp_reward, points_reward, deadline, updated_at)
         VALUES (?, 'daily', ?, ?, ?, ?, ?, ?, ?, datetime('now'))
       `).bind(
@@ -1062,9 +1177,9 @@ app.post("/api/ai/chat", authMiddleware, async (c) => {
 
     // Get user context
     const [profile, progression, attributes] = await Promise.all([
-      c.env.DB.prepare("SELECT * FROM user_profiles WHERE user_id = ?").bind(user.id).first(),
-      c.env.DB.prepare("SELECT * FROM user_progression WHERE user_id = ?").bind(user.id).first(),
-      c.env.DB.prepare("SELECT * FROM user_attributes WHERE user_id = ?").bind(user.id).first(),
+      c.env.fitloot_db.prepare("SELECT * FROM user_profiles WHERE user_id = ?").bind(user.id).first(),
+      c.env.fitloot_db.prepare("SELECT * FROM user_progression WHERE user_id = ?").bind(user.id).first(),
+      c.env.fitloot_db.prepare("SELECT * FROM user_attributes WHERE user_id = ?").bind(user.id).first(),
     ]);
 
     const systemPrompt = `Você é o FitBot, um assistente fitness virtual motivador e especializado em gamificação. 
@@ -1142,17 +1257,17 @@ app.get("/api/ai/recommendations", authMiddleware, async (c) => {
   try {
     // Get comprehensive user data
     const [profile, progression, attributes, skills, completedMissions] = await Promise.all([
-      c.env.DB.prepare("SELECT * FROM user_profiles WHERE user_id = ?").bind(user.id).first(),
-      c.env.DB.prepare("SELECT * FROM user_progression WHERE user_id = ?").bind(user.id).first(),
-      c.env.DB.prepare("SELECT * FROM user_attributes WHERE user_id = ?").bind(user.id).first(),
-      c.env.DB.prepare(`
+      c.env.fitloot_db.prepare("SELECT * FROM user_profiles WHERE user_id = ?").bind(user.id).first(),
+      c.env.fitloot_db.prepare("SELECT * FROM user_progression WHERE user_id = ?").bind(user.id).first(),
+      c.env.fitloot_db.prepare("SELECT * FROM user_attributes WHERE user_id = ?").bind(user.id).first(),
+      c.env.fitloot_db.prepare(`
         SELECT s.*, us.total_reps, us.best_reps 
         FROM skills s
         INNER JOIN user_skills us ON s.id = us.skill_id
         WHERE us.user_id = ?
         ORDER BY us.total_reps DESC
       `).bind(user.id).all(),
-      c.env.DB.prepare(`
+      c.env.fitloot_db.prepare(`
         SELECT COUNT(*) as count 
         FROM missions 
         WHERE user_id = ? AND is_completed = 1
@@ -1327,7 +1442,7 @@ Retorne APENAS um JSON com:
     const foodData = JSON.parse(jsonMatch[0]);
 
     // Save to food diary
-    await c.env.DB.prepare(`
+    await c.env.fitloot_db.prepare(`
       INSERT INTO food_diary (user_id, food_name, calories, meal_type, updated_at)
       VALUES (?, ?, ?, ?, datetime('now'))
     `).bind(
@@ -1355,9 +1470,9 @@ app.get("/api/ai/workout-suggestions", authMiddleware, async (c) => {
 
   try {
     const [profile, progression, metrics] = await Promise.all([
-      c.env.DB.prepare("SELECT * FROM user_profiles WHERE user_id = ?").bind(user.id).first(),
-      c.env.DB.prepare("SELECT * FROM user_progression WHERE user_id = ?").bind(user.id).first(),
-      c.env.DB.prepare(`
+      c.env.fitloot_db.prepare("SELECT * FROM user_profiles WHERE user_id = ?").bind(user.id).first(),
+      c.env.fitloot_db.prepare("SELECT * FROM user_progression WHERE user_id = ?").bind(user.id).first(),
+      c.env.fitloot_db.prepare(`
         SELECT * FROM daily_metrics 
         WHERE user_id = ? AND date = ?
       `).bind(user.id, new Date().toISOString().split('T')[0]).first(),
@@ -1415,5 +1530,24 @@ Responda APENAS com JSON:
     return c.json({ error: "Failed to generate workout suggestions" }, 500);
   }
 });
+
+// -----------------------------
+// SPA fallback (APENAS após todas as rotas /api/* definidas)
+// -----------------------------
+app.get("*", async (c, next) => {
+  // Se for rota API, passa adiante para as rotas definidas
+  if (c.req.path.startsWith("/api")) {
+    return next();
+  }
+
+  try {
+    // c.req é um Request válido para passar ao binding ASSETS
+    return await c.env.ASSETS.fetch(c.req.raw);
+  } catch (err) {
+    // se falhar, passa para próximos handlers (ou 404)
+    return next();
+  }
+});
+
 
 export default app;

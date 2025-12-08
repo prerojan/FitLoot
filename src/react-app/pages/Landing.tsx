@@ -1,5 +1,4 @@
 import React from 'react';
-import { Link } from 'react-router';
 import { Zap, Trophy, Target, Gamepad2, Heart, Brain, TrendingUp, Shield, Award, Star, ChevronRight, Dumbbell, Apple, Smartphone, Users, Swords, Clock, CheckCircle2, Flame, DollarSign, Sparkles, Crown, ShoppingBag } from 'lucide-react';
 import { Button } from '@/react-app/components/ui/button';
 import { Input } from '@/react-app/components/ui/input';
@@ -138,6 +137,11 @@ export default function Landing() {
     alert(`Obrigado! Enviaremos novidades para ${email}`);
     setEmail('');
   };
+
+  const handleGetStarted = () => {
+  window.location.href = '/app';
+};
+
   return <div className="min-h-screen bg-white">
       {/* Hero Section */}
       <div className="relative overflow-hidden bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50">
@@ -164,12 +168,10 @@ export default function Landing() {
             </p>
             
             <div className="flex flex-col sm:flex-row gap-4 justify-center items-center mb-12">
-              <Link to="/onboarding">
-                <Button size="lg" className="bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white px-8 py-6 text-lg rounded-full shadow-lg hover:shadow-xl transition-all">
+                <Button onClick={handleGetStarted} size="lg" className="bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white px-8 py-6 text-lg rounded-full shadow-lg hover:shadow-xl transition-all">
                   Começar Teste Grátis de 7 Dias
                   <ChevronRight className="ml-2 w-5 h-5" />
                 </Button>
-              </Link>
               
               <Button variant="outline" size="lg" className="border-2 border-emerald-500 text-emerald-600 hover:bg-emerald-50 px-8 py-6 text-lg rounded-full" onClick={() => document.getElementById('como-funciona')?.scrollIntoView({
               behavior: 'smooth'
@@ -426,11 +428,11 @@ Transforme Hábitos em XP!</h3>
                         </li>)}
                     </ul>
                     
-                    <Link to="/onboarding">
-                      <Button className={`w-full py-6 rounded-full font-bold text-lg ${plan.popular ? 'bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white shadow-lg' : 'bg-gray-200 hover:bg-gray-300 text-gray-900'}`}>
+
+                      <Button onClick={handleGetStarted} className={`w-full py-6 rounded-full font-bold text-lg ${plan.popular ? 'bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white shadow-lg' : 'bg-gray-200 hover:bg-gray-300 text-gray-900'}`}>
                         Começar Teste Grátis
                       </Button>
-                    </Link>
+
                   </div>
                 </Card>;
           })}
@@ -586,12 +588,10 @@ Transforme Hábitos em XP!</h3>
             </div>
           </form>
 
-          <Link to="/onboarding">
-            <Button size="lg" className="bg-white text-emerald-600 hover:bg-gray-50 px-12 py-6 text-lg rounded-full shadow-xl hover:shadow-2xl transition-all">
+            <Button onClick={handleGetStarted} size="lg" className="bg-white text-emerald-600 hover:bg-gray-50 px-12 py-6 text-lg rounded-full shadow-xl hover:shadow-2xl transition-all">
               Começar Teste Grátis de 7 Dias
               <Heart className="ml-2 w-5 h-5" />
             </Button>
-          </Link>
           
           <p className="text-white/80 mt-6 text-sm">
             Sem cartão de crédito necessário • Cancele quando quiser

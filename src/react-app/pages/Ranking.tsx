@@ -3,6 +3,7 @@ import { useNavigate } from "react-router";
 import { useAuth } from "@/react-app/App";
 import BottomNav from "@/react-app/components/BottomNav";
 import { Trophy, Medal, Crown, Flame, Zap } from "lucide-react";
+import { api } from "@/react-app/utils/api";
 
 export default function Ranking() {
   const { user } = useAuth();
@@ -20,7 +21,7 @@ export default function Ranking() {
 
   const loadRanking = async () => {
     try {
-      const response = await fetch("/api/ranking/global");
+      const response = await api("/api/ranking/global");
       const data = await response.json();
       setRanking(data);
     } catch (error) {

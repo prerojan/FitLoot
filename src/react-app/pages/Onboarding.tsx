@@ -6,6 +6,7 @@ import MissionCard from "@/react-app/components/MissionCard";
 import LevelUpModal from "@/react-app/components/LevelUpModal";
 import { Flame, Footprints, Target, Zap } from "lucide-react";
 import type { Mission, UserProgression, DailyMetrics, UserProfile, Title } from "@/shared/types";
+import { api } from "@/react-app/utils/api";
 
 export default function Dashboard() {
   const { user } = useAuth();
@@ -31,11 +32,11 @@ export default function Dashboard() {
   const loadData = async () => {
     try {
       const [profileRes, progressionRes, missionsRes, metricsRes, titlesRes] = await Promise.all([
-        fetch("/api/profile"),
-        fetch("/api/progression"),
-        fetch("/api/missions"),
-        fetch("/api/metrics/today"),
-        fetch("/api/titles"),
+        api("/api/profile"),
+        api("/api/progression"),
+        api("/api/missions"),
+        api("/api/metrics/today"),
+        api("/api/titles"),
       ]);
 
       if (!profileRes.ok) {
@@ -65,7 +66,7 @@ export default function Dashboard() {
 
   const handleMissionComplete = async (missionId: number, reps: number, verified: boolean) => {
     try {
-      const response = await fetch("/api/missions/complete", {
+      const response = await api("/api/missions/complete", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -79,7 +80,7 @@ export default function Dashboard() {
         const result = await response.json();
         
         if (result.leveledUp) {
-          const updatedProgression = await fetch("/api/progression").then(r => r.json());
+          const updatedProgression = await api("/api/progression").then(r => r.json());
           setNewLevel(updatedProgression.level);
           setShowLevelUp(true);
         }

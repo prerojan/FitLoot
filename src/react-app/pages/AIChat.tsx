@@ -8,6 +8,7 @@ import { useNavigate } from "react-router";
 import { useAuth } from '@/react-app/App';
 import BottomNav from "@/react-app/components/BottomNav";
 import { Send, Bot, User, Sparkles, Loader2 } from "lucide-react";
+import { api } from "@/react-app/utils/api";
 
 interface Message {
   role: "user" | "assistant";
@@ -65,14 +66,14 @@ export default function AIChat() {
         content: msg.content,
       }));
 
-      const response = await fetch("/api/ai/chat", {
+      const response = await api("/api/ai/chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           message: input,
-          history: history,
+          history,
         }),
       });
+
 
       if (!response.ok) throw new Error("Failed to get response");
 

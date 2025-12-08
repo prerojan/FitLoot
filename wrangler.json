@@ -1,28 +1,32 @@
 {
-  "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "019aaac3-f6c2-7a08-a4cb-238ea5ddc87d",
-  "main": "./src/worker/index.ts",
-  "compatibility_date": "2025-06-17",
-  "compatibility_flags": ["nodejs_compat"],
-  "observability": {
-    "enabled": true
-  },
-  "upload_source_maps": true,
-  "assets": {
-    "not_found_handling": "single-page-application"
-  },
-  "d1_databases": [
-    {
-      "binding": "DB",
-      "database_name": "019aaac3-f6c2-7a08-a4cb-238ea5ddc87d",
-      "database_id": "019aaac3-f6c2-7a08-a4cb-238ea5ddc87d"
-    }
-  ],
-  "r2_buckets": [
-    {
-      "binding": "R2_BUCKET",
-      "bucket_name": "019aaac3-f6c2-7a08-a4cb-238ea5ddc87d"
-    }
-  ]
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "fitloot-worker",
+	"main": "./src/worker/index.ts",
+	"compatibility_date": "2025-06-17",
+	"compatibility_flags": [
+		"nodejs_compat"
+	],
+	"observability": {
+		"enabled": true
+	},
+	"upload_source_maps": true,
+	"assets": {
+		"directory": "./dist",
+		"binding": "ASSETS",
+		"not_found_handling": "single-page-application"
+	},
+	"d1_databases": [
+		{
+			"binding": "fitloot_db",
+			"database_name": "fitloot-db",
+			"database_id": "811bd6c2-4f82-42f5-8610-f1400aa91a0d"
+		},
+		{
+			"binding": "fitloot_db_preview",
+			"database_name": "fitloot-db-preview",
+			"database_id": "7543878d-bfc6-41d3-b527-e9ae41b2e3a3",
+			"remote": true
+		}
+	],
+	
 }
-

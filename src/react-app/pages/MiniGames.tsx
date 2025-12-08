@@ -3,6 +3,7 @@ import { useAuth } from "@/react-app/App";
 import { useNavigate, useSearchParams } from "react-router";
 import BottomNav from "@/react-app/components/BottomNav";
 import { Swords, Trophy, Clock, Zap, Target, Users, Loader2, ChevronRight } from "lucide-react";
+import { api } from "@/react-app/utils/api";
 
 interface MiniGame {
   id: number;
@@ -55,7 +56,7 @@ export default function MiniGames() {
 
   const loadGames = async () => {
     try {
-      const response = await fetch("/api/mini-games/active");
+      const response = await api("/api/mini-games/active");
       if (response.ok) {
         const data = await response.json();
         setActiveGames(data.filter((g: MiniGame) => g.status !== 'completed'));
@@ -70,7 +71,7 @@ export default function MiniGames() {
 
   const loadSkills = async () => {
     try {
-      const response = await fetch("/api/skills");
+      const response = await api("/api/skills");
       if (response.ok) {
         const data = await response.json();
         setSkills(data);
@@ -87,7 +88,7 @@ export default function MiniGames() {
     }
 
     try {
-      const response = await fetch("/api/mini-games/challenge", {
+      const response = await api("/api/mini-games/challenge", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -114,7 +115,7 @@ export default function MiniGames() {
 
   const acceptChallenge = async (gameId: number) => {
     try {
-      const response = await fetch(`/api/mini-games/${gameId}/accept`, {
+      const response = await api(`/api/mini-games/${gameId}/accept`, {
         method: "POST"
       });
 
@@ -128,7 +129,7 @@ export default function MiniGames() {
 
   const completeChallenge = async (gameId: number, repsCompleted: number, timeSeconds: number) => {
     try {
-      const response = await fetch(`/api/mini-games/${gameId}/complete`, {
+      const response = await api(`/api/mini-games/${gameId}/complete`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

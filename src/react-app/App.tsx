@@ -10,6 +10,9 @@ import LandingPage from "@/react-app/pages/Landing";
 import Friends from "@/react-app/pages/Friends";
 import MiniGames from "@/react-app/pages/MiniGames";
 import AIChat from "@/react-app/pages/AIChat";
+import AuthCallback from "@/react-app/pages/AuthCallback";
+import { api } from "@/react-app/utils/api";
+
 
 interface User {
   id: string;
@@ -27,7 +30,7 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType>({
   user: null,
   loading: true,
-  checkAuth: async () => {}
+  checkAuth: async () => { }
 });
 
 export const useAuth = () => useContext(AuthContext);
@@ -38,7 +41,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   if (loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 flex items-center justify-center">
-        <div className="text-emerald-600">Carregando...</div>
+        <div className="text-emerald-600 text-xl">Carregando...</div>
       </div>
     );
   }
@@ -56,9 +59,7 @@ export default function App() {
 
   const checkAuth = async () => {
     try {
-      const response = await fetch('/api/users/me', {
-        credentials: 'include'
-      });
+      const response = await api('/api/users/me');
 
       if (response.ok) {
         const userData = await response.json();
@@ -73,6 +74,7 @@ export default function App() {
       setLoading(false);
     }
   };
+  ;
 
   useEffect(() => {
     checkAuth();
@@ -82,9 +84,16 @@ export default function App() {
     <AuthContext.Provider value={{ user, loading, checkAuth }}>
       <Router>
         <Routes>
+          {/* Landing page pública */}
           <Route path="/" element={<LandingPage />} />
-          <Route path="/app" element={user ? <Navigate to="/dashboard" /> : <HomePage />} />
-          
+
+          {/* Página de login */}
+          <Route path="/app" element={user ? <Navigate to="/dashboard" replace /> : <HomePage />} />
+
+          {/* Callback do Google OAuth */}
+          <Route path="/auth/callback" element={<AuthCallback />} />
+
+          {/* Rotas protegidas */}
           <Route path="/onboarding" element={<ProtectedRoute><Onboarding /></ProtectedRoute>} />
           <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
           <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
@@ -94,6 +103,7 @@ export default function App() {
           <Route path="/minigames" element={<ProtectedRoute><MiniGames /></ProtectedRoute>} />
           <Route path="/ai-chat" element={<ProtectedRoute><AIChat /></ProtectedRoute>} />
 
+          {/* Fallback */}
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Router>
