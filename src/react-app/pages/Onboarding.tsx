@@ -67,6 +67,10 @@ function ScrollPicker({ value, onChange, min, max, unit, label }: ScrollPickerPr
 
   const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") handleBlur();
+    if (e.key === "Escape") {
+      setInputStr(String(clamped));
+      setIsEditing(false);
+    }
   };
 
   const handleWheel = (e: WheelEvent<HTMLDivElement>) => {
@@ -78,13 +82,13 @@ function ScrollPicker({ value, onChange, min, max, unit, label }: ScrollPickerPr
     <div className="flex w-full flex-col items-center">
       <p className="mb-2 text-xs font-medium text-gray-500">{label}</p>
       <div
-        className="w-full max-w-[154px] select-none rounded-2xl border border-emerald-100 bg-white/95 py-2 shadow-sm backdrop-blur"
+        className="w-full max-w-[154px] select-none py-2"
         onWheel={handleWheel}
       >
         <button type="button" onClick={() => onChange(prevVal)} className="w-full py-1 text-sm text-gray-400 transition hover:text-gray-600">
           {prevVal} {unit}
         </button>
-        <div className="flex items-center justify-center border-y border-emerald-100 py-3">
+        <div className="flex items-center justify-center py-3">
           {isEditing ? (
             <span className="flex items-center gap-1">
               <input
@@ -101,7 +105,7 @@ function ScrollPicker({ value, onChange, min, max, unit, label }: ScrollPickerPr
               <span className="text-emerald-700">{unit}</span>
             </span>
           ) : (
-            <button type="button" onClick={() => setIsEditing(true)} className="text-2xl font-bold text-emerald-700">
+              <button type="button" onClick={() => setIsEditing(true)} className="text-3xl font-bold text-emerald-700">
               {clamped}
               <span className="ml-1 text-lg font-medium">{unit}</span>
             </button>
@@ -191,14 +195,14 @@ export default function Onboarding() {
   const [currentStep, setCurrentStep] = useState(0);
   const [credentials, setCredentials] = useState(INITIAL_CREDENTIALS);
   const [profile, setProfile] = useState(INITIAL_PROFILE);
-  const [selectedPlan, setSelectedPlan] = useState<"free" | "pro" | "annual">("free");
+  const [selectedPlan, setSelectedPlan] = useState<"basic">("basic");
   const [paymentTab, setPaymentTab] = useState<"card" | "boleto" | "pix">("card");
   const [stepError, setStepError] = useState<string | null>(null);
   const [stepLoading, setStepLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [selectedGoals, setSelectedGoals] = useState<GoalValue[]>([]);
   const [selectedEquipment, setSelectedEquipment] = useState<string[]>([]);
-  const [planPeriod, setPlanPeriod] = useState<"monthly" | "yearly">("yearly");
+
 
   const totalSteps = 5;
 
@@ -378,14 +382,14 @@ export default function Onboarding() {
         return;
       }
 
-      const paymentMethod = selectedPlan === "free" ? "none" : paymentTab === "card" ? "card" : paymentTab === "boleto" ? "boleto" : "pix";
-      const status = selectedPlan === "free" ? "active" : paymentTab === "card" ? "active" : "pending";
+      const paymentMethod = paymentTab === "card" ? "card" : paymentTab === "boleto" ? "boleto" : "pix";
+      const status = paymentTab === "card" ? "active" : "pending";
 
       const planRes = await api("/api/users/plan", {
         method: "POST",
         body: JSON.stringify({
-          plan_id: selectedPlan,
-          payment_method: paymentMethod as "none" | "card" | "boleto" | "pix",
+          plan_id: "basic",
+          payment_method: paymentMethod as "card" | "boleto" | "pix",
           status: status as "active" | "pending",
         }),
       });
@@ -419,7 +423,7 @@ export default function Onboarding() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 px-4 py-8 pb-24">
       <div className="mx-auto max-w-3xl">
-        <div className="mb-6 rounded-2xl border border-white/70 bg-white/70 p-4 shadow-sm backdrop-blur-lg">
+        <div className="mb-6 rounded-2xl border border-white/50 bg-white/70 p-4 shadow-lg backdrop-blur-lg">
           <div className="mb-3 flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 text-white shadow-md">
               <ActiveStepIcon className="h-5 w-5" />
@@ -600,16 +604,9 @@ export default function Onboarding() {
                 <p className="mt-1 text-sm text-gray-600">Finalize seu acesso ao FitLoot em poucos passos.</p>
               </div>
 
-              <div className="flex justify-center gap-2">
-                <button type="button" onClick={() => setPlanPeriod("monthly")} className={`rounded-xl px-4 py-2 text-sm font-medium ${planPeriod === "monthly" ? "bg-emerald-500 text-white" : "bg-gray-100 text-gray-600"}`}>Mensal</button>
-                <button type="button" onClick={() => setPlanPeriod("yearly")} className={`rounded-xl px-4 py-2 text-sm font-medium ${planPeriod === "yearly" ? "bg-emerald-500 text-white" : "bg-gray-100 text-gray-600"}`}>Anual</button>
-              </div>
-
-              <div className="grid gap-3 sm:grid-cols-3">
+              <div className="grid gap-3">
                 {[
-                  { id: "free" as const, name: "Free", price: "Grátis", color: "from-gray-400 to-gray-500", features: ["Missões diárias", "XP e níveis", "Ranking básico"], popular: false },
-                  { id: "pro" as const, name: "Premium", price: planPeriod === "yearly" ? "R$ 82,50" : "R$ 99", color: "from-emerald-500 to-teal-600", features: ["Tudo do Free", "Scanner com IA", "Ranking global"], popular: true },
-                  { id: "annual" as const, name: "Elite", price: planPeriod === "yearly" ? "R$ 124" : "R$ 149", color: "from-purple-500 to-pink-600", features: ["Tudo do Premium", "Planos de treino", "Suporte VIP"], popular: false },
+                  { id: "basic" as const, name: "Basic", price: "R$ 49/mês", color: "from-emerald-500 to-teal-600", features: ["Missões diárias", "XP e níveis", "Ranking global"], popular: true },
                 ].map((plan) => (
                   <button key={plan.id} type="button" onClick={() => setSelectedPlan(plan.id)} className={`relative rounded-2xl border-2 p-4 text-left transition ${selectedPlan === plan.id ? "border-emerald-500 bg-emerald-50" : "border-gray-200 bg-white"}`}>
                     {plan.popular && <span className="absolute right-2 top-2 rounded-full bg-emerald-500 px-2 py-0.5 text-[10px] font-semibold text-white">Popular</span>}
@@ -636,45 +633,43 @@ export default function Onboarding() {
                 <Input type="text" value={credentials.name} onChange={setCredential("name")} placeholder="Nome" required className="rounded-xl" />
               </div>
 
-              {(selectedPlan === "pro" || selectedPlan === "annual") && (
-                <div className="space-y-3 border-t border-gray-200 pt-4">
-                  <h3 className="font-bold text-gray-900">Pagamento</h3>
-                  <div className="flex flex-wrap gap-2">
-                    {([
-                      { tab: "card", label: "Cartão", icon: CreditCard },
-                      { tab: "boleto", label: "Boleto", icon: FileText },
-                      { tab: "pix", label: "PIX", icon: QrCode },
-                    ] as const).map(({ tab, label, icon: Icon }) => (
-                      <button key={tab} type="button" onClick={() => setPaymentTab(tab)} className={`flex items-center gap-1.5 rounded-xl border-2 px-3 py-2 text-sm ${paymentTab === tab ? "border-emerald-500 bg-emerald-50 text-emerald-800" : "border-gray-200 bg-white text-gray-700"}`}>
-                        <Icon className="h-4 w-4" /> {label}
-                      </button>
-                    ))}
-                  </div>
+              <div className="space-y-3 border-t border-gray-200 pt-4">
+                <h3 className="font-bold text-gray-900">Pagamento</h3>
+                <div className="flex flex-wrap gap-2">
+                  {([
+                    { tab: "card", label: "Cartão", icon: CreditCard },
+                    { tab: "boleto", label: "Boleto", icon: FileText },
+                    { tab: "pix", label: "PIX", icon: QrCode },
+                  ] as const).map(({ tab, label, icon: Icon }) => (
+                    <button key={tab} type="button" onClick={() => setPaymentTab(tab)} className={`flex items-center gap-1.5 rounded-xl border-2 px-3 py-2 text-sm ${paymentTab === tab ? "border-emerald-500 bg-emerald-50 text-emerald-800" : "border-gray-200 bg-white text-gray-700"}`}>
+                      <Icon className="h-4 w-4" /> {label}
+                    </button>
+                  ))}
+                </div>
 
                   {paymentTab === "card" && (
-                    <div className="space-y-2">
-                      <Input placeholder="Número do cartão" className="rounded-xl" />
-                      <Input placeholder="Nome no cartão" className="rounded-xl" />
-                      <div className="grid grid-cols-2 gap-2">
-                        <Input placeholder="Validade" className="rounded-xl" />
-                        <Input placeholder="CVV" className="rounded-xl" />
-                      </div>
+                  <div className="space-y-2">
+                    <Input placeholder="Número do cartão" className="rounded-xl" />
+                    <Input placeholder="Nome no cartão" className="rounded-xl" />
+                    <div className="grid grid-cols-2 gap-2">
+                      <Input placeholder="Validade" className="rounded-xl" />
+                      <Input placeholder="CVV" className="rounded-xl" />
                     </div>
+                  </div>
                   )}
 
-                  {paymentTab === "boleto" && (
-                    <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 text-center text-sm text-gray-600">
-                      Linha digitável de demonstração gerada após confirmação.
-                    </div>
-                  )}
+                {paymentTab === "boleto" && (
+                  <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 text-center text-sm text-gray-600">
+                    Linha digitável de demonstração gerada após confirmação.
+                  </div>
+                )}
 
-                  {paymentTab === "pix" && (
-                    <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 text-center text-sm text-gray-600">
-                      QR Code de demonstração será exibido após criar a conta.
-                    </div>
-                  )}
-                </div>
-              )}
+                {paymentTab === "pix" && (
+                  <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 text-center text-sm text-gray-600">
+                    QR Code de demonstração será exibido após criar a conta.
+                  </div>
+                )}
+              </div>
 
               <Button type="submit" disabled={stepLoading || !credentials.email || !credentials.password || credentials.password.length < 8 || credentials.password !== credentials.confirmPassword || !credentials.name.trim()} size="lg" className="w-full rounded-xl disabled:opacity-50">
                 {stepLoading ? "Criando conta..." : "Criar conta e finalizar"}
