@@ -75,14 +75,19 @@ function ScrollPicker({ value, onChange, min, max, unit, label }: ScrollPickerPr
 
   const handleWheel = (e: WheelEvent<HTMLDivElement>) => {
     e.preventDefault();
+    e.stopPropagation();
     if (e.deltaY < 0 && clamped < max) onChange(clamped + 1);
     else if (e.deltaY > 0 && clamped > min) onChange(clamped - 1);
   };
 
   return (
-    <div className="flex w-full flex-col items-center">
+    <div
+      className="flex w-full flex-col items-center overscroll-contain touch-none"
+      onWheelCapture={handleWheel}
+    >
       <p className="mb-2 text-xs font-medium text-gray-500">{label}</p>
-      <div className="w-full max-w-[154px] select-none py-2" onWheel={handleWheel}>
+
+      <div className="w-full max-w-[154px] select-none py-2 overscroll-contain" onWheelCapture={handleWheel}>
         <button
           type="button"
           onClick={() => onChange(prevVal)}
