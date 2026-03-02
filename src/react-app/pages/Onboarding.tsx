@@ -51,7 +51,7 @@ function ScrollPicker({ value, onChange, min, max, unit, label }: ScrollPickerPr
     if (isEditing && inputRef.current) inputRef.current.focus();
   }, [isEditing]);
 
-  const handleBlur = () => {
+  const commit = () => {
     const n = parseInt(inputStr, 10);
     if (!Number.isFinite(n)) {
       setInputStr(String(clamped));
@@ -66,7 +66,7 @@ function ScrollPicker({ value, onChange, min, max, unit, label }: ScrollPickerPr
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter") handleBlur();
+    if (e.key === "Enter") commit();
     if (e.key === "Escape") {
       setInputStr(String(clamped));
       setIsEditing(false);
@@ -74,6 +74,7 @@ function ScrollPicker({ value, onChange, min, max, unit, label }: ScrollPickerPr
   };
 
   const handleWheel = (e: WheelEvent<HTMLDivElement>) => {
+    e.preventDefault();
     if (e.deltaY < 0 && clamped < max) onChange(clamped + 1);
     else if (e.deltaY > 0 && clamped > min) onChange(clamped - 1);
   };
@@ -81,13 +82,15 @@ function ScrollPicker({ value, onChange, min, max, unit, label }: ScrollPickerPr
   return (
     <div className="flex w-full flex-col items-center">
       <p className="mb-2 text-xs font-medium text-gray-500">{label}</p>
-      <div
-        className="w-full max-w-[154px] select-none py-2"
-        onWheel={handleWheel}
-      >
-        <button type="button" onClick={() => onChange(prevVal)} className="w-full py-1 text-sm text-gray-400 transition hover:text-gray-600">
+      <div className="w-full max-w-[154px] select-none py-2" onWheel={handleWheel}>
+        <button
+          type="button"
+          onClick={() => onChange(prevVal)}
+          className="w-full py-1 text-sm text-gray-400 transition hover:text-gray-600"
+        >
           {prevVal} {unit}
         </button>
+
         <div className="flex items-center justify-center py-3">
           {isEditing ? (
             <span className="flex items-center gap-1">
@@ -98,20 +101,25 @@ function ScrollPicker({ value, onChange, min, max, unit, label }: ScrollPickerPr
                 max={max}
                 value={inputStr}
                 onChange={(e) => setInputStr(e.target.value)}
-                onBlur={handleBlur}
+                onBlur={commit}
                 onKeyDown={handleKeyDown}
-                className="w-14 bg-transparent text-center text-2xl font-bold text-emerald-700 outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                className="w-16 bg-transparent text-center text-3xl font-bold text-emerald-700 outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
               />
               <span className="text-emerald-700">{unit}</span>
             </span>
           ) : (
-              <button type="button" onClick={() => setIsEditing(true)} className="text-3xl font-bold text-emerald-700">
+            <button type="button" onClick={() => setIsEditing(true)} className="text-3xl font-bold text-emerald-700">
               {clamped}
               <span className="ml-1 text-lg font-medium">{unit}</span>
             </button>
           )}
         </div>
-        <button type="button" onClick={() => onChange(nextVal)} className="w-full py-1 text-sm text-gray-400 transition hover:text-gray-600">
+
+        <button
+          type="button"
+          onClick={() => onChange(nextVal)}
+          className="w-full py-1 text-sm text-gray-400 transition hover:text-gray-600"
+        >
           {nextVal} {unit}
         </button>
       </div>
@@ -123,7 +131,6 @@ type CredentialsStep = {
   email: string;
   password: string;
   confirmPassword: string;
-  name: string;
 };
 
 type ProfileStep = {
@@ -146,7 +153,6 @@ const INITIAL_CREDENTIALS: CredentialsStep = {
   email: "",
   password: "",
   confirmPassword: "",
-  name: "",
 };
 
 const INITIAL_PROFILE: ProfileStep = {
@@ -166,7 +172,6 @@ const INITIAL_PROFILE: ProfileStep = {
 };
 
 const STEP_NAMES = ["Identidade", "Corpo", "Objetivos", "Condicionamento", "Plano e conta"] as const;
-
 const STEP_ICONS = [UserRound, Ruler, Target, Activity, Shield];
 
 type GoalValue = ProfileStep["main_goal"];
@@ -195,14 +200,15 @@ export default function Onboarding() {
   const [currentStep, setCurrentStep] = useState(0);
   const [credentials, setCredentials] = useState(INITIAL_CREDENTIALS);
   const [profile, setProfile] = useState(INITIAL_PROFILE);
-  const [selectedPlan, setSelectedPlan] = useState<"basic">("basic");
+
+  const [selectedPlan, setSelectedPlan] = useState<"basic" | "pro" | "elite">("basic");
   const [paymentTab, setPaymentTab] = useState<"card" | "boleto" | "pix">("card");
+
   const [stepError, setStepError] = useState<string | null>(null);
   const [stepLoading, setStepLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [selectedGoals, setSelectedGoals] = useState<GoalValue[]>([]);
   const [selectedEquipment, setSelectedEquipment] = useState<string[]>([]);
-
 
   const totalSteps = 5;
 
@@ -294,20 +300,26 @@ export default function Onboarding() {
     e.preventDefault();
     setStepError(null);
 
+    // validações mínimas (mantendo seu comportamento atual, sem exigir "nome" aqui)
     if (
       !credentials.email ||
       !credentials.password ||
       credentials.password.length < 8 ||
-      credentials.password !== credentials.confirmPassword ||
-      !credentials.name.trim()
+      credentials.password !== credentials.confirmPassword
     ) {
       setStepError(
         credentials.password.length < 8
           ? "A senha deve ter pelo menos 8 caracteres"
           : credentials.password !== credentials.confirmPassword
             ? "As senhas não coincidem"
-            : "Preencha e-mail, nome e senha.",
+            : "Preencha e-mail e senha.",
       );
+      return;
+    }
+
+    // Garantia extra: nome completo vindo da etapa 0
+    if (!profile.full_name.trim()) {
+      setStepError("Preencha seu nome completo na etapa de Identidade.");
       return;
     }
 
@@ -316,7 +328,11 @@ export default function Onboarding() {
     try {
       const registerRes = await api("/api/auth/register", {
         method: "POST",
-        body: JSON.stringify({ email: credentials.email, password: credentials.password, name: credentials.name.trim() }),
+        body: JSON.stringify({
+          email: credentials.email,
+          password: credentials.password,
+          name: profile.full_name.trim(), // agora vem da etapa 0
+        }),
       });
 
       if (registerRes.status === 409) {
@@ -346,7 +362,7 @@ export default function Onboarding() {
 
       const patchRes = await api("/api/users/me", {
         method: "PATCH",
-        body: JSON.stringify({ name: profile.full_name || credentials.name }),
+        body: JSON.stringify({ name: profile.full_name.trim() }),
       });
 
       if (!patchRes.ok) {
@@ -388,7 +404,7 @@ export default function Onboarding() {
       const planRes = await api("/api/users/plan", {
         method: "POST",
         body: JSON.stringify({
-          plan_id: "basic",
+          plan_id: selectedPlan, // importante: salva o plano escolhido
           payment_method: paymentMethod as "card" | "boleto" | "pix",
           status: status as "active" | "pending",
         }),
@@ -429,13 +445,18 @@ export default function Onboarding() {
               <ActiveStepIcon className="h-5 w-5" />
             </div>
             <div>
-              <p className="text-sm font-semibold text-gray-700">Etapa {currentStep + 1} de {totalSteps}</p>
+              <p className="text-sm font-semibold text-gray-700">
+                Etapa {currentStep + 1} de {totalSteps}
+              </p>
               <p className="text-xs text-gray-500">{STEP_NAMES[currentStep]}</p>
             </div>
             <p className="ml-auto text-xs font-semibold text-emerald-700">{Math.round(progress)}%</p>
           </div>
           <div className="h-2 overflow-hidden rounded-full bg-white/80">
-            <div className="h-full bg-gradient-to-r from-emerald-500 to-teal-600 transition-all duration-300" style={{ width: `${progress}%` }} />
+            <div
+              className="h-full bg-gradient-to-r from-emerald-500 to-teal-600 transition-all duration-300"
+              style={{ width: `${progress}%` }}
+            />
           </div>
         </div>
 
@@ -444,7 +465,9 @@ export default function Onboarding() {
             <div className="mb-5 rounded-xl border border-red-400/30 bg-red-50 px-4 py-3 text-sm text-red-600">
               <div className="mb-2">{stepError}</div>
               {stepError.includes("já está cadastrado") && (
-                <Button type="button" onClick={() => navigate("/app")} className="w-full">Fazer login</Button>
+                <Button type="button" onClick={() => navigate("/app")} className="w-full">
+                  Fazer login
+                </Button>
               )}
             </div>
           )}
@@ -458,14 +481,27 @@ export default function Onboarding() {
 
               <div>
                 <label className="mb-1 block text-sm font-medium text-gray-700">Nome completo</label>
-                <Input value={profile.full_name} onChange={setProfileField("full_name")} placeholder="Seu nome completo" className="rounded-xl border-2 border-gray-200 focus:border-emerald-500" />
+                <Input
+                  value={profile.full_name}
+                  onChange={setProfileField("full_name")}
+                  placeholder="Seu nome completo"
+                  className="rounded-xl border-2 border-gray-200 focus:border-emerald-500"
+                />
               </div>
 
               <div>
                 <label className="mb-1 block text-sm font-medium text-gray-700">Nome de usuário</label>
                 <div className="flex rounded-xl border-2 border-gray-200 bg-white transition focus-within:border-emerald-500">
-                  <span className="flex items-center pl-3 text-gray-400"><User className="h-4 w-4" /></span>
-                  <Input value={profile.username} onChange={setProfileField("username")} placeholder="nome_de_usuario" minLength={3} className="border-0 focus-visible:ring-0" />
+                  <span className="flex items-center pl-3 text-gray-400">
+                    <User className="h-4 w-4" />
+                  </span>
+                  <Input
+                    value={profile.username}
+                    onChange={setProfileField("username")}
+                    placeholder="nome_de_usuario"
+                    minLength={3}
+                    className="border-0 focus-visible:ring-0"
+                  />
                 </div>
               </div>
 
@@ -477,16 +513,33 @@ export default function Onboarding() {
                     { value: "mulher", label: "Feminino" },
                     { value: "outro", label: "Prefiro não dizer" },
                   ] as const).map((opt) => (
-                    <button key={opt.value} type="button" onClick={() => setProfile((p) => ({ ...p, gender: opt.value }))} className={`rounded-xl border-2 px-3 py-3 text-sm font-medium transition ${profile.gender === opt.value ? "border-emerald-500 bg-emerald-50 text-emerald-800" : "border-gray-200 bg-white text-gray-700 hover:border-emerald-200"}`}>
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => setProfile((p) => ({ ...p, gender: opt.value }))}
+                      className={`rounded-xl border-2 px-3 py-3 text-sm font-medium transition ${profile.gender === opt.value
+                          ? "border-emerald-500 bg-emerald-50 text-emerald-800"
+                          : "border-gray-200 bg-white text-gray-700 hover:border-emerald-200"
+                        }`}
+                    >
                       {opt.label}
                     </button>
                   ))}
                 </div>
               </div>
 
-              <ScrollPicker label="Idade" value={Math.min(80, Math.max(13, parseInt(profile.age, 10) || 25))} onChange={(v) => setProfile((p) => ({ ...p, age: String(v) }))} min={13} max={80} unit="anos" />
+              <ScrollPicker
+                label="Idade"
+                value={Math.min(80, Math.max(13, parseInt(profile.age, 10) || 25))}
+                onChange={(v) => setProfile((p) => ({ ...p, age: String(v) }))}
+                min={13}
+                max={80}
+                unit="anos"
+              />
 
-              <Button type="submit" size="lg" className="mt-6 w-full rounded-xl">Continuar <ChevronRight className="ml-1 h-4 w-4" /></Button>
+              <Button type="submit" size="lg" className="mt-6 w-full rounded-xl">
+                Continuar <ChevronRight className="ml-1 h-4 w-4" />
+              </Button>
             </form>
           )}
 
@@ -498,11 +551,27 @@ export default function Onboarding() {
               </div>
 
               <div className="grid grid-cols-2 gap-6 justify-items-center">
-                <ScrollPicker label="Altura" value={Math.min(220, Math.max(140, Number(profile.height) || 170))} onChange={(v) => setProfile((p) => ({ ...p, height: String(v) }))} min={140} max={220} unit="cm" />
-                <ScrollPicker label="Peso" value={Math.min(200, Math.max(40, Number(profile.weight) || 70))} onChange={(v) => setProfile((p) => ({ ...p, weight: String(v) }))} min={40} max={200} unit="kg" />
+                <ScrollPicker
+                  label="Altura"
+                  value={Math.min(220, Math.max(140, Number(profile.height) || 170))}
+                  onChange={(v) => setProfile((p) => ({ ...p, height: String(v) }))}
+                  min={140}
+                  max={220}
+                  unit="cm"
+                />
+                <ScrollPicker
+                  label="Peso"
+                  value={Math.min(200, Math.max(40, Number(profile.weight) || 70))}
+                  onChange={(v) => setProfile((p) => ({ ...p, weight: String(v) }))}
+                  min={40}
+                  max={200}
+                  unit="kg"
+                />
               </div>
 
-              <Button type="submit" size="lg" className="w-full rounded-xl">Continuar <ChevronRight className="ml-1 h-4 w-4" /></Button>
+              <Button type="submit" size="lg" className="w-full rounded-xl">
+                Continuar <ChevronRight className="ml-1 h-4 w-4" />
+              </Button>
             </form>
           )}
 
@@ -518,8 +587,18 @@ export default function Onboarding() {
                   const Icon = opt.icon;
                   const isSelected = selectedGoals.includes(opt.value);
                   return (
-                    <button key={opt.value} type="button" onClick={() => setSelectedGoals((prev) => (isSelected ? prev.filter((g) => g !== opt.value) : [...prev, opt.value]))} className={`flex items-center gap-3 rounded-xl border-2 px-4 py-3 text-left text-sm font-medium transition ${isSelected ? "border-emerald-500 bg-emerald-50 text-emerald-800" : "border-gray-200 bg-white text-gray-700 hover:border-emerald-200"}`}>
-                      <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700"><Icon className="h-4 w-4" /></span>
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() =>
+                        setSelectedGoals((prev) => (isSelected ? prev.filter((g) => g !== opt.value) : [...prev, opt.value]))
+                      }
+                      className={`flex items-center gap-3 rounded-xl border-2 px-4 py-3 text-left text-sm font-medium transition ${isSelected ? "border-emerald-500 bg-emerald-50 text-emerald-800" : "border-gray-200 bg-white text-gray-700 hover:border-emerald-200"
+                        }`}
+                    >
+                      <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700">
+                        <Icon className="h-4 w-4" />
+                      </span>
                       <span className="flex-1">{opt.label}</span>
                       {isSelected && <CheckCircle2 className="h-4 w-4 text-emerald-600" />}
                     </button>
@@ -527,7 +606,9 @@ export default function Onboarding() {
                 })}
               </div>
 
-              <Button type="submit" disabled={selectedGoals.length === 0} size="lg" className="w-full rounded-xl disabled:opacity-50">Continuar <ChevronRight className="ml-1 h-4 w-4" /></Button>
+              <Button type="submit" disabled={selectedGoals.length === 0} size="lg" className="w-full rounded-xl disabled:opacity-50">
+                Continuar <ChevronRight className="ml-1 h-4 w-4" />
+              </Button>
             </form>
           )}
 
@@ -545,26 +626,44 @@ export default function Onboarding() {
                   { value: "intermediario", label: "Intermediário" },
                   { value: "avancado", label: "Avançado" },
                 ] as const).map((c) => (
-                  <button key={c.value} type="button" onClick={() => setProfile((p) => ({ ...p, initial_conditioning: c.value }))} className={`rounded-xl border-2 px-3 py-3 text-sm font-medium transition ${profile.initial_conditioning === c.value ? "border-emerald-500 bg-emerald-50 text-emerald-800" : "border-gray-200 bg-white text-gray-700"}`}>
+                  <button
+                    key={c.value}
+                    type="button"
+                    onClick={() => setProfile((p) => ({ ...p, initial_conditioning: c.value }))}
+                    className={`rounded-xl border-2 px-3 py-3 text-sm font-medium transition ${profile.initial_conditioning === c.value ? "border-emerald-500 bg-emerald-50 text-emerald-800" : "border-gray-200 bg-white text-gray-700"
+                      }`}
+                  >
                     {c.label}
                   </button>
                 ))}
               </div>
 
               <div className="grid grid-cols-3 gap-3">
-                {[
+                {([
                   { key: "initial_pushups" as const, label: "Flexões" },
                   { key: "initial_situps" as const, label: "Abdominais" },
                   { key: "initial_squats" as const, label: "Agachamentos" },
-                ].map(({ key, label }) => {
+                ] as const).map(({ key, label }) => {
                   const val = Number(profile[key]) || 0;
                   return (
                     <div key={key} className="rounded-xl border border-gray-200 bg-white p-3 text-center">
                       <p className="mb-2 text-xs font-medium text-gray-600">{label}</p>
                       <div className="flex items-center justify-center gap-2">
-                        <button type="button" onClick={() => setProfile((p) => ({ ...p, [key]: String(Math.max(0, val - 1)) }))} className="h-8 w-8 rounded-lg bg-gray-100 font-bold">−</button>
+                        <button
+                          type="button"
+                          onClick={() => setProfile((p) => ({ ...p, [key]: String(Math.max(0, val - 1)) }))}
+                          className="h-8 w-8 rounded-lg bg-gray-100 font-bold"
+                        >
+                          −
+                        </button>
                         <span className="w-8 font-bold text-emerald-700">{val}</span>
-                        <button type="button" onClick={() => setProfile((p) => ({ ...p, [key]: String(val + 1) }))} className="h-8 w-8 rounded-lg bg-gray-100 font-bold">+</button>
+                        <button
+                          type="button"
+                          onClick={() => setProfile((p) => ({ ...p, [key]: String(val + 1) }))}
+                          className="h-8 w-8 rounded-lg bg-gray-100 font-bold"
+                        >
+                          +
+                        </button>
                       </div>
                     </div>
                   );
@@ -573,7 +672,13 @@ export default function Onboarding() {
 
               <div>
                 <label className="mb-1 block text-sm font-medium text-gray-700">Lesões ou limitações (opcional)</label>
-                <textarea value={profile.injuries} onChange={(e) => setProfile((p) => ({ ...p, injuries: e.target.value }))} placeholder="Ex: joelho, lombar..." rows={2} className="w-full resize-none rounded-xl border-2 border-gray-200 px-3 py-2 text-sm outline-none transition focus:border-emerald-500" />
+                <textarea
+                  value={profile.injuries}
+                  onChange={(e) => setProfile((p) => ({ ...p, injuries: e.target.value }))}
+                  placeholder="Ex: joelho, lombar..."
+                  rows={2}
+                  className="w-full resize-none rounded-xl border-2 border-gray-200 px-3 py-2 text-sm outline-none transition focus:border-emerald-500"
+                />
               </div>
 
               <div>
@@ -583,7 +688,13 @@ export default function Onboarding() {
                     const Icon = eq.icon;
                     const isSelected = selectedEquipment.includes(eq.id);
                     return (
-                      <button key={eq.id} type="button" onClick={() => setSelectedEquipment((prev) => (isSelected ? prev.filter((v) => v !== eq.id) : [...prev, eq.id]))} className={`flex items-center gap-2 rounded-xl border-2 px-3 py-2 text-sm transition ${isSelected ? "border-emerald-500 bg-emerald-50 text-emerald-800" : "border-gray-200 bg-white text-gray-700"}`}>
+                      <button
+                        key={eq.id}
+                        type="button"
+                        onClick={() => setSelectedEquipment((prev) => (isSelected ? prev.filter((v) => v !== eq.id) : [...prev, eq.id]))}
+                        className={`flex items-center gap-2 rounded-xl border-2 px-3 py-2 text-sm transition ${isSelected ? "border-emerald-500 bg-emerald-50 text-emerald-800" : "border-gray-200 bg-white text-gray-700"
+                          }`}
+                      >
                         <Icon className="h-4 w-4" />
                         <span>{eq.label}</span>
                       </button>
@@ -593,7 +704,9 @@ export default function Onboarding() {
                 <Input value={profile.equipment} onChange={setProfileField("equipment")} placeholder="Outros equipamentos" className="mt-2 rounded-xl" />
               </div>
 
-              <Button type="submit" size="lg" className="w-full rounded-xl">Continuar <ChevronRight className="ml-1 h-4 w-4" /></Button>
+              <Button type="submit" size="lg" className="w-full rounded-xl">
+                Continuar <ChevronRight className="ml-1 h-4 w-4" />
+              </Button>
             </form>
           )}
 
@@ -604,18 +717,38 @@ export default function Onboarding() {
                 <p className="mt-1 text-sm text-gray-600">Finalize seu acesso ao FitLoot em poucos passos.</p>
               </div>
 
-              <div className="grid gap-3">
-                {[
-                  { id: "basic" as const, name: "Basic", price: "R$ 49/mês", color: "from-emerald-500 to-teal-600", features: ["Missões diárias", "XP e níveis", "Ranking global"], popular: true },
-                ].map((plan) => (
-                  <button key={plan.id} type="button" onClick={() => setSelectedPlan(plan.id)} className={`relative rounded-2xl border-2 p-4 text-left transition ${selectedPlan === plan.id ? "border-emerald-500 bg-emerald-50" : "border-gray-200 bg-white"}`}>
-                    {plan.popular && <span className="absolute right-2 top-2 rounded-full bg-emerald-500 px-2 py-0.5 text-[10px] font-semibold text-white">Popular</span>}
-                    <div className={`mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-br ${plan.color} text-white`}><Shield className="h-5 w-5" /></div>
+              <div className="grid gap-3 sm:grid-cols-3">
+                {([
+                  { id: "basic" as const, name: "Básico", price: "R$ 49/mês", color: "from-gray-500 to-gray-600", features: ["Missões diárias", "XP e níveis", "Ranking"] },
+                  { id: "pro" as const, name: "Pro", price: "R$ 99/mês", color: "from-emerald-500 to-teal-600", features: ["Tudo do Básico", "Scanner com IA", "Ranking global"], popular: true },
+                  { id: "elite" as const, name: "Elite", price: "R$ 149/mês", color: "from-purple-500 to-pink-600", features: ["Tudo do Pro", "Planos de treino", "Suporte VIP"] },
+                ] as const).map((plan) => (
+                  <button
+                    key={plan.id}
+                    type="button"
+                    onClick={() => setSelectedPlan(plan.id)}
+                    className={`relative rounded-2xl border-2 p-4 text-left transition ${selectedPlan === plan.id ? "border-emerald-500 bg-emerald-50" : "border-gray-200 bg-white"
+                      }`}
+                  >
+                    {("popular" in plan && plan.popular) && (
+                      <span className="absolute right-2 top-2 rounded-full bg-emerald-500 px-2 py-0.5 text-[10px] font-semibold text-white">
+                        Popular
+                      </span>
+                    )}
+
+                    <div className={`mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-br ${plan.color} text-white`}>
+                      <Shield className="h-5 w-5" />
+                    </div>
+
                     <h4 className="font-bold text-gray-900">{plan.name}</h4>
                     <p className="mb-2 text-xl font-bold text-gray-900">{plan.price}</p>
+
                     <ul className="space-y-1">
                       {plan.features.map((f) => (
-                        <li key={f} className="flex items-center gap-1.5 text-xs text-gray-700"><CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />{f}</li>
+                        <li key={f} className="flex items-center gap-1.5 text-xs text-gray-700">
+                          <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
+                          {f}
+                        </li>
                       ))}
                     </ul>
                   </button>
@@ -624,30 +757,60 @@ export default function Onboarding() {
 
               <div className="space-y-3 border-t border-gray-200 pt-4">
                 <h3 className="font-bold text-gray-900">Crie sua conta</h3>
+
                 <Input type="email" value={credentials.email} onChange={setCredential("email")} placeholder="E-mail" required className="rounded-xl" />
+
                 <div className="relative">
-                  <Input type={showPassword ? "text" : "password"} value={credentials.password} onChange={setCredential("password")} placeholder="Senha (mín. 8)" minLength={8} required className="rounded-xl pr-10" />
-                  <button type="button" onClick={() => setShowPassword((v) => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-500">ver</button>
+                  <Input
+                    type={showPassword ? "text" : "password"}
+                    value={credentials.password}
+                    onChange={setCredential("password")}
+                    placeholder="Senha (mín. 8)"
+                    minLength={8}
+                    required
+                    className="rounded-xl pr-10"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((v) => !v)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-500"
+                  >
+                    ver
+                  </button>
                 </div>
-                <Input type={showPassword ? "text" : "password"} value={credentials.confirmPassword} onChange={setCredential("confirmPassword")} placeholder="Confirmar senha" required className="rounded-xl" />
-                <Input type="text" value={credentials.name} onChange={setCredential("name")} placeholder="Nome" required className="rounded-xl" />
+
+                <Input
+                  type={showPassword ? "text" : "password"}
+                  value={credentials.confirmPassword}
+                  onChange={setCredential("confirmPassword")}
+                  placeholder="Confirmar senha"
+                  required
+                  className="rounded-xl"
+                />
               </div>
 
               <div className="space-y-3 border-t border-gray-200 pt-4">
                 <h3 className="font-bold text-gray-900">Pagamento</h3>
+
                 <div className="flex flex-wrap gap-2">
                   {([
                     { tab: "card", label: "Cartão", icon: CreditCard },
                     { tab: "boleto", label: "Boleto", icon: FileText },
                     { tab: "pix", label: "PIX", icon: QrCode },
                   ] as const).map(({ tab, label, icon: Icon }) => (
-                    <button key={tab} type="button" onClick={() => setPaymentTab(tab)} className={`flex items-center gap-1.5 rounded-xl border-2 px-3 py-2 text-sm ${paymentTab === tab ? "border-emerald-500 bg-emerald-50 text-emerald-800" : "border-gray-200 bg-white text-gray-700"}`}>
+                    <button
+                      key={tab}
+                      type="button"
+                      onClick={() => setPaymentTab(tab)}
+                      className={`flex items-center gap-1.5 rounded-xl border-2 px-3 py-2 text-sm ${paymentTab === tab ? "border-emerald-500 bg-emerald-50 text-emerald-800" : "border-gray-200 bg-white text-gray-700"
+                        }`}
+                    >
                       <Icon className="h-4 w-4" /> {label}
                     </button>
                   ))}
                 </div>
 
-                  {paymentTab === "card" && (
+                {paymentTab === "card" && (
                   <div className="space-y-2">
                     <Input placeholder="Número do cartão" className="rounded-xl" />
                     <Input placeholder="Nome no cartão" className="rounded-xl" />
@@ -656,7 +819,7 @@ export default function Onboarding() {
                       <Input placeholder="CVV" className="rounded-xl" />
                     </div>
                   </div>
-                  )}
+                )}
 
                 {paymentTab === "boleto" && (
                   <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 text-center text-sm text-gray-600">
@@ -671,7 +834,18 @@ export default function Onboarding() {
                 )}
               </div>
 
-              <Button type="submit" disabled={stepLoading || !credentials.email || !credentials.password || credentials.password.length < 8 || credentials.password !== credentials.confirmPassword || !credentials.name.trim()} size="lg" className="w-full rounded-xl disabled:opacity-50">
+              <Button
+                type="submit"
+                disabled={
+                  stepLoading ||
+                  !credentials.email ||
+                  !credentials.password ||
+                  credentials.password.length < 8 ||
+                  credentials.password !== credentials.confirmPassword
+                }
+                size="lg"
+                className="w-full rounded-xl disabled:opacity-50"
+              >
                 {stepLoading ? "Criando conta..." : "Criar conta e finalizar"}
                 {!stepLoading && <ArrowRight className="ml-2 h-4 w-4" />}
               </Button>
