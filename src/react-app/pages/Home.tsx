@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, type FC, type FormEvent, type ChangeEvent } from 'react';
+import { useState, useEffect, type FC, type FormEvent, type ChangeEvent } from 'react';
 import { useNavigate } from 'react-router';
 import { Zap, Mail, ArrowRight, Shield, Trophy, Target, Sparkles, Check, Eye, EyeOff } from 'lucide-react';
 import { api } from '@/react-app/utils/api';
@@ -24,7 +24,6 @@ const Home: FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [userNotFound, setUserNotFound] = useState(false);
-  const passwordRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -32,24 +31,6 @@ const Home: FC = () => {
       setSuccessMessage('Conta criada com sucesso! Faça login para continuar.');
     }
   }, []);
-
-  const togglePassword = () => {
-    const el = passwordRef.current;
-    if (!el) return;
-
-    const start = el.selectionStart ?? el.value.length;
-    const end = el.selectionEnd ?? el.value.length;
-
-    setShowPassword((v) => !v);
-
-    requestAnimationFrame(() => {
-      const node = passwordRef.current;
-      if (!node) return;
-
-      node.focus({ preventScroll: true });
-      node.setSelectionRange(start, end);
-    });
-  };
 
   const goToOnboarding = () => {
     if (form.email) sessionStorage.setItem('onboarding_email', form.email);
@@ -217,53 +198,37 @@ const Home: FC = () => {
 
               {/* Campo de Senha */}
               <div>
-                <div>
-                  <label
-                    htmlFor="password"
-                    className="block text-sm font-medium text-gray-700 mb-2"
-                  >
-                    Senha
-                  </label>
+                <label
+                  htmlFor="password"
+                  className="mb-2 block text-sm font-medium text-gray-700"
+                >
+                  Senha
+                </label>
 
-                  <div className="relative">
-                    <Input
-                      ref={passwordRef}
-                      id="password"
-                      type={showPassword ? "text" : "password"}
-                      placeholder="••••••••"
-                      value={form.password}
-                      onChange={handleChange("password")}
-                      autoComplete="current-password"
-                      required
-                      className="w-full pr-12 py-4 rounded-2xl border-2 border-gray-200 focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100 transition-all text-base"
-                    />
-
-                    <button
-                      type="button"
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={togglePassword}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
-                      aria-label={showPassword ? "Ocultar senha" : "Mostrar senha"}
-                    >
-                      {showPassword ? (
-                        <Eye className="h-5 w-5" />
-                      ) : (
-                        <EyeOff className="h-5 w-5" />
-                      )}
-                    </button>
-                  </div>
-                </div>
                 <div className="relative">
                   <Input
                     id="password"
-                    type={showPassword ? 'text' : 'password'}
+                    type={showPassword ? "text" : "password"}
                     placeholder="••••••••"
                     value={form.password}
-                    onChange={handleChange('password')}
+                    onChange={handleChange("password")}
                     autoComplete="current-password"
                     required
                     className="w-full pr-12 py-4 rounded-2xl border-2 border-gray-200 focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100 transition-all text-base"
                   />
+
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((p) => !p)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700 transition-colors focus:outline-none"
+                    aria-label={showPassword ? "Ocultar senha" : "Mostrar senha"}
+                  >
+                    {showPassword ? (
+                      <Eye className="h-5 w-5" />
+                    ) : (
+                      <EyeOff className="h-5 w-5" />
+                    )}
+                  </button>
                 </div>
               </div>
 

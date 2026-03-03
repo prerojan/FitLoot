@@ -312,7 +312,6 @@ export default function Onboarding() {
   const [showPassword, setShowPassword] = useState(false);
   const [selectedGoals, setSelectedGoals] = useState<GoalValue[]>([]);
   const [selectedEquipment, setSelectedEquipment] = useState<string[]>([]);
-  const passwordRef = useRef<HTMLInputElement>(null);
 
   const totalSteps = 5;
 
@@ -328,24 +327,6 @@ export default function Onboarding() {
     if (authLoading) return;
     if (user?.onboarding_completed === 1) navigate("/home");
   }, [authLoading, navigate, user]);
-
-  const togglePassword = () => {
-    const el = passwordRef.current;
-    if (!el) return;
-
-    const start = el.selectionStart ?? el.value.length;
-    const end = el.selectionEnd ?? el.value.length;
-
-    setShowPassword((v) => !v);
-
-    requestAnimationFrame(() => {
-      const node = passwordRef.current;
-      if (!node) return;
-
-      node.focus({ preventScroll: true });
-      node.setSelectionRange(start, end);
-    });
-  };
 
   const setCredential = (field: keyof CredentialsStep) => (e: ChangeEvent<HTMLInputElement>) => {
     setCredentials((c) => ({ ...c, [field]: e.target.value }));
@@ -952,9 +933,14 @@ export default function Onboarding() {
                   rightSlot={
                     <button
                       type="button"
-                      onMouseDown={(e) => e.preventDefault()} // não rouba foco
-                      onClick={togglePassword}
-                      className="rounded-lg p-2 text-gray-500 transition hover:bg-gray-50 hover:text-gray-700 focus:outline-none"
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                      }}
+                      onClick={(e) => {
+                        setShowPassword((v) => !v);
+                        e.currentTarget.blur();
+                      }}
+                      className="rounded-lg p-2 text-gray-500 transition hover:bg-gray-50 hover:text-gray-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/30"
                       aria-label={showPassword ? "Ocultar senha" : "Mostrar senha"}
                       title={showPassword ? "Ocultar senha" : "Mostrar senha"}
                     >
@@ -963,7 +949,6 @@ export default function Onboarding() {
                   }
                 >
                   <Input
-                    ref={passwordRef}
                     type={showPassword ? "text" : "password"}
                     value={credentials.password}
                     onChange={setCredential("password")}
