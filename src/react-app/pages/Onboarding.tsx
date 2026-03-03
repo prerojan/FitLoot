@@ -1,4 +1,12 @@
-import { useEffect, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent, type WheelEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type FormEvent,
+  type KeyboardEvent,
+} from "react";
 import { useNavigate } from "react-router";
 import { useAuth } from "@/react-app/App";
 import { api } from "@/react-app/utils/api";
@@ -11,7 +19,6 @@ import {
   ChevronRight,
   CreditCard,
   Dumbbell,
-  FileText,
   Gauge,
   HeartPulse,
   Monitor,
@@ -23,6 +30,8 @@ import {
   UserRound,
   Weight,
   Zap,
+  Eye,
+  EyeOff
 } from "lucide-react";
 
 type ScrollPickerProps = {
@@ -34,10 +43,50 @@ type ScrollPickerProps = {
   label: string;
 };
 
+const FIELD_WRAP =
+  "flex h-11 items-center rounded-xl border-2 border-gray-200 bg-white px-3 transition " +
+  "[&:has(input:focus)]:border-emerald-500 " +
+  "[&:has(input:focus)]:ring-2 " +
+  "[&:has(input:focus)]:ring-emerald-500/20";
+
+const FIELD_INPUT =
+  "h-full w-full !border-0 !bg-transparent !p-0 !shadow-none !ring-0 " +
+  "focus-visible:!ring-0 focus-visible:!ring-offset-0";
+
+const FIELD_TEXTAREA =
+  "w-full resize-none !border-0 !bg-transparent !p-0 text-sm outline-none !shadow-none !ring-0 " +
+  "focus-visible:!ring-0 focus-visible:!ring-offset-0";
+
+function Field({
+  label,
+  leftIcon,
+  rightSlot,
+  children,
+}: {
+  label: string;
+  leftIcon?: React.ReactNode;
+  rightSlot?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <div>
+      <label className="mb-1 block text-sm font-medium text-gray-700">{label}</label>
+      <div className={`${FIELD_WRAP} ${rightSlot ? "pr-2" : ""}`}>
+        {leftIcon ? <span className="mr-2 flex items-center text-gray-400">{leftIcon}</span> : null}
+        <div className="flex-1">{children}</div>
+        {rightSlot ? <div className="ml-2 flex items-center">{rightSlot}</div> : null}
+      </div>
+    </div>
+  );
+}
+
 function ScrollPicker({ value, onChange, min, max, unit, label }: ScrollPickerProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [inputStr, setInputStr] = useState(String(value));
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const rootRef = useRef<HTMLDivElement>(null);
+  const isPointerInsideRef = useRef(false);
 
   const clamped = Math.min(max, Math.max(min, value));
   const prevVal = clamped > min ? clamped - 1 : min;
@@ -48,10 +97,10 @@ function ScrollPicker({ value, onChange, min, max, unit, label }: ScrollPickerPr
   }, [clamped]);
 
   useEffect(() => {
-    if (isEditing && inputRef.current) inputRef.current.focus();
+    if (isEditing) inputRef.current?.focus();
   }, [isEditing]);
 
-  const commit = () => {
+  const commit = useCallback(() => {
     const n = parseInt(inputStr, 10);
     if (!Number.isFinite(n)) {
       setInputStr(String(clamped));
@@ -63,7 +112,7 @@ function ScrollPicker({ value, onChange, min, max, unit, label }: ScrollPickerPr
     setInputStr(String(next));
     onChange(next);
     setIsEditing(false);
-  };
+  }, [clamped, inputStr, max, min, onChange]);
 
   const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") commit();
@@ -73,21 +122,66 @@ function ScrollPicker({ value, onChange, min, max, unit, label }: ScrollPickerPr
     }
   };
 
-  const handleWheel = (e: WheelEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (e.deltaY < 0 && clamped < max) onChange(clamped + 1);
-    else if (e.deltaY > 0 && clamped > min) onChange(clamped - 1);
+  const handleWheelChangeValue = (deltaY: number) => {
+    if (deltaY < 0 && clamped < max) onChange(clamped + 1);
+    else if (deltaY > 0 && clamped > min) onChange(clamped - 1);
+  };
+
+  const getScrollParent = (el: HTMLElement | null): HTMLElement | null => {
+    let cur: HTMLElement | null = el;
+    while (cur) {
+      const style = window.getComputedStyle(cur);
+      const overflowY = style.overflowY;
+      const canScroll =
+        (overflowY === "auto" || overflowY === "scroll") && cur.scrollHeight > cur.clientHeight;
+      if (canScroll) return cur;
+      cur = cur.parentElement;
+    }
+    return null;
+  };
+
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+
+    const scrollParent = getScrollParent(root);
+
+    const onWheelNative = (ev: globalThis.WheelEvent) => {
+      if (isEditing) return;
+      if (!isPointerInsideRef.current) return;
+
+      ev.preventDefault();
+      ev.stopPropagation();
+      handleWheelChangeValue(ev.deltaY);
+    };
+
+    root.addEventListener("wheel", onWheelNative, { passive: false });
+    if (scrollParent) scrollParent.addEventListener("wheel", onWheelNative, { passive: false });
+
+    return () => {
+      root.removeEventListener("wheel", onWheelNative as EventListener);
+      if (scrollParent) scrollParent.removeEventListener("wheel", onWheelNative as EventListener);
+    };
+  }, [isEditing, clamped, max, min, onChange]);
+
+  const disableLock = () => {
+    isPointerInsideRef.current = false;
   };
 
   return (
     <div
-      className="flex w-full flex-col items-center overscroll-contain touch-none"
-      onWheelCapture={handleWheel}
+      ref={rootRef}
+      className="flex w-full flex-col items-center overscroll-contain"
+      onPointerEnter={() => {
+        isPointerInsideRef.current = true;
+      }}
+      onPointerLeave={disableLock}
+      onPointerCancel={disableLock}
+      onBlurCapture={disableLock}
     >
       <p className="mb-2 text-xs font-medium text-gray-500">{label}</p>
 
-      <div className="w-full max-w-[154px] select-none py-2 overscroll-contain" onWheelCapture={handleWheel}>
+      <div className="w-full max-w-[154px] select-none py-2 overscroll-contain">
         <button
           type="button"
           onClick={() => onChange(prevVal)}
@@ -113,7 +207,11 @@ function ScrollPicker({ value, onChange, min, max, unit, label }: ScrollPickerPr
               <span className="text-emerald-700">{unit}</span>
             </span>
           ) : (
-            <button type="button" onClick={() => setIsEditing(true)} className="text-3xl font-bold text-emerald-700">
+            <button
+              type="button"
+              onClick={() => setIsEditing(true)}
+              className="text-3xl font-bold text-emerald-700"
+            >
               {clamped}
               <span className="ml-1 text-lg font-medium">{unit}</span>
             </button>
@@ -207,13 +305,14 @@ export default function Onboarding() {
   const [profile, setProfile] = useState(INITIAL_PROFILE);
 
   const [selectedPlan, setSelectedPlan] = useState<"basic" | "pro" | "elite">("basic");
-  const [paymentTab, setPaymentTab] = useState<"card" | "boleto" | "pix">("card");
+  const [paymentTab, setPaymentTab] = useState<"card" | "pix">("card");
 
   const [stepError, setStepError] = useState<string | null>(null);
   const [stepLoading, setStepLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [selectedGoals, setSelectedGoals] = useState<GoalValue[]>([]);
   const [selectedEquipment, setSelectedEquipment] = useState<string[]>([]);
+  const passwordRef = useRef<HTMLInputElement>(null);
 
   const totalSteps = 5;
 
@@ -229,6 +328,24 @@ export default function Onboarding() {
     if (authLoading) return;
     if (user?.onboarding_completed === 1) navigate("/home");
   }, [authLoading, navigate, user]);
+
+  const togglePassword = () => {
+    const el = passwordRef.current;
+    if (!el) return;
+
+    const start = el.selectionStart ?? el.value.length;
+    const end = el.selectionEnd ?? el.value.length;
+
+    setShowPassword((v) => !v);
+
+    requestAnimationFrame(() => {
+      const node = passwordRef.current;
+      if (!node) return;
+
+      node.focus({ preventScroll: true });
+      node.setSelectionRange(start, end);
+    });
+  };
 
   const setCredential = (field: keyof CredentialsStep) => (e: ChangeEvent<HTMLInputElement>) => {
     setCredentials((c) => ({ ...c, [field]: e.target.value }));
@@ -264,7 +381,14 @@ export default function Onboarding() {
     const weight = Number(profile.weight);
     const height = Number(profile.height);
 
-    if (!Number.isFinite(weight) || weight < 40 || weight > 200 || !Number.isFinite(height) || height < 140 || height > 220) {
+    if (
+      !Number.isFinite(weight) ||
+      weight < 40 ||
+      weight > 200 ||
+      !Number.isFinite(height) ||
+      height < 140 ||
+      height > 220
+    ) {
       setStepError("Altura (140–220 cm) e peso (40–200 kg) devem estar no intervalo válido.");
       return;
     }
@@ -305,7 +429,6 @@ export default function Onboarding() {
     e.preventDefault();
     setStepError(null);
 
-    // validações mínimas (mantendo seu comportamento atual, sem exigir "nome" aqui)
     if (
       !credentials.email ||
       !credentials.password ||
@@ -322,7 +445,6 @@ export default function Onboarding() {
       return;
     }
 
-    // Garantia extra: nome completo vindo da etapa 0
     if (!profile.full_name.trim()) {
       setStepError("Preencha seu nome completo na etapa de Identidade.");
       return;
@@ -336,7 +458,7 @@ export default function Onboarding() {
         body: JSON.stringify({
           email: credentials.email,
           password: credentials.password,
-          name: profile.full_name.trim(), // agora vem da etapa 0
+          name: profile.full_name.trim(),
         }),
       });
 
@@ -403,14 +525,14 @@ export default function Onboarding() {
         return;
       }
 
-      const paymentMethod = paymentTab === "card" ? "card" : paymentTab === "boleto" ? "boleto" : "pix";
+      const paymentMethod = paymentTab === "card" ? "card" : "pix";
       const status = paymentTab === "card" ? "active" : "pending";
 
       const planRes = await api("/api/users/plan", {
         method: "POST",
         body: JSON.stringify({
-          plan_id: selectedPlan, // importante: salva o plano escolhido
-          payment_method: paymentMethod as "card" | "boleto" | "pix",
+          plan_id: selectedPlan,
+          payment_method: paymentMethod as "card" | "pix",
           status: status as "active" | "pending",
         }),
       });
@@ -481,34 +603,29 @@ export default function Onboarding() {
             <form onSubmit={handleIdentityNext} className="space-y-5 animate-stepIn">
               <div className="mb-2 text-center">
                 <h2 className="text-2xl font-bold text-gray-900">Sua identidade</h2>
-                <p className="mt-1 text-sm text-gray-600">Vamos configurar um perfil rápido para personalizar sua experiência.</p>
+                <p className="mt-1 text-sm text-gray-600">
+                  Vamos configurar um perfil rápido para personalizar sua experiência.
+                </p>
               </div>
 
-              <div>
-                <label className="mb-1 block text-sm font-medium text-gray-700">Nome completo</label>
+              <Field label="Nome completo">
                 <Input
                   value={profile.full_name}
                   onChange={setProfileField("full_name")}
                   placeholder="Seu nome completo"
-                  className="rounded-xl border-2 border-gray-200 focus:border-emerald-500"
+                  className={FIELD_INPUT}
                 />
-              </div>
+              </Field>
 
-              <div>
-                <label className="mb-1 block text-sm font-medium text-gray-700">Nome de usuário</label>
-                <div className="flex rounded-xl border-2 border-gray-200 bg-white transition focus-within:border-emerald-500">
-                  <span className="flex items-center pl-3 text-gray-400">
-                    <User className="h-4 w-4" />
-                  </span>
-                  <Input
-                    value={profile.username}
-                    onChange={setProfileField("username")}
-                    placeholder="nome_de_usuario"
-                    minLength={3}
-                    className="border-0 focus-visible:ring-0"
-                  />
-                </div>
-              </div>
+              <Field label="Nome de usuário" leftIcon={<User className="h-4 w-4" />}>
+                <Input
+                  value={profile.username}
+                  onChange={setProfileField("username")}
+                  placeholder="nome_de_usuario"
+                  minLength={3}
+                  className={FIELD_INPUT}
+                />
+              </Field>
 
               <div>
                 <label className="mb-2 block text-sm font-medium text-gray-700">Gênero</label>
@@ -552,7 +669,9 @@ export default function Onboarding() {
             <form onSubmit={handleBodyNext} className="space-y-6 animate-stepIn">
               <div className="text-center">
                 <h2 className="text-2xl font-bold text-gray-900">Medidas do corpo</h2>
-                <p className="mt-1 text-sm text-gray-600">Isso nos ajuda a criar metas mais inteligentes para você.</p>
+                <p className="mt-1 text-sm text-gray-600">
+                  Isso nos ajuda a criar metas mais inteligentes para você.
+                </p>
               </div>
 
               <div className="grid grid-cols-2 gap-6 justify-items-center">
@@ -584,7 +703,9 @@ export default function Onboarding() {
             <form onSubmit={handleGoalsNext} className="space-y-5 animate-stepIn">
               <div className="text-center">
                 <h2 className="text-2xl font-bold text-gray-900">Objetivos</h2>
-                <p className="mt-1 text-sm text-gray-600">Selecione os objetivos que melhor representam seu foco atual.</p>
+                <p className="mt-1 text-sm text-gray-600">
+                  Selecione os objetivos que melhor representam seu foco atual.
+                </p>
               </div>
 
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -596,9 +717,13 @@ export default function Onboarding() {
                       key={opt.value}
                       type="button"
                       onClick={() =>
-                        setSelectedGoals((prev) => (isSelected ? prev.filter((g) => g !== opt.value) : [...prev, opt.value]))
+                        setSelectedGoals((prev) =>
+                          isSelected ? prev.filter((g) => g !== opt.value) : [...prev, opt.value],
+                        )
                       }
-                      className={`flex items-center gap-3 rounded-xl border-2 px-4 py-3 text-left text-sm font-medium transition ${isSelected ? "border-emerald-500 bg-emerald-50 text-emerald-800" : "border-gray-200 bg-white text-gray-700 hover:border-emerald-200"
+                      className={`flex items-center gap-3 rounded-xl border-2 px-4 py-3 text-left text-sm font-medium transition ${isSelected
+                          ? "border-emerald-500 bg-emerald-50 text-emerald-800"
+                          : "border-gray-200 bg-white text-gray-700 hover:border-emerald-200"
                         }`}
                     >
                       <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700">
@@ -611,7 +736,12 @@ export default function Onboarding() {
                 })}
               </div>
 
-              <Button type="submit" disabled={selectedGoals.length === 0} size="lg" className="w-full rounded-xl disabled:opacity-50">
+              <Button
+                type="submit"
+                disabled={selectedGoals.length === 0}
+                size="lg"
+                className="w-full rounded-xl disabled:opacity-50"
+              >
                 Continuar <ChevronRight className="ml-1 h-4 w-4" />
               </Button>
             </form>
@@ -635,7 +765,9 @@ export default function Onboarding() {
                     key={c.value}
                     type="button"
                     onClick={() => setProfile((p) => ({ ...p, initial_conditioning: c.value }))}
-                    className={`rounded-xl border-2 px-3 py-3 text-sm font-medium transition ${profile.initial_conditioning === c.value ? "border-emerald-500 bg-emerald-50 text-emerald-800" : "border-gray-200 bg-white text-gray-700"
+                    className={`rounded-xl border-2 px-3 py-3 text-sm font-medium transition ${profile.initial_conditioning === c.value
+                        ? "border-emerald-500 bg-emerald-50 text-emerald-800"
+                        : "border-gray-200 bg-white text-gray-700"
                       }`}
                   >
                     {c.label}
@@ -676,14 +808,18 @@ export default function Onboarding() {
               </div>
 
               <div>
-                <label className="mb-1 block text-sm font-medium text-gray-700">Lesões ou limitações (opcional)</label>
-                <textarea
-                  value={profile.injuries}
-                  onChange={(e) => setProfile((p) => ({ ...p, injuries: e.target.value }))}
-                  placeholder="Ex: joelho, lombar..."
-                  rows={2}
-                  className="w-full resize-none rounded-xl border-2 border-gray-200 px-3 py-2 text-sm outline-none transition focus:border-emerald-500"
-                />
+                <label className="mb-1 block text-sm font-medium text-gray-700">
+                  Lesões ou limitações (opcional)
+                </label>
+                <div className={`${FIELD_WRAP} h-auto items-start py-2`}>
+                  <textarea
+                    value={profile.injuries}
+                    onChange={(e) => setProfile((p) => ({ ...p, injuries: e.target.value }))}
+                    placeholder="Ex: joelho, lombar..."
+                    rows={2}
+                    className={FIELD_TEXTAREA}
+                  />
+                </div>
               </div>
 
               <div>
@@ -696,8 +832,14 @@ export default function Onboarding() {
                       <button
                         key={eq.id}
                         type="button"
-                        onClick={() => setSelectedEquipment((prev) => (isSelected ? prev.filter((v) => v !== eq.id) : [...prev, eq.id]))}
-                        className={`flex items-center gap-2 rounded-xl border-2 px-3 py-2 text-sm transition ${isSelected ? "border-emerald-500 bg-emerald-50 text-emerald-800" : "border-gray-200 bg-white text-gray-700"
+                        onClick={() =>
+                          setSelectedEquipment((prev) =>
+                            isSelected ? prev.filter((v) => v !== eq.id) : [...prev, eq.id],
+                          )
+                        }
+                        className={`flex items-center gap-2 rounded-xl border-2 px-3 py-2 text-sm transition ${isSelected
+                            ? "border-emerald-500 bg-emerald-50 text-emerald-800"
+                            : "border-gray-200 bg-white text-gray-700"
                           }`}
                       >
                         <Icon className="h-4 w-4" />
@@ -706,7 +848,17 @@ export default function Onboarding() {
                     );
                   })}
                 </div>
-                <Input value={profile.equipment} onChange={setProfileField("equipment")} placeholder="Outros equipamentos" className="mt-2 rounded-xl" />
+
+                <div className="mt-2">
+                  <Field label="Outros equipamentos">
+                    <Input
+                      value={profile.equipment}
+                      onChange={setProfileField("equipment")}
+                      placeholder="Ex: banco, colchonete..."
+                      className={FIELD_INPUT}
+                    />
+                  </Field>
+                </div>
               </div>
 
               <Button type="submit" size="lg" className="w-full rounded-xl">
@@ -724,9 +876,28 @@ export default function Onboarding() {
 
               <div className="grid gap-3 sm:grid-cols-3">
                 {([
-                  { id: "basic" as const, name: "Básico", price: "R$ 49/mês", color: "from-gray-500 to-gray-600", features: ["Missões diárias", "XP e níveis", "Ranking"] },
-                  { id: "pro" as const, name: "Pro", price: "R$ 99/mês", color: "from-emerald-500 to-teal-600", features: ["Tudo do Básico", "Scanner com IA", "Ranking global"], popular: true },
-                  { id: "elite" as const, name: "Elite", price: "R$ 149/mês", color: "from-purple-500 to-pink-600", features: ["Tudo do Pro", "Planos de treino", "Suporte VIP"] },
+                  {
+                    id: "basic" as const,
+                    name: "Básico",
+                    price: "R$ 49/mês",
+                    color: "from-gray-500 to-gray-600",
+                    features: ["Missões diárias", "XP e níveis", "Ranking"],
+                  },
+                  {
+                    id: "pro" as const,
+                    name: "Pro",
+                    price: "R$ 99/mês",
+                    color: "from-emerald-500 to-teal-600",
+                    features: ["Tudo do Básico", "Scanner com IA", "Ranking global"],
+                    popular: true,
+                  },
+                  {
+                    id: "elite" as const,
+                    name: "Elite",
+                    price: "R$ 149/mês",
+                    color: "from-purple-500 to-pink-600",
+                    features: ["Tudo do Pro", "Planos de treino", "Suporte VIP"],
+                  },
                 ] as const).map((plan) => (
                   <button
                     key={plan.id}
@@ -741,7 +912,9 @@ export default function Onboarding() {
                       </span>
                     )}
 
-                    <div className={`mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-br ${plan.color} text-white`}>
+                    <div
+                      className={`mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-br ${plan.color} text-white`}
+                    >
                       <Shield className="h-5 w-5" />
                     </div>
 
@@ -763,35 +936,54 @@ export default function Onboarding() {
               <div className="space-y-3 border-t border-gray-200 pt-4">
                 <h3 className="font-bold text-gray-900">Crie sua conta</h3>
 
-                <Input type="email" value={credentials.email} onChange={setCredential("email")} placeholder="E-mail" required className="rounded-xl" />
-
-                <div className="relative">
+                <Field label="E-mail">
                   <Input
+                    type="email"
+                    value={credentials.email}
+                    onChange={setCredential("email")}
+                    placeholder="E-mail"
+                    required
+                    className={FIELD_INPUT}
+                  />
+                </Field>
+
+                <Field
+                  label="Senha"
+                  rightSlot={
+                    <button
+                      type="button"
+                      onMouseDown={(e) => e.preventDefault()} // não rouba foco
+                      onClick={togglePassword}
+                      className="rounded-lg p-2 text-gray-500 transition hover:bg-gray-50 hover:text-gray-700 focus:outline-none"
+                      aria-label={showPassword ? "Ocultar senha" : "Mostrar senha"}
+                      title={showPassword ? "Ocultar senha" : "Mostrar senha"}
+                    >
+                      {showPassword ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+                    </button>
+                  }
+                >
+                  <Input
+                    ref={passwordRef}
                     type={showPassword ? "text" : "password"}
                     value={credentials.password}
                     onChange={setCredential("password")}
                     placeholder="Senha (mín. 8)"
                     minLength={8}
                     required
-                    className="rounded-xl pr-10"
+                    className={FIELD_INPUT}
                   />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword((v) => !v)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-500"
-                  >
-                    ver
-                  </button>
-                </div>
+                </Field>
 
-                <Input
-                  type={showPassword ? "text" : "password"}
-                  value={credentials.confirmPassword}
-                  onChange={setCredential("confirmPassword")}
-                  placeholder="Confirmar senha"
-                  required
-                  className="rounded-xl"
-                />
+                <Field label="Confirmar senha">
+                  <Input
+                    type={showPassword ? "text" : "password"}
+                    value={credentials.confirmPassword}
+                    onChange={setCredential("confirmPassword")}
+                    placeholder="Confirmar senha"
+                    required
+                    className={FIELD_INPUT}
+                  />
+                </Field>
               </div>
 
               <div className="space-y-3 border-t border-gray-200 pt-4">
@@ -800,14 +992,15 @@ export default function Onboarding() {
                 <div className="flex flex-wrap gap-2">
                   {([
                     { tab: "card", label: "Cartão", icon: CreditCard },
-                    { tab: "boleto", label: "Boleto", icon: FileText },
                     { tab: "pix", label: "PIX", icon: QrCode },
                   ] as const).map(({ tab, label, icon: Icon }) => (
                     <button
                       key={tab}
                       type="button"
                       onClick={() => setPaymentTab(tab)}
-                      className={`flex items-center gap-1.5 rounded-xl border-2 px-3 py-2 text-sm ${paymentTab === tab ? "border-emerald-500 bg-emerald-50 text-emerald-800" : "border-gray-200 bg-white text-gray-700"
+                      className={`flex items-center gap-1.5 rounded-xl border-2 px-3 py-2 text-sm ${paymentTab === tab
+                          ? "border-emerald-500 bg-emerald-50 text-emerald-800"
+                          : "border-gray-200 bg-white text-gray-700"
                         }`}
                     >
                       <Icon className="h-4 w-4" /> {label}
@@ -816,19 +1009,23 @@ export default function Onboarding() {
                 </div>
 
                 {paymentTab === "card" && (
-                  <div className="space-y-2">
-                    <Input placeholder="Número do cartão" className="rounded-xl" />
-                    <Input placeholder="Nome no cartão" className="rounded-xl" />
-                    <div className="grid grid-cols-2 gap-2">
-                      <Input placeholder="Validade" className="rounded-xl" />
-                      <Input placeholder="CVV" className="rounded-xl" />
-                    </div>
-                  </div>
-                )}
+                  <div className="space-y-3">
+                    <Field label="Número do cartão">
+                      <Input placeholder="Número do cartão" className={FIELD_INPUT} />
+                    </Field>
 
-                {paymentTab === "boleto" && (
-                  <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 text-center text-sm text-gray-600">
-                    Linha digitável de demonstração gerada após confirmação.
+                    <Field label="Nome no cartão">
+                      <Input placeholder="Nome no cartão" className={FIELD_INPUT} />
+                    </Field>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <Field label="Validade">
+                        <Input placeholder="MM/AA" className={FIELD_INPUT} />
+                      </Field>
+                      <Field label="CVV">
+                        <Input placeholder="CVV" className={FIELD_INPUT} />
+                      </Field>
+                    </div>
                   </div>
                 )}
 

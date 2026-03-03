@@ -269,7 +269,7 @@ export type LoginRequest = z.infer<typeof LoginRequestSchema>;
 // User plan (subscription)
 export const UserPlanRequestSchema = z.object({
   plan_id: z.enum(["free", "pro", "annual"]),
-  payment_method: z.enum(["none", "card", "boleto", "pix"]),
+  payment_method: z.enum(["none", "card", "pix"]),
   status: z.enum(["active", "pending"]),
 });
 export type UserPlanRequest = z.infer<typeof UserPlanRequestSchema>;

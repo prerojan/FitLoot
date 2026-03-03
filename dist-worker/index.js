@@ -7606,7 +7606,7 @@ var LoginRequestSchema = zod_default.object({
 });
 var UserPlanRequestSchema = zod_default.object({
   plan_id: zod_default.enum(["free", "pro", "annual"]),
-  payment_method: zod_default.enum(["none", "card", "boleto", "pix"]),
+  payment_method: zod_default.enum(["none", "card", "pix"]),
   status: zod_default.enum(["active", "pending"])
 });
 var UpdateMeRequestSchema = zod_default.object({
