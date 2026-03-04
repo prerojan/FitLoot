@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, type FC, type FormEvent, type ChangeEvent } from "react";
 import { useNavigate } from "react-router";
+import { useAuth } from "@/react-app/App";
 import {
   Zap,
   Mail,
@@ -28,6 +29,7 @@ type ApiError = {
 
 const Home: FC = () => {
   const navigate = useNavigate();
+  const { checkAuth } = useAuth();
 
   const [form, setForm] = useState<LoginForm>({ email: "", password: "" });
   const [showPassword, setShowPassword] = useState(false);
@@ -77,11 +79,18 @@ const Home: FC = () => {
           return;
         }
 
+        if (res.status === 401) {
+          setError("Email ou senha incorretos.");
+          return;
+        }
+
         setError(data?.error ?? "Erro ao fazer login");
         return;
       }
 
-      navigate("/home");
+      // Após login, atualiza contexto global e redireciona
+      await checkAuth();
+      navigate("/dashboard");
     } catch {
       setError("Não foi possível conectar ao servidor");
     } finally {

@@ -9,7 +9,6 @@ import {
   MiniGameChallengeRequestSchema,
   MiniGameCompleteRequestSchema,
   AiChatRequestSchema,
-  AiAnalyzeFoodRequestSchema,
   AuthRegisterRequestSchema,
   LoginRequestSchema,
   UserPlanRequestSchema,
@@ -77,7 +76,9 @@ async function authMiddleware(
 export interface Env {
   fitloot_db: D1Database;
   ASSETS: Fetcher;
-  /** Definir via: wrangler secret put ANTHROPIC_API_KEY */
+  OPENAI_API_KEY: string;
+  USDA_API_KEY: string;
+  GOOGLE_CLOUD_VISION_KEY: string;
   ANTHROPIC_API_KEY?: string;
 }
 // --------------------------------
@@ -1190,10 +1191,10 @@ Responda APENAS com um JSON no formato:
         s.name.toLowerCase().includes(mission.skill_name.toLowerCase())
       );
       
-      await c.env.fitloot_db.prepare(`
-        INSERT INTO missions (user_id, type, title, description, skill_id, target_reps, xp_reward, points_reward, deadline, updated_at)
-        VALUES (?, 'daily', ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-      `).bind(
+      await c.env.fitloot_db.prepare(
+      `INSERT INTO missions (user_id, type, title, description, skill_id, target_reps, xp_reward, points_reward, deadline, updated_at)
+        VALUES (?, 'daily', ?, ?, ?, ?, ?, ?, ?, datetime('now'))`
+      ).bind(
         user.id,
         mission.title,
         mission.description,
@@ -1221,15 +1222,13 @@ Responda APENAS com um JSON no formato:
 app.post("/api/ai/chat", authMiddleware, async (c) => {
   const user = c.get("user");
   if (!user) return c.json({ error: "Unauthorized" }, 401);
-  if (!c.env.ANTHROPIC_API_KEY) return c.json({ error: "AI not configured" }, 503);
-
   try {
     const raw = await c.req.json();
     const parsed = AiChatRequestSchema.safeParse(raw);
     if (!parsed.success) {
       return c.json({ error: "Invalid input", details: parsed.error.flatten() }, 400);
     }
-    const { message: userMessage, history: conversationHistory = [] } = parsed.data;
+    const { message: userMessage, history: conversationHistory = [], mode = "suporte" } = parsed.data;
 
     // Get user context
     const [profile, progression, attributes] = await Promise.all([
@@ -1247,62 +1246,32 @@ Contexto do usuário:
 - Streak: ${progression?.current_streak} dias
 - Objetivo: ${profile?.main_goal}
 - Condicionamento: ${profile?.initial_conditioning}
+- Modo: ${mode}`;
 
-Atributos:
-- Força: ${attributes?.strength}
-- Constituição: ${attributes?.constitution}
-- Vitalidade: ${attributes?.vitality}
-- Destreza: ${attributes?.dexterity}
-- Foco: ${attributes?.focus}
-
-Sua missão:
-1. Seja motivador e use linguagem de RPG/games
-2. Forneça dicas práticas de treino
-3. Responda dúvidas sobre exercícios
-4. Ajude o usuário a atingir suas metas
-5. Seja conciso (máximo 3 parágrafos)
-6. Use emojis relevantes 💪🔥⚡
-
-Responda em português brasileiro de forma amigável e motivadora!`;
-
-    // Build messages array
-    const messages = [
-      ...conversationHistory,
-      { role: "user", content: userMessage }
-    ];
-
-    const aiResponse = await fetch("https://api.anthropic.com/v1/messages", {
+    // Call OpenAI API
+    const openaiRes = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "anthropic-version": "2023-06-01",
-        "x-api-key": c.env.ANTHROPIC_API_KEY,
+        "Authorization": `Bearer ${c.env.OPENAI_API_KEY}`,
       },
       body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
+        model: "gpt-4o",
+        messages: [
+          { role: "system", content: systemPrompt },
+          ...conversationHistory.map((msg) => ({ role: msg.role, content: msg.content })),
+          { role: "user", content: userMessage },
+        ],
         max_tokens: 1000,
-        system: systemPrompt,
-        messages: messages,
       }),
     });
-
-    if (!aiResponse.ok) {
-      throw new Error("AI API error");
-    }
-
-    const aiData = await aiResponse.json() as ClaudeResponse;
-    const botResponse = aiData.content[0].text;
-
-    return c.json({ 
-      success: true,
-      message: botResponse,
-      user_level: progression?.level,
-      user_xp: progression?.xp
-    });
-
+    if (!openaiRes.ok) throw new Error("AI API error");
+    const openaiData: any = await openaiRes.json();
+    const content = openaiData.choices?.[0]?.message?.content || "";
+    return c.json({ message: content });
   } catch (error) {
-    console.error("Chatbot error:", error);
-    return c.json({ error: "Failed to process message" }, 500);
+    console.error("AI chat error:", error);
+    return c.json({ message: "Desculpe, tive um problema ao processar sua mensagem. Tente novamente!", error: "IA indisponível", fallback: true });
   }
 });
 
@@ -1413,134 +1382,139 @@ Analise e responda APENAS com JSON:
 });
 
 // 4. AI Food Analysis (Enhanced)
-app.post("/api/ai/analyze-food", authMiddleware, async (c) => {
+// Nova implementação: OpenAI GPT-4o + fallback robusto
+app.post("/api/ai/generate-missions", authMiddleware, async (c) => {
   const user = c.get("user");
   if (!user) return c.json({ error: "Unauthorized" }, 401);
-  if (!c.env.ANTHROPIC_API_KEY) return c.json({ error: "AI not configured" }, 503);
 
+  const [profile, progression, attributes, skills] = await Promise.all([
+    c.env.fitloot_db.prepare("SELECT * FROM user_profiles WHERE user_id = ?").bind(user.id).first(),
+    c.env.fitloot_db.prepare("SELECT * FROM user_progression WHERE user_id = ?").bind(user.id).first(),
+    c.env.fitloot_db.prepare("SELECT * FROM user_attributes WHERE user_id = ?").bind(user.id).first(),
+    c.env.fitloot_db.prepare(`
+      SELECT s.* FROM skills s
+      INNER JOIN user_skills us ON s.id = us.skill_id
+      WHERE us.user_id = ?
+    `).bind(user.id).all(),
+  ]);
+
+  // 70% missões baseadas em condicionamento
+  const baseMissions = await generateFallbackMissions(user.id, c.env.fitloot_db, profile?.initial_conditioning, skills.results);
+
+  // 30% missões via IA (OpenAI)
+  let aiMissions: any[] = [];
+  let fallback = false;
+  let error = null;
   try {
-    const raw = await c.req.json();
-    const parsed = AiAnalyzeFoodRequestSchema.safeParse(raw);
-    if (!parsed.success) {
-      return c.json({ error: "Invalid input", details: parsed.error.flatten() }, 400);
-    }
-    const { food_description, image_base64 } = parsed.data;
-
-    let prompt = "";
-    type AnthropicImageSource = { type: "base64"; media_type: string; data: string };
-    type AnthropicContentBlock = { type: "image"; source: AnthropicImageSource } | { type: "text"; text: string };
-    let messages: Array<{ role: string; content: string | AnthropicContentBlock[] }> = [];
-
-    if (image_base64) {
-      // Image-based analysis
-      prompt = `Analise esta imagem de comida e retorne APENAS um JSON com:
-{
-  "food_name": "nome do alimento",
-  "calories": número estimado de calorias,
-  "protein": gramas de proteína,
-  "carbs": gramas de carboidratos,
-  "fats": gramas de gordura,
-  "healthy_score": número de 1-10,
-  "suggestions": "sugestões para tornar mais saudável"
-}`;
-
-      messages = [{
-        role: "user",
-        content: [
-          {
-            type: "image",
-            source: {
-              type: "base64",
-              media_type: "image/jpeg",
-              data: image_base64
-            }
-          },
-          { type: "text", text: prompt }
-        ]
-      }];
-    } else {
-      // Text-based analysis
-      prompt = `Analise este alimento: "${food_description}"
-
-Retorne APENAS um JSON com:
-{
-  "food_name": "nome do alimento",
-  "calories": número estimado de calorias,
-  "protein": gramas de proteína,
-  "carbs": gramas de carboidratos,
-  "fats": gramas de gordura,
-  "healthy_score": número de 1-10,
-  "suggestions": "sugestões para tornar mais saudável ou alternativas"
-}`;
-
-      messages = [{ role: "user", content: prompt }];
-    }
-
-    const aiResponse = await fetch("https://api.anthropic.com/v1/messages", {
+    const openaiRes = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "anthropic-version": "2023-06-01",
-        "x-api-key": c.env.ANTHROPIC_API_KEY,
+        "Authorization": `Bearer ${c.env.OPENAI_API_KEY}`,
       },
       body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
-        max_tokens: 1000,
-        messages: messages,
+        model: "gpt-4o",
+        messages: [{ role: "user", content: `Gere 2 missões fitness desafiadoras e alcançáveis para um usuário com condicionamento ${profile?.initial_conditioning}, objetivo ${profile?.main_goal}, lesões: ${profile?.injuries || "nenhuma"}, equipamentos: ${profile?.equipment || "nenhum"}. Responda em JSON estruturado.` }],
+        max_tokens: 800,
       }),
     });
-
-    if (!aiResponse.ok) {
-      throw new Error("AI API error");
+    if (openaiRes.ok) {
+      const openaiData = await openaiRes.json();
+      const content = openaiData.choices?.[0]?.message?.content || "";
+      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0]);
+        aiMissions = parsed.missions || [];
+      }
+    } else {
+      error = "OpenAI indisponível";
+      fallback = true;
     }
-
-    const aiData = await aiResponse.json() as ClaudeResponse;
-    const content = aiData.content[0].text;
-    
-    const jsonMatch = content.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      throw new Error("Invalid AI response format");
-    }
-    
-    const foodData = JSON.parse(jsonMatch[0]) as { food_name: string; calories: number };
-
-    // Save to food diary
-    await c.env.fitloot_db.prepare(`
-      INSERT INTO food_diary (user_id, food_name, calories, meal_type, updated_at)
-      VALUES (?, ?, ?, ?, datetime('now'))
-    `).bind(
-      user.id,
-      foodData.food_name,
-      foodData.calories,
-      'lanche'
-    ).run();
-
-    return c.json({ 
-      success: true,
-      food_data: foodData
-    });
-
-  } catch (error) {
-    console.error("Food analysis error:", error);
-    return c.json({ error: "Failed to analyze food" }, 500);
+  } catch (e) {
+    error = "Falha na IA";
+    fallback = true;
   }
+
+  // Junta as missões (70% base, 30% IA)
+  const totalMissions = [...baseMissions.slice(0, 3), ...aiMissions.slice(0, 2)];
+
+  // Salva no banco
+  const tomorrow = new Date(Date.now() + 86400000).toISOString();
+  for (const mission of totalMissions) {
+    const skill = (skills.results as Array<{ id: number; name: string }>).find((s) =>
+      s.name.toLowerCase().includes((mission.skill_name || mission.skill).toLowerCase())
+    );
+    await c.env.fitloot_db.prepare(
+      `INSERT INTO missions (user_id, type, title, description, skill_id, target_reps, xp_reward, points_reward, deadline, updated_at)
+        VALUES (?, 'daily', ?, ?, ?, ?, ?, ?, ?, datetime('now'))`
+    ).bind(
+      user.id,
+      mission.title,
+      mission.description,
+      skill?.id || null,
+      mission.target_reps,
+      mission.xp_reward,
+      mission.points_reward,
+      tomorrow
+    ).run();
+  }
+
+  return c.json({ success: true, missions: totalMissions, fallback, error });
 });
-
-// Helper: Get AI-powered workout suggestions based on user state
-app.get("/api/ai/workout-suggestions", authMiddleware, async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
-  if (!c.env.ANTHROPIC_API_KEY) return c.json({ error: "AI not configured" }, 503);
-
-  try {
-    const [profile, progression, metrics] = await Promise.all([
-      c.env.fitloot_db.prepare("SELECT * FROM user_profiles WHERE user_id = ?").bind(user.id).first(),
-      c.env.fitloot_db.prepare("SELECT * FROM user_progression WHERE user_id = ?").bind(user.id).first(),
-      c.env.fitloot_db.prepare(`
-        SELECT * FROM daily_metrics 
-        WHERE user_id = ? AND date = ?
-      `).bind(user.id, new Date().toISOString().split('T')[0]).first(),
-    ]);
+      // Fallback generator para missões baseadas em condicionamento
+      async function generateFallbackMissions(
+        userId: string,
+        db: D1Database,
+        conditioning: "sedentario" | "iniciante" | "intermediario" | "avancado" = "iniciante",
+        skills: Array<{ name: string }> = []
+      ): Promise<Array<{
+        title: string;
+        description: string;
+        skill_name: string;
+        target_reps: number;
+        xp_reward: number;
+        points_reward: number;
+        difficulty: string;
+        type: string;
+      }>> {
+        // Define volume por condicionamento
+        const volumeMap: Record<"sedentario" | "iniciante" | "intermediario" | "avancado", number> = {
+          sedentario: 10,
+          iniciante: 20,
+          intermediario: 30,
+          avancado: 50,
+        };
+        const xpMap: Record<"sedentario" | "iniciante" | "intermediario" | "avancado", number> = {
+          sedentario: 20,
+          iniciante: 40,
+          intermediario: 60,
+          avancado: 100,
+        };
+        const pointsMap: Record<"sedentario" | "iniciante" | "intermediario" | "avancado", number> = {
+          sedentario: 5,
+          iniciante: 10,
+          intermediario: 15,
+          avancado: 25,
+        };
+        const diffMap: Record<"sedentario" | "iniciante" | "intermediario" | "avancado", string> = {
+          sedentario: "easy",
+          iniciante: "easy",
+          intermediario: "medium",
+          avancado: "hard",
+        };
+        // Gera missões para as 3 principais skills
+        return skills.slice(0, 3).map((skill) => ({
+          title: `Missão ${skill.name}`,
+          description: `Complete ${volumeMap[conditioning]} repetições de ${skill.name}`,
+          skill_name: skill.name,
+          target_reps: volumeMap[conditioning],
+          xp_reward: xpMap[conditioning],
+          points_reward: pointsMap[conditioning],
+          difficulty: diffMap[conditioning],
+          type: "diaria",
+        }));
+      }
+    });
 
     const prompt = `Baseado nestes dados de hoje, sugira um treino:
 
