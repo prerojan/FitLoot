@@ -13,12 +13,12 @@ import AIChat from "@/react-app/pages/AIChat";
 import { api } from "@/react-app/utils/api";
 
 
-interface User {
+export interface User {
   id: string;
   email: string;
   name: string;
   avatar_url?: string;
-  onboarding_completed?: number;
+  onboarding_completed: number;
 }
 
 interface AuthContextType {
@@ -35,7 +35,7 @@ const AuthContext = createContext<AuthContextType>({
   logout: () => { },
 });
 
-export const useAuth = () => useContext(AuthContext);
+export const useAuth = (): AuthContextType => useContext(AuthContext);
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -68,8 +68,15 @@ export default function App() {
       const response = await api('/api/users/me');
 
       if (response.ok) {
-        const userData = await response.json();
-        setUser(userData);
+        const userData = (await response.json()) as Partial<User>;
+        const normalizedUser: User = {
+          id: userData.id ?? "",
+          email: userData.email ?? "",
+          name: userData.name ?? "",
+          onboarding_completed: Number(userData.onboarding_completed ?? 0),
+          ...(typeof userData.avatar_url === "string" ? { avatar_url: userData.avatar_url } : {}),
+        };
+        setUser(normalizedUser);
       } else {
         setUser(null);
       }
@@ -81,6 +88,8 @@ export default function App() {
   }
   };
 
+
+  const isOnboardingCompleted = user?.onboarding_completed === 1;
   const logout = () => {
     setUser(null);
   };
@@ -105,8 +114,10 @@ export default function App() {
                   </div>
                 )
               : user
-                ? <Navigate to={user.onboarding_completed ? "/home" : "/onboarding"} replace />
-                : <HomePage />
+              ? <Navigate to={user.onboarding_completed ? "/home" : "/onboarding"} replace />
+                : isOnboardingCompleted
+                  ? <Navigate to="/home" replace />
+                  : <HomePage />
           } />
 
           {/* Rotas protegidas */}
