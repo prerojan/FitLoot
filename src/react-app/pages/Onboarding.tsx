@@ -10,6 +10,7 @@ import {
 import { useNavigate } from "react-router";
 import { useAuth } from "@/react-app/App";
 import { api } from "@/react-app/utils/api";
+import { safeGet } from "@/utils/typeHelpers";
 import { Button } from "@/react-app/components/ui/button";
 import { Input } from "@/react-app/components/ui/input";
 import {
@@ -386,7 +387,7 @@ export default function Onboarding() {
       return;
     }
 
-    setProfile((p) => ({ ...p, main_goal: selectedGoals[0] ?? p.main_goal }));
+    setProfile((p) => ({ ...p, main_goal: safeGet(selectedGoals, 0) ?? p.main_goal }));
     setCurrentStep(3);
   };
 
@@ -480,7 +481,7 @@ export default function Onboarding() {
       }
 
       const equipmentStr = [...selectedEquipment, profile.equipment].filter(Boolean).join(", ");
-      const mainGoal = selectedGoals.length > 0 ? selectedGoals[0] : profile.main_goal;
+      const mainGoal = safeGet(selectedGoals, 0) ?? profile.main_goal;
 
       const res = await api("/api/onboarding", {
         method: "POST",

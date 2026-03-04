@@ -11,7 +11,7 @@ export function Avatar({ src, name, className }: AvatarProps) {
     ?.split(' ')
     .filter(Boolean)
     .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase())
+    .map((part) => part.charAt(0).toUpperCase())
     .join('') || '?';
 
   if (src) {

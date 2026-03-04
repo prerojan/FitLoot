@@ -15,6 +15,8 @@ import {
   UserPlanRequestSchema,
   UpdateMeRequestSchema,
 } from "../shared/types";
+import { assertString, safeGet } from "../utils/typeHelpers";
+import { toStatusCode } from "./httpHelpers";
 
 // Tipo do usuário autenticado
 interface AuthUser {
@@ -38,7 +40,7 @@ async function authMiddleware(
   c: import("hono").Context<{ Bindings: Env; Variables: { user: AuthUser } }>,
   next: () => Promise<void>
 ) {
-  const sessionId = c.req.header('Cookie')?.match(/session_id=([^;]+)/)?.[1];
+  const sessionId = safeGet(c.req.header('Cookie')?.match(/session_id=([^;]+)/) ?? [], 1);
 
   if (!sessionId) {
     return c.json({ error: 'Unauthorized' }, 401);
@@ -294,7 +296,7 @@ app.post(
 );
 
 app.get("/api/logout", async (c) => {
-  const sessionId = c.req.header("Cookie")?.match(/session_id=([^;]+)/)?.[1];
+  const sessionId = safeGet(c.req.header("Cookie")?.match(/session_id=([^;]+)/) ?? [], 1);
 
   if (sessionId) {
     await c.env.fitloot_db
@@ -489,11 +491,11 @@ app.post("/api/missions/complete", authMiddleware, zValidator("json", CompleteMi
     "SELECT * FROM user_progression WHERE user_id = ?"
   ).bind(user.id).first();
 
-  const today = new Date().toISOString().split('T')[0];
+  const today = assertString(safeGet(new Date().toISOString().split('T'), 0));
   let streakMultiplier = 1;
   
   if (progression?.last_activity_date !== today) {
-    const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
+    const yesterday = assertString(safeGet(new Date(Date.now() - 86400000).toISOString().split('T'), 0));
     let newStreak = 1;
     
     if (progression?.last_activity_date === yesterday) {
@@ -696,7 +698,7 @@ app.get("/api/metrics/today", authMiddleware, async (c) => {
   const user = c.get("user");
   if (!user) return c.json({ error: "Unauthorized" }, 401);
   
-  const today = new Date().toISOString().split('T')[0];
+  const today = assertString(safeGet(new Date().toISOString().split('T'), 0));
   
   let metrics = await c.env.fitloot_db.prepare(
     "SELECT * FROM daily_metrics WHERE user_id = ? AND date = ?"
@@ -721,7 +723,7 @@ app.post("/api/metrics/update", authMiddleware, zValidator("json", UpdateDailyMe
   if (!user) return c.json({ error: "Unauthorized" }, 401);
   
   const data = c.req.valid("json");
-  const today = new Date().toISOString().split('T')[0];
+  const today = assertString(safeGet(new Date().toISOString().split('T'), 0));
 
   await c.env.fitloot_db.prepare(
     `INSERT INTO daily_metrics (user_id, date, steps, calories_burned, updated_at)
@@ -752,7 +754,7 @@ app.get("/api/food/today", authMiddleware, async (c) => {
   const user = c.get("user");
   if (!user) return c.json({ error: "Unauthorized" }, 401);
   
-  const today = new Date().toISOString().split('T')[0];
+  const today = assertString(safeGet(new Date().toISOString().split('T'), 0));
 
   const foods = await c.env.fitloot_db.prepare(
     `SELECT * FROM food_diary 
@@ -1238,18 +1240,18 @@ async function extractLabelTextWithVision(c: import("hono").Context<AppContext>,
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   }, timeoutMsByService.vision);
-  return data.responses?.[0]?.fullTextAnnotation?.text ?? "";
+  return safeGet(data.responses ?? [], 0)?.fullTextAnnotation?.text ?? "";
 }
 
 function parseNutritionFromOcrLabel(text: string) {
   if (!text) return null;
 
   const normalize = (value?: string) => (value ? Number(value.replace(",", ".")) : null);
-  const kcal = normalize(text.match(/(\d+[\.,]?\d*)\s*kcal/i)?.[1]);
-  const kJ = normalize(text.match(/(\d+[\.,]?\d*)\s*kj/i)?.[1]);
-  const protein = normalize(text.match(/prote[ií]n[aa]s?[^\d]*(\d+[\.,]?\d*)\s*g/i)?.[1]);
-  const carbs = normalize(text.match(/carboidratos?[^\d]*(\d+[\.,]?\d*)\s*g/i)?.[1]);
-  const fats = normalize(text.match(/gorduras?(?:\s+totais?)?[^\d]*(\d+[\.,]?\d*)\s*g/i)?.[1]);
+  const kcal = normalize(safeGet(text.match(/(\d+[\.,]?\d*)\s*kcal/i) ?? [], 1));
+  const kJ = normalize(safeGet(text.match(/(\d+[\.,]?\d*)\s*kj/i) ?? [], 1));
+  const protein = normalize(safeGet(text.match(/prote[ií]n[aa]s?[^\d]*(\d+[\.,]?\d*)\s*g/i) ?? [], 1));
+  const carbs = normalize(safeGet(text.match(/carboidratos?[^\d]*(\d+[\.,]?\d*)\s*g/i) ?? [], 1));
+  const fats = normalize(safeGet(text.match(/gorduras?(?:\s+totais?)?[^\d]*(\d+[\.,]?\d*)\s*g/i) ?? [], 1));
 
   if ([kcal, kJ, protein, carbs, fats].every((item) => item === null)) {
     return null;
@@ -1368,7 +1370,7 @@ Lesões: ${profile?.injuries || "nenhuma"}
 Equipamentos: ${profile?.equipment || "nenhum"}`,
     }], 800, true);
 
-    const content = openaiData.choices?.[0]?.message?.content ?? "{}";
+    const content = safeGet(openaiData.choices ?? [], 0)?.message?.content ?? "{}";
     const parsed = JSON.parse(content) as { missions?: MissionDraft[] };
     aiMissions = parsed.missions ?? [];
   } catch (err) {
@@ -1441,11 +1443,11 @@ Contexto do usuário:
       { role: "user", content: userMessage },
     ]);
 
-    const content = openaiData.choices?.[0]?.message?.content ?? "";
+    const content = safeGet(openaiData.choices ?? [], 0)?.message?.content ?? "";
     return c.json({ message: content });
   } catch (error) {
     const friendly = toFriendlyErrorResponse(error);
-    return c.json(friendly.payload, friendly.status);
+    return c.json(friendly.payload, toStatusCode(friendly.status));
   }
 });
 
@@ -1483,7 +1485,7 @@ Atributos: força ${attributes?.strength}, constituição ${attributes?.constitu
 Skills: ${(skills.results as Array<{ name: string; total_reps: number }>).slice(0, 5).map((s) => `${s.name}:${s.total_reps}`).join(",")}`;
 
     const openaiData = await callOpenAIChat(c, [{ role: "user", content: prompt }], 1000, true);
-    const content = openaiData.choices?.[0]?.message?.content ?? "{}";
+    const content = safeGet(openaiData.choices ?? [], 0)?.message?.content ?? "{}";
     const recommendations = JSON.parse(content);
 
     return c.json({
@@ -1497,7 +1499,7 @@ Skills: ${(skills.results as Array<{ name: string; total_reps: number }>).slice(
     });
   } catch (error) {
     const friendly = toFriendlyErrorResponse(error);
-    return c.json(friendly.payload, friendly.status);
+    return c.json(friendly.payload, toStatusCode(friendly.status));
   }
 });
 
@@ -1516,7 +1518,7 @@ app.get("/api/ai/workout-suggestions", authMiddleware, async (c) => {
     const prompt = `Sugira treino em JSON com workout_type, duration_minutes, intensity, exercises e motivation. Contexto: nível ${progression?.level}, objetivo ${profile?.main_goal}, passos ${metrics?.steps || 0}, calorias ${metrics?.calories_burned || 0}.`;
 
     const openaiData = await callOpenAIChat(c, [{ role: "user", content: prompt }], 900, true);
-    const content = openaiData.choices?.[0]?.message?.content ?? "{}";
+    const content = safeGet(openaiData.choices ?? [], 0)?.message?.content ?? "{}";
     const workout = JSON.parse(content) as Record<string, unknown>;
 
     return c.json({
@@ -1525,7 +1527,7 @@ app.get("/api/ai/workout-suggestions", authMiddleware, async (c) => {
     });
   } catch (error) {
     const friendly = toFriendlyErrorResponse(error);
-    return c.json(friendly.payload, friendly.status);
+    return c.json(friendly.payload, toStatusCode(friendly.status));
   }
 });
 
@@ -1551,7 +1553,7 @@ app.post("/api/ai/analyze-food", authMiddleware, async (c) => {
 Contexto textual: ${food_description || "não informado"}
 Texto OCR do rótulo: ${visionText || "não identificado"}.`;
     const aiData = await callOpenAIChat(c, [{ role: "user", content: identifyPrompt }], 700, true);
-    const aiContent = aiData.choices?.[0]?.message?.content ?? "{}";
+    const aiContent = safeGet(aiData.choices ?? [], 0)?.message?.content ?? "{}";
     const identified = JSON.parse(aiContent) as {
       items?: Array<{ food_name?: string; portion_description?: string; portion_multiplier?: number }>;
     };
@@ -1576,12 +1578,15 @@ Texto OCR do rótulo: ${visionText || "não identificado"}.`;
     }> = [];
 
     for (const item of items) {
-      const query = item.food_name!.trim();
+      const query = assertString(item.food_name).trim();
+      if (!query) {
+        continue;
+      }
       const multiplier = Number(item.portion_multiplier ?? 1);
 
       try {
         const usda = await searchFoodOnUSDA(c, query);
-        const first = usda.foods?.[0];
+        const first = safeGet(usda.foods ?? [], 0);
         if (!first) throw new Error("not-found");
         const nutrients = first.foodNutrients ?? [];
         const byName = (name: string) => nutrients.find((n) => n.nutrientName?.toLowerCase() === name.toLowerCase())?.value ?? null;
@@ -1604,7 +1609,7 @@ Texto OCR do rótulo: ${visionText || "não identificado"}.`;
       } catch {
         const estimatePrompt = `Estime APENAS JSON com calories, protein, carbs, fats para ${query} (${item.portion_description || "porção média"}).`;
         const fallbackData = await callOpenAIChat(c, [{ role: "user", content: estimatePrompt }], 350, true);
-        const estimate = JSON.parse(fallbackData.choices?.[0]?.message?.content ?? "{}") as {
+        const estimate = JSON.parse(safeGet(fallbackData.choices ?? [], 0)?.message?.content ?? "{}") as {
           calories?: number;
           protein?: number;
           carbs?: number;
@@ -1676,7 +1681,7 @@ Texto OCR do rótulo: ${visionText || "não identificado"}.`;
     });
   } catch (error) {
     const friendly = toFriendlyErrorResponse(error);
-    return c.json(friendly.payload, friendly.status);
+    return c.json(friendly.payload, toStatusCode(friendly.status));
   }
 });
 

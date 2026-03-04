@@ -5,6 +5,7 @@ import BottomNav from "@/react-app/components/BottomNav";
 import { Card } from "@/react-app/components/ui/card";
 import { Button } from "@/react-app/components/ui/button";
 import { api } from "@/react-app/utils/api";
+import { assertString, safeGet } from "@/utils/typeHelpers";
 
 type AnalysisItem = {
   food_name: string;
@@ -104,11 +105,16 @@ export default function FoodAnalysis() {
     const image = canvas.toDataURL("image/jpeg", 0.85);
     setPreview(image);
     stopCamera();
-    await runAnalysis(image.split(",")[1]);
+    const base64 = assertString(safeGet(image.split(","), 1));
+    if (!base64) {
+      setError("Falha ao processar a imagem capturada.");
+      return;
+    }
+    await runAnalysis(base64);
   };
 
   const onPickGallery: ChangeEventHandler<HTMLInputElement> = async (event) => {
-    const file = event.target.files?.[0];
+    const file = safeGet(Array.from(event.target.files ?? []), 0);
     if (!file) return;
 
     const reader = new FileReader();
@@ -116,7 +122,12 @@ export default function FoodAnalysis() {
       const value = String(reader.result || "");
       if (!value.includes(",")) return;
       setPreview(value);
-      await runAnalysis(value.split(",")[1]);
+      const base64 = assertString(safeGet(value.split(","), 1));
+      if (!base64) {
+        setError("Falha ao processar a imagem selecionada.");
+        return;
+      }
+      await runAnalysis(base64);
     };
     reader.readAsDataURL(file);
   };
