@@ -38,7 +38,14 @@
     "check": "tsc && vite build && wrangler deploy --dry-run",
     "dev": "vite",
     "dev:worker": "wrangler dev --local --port 8787",
-    "dev:all": "concurrently \"npm run dev\" \"npm run dev:worker\"",
-    "lint": "eslint ."
+    "dev:all": "bash -c \"npm run dev & npm run dev:worker\"",
+    "lint": "eslint .",
+    "test": "npm run lint && npm run build",
+    "test:worker": "wrangler deploy --dry-run",
+    "setup:test-env": "bash ./scripts/setup-test-env.sh",
+    "debug:npm-config": "npm config list && npm config get registry",
+    "check:lite": "node ./scripts/static-checks.mjs",
+    "ai:check": "npm run check:lite",
+    "validate": "npm run check:lite"
   }
 }

@@ -5,10 +5,12 @@ import BottomNav from "@/react-app/components/BottomNav";
 import { Trophy, Medal, Crown, Flame, Zap } from "lucide-react";
 import { api } from "@/react-app/utils/api";
 
+type RankingPlayer = { username: string; full_name: string; level: number; xp: number; current_streak: number };
+
 export default function Ranking() {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const [ranking, setRanking] = useState<any[]>([]);
+  const [ranking, setRanking] = useState<RankingPlayer[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -103,7 +105,7 @@ function PodiumCard({
   height,
 }: {
   position: number;
-  player: { username: string; level: number; current_streak: number };
+  player: RankingPlayer;
   height: string;
 }) {
   const getMedalIcon = () => {
@@ -138,7 +140,7 @@ function PodiumCard({
   );
 }
 
-function RankingCard({ position, player }: { position: number; player: { username: string; full_name: string; level: number; xp: number; current_streak: number } }) {
+function RankingCard({ position, player }: { position: number; player: RankingPlayer }) {
   return (
     <div className="bg-white/80 backdrop-blur-sm rounded-2xl p-4 shadow-lg flex items-center gap-4 hover:shadow-xl transition-all">
       <div className="flex items-center justify-center w-12 h-12 bg-gradient-to-br from-emerald-500 to-teal-600 text-white font-bold text-lg rounded-xl flex-shrink-0">
