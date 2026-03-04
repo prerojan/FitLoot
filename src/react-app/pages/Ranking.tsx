@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { useAuth } from "@/react-app/App";
 import BottomNav from "@/react-app/components/BottomNav";
+import { Avatar } from "@/react-app/components/ui/avatar";
+import { Card } from "@/react-app/components/ui/card";
 import { Trophy, Medal, Crown, Flame, Zap } from "lucide-react";
 import { api } from "@/react-app/utils/api";
 
@@ -41,44 +43,24 @@ export default function Ranking() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 pb-24">
-      {/* Header */}
       <div className="bg-gradient-to-r from-emerald-500 to-teal-600 text-white px-6 pt-8 pb-6 rounded-b-3xl shadow-xl">
         <div className="text-center mb-6">
           <div className="inline-flex items-center justify-center w-16 h-16 bg-white/20 backdrop-blur-sm rounded-full mb-4">
             <Trophy className="w-8 h-8" />
           </div>
-          <h1 className="text-3xl font-bold mb-1">Ranking Global</h1>
+          <h1 className="fl-title-page text-white mb-1">Ranking Global</h1>
           <p className="text-emerald-100">Top atletas do FitLoot</p>
         </div>
 
-        {/* Top 3 Podium */}
         {ranking.length >= 3 && (
           <div className="flex items-end justify-center gap-2 mb-6">
-            {/* 2nd Place */}
-            <PodiumCard
-              position={2}
-              player={ranking[1]}
-              height="h-24"
-            />
-            
-            {/* 1st Place */}
-            <PodiumCard
-              position={1}
-              player={ranking[0]}
-              height="h-32"
-            />
-            
-            {/* 3rd Place */}
-            <PodiumCard
-              position={3}
-              player={ranking[2]}
-              height="h-20"
-            />
+            <PodiumCard position={2} player={ranking[1]} height="h-24" />
+            <PodiumCard position={1} player={ranking[0]} height="h-32" />
+            <PodiumCard position={3} player={ranking[2]} height="h-20" />
           </div>
         )}
       </div>
 
-      {/* Rankings List */}
       <div className="px-6 py-6 space-y-3">
         {ranking.slice(3).map((player, index) => (
           <RankingCard key={index} position={index + 4} player={player} />
@@ -120,17 +102,15 @@ function PodiumCard({
 
   return (
     <div className="flex-1 max-w-[100px]">
-      <div className="bg-white/90 backdrop-blur-sm rounded-2xl p-3 mb-2 text-center shadow-xl">
-        <div className="flex justify-center mb-2">
-          {getMedalIcon()}
-        </div>
+      <Card tone="soft" className="p-3 mb-2 text-center shadow-xl">
+        <div className="flex justify-center mb-2">{getMedalIcon()}</div>
         <p className="font-bold text-gray-900 text-sm truncate">{player.username}</p>
         <p className="text-xs text-gray-600">Nv {player.level}</p>
         <div className="flex items-center justify-center gap-1 mt-2 text-xs text-emerald-600">
           <Flame className="w-3 h-3" />
           <span>{player.current_streak}d</span>
         </div>
-      </div>
+      </Card>
       <div className={`bg-gradient-to-b ${getBgColor()} ${height} rounded-t-xl flex items-center justify-center font-bold text-white text-xl shadow-lg`}>
         {position}
       </div>
@@ -140,10 +120,12 @@ function PodiumCard({
 
 function RankingCard({ position, player }: { position: number; player: { username: string; full_name: string; level: number; xp: number; current_streak: number } }) {
   return (
-    <div className="bg-white/80 backdrop-blur-sm rounded-2xl p-4 shadow-lg flex items-center gap-4 hover:shadow-xl transition-all">
+    <Card tone="soft" className="p-4 flex items-center gap-4 hover:shadow-xl transition-all">
       <div className="flex items-center justify-center w-12 h-12 bg-gradient-to-br from-emerald-500 to-teal-600 text-white font-bold text-lg rounded-xl flex-shrink-0">
         {position}
       </div>
+
+      <Avatar name={player.full_name || player.username} className="h-11 w-11 bg-emerald-100 text-emerald-700 text-sm" />
 
       <div className="flex-1 min-w-0">
         <h3 className="font-bold text-gray-900 truncate">{player.username}</h3>
@@ -160,6 +142,6 @@ function RankingCard({ position, player }: { position: number; player: { usernam
           <span>{player.current_streak}d</span>
         </div>
       </div>
-    </div>
+    </Card>
   );
 }

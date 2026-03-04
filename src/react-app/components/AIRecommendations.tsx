@@ -55,7 +55,7 @@ export default function AIRecommendations() {
 
   if (loading) {
     return (
-      <div className="bg-white rounded-2xl shadow-lg p-6">
+      <div className="fl-card p-6">
         <div className="flex items-center justify-center gap-2 text-emerald-600">
           <Loader2 className="w-5 h-5 animate-spin" />
           <span className="text-sm">Analisando seu progresso...</span>
@@ -84,7 +84,7 @@ export default function AIRecommendations() {
     <div className="space-y-4">
       <div className="flex items-center gap-2 mb-4">
         <Sparkles className="w-5 h-5 text-purple-600" />
-        <h2 className="text-xl font-bold text-gray-900">Recomendações IA</h2>
+        <h2 className="fl-title-card">Recomendações IA</h2>
       </div>
 
       {/* Motivation Message */}
@@ -96,7 +96,7 @@ export default function AIRecommendations() {
       </div>
 
       {/* Next Skill */}
-      <div className="bg-white rounded-2xl shadow-md p-4">
+      <div className="fl-card p-4 shadow-md">
         <div className="flex items-start gap-3">
           <div className="bg-emerald-100 p-2 rounded-lg">
             <Target className="w-5 h-5 text-emerald-600" />
@@ -114,7 +114,7 @@ export default function AIRecommendations() {
       </div>
 
       {/* Weak Attribute */}
-      <div className="bg-white rounded-2xl shadow-md p-4">
+      <div className="fl-card p-4 shadow-md">
         <div className="flex items-start gap-3">
           <div className="bg-orange-100 p-2 rounded-lg">
             <TrendingUp className="w-5 h-5 text-orange-600" />
@@ -132,7 +132,7 @@ export default function AIRecommendations() {
       </div>
 
       {/* Training Focus */}
-      <div className="bg-white rounded-2xl shadow-md p-4">
+      <div className="fl-card p-4 shadow-md">
         <div className="flex items-start gap-3">
           <div className="bg-blue-100 p-2 rounded-lg">
             <Lightbulb className="w-5 h-5 text-blue-600" />

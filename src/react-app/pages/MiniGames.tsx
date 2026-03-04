@@ -166,7 +166,7 @@ export default function MiniGames() {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <Swords className="w-8 h-8 text-purple-600" />
-              <h1 className="text-3xl font-bold text-gray-900">Mini-Games</h1>
+              <h1 className="fl-title-page">Mini-Games</h1>
             </div>
             <button
               onClick={() => setShowCreateForm(!showCreateForm)}
@@ -183,7 +183,7 @@ export default function MiniGames() {
         {/* Create Challenge Form */}
         {showCreateForm && (
           <div className="bg-white rounded-3xl shadow-2xl p-8 mb-6 animate-fadeIn">
-            <h2 className="text-2xl font-bold text-gray-900 mb-6">Criar Novo Desafio</h2>
+            <h2 className="fl-title-section mb-6">Criar Novo Desafio</h2>
             
             <div className="space-y-6">
               <div>
@@ -274,7 +274,7 @@ export default function MiniGames() {
         )}
 
         {/* Active Challenges */}
-        <h2 className="text-xl font-bold text-gray-900 mb-4">Desafios Ativos ({activeGames.length})</h2>
+        <h2 className="fl-title-card mb-4">Desafios Ativos ({activeGames.length})</h2>
         
         {activeGames.length === 0 ? (
           <div className="text-center py-12 bg-white rounded-3xl shadow-lg">
@@ -290,7 +290,7 @@ export default function MiniGames() {
               const isActive = game.status === 'active';
               
               return (
-                <div key={game.id} className="bg-white rounded-2xl p-6 shadow-lg hover:shadow-xl transition-shadow">
+                <div key={game.id} className="fl-card p-6 hover:shadow-xl transition-shadow">
                   <div className="flex items-center justify-between mb-4">
                     <div className={`px-3 py-1 rounded-full text-sm font-semibold ${
                       isPending ? 'bg-yellow-100 text-yellow-700' : 'bg-green-100 text-green-700'
@@ -359,7 +359,7 @@ export default function MiniGames() {
                           completeChallenge(game.id, reps, time);
                         }
                       }}
-                      className="w-full bg-gradient-to-r from-emerald-500 to-teal-600 text-white py-3 rounded-full font-semibold hover:shadow-lg flex items-center justify-center gap-2"
+                      className="fl-btn-primary w-full py-3 rounded-full hover:shadow-lg flex items-center justify-center gap-2"
                     >
                       Completar Desafio
                       <Trophy className="w-5 h-5" />
@@ -380,7 +380,7 @@ export default function MiniGames() {
         {/* Completed Games */}
         {completedGames.length > 0 && (
           <>
-            <h2 className="text-xl font-bold text-gray-900 mb-4">Histórico Recente</h2>
+            <h2 className="fl-title-card mb-4">Histórico Recente</h2>
             <div className="space-y-3">
               {completedGames.map((game) => {
                 const isWinner = game.winner_user_id === user?.id;

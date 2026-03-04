@@ -1,5 +1,9 @@
 import { useState } from "react";
 import { CheckCircle, Clock, Dumbbell } from "lucide-react";
+import { Card } from "@/react-app/components/ui/card";
+import { Button } from "@/react-app/components/ui/button";
+import { Input } from "@/react-app/components/ui/input";
+import { Badge } from "@/react-app/components/ui/badge";
 import type { Mission } from "@/shared/types";
 
 interface MissionCardProps {
@@ -41,7 +45,7 @@ export default function MissionCard({ mission, onComplete }: MissionCardProps) {
   };
 
   return (
-    <div className="bg-white/80 backdrop-blur-sm rounded-2xl p-5 shadow-lg hover:shadow-xl transition-all">
+    <Card tone="soft" className="p-5 hover:shadow-xl transition-all">
       <div className="flex items-start justify-between mb-3">
         <div className="flex-1">
           <h3 className="font-semibold text-gray-900 mb-1">{mission.title}</h3>
@@ -49,10 +53,10 @@ export default function MissionCard({ mission, onComplete }: MissionCardProps) {
             <p className="text-sm text-gray-600 mb-2">{mission.description}</p>
           )}
           {mission.skill_name && (
-            <div className="flex items-center gap-1 text-xs text-emerald-700 bg-emerald-50 rounded-full px-3 py-1 w-fit">
+            <Badge className="w-fit gap-1">
               <Dumbbell className="w-3 h-3" />
               <span>{mission.skill_name}</span>
-            </div>
+            </Badge>
           )}
         </div>
         <div className="flex flex-col items-end gap-1">
@@ -75,19 +79,20 @@ export default function MissionCard({ mission, onComplete }: MissionCardProps) {
       )}
 
       {!showComplete ? (
-        <button
+        <Button
           onClick={() => setShowComplete(true)}
-          className="w-full bg-gradient-to-r from-emerald-500 to-teal-600 text-white py-3 rounded-xl font-semibold shadow-md hover:shadow-lg transition-all hover:scale-105"
+          variant="primary"
+          className="w-full py-3 rounded-xl shadow-md hover:shadow-lg hover:scale-105"
         >
           Completar Missão
-        </button>
+        </Button>
       ) : (
         <div className="space-y-3 bg-emerald-50 p-4 rounded-xl">
           <div>
             <label className="text-sm font-medium text-gray-700 mb-2 block">
               Quantas repetições você fez?
             </label>
-            <input
+            <Input
               type="number"
               value={reps}
               onChange={(e) => setReps(e.target.value)}
@@ -97,24 +102,26 @@ export default function MissionCard({ mission, onComplete }: MissionCardProps) {
             />
           </div>
           <div className="flex gap-2">
-            <button
+            <Button
               onClick={() => setShowComplete(false)}
-              className="flex-1 bg-gray-200 text-gray-700 py-2 rounded-lg font-medium hover:bg-gray-300 transition-colors"
+              variant="secondary"
+              className="flex-1 py-2 rounded-lg"
               disabled={completing}
             >
               Cancelar
-            </button>
-            <button
+            </Button>
+            <Button
               onClick={handleComplete}
               disabled={completing || !reps}
-              className="flex-1 bg-emerald-600 text-white py-2 rounded-lg font-medium hover:bg-emerald-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+              variant="primary"
+              className="flex-1 py-2 rounded-lg"
             >
               <CheckCircle className="w-4 h-4" />
               {completing ? "Verificando..." : "Confirmar"}
-            </button>
+            </Button>
           </div>
         </div>
       )}
-    </div>
+    </Card>
   );
 }
