@@ -22,6 +22,36 @@ body {
   overflow-x: hidden;
 }
 
+@layer components {
+  .fl-title-page {
+    @apply text-3xl font-bold text-gray-900;
+  }
+
+  .fl-title-section {
+    @apply text-2xl font-bold text-gray-900;
+  }
+
+  .fl-title-card {
+    @apply text-xl font-bold text-gray-900;
+  }
+
+  .fl-card {
+    @apply rounded-2xl bg-white shadow-lg;
+  }
+
+  .fl-card-soft {
+    @apply rounded-2xl bg-white/60 backdrop-blur-sm border border-emerald-100;
+  }
+
+  .fl-btn-primary {
+    @apply bg-gradient-to-r from-emerald-500 to-teal-600 text-white font-semibold transition-all;
+  }
+
+  .fl-btn-primary:hover {
+    @apply from-emerald-600 to-teal-700;
+  }
+}
+
 @keyframes fadeIn {
   from {
     opacity: 0;

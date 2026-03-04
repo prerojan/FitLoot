@@ -153,12 +153,12 @@ export default function Landing() {
           <div className="text-center">
             <div className="flex items-center justify-center gap-3 mb-6">
               <Zap className="w-12 h-12 text-emerald-500" strokeWidth={2.5} />
-              <h1 className="text-5xl md:text-7xl font-bold text-gray-900">
+              <h1 className="fl-title-page text-5xl md:text-7xl">
                 Fit<span className="text-emerald-500">Loot</span>
               </h1>
             </div>
             
-            <h2 className="text-3xl md:text-5xl font-bold text-gray-900 mb-6 leading-tight">
+            <h2 className="fl-title-page md:text-5xl mb-6 leading-tight">
               Transforme Sua Vida<br />
               <span className="text-transparent bg-clip-text bg-gradient-to-r from-emerald-500 to-teal-500">
                 Em Um Grande Jogo
@@ -170,7 +170,7 @@ export default function Landing() {
             </p>
             
             <div className="flex flex-col sm:flex-row gap-4 justify-center items-center mb-12">
-                <Button onClick={handleGetStarted} size="lg" className="bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white px-8 py-6 text-lg rounded-full shadow-lg hover:shadow-xl transition-all">
+                <Button onClick={handleGetStarted} size="lg" className="fl-btn-primary px-8 py-6 text-lg rounded-full shadow-lg hover:shadow-xl">
                   Começar Teste Grátis de 7 Dias
                   <ChevronRight className="ml-2 w-5 h-5" />
                 </Button>
@@ -184,7 +184,7 @@ export default function Landing() {
 
             {/* Stats */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-6 max-w-4xl mx-auto">
-              {stats.map((stat, idx) => <Card key={idx} className="p-6 bg-white/80 backdrop-blur-sm border-emerald-100 rounded-3xl hover:shadow-lg transition-shadow">
+              {stats.map((stat, idx) => <Card key={idx} className="fl-card-soft p-6 rounded-3xl hover:shadow-lg transition-shadow">
                   <div className="text-3xl md:text-4xl font-bold text-emerald-600 mb-2">
                     {stat.value}
                   </div>
@@ -202,7 +202,7 @@ export default function Landing() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="grid md:grid-cols-2 gap-12 items-center">
             <div>
-              <h3 className="text-4xl md:text-5xl font-bold text-gray-900 mb-6">
+              <h3 className="fl-title-page md:text-5xl mb-6">
                 Evolua Seus Atributos <span className="text-emerald-500">RPG Style</span>
               </h3>
               <p className="text-xl text-gray-600 mb-8 leading-relaxed">
@@ -267,7 +267,7 @@ export default function Landing() {
       <div className="py-20 bg-gradient-to-br from-gray-50 to-gray-100">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center mb-16">
-            <h3 className="text-4xl md:text-5xl font-bold text-gray-900 mb-4">Quanto Você Economiza com FitLoot?</h3>
+            <h3 className="fl-title-page md:text-5xl mb-4">Quanto Você Economiza com FitLoot?</h3>
             <p className="text-xl text-gray-600">
               Compare os custos tradicionais com nossa solução completa
             </p>
@@ -323,7 +323,7 @@ export default function Landing() {
       <div id="como-funciona" className="py-20 bg-white">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center mb-16">
-            <h3 className="text-4xl md:text-5xl font-bold text-gray-900 mb-4">Mais Que Um Treino 
+            <h3 className="fl-title-page md:text-5xl mb-4">Mais Que Um Treino 
 Transforme Hábitos em XP!</h3>
             <p className="text-xl text-gray-600">
               Sistema de gamificação completo que torna exercícios viciantes
@@ -393,7 +393,7 @@ Transforme Hábitos em XP!</h3>
       <div className="py-20 bg-gradient-to-br from-emerald-50 to-teal-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center mb-16">
-            <h3 className="text-4xl md:text-5xl font-bold text-gray-900 mb-4">
+            <h3 className="fl-title-page md:text-5xl mb-4">
               🏆 Escolha Seu Plano FitLoot
             </h3>
             <p className="text-xl text-gray-600">
@@ -414,7 +414,7 @@ Transforme Hábitos em XP!</h3>
                       <Icon className="w-8 h-8 text-white" strokeWidth={2} />
                     </div>
                     
-                    <h4 className="text-2xl font-bold text-gray-900 mb-2">{plan.name}</h4>
+                    <h4 className="fl-title-section mb-2">{plan.name}</h4>
                     <div className="mb-4">
                       <span className="text-4xl font-bold text-gray-900">{plan.price}</span>
                       <span className="text-gray-600">/mês</span>
@@ -431,7 +431,7 @@ Transforme Hábitos em XP!</h3>
                     </ul>
                     
 
-                      <Button onClick={handleGetStarted} className={`w-full py-6 rounded-full font-bold text-lg ${plan.popular ? 'bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white shadow-lg' : 'bg-gray-200 hover:bg-gray-300 text-gray-900'}`}>
+                      <Button onClick={handleGetStarted} className={`w-full py-6 rounded-full text-lg ${plan.popular ? 'fl-btn-primary shadow-lg' : 'bg-gray-200 hover:bg-gray-300 text-gray-900 font-semibold'}`}>
                         Começar Teste Grátis
                       </Button>
 
@@ -451,7 +451,7 @@ Transforme Hábitos em XP!</h3>
       <div className="py-20 bg-white">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center mb-16">
-            <h3 className="text-4xl md:text-5xl font-bold text-gray-900 mb-4">
+            <h3 className="fl-title-page md:text-5xl mb-4">
               O Que Dizem Nossos Usuários
             </h3>
             <p className="text-xl text-gray-600">
@@ -493,7 +493,7 @@ Transforme Hábitos em XP!</h3>
       <div className="py-20 bg-gradient-to-br from-gray-50 to-gray-100">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center mb-16">
-            <h3 className="text-4xl md:text-5xl font-bold text-gray-900 mb-4">
+            <h3 className="fl-title-page md:text-5xl mb-4">
               Funcionalidades Completas
             </h3>
             <p className="text-xl text-gray-600">
@@ -524,7 +524,7 @@ Transforme Hábitos em XP!</h3>
       <div className="py-20 bg-white">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center mb-16">
-            <h3 className="text-4xl md:text-5xl font-bold text-gray-900 mb-4">
+            <h3 className="fl-title-page md:text-5xl mb-4">
               ✨ Benefícios Exclusivos
             </h3>
           </div>

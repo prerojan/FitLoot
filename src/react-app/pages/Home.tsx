@@ -122,7 +122,7 @@ const Home: FC = () => {
               <Zap className="w-10 h-10 text-white" strokeWidth={2.5} />
             </div>
             <div>
-              <h1 className="text-4xl font-bold text-gray-900">
+              <h1 className="fl-title-page text-4xl">
                 Fit<span className="text-emerald-500">Loot</span>
               </h1>
               <p className="text-gray-600">Transforme treinos em conquistas</p>
@@ -130,7 +130,7 @@ const Home: FC = () => {
           </div>
 
           <div className="space-y-6">
-            <h2 className="text-3xl font-bold text-gray-900 leading-tight">
+            <h2 className="fl-title-page leading-tight">
               Entre e comece a{" "}
               <span className="text-transparent bg-clip-text bg-gradient-to-r from-emerald-500 to-teal-500">
                 evoluir hoje
@@ -148,7 +148,7 @@ const Home: FC = () => {
                 return (
                   <div
                     key={idx}
-                    className="flex items-center gap-4 p-4 bg-white/60 backdrop-blur-sm rounded-2xl border border-emerald-100 hover:shadow-lg transition-all"
+                    className="fl-card-soft flex items-center gap-4 p-4 hover:shadow-lg transition-all"
                   >
                     <div className="w-12 h-12 bg-gradient-to-br from-emerald-400 to-teal-500 rounded-xl flex items-center justify-center flex-shrink-0">
                       <Icon className="w-6 h-6 text-white" strokeWidth={2} />
@@ -168,7 +168,7 @@ const Home: FC = () => {
             ].map((stat, idx) => (
               <div
                 key={idx}
-                className="text-center p-4 bg-white/60 backdrop-blur-sm rounded-2xl border border-emerald-100"
+                className="fl-card-soft text-center p-4"
               >
                 <div className="text-2xl font-bold text-emerald-600">{stat.value}</div>
                 <div className="text-sm text-gray-600">{stat.label}</div>
@@ -185,13 +185,13 @@ const Home: FC = () => {
               <div className="w-12 h-12 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-xl flex items-center justify-center">
                 <Zap className="w-7 h-7 text-white" strokeWidth={2.5} />
               </div>
-              <h1 className="text-3xl font-bold text-gray-900">
+              <h1 className="fl-title-page">
                 Fit<span className="text-emerald-500">Loot</span>
               </h1>
             </div>
 
             <div className="text-center mb-6">
-              <h3 className="text-2xl md:text-3xl font-bold text-gray-900 mb-2">
+              <h3 className="fl-title-section md:text-3xl mb-2">
                 Bem-vindo de volta! 👋
               </h3>
               <p className="text-gray-600">Entre para continuar sua jornada épica</p>
@@ -210,7 +210,7 @@ const Home: FC = () => {
                   <button
                     type="button"
                     onClick={goToOnboarding}
-                    className="mt-2 w-full py-2 rounded-xl font-semibold bg-emerald-600 hover:bg-emerald-700 text-white transition-colors"
+                    className="fl-btn-primary mt-2 w-full py-2 rounded-xl"
                   >
                     Criar minha conta
                   </button>
@@ -273,7 +273,7 @@ const Home: FC = () => {
               <Button
                 type="submit"
                 disabled={isLoading || !form.email || !form.password}
-                className="w-full py-4 rounded-2xl font-bold text-base bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white shadow-lg hover:shadow-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
+                className="fl-btn-primary w-full py-4 rounded-2xl text-base shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
               >
                 {isLoading ? "Entrando..." : "Entrar"}
                 {!isLoading && <ArrowRight className="ml-2 w-5 h-5" />}
