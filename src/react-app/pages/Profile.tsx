@@ -12,9 +12,9 @@ export default function Profile() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [attributes, setAttributes] = useState<UserAttributes | null>(null);
   const [progression, setProgression] = useState<UserProgression | null>(null);
-  const [skills, setSkills] = useState<any[]>([]);
-  const [achievements, setAchievements] = useState<any[]>([]);
-  const [titles, setTitles] = useState<any[]>([]);
+  const [skills, setSkills] = useState<SkillWithProgress[]>([]);
+  const [achievements, setAchievements] = useState<AchievementWithUnlock[]>([]);
+  const [titles, setTitles] = useState<TitleWithUnlock[]>([]);
   const [activeTab, setActiveTab] = useState<'attributes' | 'skills' | 'achievements' | 'titles'>('attributes');
   const [loading, setLoading] = useState(true);
 

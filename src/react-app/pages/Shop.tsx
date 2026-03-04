@@ -6,11 +6,31 @@ import { ShoppingBag, Coins, QrCode, Package } from "lucide-react";
 import type { UserProgression } from "@/shared/types";
 import { api } from "@/react-app/utils/api";
 
+type ShopProductView = {
+  id: number;
+  name: string;
+  description: string | null;
+  points_cost: number;
+  image_url: string | null;
+  category: string;
+  partner_name?: string;
+};
+
+type ShopOrderView = {
+  id: number;
+  product_name: string;
+  image_url: string | null;
+  is_redeemed?: number;
+  qr_code?: string;
+  created_at?: string;
+  points_spent?: number;
+};
+
 export default function Shop() {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const [products, setProducts] = useState<any[]>([]);
-  const [orders, setOrders] = useState<any[]>([]);
+  const [products, setProducts] = useState<ShopProductView[]>([]);
+  const [orders, setOrders] = useState<ShopOrderView[]>([]);
   const [progression, setProgression] = useState<UserProgression | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<string>("todos");
   const [activeTab, setActiveTab] = useState<'shop' | 'orders'>('shop');
@@ -55,7 +75,7 @@ export default function Shop() {
         await loadData();
         setActiveTab('orders');
       } else {
-        const data = await response.json();
+        const data = (await response.json()) as { error?: string };
         alert(data.error || "Erro ao realizar compra");
       }
     } catch (error) {
@@ -194,7 +214,7 @@ function ProductCard({
   userPoints,
   onPurchase,
 }: {
-  product: { id: number; name: string; description: string | null; points_cost: number; image_url: string | null; partner_name?: string };
+  product: ShopProductView;
   userPoints: number;
   onPurchase: (id: number) => void;
 }) {
@@ -253,7 +273,7 @@ function ProductCard({
   );
 }
 
-function OrderCard({ order }: { order: { product_name: string; image_url: string | null; is_redeemed?: number; qr_code?: string; created_at?: string; points_spent?: number } }) {
+function OrderCard({ order }: { order: ShopOrderView }) {
   const isRedeemed = order.is_redeemed === 1;
 
   return (
