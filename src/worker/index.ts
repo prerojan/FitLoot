@@ -67,7 +67,7 @@ async function authMiddleware(
     email: session.email as string,
     name: session.name as string,
     avatar_url: session.avatar_url as string | undefined,
-    onboarding_completed: Number(session.onboarding_completed ?? 0),
+    onboarding_completed: Number(session.onboarding_completed) === 1 ? 1 : 0,
   });
 
   await next();

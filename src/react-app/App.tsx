@@ -13,7 +13,7 @@ import AIChat from "@/react-app/pages/AIChat";
 import { api } from "@/react-app/utils/api";
 
 
-export interface User {
+interface User {
   id: string;
   email: string;
   name: string;
@@ -35,7 +35,7 @@ const AuthContext = createContext<AuthContextType>({
   logout: () => { },
 });
 
-export const useAuth = (): AuthContextType => useContext(AuthContext);
+export const useAuth = () => useContext(AuthContext);
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -68,28 +68,19 @@ export default function App() {
       const response = await api('/api/users/me');
 
       if (response.ok) {
-        const userData = (await response.json()) as Partial<User>;
-        const normalizedUser: User = {
-          id: userData.id ?? "",
-          email: userData.email ?? "",
-          name: userData.name ?? "",
-          onboarding_completed: Number(userData.onboarding_completed ?? 0),
-          ...(typeof userData.avatar_url === "string" ? { avatar_url: userData.avatar_url } : {}),
-        };
-        setUser(normalizedUser);
+        const userData = await response.json();
+        setUser(userData);
       } else {
         setUser(null);
       }
     } catch (error) {
       console.error('Auth check failed:', error);
       setUser(null);
-  } finally {
-    setLoading(false);
-  }
+    } finally {
+      setLoading(false);
+    }
   };
 
-
-  const isOnboardingCompleted = user?.onboarding_completed === 1;
   const logout = () => {
     setUser(null);
   };
@@ -109,15 +100,13 @@ export default function App() {
           <Route path="/app" element={
             loading
               ? (
-                  <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 flex items-center justify-center">
-                    <div className="text-emerald-600 text-xl">Carregando...</div>
-                  </div>
-                )
+                <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 flex items-center justify-center">
+                  <div className="text-emerald-600 text-xl">Carregando...</div>
+                </div>
+              )
               : user
-              ? <Navigate to={user.onboarding_completed ? "/home" : "/onboarding"} replace />
-                : isOnboardingCompleted
-                  ? <Navigate to="/home" replace />
-                  : <HomePage />
+                ? <Navigate to={user.onboarding_completed === 1 ? "/home" : "/onboarding"} replace />
+                : <HomePage />
           } />
 
           {/* Rotas protegidas */}

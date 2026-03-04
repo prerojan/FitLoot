@@ -1,9 +1,20 @@
-import { useState, useEffect, type FC, type FormEvent, type ChangeEvent } from 'react';
-import { useNavigate } from 'react-router';
-import { Zap, Mail, ArrowRight, Shield, Trophy, Target, Sparkles, Check, Eye, EyeOff } from 'lucide-react';
-import { api } from '@/react-app/utils/api';
-import { Button } from '@/react-app/components/ui/button';
-import { Input } from '@/react-app/components/ui/input';
+import { useState, useEffect, useRef, type FC, type FormEvent, type ChangeEvent } from "react";
+import { useNavigate } from "react-router";
+import {
+  Zap,
+  Mail,
+  ArrowRight,
+  Shield,
+  Trophy,
+  Target,
+  Sparkles,
+  Check,
+  Eye,
+  EyeOff,
+} from "lucide-react";
+import { api } from "@/react-app/utils/api";
+import { Button } from "@/react-app/components/ui/button";
+import { Input } from "@/react-app/components/ui/input";
 
 type LoginForm = {
   email: string;
@@ -18,30 +29,32 @@ type ApiError = {
 const Home: FC = () => {
   const navigate = useNavigate();
 
-  const [form, setForm] = useState<LoginForm>({ email: '', password: '' });
+  const [form, setForm] = useState<LoginForm>({ email: "", password: "" });
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [userNotFound, setUserNotFound] = useState(false);
 
+  const passwordRef = useRef<HTMLInputElement>(null);
+
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    if (params.get('registered') === 'true') {
-      setSuccessMessage('Conta criada com sucesso! Faça login para continuar.');
+    if (params.get("registered") === "true") {
+      setSuccessMessage("Conta criada com sucesso! Faça login para continuar.");
     }
   }, []);
 
   const goToOnboarding = () => {
-    if (form.email) sessionStorage.setItem('onboarding_email', form.email);
-    navigate('/onboarding');
+    if (form.email) sessionStorage.setItem("onboarding_email", form.email);
+    navigate("/onboarding");
   };
 
   const handleChange =
     (field: keyof LoginForm) =>
-    (e: ChangeEvent<HTMLInputElement>) => {
-      setForm((prev) => ({ ...prev, [field]: e.target.value }));
-    };
+      (e: ChangeEvent<HTMLInputElement>) => {
+        setForm((prev) => ({ ...prev, [field]: e.target.value }));
+      };
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -50,25 +63,27 @@ const Home: FC = () => {
     setIsLoading(true);
 
     try {
-      const res = await api('/api/auth/login', {
-        method: 'POST',
+      const res = await api("/api/auth/login", {
+        method: "POST",
         body: JSON.stringify(form),
       });
 
       if (!res.ok) {
         const data = (await res.json().catch(() => null)) as ApiError | null;
-        if (res.status === 404 && data?.code === 'USER_NOT_FOUND') {
-          setError(data?.error ?? 'Nenhuma conta encontrada com esse e-mail.');
+
+        if (res.status === 404 && data?.code === "USER_NOT_FOUND") {
+          setError(data?.error ?? "Nenhuma conta encontrada com esse e-mail.");
           setUserNotFound(true);
           return;
         }
-        setError(data?.error ?? 'Erro ao fazer login');
+
+        setError(data?.error ?? "Erro ao fazer login");
         return;
       }
 
-      navigate('/home');
+      navigate("/home");
     } catch {
-      setError('Não foi possível conectar ao servidor');
+      setError("Não foi possível conectar ao servidor");
     } finally {
       setIsLoading(false);
     }
@@ -81,8 +96,14 @@ const Home: FC = () => {
 
       {/* Elementos decorativos flutuantes */}
       <div className="absolute top-20 left-10 w-20 h-20 bg-emerald-200 rounded-full blur-3xl opacity-50 animate-pulse" />
-      <div className="absolute bottom-20 right-10 w-32 h-32 bg-teal-200 rounded-full blur-3xl opacity-50 animate-pulse" style={{ animationDelay: '700ms' }} />
-      <div className="absolute top-1/2 left-1/4 w-24 h-24 bg-cyan-200 rounded-full blur-3xl opacity-50 animate-pulse" style={{ animationDelay: '1000ms' }} />
+      <div
+        className="absolute bottom-20 right-10 w-32 h-32 bg-teal-200 rounded-full blur-3xl opacity-50 animate-pulse"
+        style={{ animationDelay: "700ms" }}
+      />
+      <div
+        className="absolute top-1/2 left-1/4 w-24 h-24 bg-cyan-200 rounded-full blur-3xl opacity-50 animate-pulse"
+        style={{ animationDelay: "1000ms" }}
+      />
 
       <div className="relative w-full max-w-6xl grid md:grid-cols-2 gap-8 items-center">
         {/* Painel Esquerdo - Informações */}
@@ -101,19 +122,25 @@ const Home: FC = () => {
 
           <div className="space-y-6">
             <h2 className="text-3xl font-bold text-gray-900 leading-tight">
-              Entre e comece a <span className="text-transparent bg-clip-text bg-gradient-to-r from-emerald-500 to-teal-500">evoluir hoje</span>
+              Entre e comece a{" "}
+              <span className="text-transparent bg-clip-text bg-gradient-to-r from-emerald-500 to-teal-500">
+                evoluir hoje
+              </span>
             </h2>
 
             <div className="space-y-4">
               {[
-                { icon: Trophy, text: 'Ganhe XP e suba de nível com cada treino' },
-                { icon: Target, text: 'Complete missões e desbloqueie conquistas' },
-                { icon: Sparkles, text: 'Troque pontos por cupons fitness reais' },
-                { icon: Shield, text: 'Sistema anti-trapaça com validação por sensores' }
+                { icon: Trophy, text: "Ganhe XP e suba de nível com cada treino" },
+                { icon: Target, text: "Complete missões e desbloqueie conquistas" },
+                { icon: Sparkles, text: "Troque pontos por cupons fitness reais" },
+                { icon: Shield, text: "Sistema anti-trapaça com validação por sensores" },
               ].map((item, idx) => {
                 const Icon = item.icon;
                 return (
-                  <div key={idx} className="flex items-center gap-4 p-4 bg-white/60 backdrop-blur-sm rounded-2xl border border-emerald-100 hover:shadow-lg transition-all">
+                  <div
+                    key={idx}
+                    className="flex items-center gap-4 p-4 bg-white/60 backdrop-blur-sm rounded-2xl border border-emerald-100 hover:shadow-lg transition-all"
+                  >
                     <div className="w-12 h-12 bg-gradient-to-br from-emerald-400 to-teal-500 rounded-xl flex items-center justify-center flex-shrink-0">
                       <Icon className="w-6 h-6 text-white" strokeWidth={2} />
                     </div>
@@ -126,11 +153,14 @@ const Home: FC = () => {
 
           <div className="grid grid-cols-3 gap-4 pt-6">
             {[
-              { value: '10K+', label: 'Usuários' },
-              { value: '500K+', label: 'Missões' },
-              { value: '95%', label: 'Sucesso' }
+              { value: "10K+", label: "Usuários" },
+              { value: "500K+", label: "Missões" },
+              { value: "95%", label: "Sucesso" },
             ].map((stat, idx) => (
-              <div key={idx} className="text-center p-4 bg-white/60 backdrop-blur-sm rounded-2xl border border-emerald-100">
+              <div
+                key={idx}
+                className="text-center p-4 bg-white/60 backdrop-blur-sm rounded-2xl border border-emerald-100"
+              >
                 <div className="text-2xl font-bold text-emerald-600">{stat.value}</div>
                 <div className="text-sm text-gray-600">{stat.label}</div>
               </div>
@@ -138,7 +168,7 @@ const Home: FC = () => {
           </div>
         </div>
 
-          {/* Painel Direito - Formulário de Login */}
+        {/* Painel Direito - Formulário de Login */}
         <div className="relative">
           <div className="bg-white/80 backdrop-blur-xl rounded-3xl shadow-2xl p-8 md:p-10 border border-white/20">
             {/* Logo mobile */}
@@ -155,9 +185,7 @@ const Home: FC = () => {
               <h3 className="text-2xl md:text-3xl font-bold text-gray-900 mb-2">
                 Bem-vindo de volta! 👋
               </h3>
-              <p className="text-gray-600">
-                Entre para continuar sua jornada épica
-              </p>
+              <p className="text-gray-600">Entre para continuar sua jornada épica</p>
             </div>
 
             {successMessage && (
@@ -189,7 +217,7 @@ const Home: FC = () => {
                   type="email"
                   placeholder="seu@email.com"
                   value={form.email}
-                  onChange={handleChange('email')}
+                  onChange={handleChange("email")}
                   autoComplete="email"
                   required
                   className="w-full pl-12 pr-4 py-4 rounded-2xl border-2 border-gray-200 focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100 transition-all text-base"
@@ -198,15 +226,13 @@ const Home: FC = () => {
 
               {/* Campo de Senha */}
               <div>
-                <label
-                  htmlFor="password"
-                  className="mb-2 block text-sm font-medium text-gray-700"
-                >
+                <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-2">
                   Senha
                 </label>
 
                 <div className="relative">
                   <Input
+                    ref={passwordRef}
                     id="password"
                     type={showPassword ? "text" : "password"}
                     placeholder="••••••••"
@@ -219,15 +245,18 @@ const Home: FC = () => {
 
                   <button
                     type="button"
-                    onClick={() => setShowPassword((p) => !p)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700 transition-colors focus:outline-none"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={(e) => {
+                      setShowPassword((p) => !p);
+                      e.currentTarget.blur();
+                      // opcional: mantém o cursor no input após clicar no olho
+                      passwordRef.current?.focus();
+                    }}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 rounded-lg p-2 text-gray-400 transition hover:bg-gray-50 hover:text-gray-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/30"
                     aria-label={showPassword ? "Ocultar senha" : "Mostrar senha"}
+                    title={showPassword ? "Ocultar senha" : "Mostrar senha"}
                   >
-                    {showPassword ? (
-                      <Eye className="h-5 w-5" />
-                    ) : (
-                      <EyeOff className="h-5 w-5" />
-                    )}
+                    {showPassword ? <Eye className="h-5 w-5" /> : <EyeOff className="h-5 w-5" />}
                   </button>
                 </div>
               </div>
@@ -237,7 +266,7 @@ const Home: FC = () => {
                 disabled={isLoading || !form.email || !form.password}
                 className="w-full py-4 rounded-2xl font-bold text-base bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white shadow-lg hover:shadow-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
               >
-                {isLoading ? 'Entrando...' : 'Entrar'}
+                {isLoading ? "Entrando..." : "Entrar"}
                 {!isLoading && <ArrowRight className="ml-2 w-5 h-5" />}
               </Button>
             </form>
@@ -245,7 +274,7 @@ const Home: FC = () => {
             {/* Footer */}
             <div className="mt-8 text-center">
               <p className="text-sm text-gray-600">
-                Não tem uma conta?{' '}
+                Não tem uma conta?{" "}
                 <button
                   type="button"
                   onClick={goToOnboarding}
