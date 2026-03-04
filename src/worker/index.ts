@@ -1091,137 +1091,153 @@ async function createDailyMissions(db: D1Database, userId: string) {
 
 // AI-powered endpoints
 
-// 1. Generate personalized missions using AI
+type ConditioningLevel = "sedentario" | "iniciante" | "intermediario" | "avancado";
+
+type MissionDraft = {
+  title: string;
+  description: string;
+  skill_name: string;
+  target_reps: number;
+  xp_reward: number;
+  points_reward: number;
+  difficulty: string;
+  type?: string;
+  skill?: string;
+};
+
+interface OpenAIChatCompletionResponse {
+  choices?: Array<{
+    message?: {
+      content?: string;
+    };
+  }>;
+}
+
+// Fallback generator para missões baseadas em condicionamento
+async function generateFallbackMissions(
+  conditioning: ConditioningLevel = "iniciante",
+  skills: Array<{ name: string }> = []
+): Promise<MissionDraft[]> {
+  const volumeMap: Record<ConditioningLevel, number> = {
+    sedentario: 10,
+    iniciante: 20,
+    intermediario: 30,
+    avancado: 50,
+  };
+  const xpMap: Record<ConditioningLevel, number> = {
+    sedentario: 20,
+    iniciante: 40,
+    intermediario: 60,
+    avancado: 100,
+  };
+  const pointsMap: Record<ConditioningLevel, number> = {
+    sedentario: 5,
+    iniciante: 10,
+    intermediario: 15,
+    avancado: 25,
+  };
+  const diffMap: Record<ConditioningLevel, string> = {
+    sedentario: "easy",
+    iniciante: "easy",
+    intermediario: "medium",
+    avancado: "hard",
+  };
+
+  return skills.slice(0, 3).map((skill) => ({
+    title: `Missão ${skill.name}`,
+    description: `Complete ${volumeMap[conditioning]} repetições de ${skill.name}`,
+    skill_name: skill.name,
+    target_reps: volumeMap[conditioning],
+    xp_reward: xpMap[conditioning],
+    points_reward: pointsMap[conditioning],
+    difficulty: diffMap[conditioning],
+    type: "diaria",
+  }));
+}
+
+// 1. Generate personalized missions using AI (70/30 com fallback robusto)
 app.post("/api/ai/generate-missions", authMiddleware, async (c) => {
   const user = c.get("user");
   if (!user) return c.json({ error: "Unauthorized" }, 401);
-  if (!c.env.ANTHROPIC_API_KEY) return c.json({ error: "AI not configured" }, 503);
+
+  const [profile, skills] = await Promise.all([
+    c.env.fitloot_db.prepare("SELECT * FROM user_profiles WHERE user_id = ?").bind(user.id).first(),
+    c.env.fitloot_db.prepare(`
+      SELECT s.* FROM skills s
+      INNER JOIN user_skills us ON s.id = us.skill_id
+      WHERE us.user_id = ?
+    `).bind(user.id).all(),
+  ]);
+
+  const conditioning = (profile?.initial_conditioning ?? "iniciante") as ConditioningLevel;
+  const skillRows = skills.results as Array<{ id: number; name: string }>;
+
+  const baseMissions = await generateFallbackMissions(conditioning, skillRows);
+
+  let aiMissions: MissionDraft[] = [];
+  let fallback = false;
+  let error: string | null = null;
 
   try {
-    // Get user data for personalization
-    const [profile, progression, attributes, skills] = await Promise.all([
-      c.env.fitloot_db.prepare("SELECT * FROM user_profiles WHERE user_id = ?").bind(user.id).first(),
-      c.env.fitloot_db.prepare("SELECT * FROM user_progression WHERE user_id = ?").bind(user.id).first(),
-      c.env.fitloot_db.prepare("SELECT * FROM user_attributes WHERE user_id = ?").bind(user.id).first(),
-      c.env.fitloot_db.prepare(`
-        SELECT s.* FROM skills s
-        INNER JOIN user_skills us ON s.id = us.skill_id
-        WHERE us.user_id = ?
-      `).bind(user.id).all(),
-    ]);
-
-    // Build AI prompt with user context
-    const prompt = `Você é um personal trainer virtual especializado em gamificação fitness. 
-
-Perfil do usuário:
-- Nome: ${profile?.full_name}
-- Nível: ${progression?.level}
-- Objetivo: ${profile?.main_goal}
-- Condicionamento: ${profile?.initial_conditioning}
-- Equipamentos: ${profile?.equipment || "nenhum"}
-- Lesões: ${profile?.injuries || "nenhuma"}
-
-Atributos atuais:
-- Força: ${attributes?.strength}
-- Constituição: ${attributes?.constitution}
-- Vitalidade: ${attributes?.vitality}
-- Destreza: ${attributes?.dexterity}
-- Foco: ${attributes?.focus}
-
-Skills desbloqueadas: ${(skills.results as Array<{ name: string }>).map((s) => s.name).join(", ")}
-
-Crie 5 missões diárias DESAFIADORAS mas ALCANÇÁVEIS para este usuário. As missões devem:
-1. Ser progressivas e adequadas ao nível atual
-2. Variar entre diferentes tipos de exercício
-3. Considerar os equipamentos disponíveis
-4. Evitar áreas com lesões
-5. Focar no objetivo principal
-
-Responda APENAS com um JSON no formato:
-{
-  "missions": [
-    {
-      "title": "título curto",
-      "description": "descrição motivadora",
-      "skill_name": "nome da skill",
-      "target_reps": número,
-      "xp_reward": número,
-      "points_reward": número,
-      "difficulty": "easy|medium|hard"
-    }
-  ]
-}`;
-
-    // Call Claude API
-    const aiResponse = await fetch("https://api.anthropic.com/v1/messages", {
+    const openaiRes = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "anthropic-version": "2023-06-01",
-        "x-api-key": c.env.ANTHROPIC_API_KEY,
+        "Authorization": `Bearer ${c.env.OPENAI_API_KEY}`,
       },
       body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
-        max_tokens: 2000,
-        messages: [{ role: "user", content: prompt }],
+        model: "gpt-4o",
+        messages: [{ role: "user", content: `Gere 2 missões fitness desafiadoras e alcançáveis para um usuário com condicionamento ${conditioning}, objetivo ${profile?.main_goal}, lesões: ${profile?.injuries || "nenhuma"}, equipamentos: ${profile?.equipment || "nenhum"}. Responda em JSON estruturado.` }],
+        max_tokens: 800,
       }),
     });
 
-    if (!aiResponse.ok) {
-      throw new Error("AI API error");
+    if (!openaiRes.ok) {
+      throw new Error("OpenAI indisponível");
     }
 
-    const aiData = await aiResponse.json() as ClaudeResponse;
-    const content = aiData.content[0].text;
-    
-    // Parse JSON from response
+    const openaiData = (await openaiRes.json()) as OpenAIChatCompletionResponse;
+    const content = openaiData.choices?.[0]?.message?.content ?? "";
     const jsonMatch = content.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      throw new Error("Invalid AI response format");
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0]) as { missions?: MissionDraft[] };
+      aiMissions = parsed.missions ?? [];
     }
-    
-    const missionsData = JSON.parse(jsonMatch[0]);
-    
-    // Insert missions into database
-    const tomorrow = new Date(Date.now() + 86400000).toISOString();
-    
-    for (const mission of missionsData.missions) {
-      // Find skill ID by name
-      const skill = (skills.results as Array<{ id: number; name: string }>).find((s) =>
-        s.name.toLowerCase().includes(mission.skill_name.toLowerCase())
-      );
-      
-      await c.env.fitloot_db.prepare(
+  } catch (_err) {
+    error = "Falha na IA";
+    fallback = true;
+  }
+
+  const totalMissions = [...baseMissions.slice(0, 3), ...aiMissions.slice(0, 2)];
+
+  const tomorrow = new Date(Date.now() + 86400000).toISOString();
+  for (const mission of totalMissions) {
+    const missionSkillName = (mission.skill_name || mission.skill || "").toLowerCase();
+    const skill = skillRows.find((s) => s.name.toLowerCase().includes(missionSkillName));
+
+    await c.env.fitloot_db.prepare(
       `INSERT INTO missions (user_id, type, title, description, skill_id, target_reps, xp_reward, points_reward, deadline, updated_at)
         VALUES (?, 'daily', ?, ?, ?, ?, ?, ?, ?, datetime('now'))`
-      ).bind(
-        user.id,
-        mission.title,
-        mission.description,
-        skill?.id || null,
-        mission.target_reps,
-        mission.xp_reward,
-        mission.points_reward,
-        tomorrow
-      ).run();
-    }
-
-    return c.json({ 
-      success: true, 
-      missions: missionsData.missions,
-      message: "Missões geradas com IA!"
-    });
-
-  } catch (error) {
-    console.error("AI generation error:", error);
-    return c.json({ error: "Failed to generate missions" }, 500);
+    ).bind(
+      user.id,
+      mission.title,
+      mission.description,
+      skill?.id || null,
+      mission.target_reps,
+      mission.xp_reward,
+      mission.points_reward,
+      tomorrow
+    ).run();
   }
+
+  return c.json({ success: true, missions: totalMissions, fallback, error });
 });
 
 // 2. AI Fitness Chatbot
 app.post("/api/ai/chat", authMiddleware, async (c) => {
   const user = c.get("user");
   if (!user) return c.json({ error: "Unauthorized" }, 401);
+
   try {
     const raw = await c.req.json();
     const parsed = AiChatRequestSchema.safeParse(raw);
@@ -1230,7 +1246,6 @@ app.post("/api/ai/chat", authMiddleware, async (c) => {
     }
     const { message: userMessage, history: conversationHistory = [], mode = "suporte" } = parsed.data;
 
-    // Get user context
     const [profile, progression, attributes] = await Promise.all([
       c.env.fitloot_db.prepare("SELECT * FROM user_profiles WHERE user_id = ?").bind(user.id).first(),
       c.env.fitloot_db.prepare("SELECT * FROM user_progression WHERE user_id = ?").bind(user.id).first(),
@@ -1246,9 +1261,9 @@ Contexto do usuário:
 - Streak: ${progression?.current_streak} dias
 - Objetivo: ${profile?.main_goal}
 - Condicionamento: ${profile?.initial_conditioning}
+- Força: ${attributes?.strength}
 - Modo: ${mode}`;
 
-    // Call OpenAI API
     const openaiRes = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -1265,9 +1280,11 @@ Contexto do usuário:
         max_tokens: 1000,
       }),
     });
+
     if (!openaiRes.ok) throw new Error("AI API error");
-    const openaiData: any = await openaiRes.json();
-    const content = openaiData.choices?.[0]?.message?.content || "";
+
+    const openaiData = (await openaiRes.json()) as OpenAIChatCompletionResponse;
+    const content = openaiData.choices?.[0]?.message?.content ?? "";
     return c.json({ message: content });
   } catch (error) {
     console.error("AI chat error:", error);
@@ -1282,7 +1299,6 @@ app.get("/api/ai/recommendations", authMiddleware, async (c) => {
   if (!c.env.ANTHROPIC_API_KEY) return c.json({ error: "AI not configured" }, 503);
 
   try {
-    // Get comprehensive user data
     const [profile, progression, attributes, skills, completedMissions] = await Promise.all([
       c.env.fitloot_db.prepare("SELECT * FROM user_profiles WHERE user_id = ?").bind(user.id).first(),
       c.env.fitloot_db.prepare("SELECT * FROM user_progression WHERE user_id = ?").bind(user.id).first(),
@@ -1357,164 +1373,41 @@ Analise e responda APENAS com JSON:
 
     const aiData = await aiResponse.json() as ClaudeResponse;
     const content = aiData.content[0].text;
-    
+
     const jsonMatch = content.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
       throw new Error("Invalid AI response format");
     }
-    
+
     const recommendations = JSON.parse(jsonMatch[0]);
 
-    return c.json({ 
+    return c.json({
       success: true,
       recommendations,
       user_stats: {
         level: progression?.level,
         total_missions: completedMissions?.count,
-        streak: progression?.current_streak
-      }
+        streak: progression?.current_streak,
+      },
     });
-
   } catch (error) {
     console.error("Recommendations error:", error);
     return c.json({ error: "Failed to generate recommendations" }, 500);
   }
 });
 
-// 4. AI Food Analysis (Enhanced)
-// Nova implementação: OpenAI GPT-4o + fallback robusto
-app.post("/api/ai/generate-missions", authMiddleware, async (c) => {
+// 4. AI workout suggestions
+app.get("/api/ai/workout-suggestions", authMiddleware, async (c) => {
   const user = c.get("user");
   if (!user) return c.json({ error: "Unauthorized" }, 401);
+  if (!c.env.ANTHROPIC_API_KEY) return c.json({ error: "AI not configured" }, 503);
 
-  const [profile, progression, attributes, skills] = await Promise.all([
-    c.env.fitloot_db.prepare("SELECT * FROM user_profiles WHERE user_id = ?").bind(user.id).first(),
-    c.env.fitloot_db.prepare("SELECT * FROM user_progression WHERE user_id = ?").bind(user.id).first(),
-    c.env.fitloot_db.prepare("SELECT * FROM user_attributes WHERE user_id = ?").bind(user.id).first(),
-    c.env.fitloot_db.prepare(`
-      SELECT s.* FROM skills s
-      INNER JOIN user_skills us ON s.id = us.skill_id
-      WHERE us.user_id = ?
-    `).bind(user.id).all(),
-  ]);
-
-  // 70% missões baseadas em condicionamento
-  const baseMissions = await generateFallbackMissions(user.id, c.env.fitloot_db, profile?.initial_conditioning, skills.results);
-
-  // 30% missões via IA (OpenAI)
-  let aiMissions: any[] = [];
-  let fallback = false;
-  let error = null;
   try {
-    const openaiRes = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${c.env.OPENAI_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: "gpt-4o",
-        messages: [{ role: "user", content: `Gere 2 missões fitness desafiadoras e alcançáveis para um usuário com condicionamento ${profile?.initial_conditioning}, objetivo ${profile?.main_goal}, lesões: ${profile?.injuries || "nenhuma"}, equipamentos: ${profile?.equipment || "nenhum"}. Responda em JSON estruturado.` }],
-        max_tokens: 800,
-      }),
-    });
-    if (openaiRes.ok) {
-      const openaiData = await openaiRes.json();
-      const content = openaiData.choices?.[0]?.message?.content || "";
-      const jsonMatch = content.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        const parsed = JSON.parse(jsonMatch[0]);
-        aiMissions = parsed.missions || [];
-      }
-    } else {
-      error = "OpenAI indisponível";
-      fallback = true;
-    }
-  } catch (e) {
-    error = "Falha na IA";
-    fallback = true;
-  }
-
-  // Junta as missões (70% base, 30% IA)
-  const totalMissions = [...baseMissions.slice(0, 3), ...aiMissions.slice(0, 2)];
-
-  // Salva no banco
-  const tomorrow = new Date(Date.now() + 86400000).toISOString();
-  for (const mission of totalMissions) {
-    const skill = (skills.results as Array<{ id: number; name: string }>).find((s) =>
-      s.name.toLowerCase().includes((mission.skill_name || mission.skill).toLowerCase())
-    );
-    await c.env.fitloot_db.prepare(
-      `INSERT INTO missions (user_id, type, title, description, skill_id, target_reps, xp_reward, points_reward, deadline, updated_at)
-        VALUES (?, 'daily', ?, ?, ?, ?, ?, ?, ?, datetime('now'))`
-    ).bind(
-      user.id,
-      mission.title,
-      mission.description,
-      skill?.id || null,
-      mission.target_reps,
-      mission.xp_reward,
-      mission.points_reward,
-      tomorrow
-    ).run();
-  }
-
-  return c.json({ success: true, missions: totalMissions, fallback, error });
-});
-      // Fallback generator para missões baseadas em condicionamento
-      async function generateFallbackMissions(
-        userId: string,
-        db: D1Database,
-        conditioning: "sedentario" | "iniciante" | "intermediario" | "avancado" = "iniciante",
-        skills: Array<{ name: string }> = []
-      ): Promise<Array<{
-        title: string;
-        description: string;
-        skill_name: string;
-        target_reps: number;
-        xp_reward: number;
-        points_reward: number;
-        difficulty: string;
-        type: string;
-      }>> {
-        // Define volume por condicionamento
-        const volumeMap: Record<"sedentario" | "iniciante" | "intermediario" | "avancado", number> = {
-          sedentario: 10,
-          iniciante: 20,
-          intermediario: 30,
-          avancado: 50,
-        };
-        const xpMap: Record<"sedentario" | "iniciante" | "intermediario" | "avancado", number> = {
-          sedentario: 20,
-          iniciante: 40,
-          intermediario: 60,
-          avancado: 100,
-        };
-        const pointsMap: Record<"sedentario" | "iniciante" | "intermediario" | "avancado", number> = {
-          sedentario: 5,
-          iniciante: 10,
-          intermediario: 15,
-          avancado: 25,
-        };
-        const diffMap: Record<"sedentario" | "iniciante" | "intermediario" | "avancado", string> = {
-          sedentario: "easy",
-          iniciante: "easy",
-          intermediario: "medium",
-          avancado: "hard",
-        };
-        // Gera missões para as 3 principais skills
-        return skills.slice(0, 3).map((skill) => ({
-          title: `Missão ${skill.name}`,
-          description: `Complete ${volumeMap[conditioning]} repetições de ${skill.name}`,
-          skill_name: skill.name,
-          target_reps: volumeMap[conditioning],
-          xp_reward: xpMap[conditioning],
-          points_reward: pointsMap[conditioning],
-          difficulty: diffMap[conditioning],
-          type: "diaria",
-        }));
-      }
-    });
+    const [profile, progression, metrics] = await Promise.all([
+      c.env.fitloot_db.prepare("SELECT * FROM user_profiles WHERE user_id = ?").bind(user.id).first(),
+      c.env.fitloot_db.prepare("SELECT * FROM user_progression WHERE user_id = ?").bind(user.id).first(),
+      c.env.fitloot_db.prepare("SELECT * FROM daily_metrics WHERE user_id = ? ORDER BY date DESC LIMIT 1").bind(user.id).first(),
+    ]);
 
     const prompt = `Baseado nestes dados de hoje, sugira um treino:
 
@@ -1551,19 +1444,18 @@ Responda APENAS com JSON:
 
     const aiData = await aiResponse.json() as ClaudeResponse;
     const content = aiData.content[0].text;
-    
+
     const jsonMatch = content.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
       throw new Error("Invalid AI response format");
     }
-    
+
     const workout = JSON.parse(jsonMatch[0]) as Record<string, unknown>;
 
-    return c.json({ 
-      success: true, 
-      workout
+    return c.json({
+      success: true,
+      workout,
     });
-
   } catch (error) {
     console.error("Workout suggestions error:", error);
     return c.json({ error: "Failed to generate workout suggestions" }, 500);
