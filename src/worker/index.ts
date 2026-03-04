@@ -1072,11 +1072,10 @@ async function createDailyMissions(db: D1Database, userId: string) {
 
     if (skill) {
       await db.prepare(
-      `INSERT INTO missions (user_id, type, title, description, skill_id, target_reps, xp_reward, points_reward, deadline, updated_at)
-        VALUES (?, 'daily', ?, ?, ?, ?, ?, ?, ?, datetime('now'))`
+        `INSERT INTO missions (user_id, type, title, description, skill_id, target_reps, xp_reward, points_reward, deadline, updated_at)
+          VALUES (?, 'daily', ?, ?, ?, ?, ?, ?, ?, datetime('now'))`
       ).bind(
         userId,
-        'daily',
         `Complete ${20} ${skill.name}`,
         `Execute ${20} repetições de ${skill.name}`,
         skillId,
@@ -1111,6 +1110,13 @@ interface OpenAIChatCompletionResponse {
       content?: string;
     };
   }>;
+}
+
+function normalizeConditioning(value: unknown): ConditioningLevel {
+  if (value === "sedentario" || value === "iniciante" || value === "intermediario" || value === "avancado") {
+    return value;
+  }
+  return "iniciante";
 }
 
 // Fallback generator para missões baseadas em condicionamento
@@ -1169,7 +1175,7 @@ app.post("/api/ai/generate-missions", authMiddleware, async (c) => {
     `).bind(user.id).all(),
   ]);
 
-  const conditioning = (profile?.initial_conditioning ?? "iniciante") as ConditioningLevel;
+  const conditioning = normalizeConditioning(profile?.initial_conditioning);
   const skillRows = skills.results as Array<{ id: number; name: string }>;
 
   const baseMissions = await generateFallbackMissions(conditioning, skillRows);
@@ -1212,8 +1218,10 @@ app.post("/api/ai/generate-missions", authMiddleware, async (c) => {
 
   const tomorrow = new Date(Date.now() + 86400000).toISOString();
   for (const mission of totalMissions) {
-    const missionSkillName = (mission.skill_name || mission.skill || "").toLowerCase();
-    const skill = skillRows.find((s) => s.name.toLowerCase().includes(missionSkillName));
+    const missionSkillName = (mission.skill_name || mission.skill || "").trim().toLowerCase();
+    const skill = missionSkillName
+      ? skillRows.find((s) => s.name.toLowerCase().includes(missionSkillName))
+      : null;
 
     await c.env.fitloot_db.prepare(
       `INSERT INTO missions (user_id, type, title, description, skill_id, target_reps, xp_reward, points_reward, deadline, updated_at)
