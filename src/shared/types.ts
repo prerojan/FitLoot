@@ -167,6 +167,30 @@ export const DailyMetricsSchema = z.object({
 
 export type DailyMetrics = z.infer<typeof DailyMetricsSchema>;
 
+// Composite UI/API types
+export type SkillWithProgress = Skill & {
+  total_reps: number;
+  best_reps: number;
+};
+
+export type AchievementWithUnlock = Achievement & {
+  unlocked?: number;
+  unlocked_at?: string;
+};
+
+export type TitleWithUnlock = Title & {
+  unlocked?: number;
+  is_active?: number;
+};
+
+export type RankingPlayer = {
+  username: string;
+  full_name: string;
+  level: number;
+  xp: number;
+  current_streak: number;
+};
+
 // Onboarding Request Schema
 export const OnboardingRequestSchema = z.object({
   username: z.string().min(3).max(20),

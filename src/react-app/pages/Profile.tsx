@@ -3,7 +3,14 @@ import { useNavigate } from "react-router";
 import { useAuth } from "@/react-app/App";
 import BottomNav from "@/react-app/components/BottomNav";
 import { LogOut, Trophy, Award, Dumbbell, Target } from "lucide-react";
-import type { UserProfile, UserAttributes, UserProgression } from "@/shared/types";
+import type {
+  UserProfile,
+  UserAttributes,
+  UserProgression,
+  SkillWithProgress,
+  AchievementWithUnlock,
+  TitleWithUnlock,
+} from "@/shared/types";
 import { api } from "@/react-app/utils/api";
 
 export default function Profile() {
@@ -238,7 +245,6 @@ function AttributeBar({ label, value, color }: { label: string; value: number; c
   );
 }
 
-type SkillWithProgress = { name: string; description: string | null; difficulty: string; total_reps: number; best_reps: number };
 function SkillCard({ skill }: { skill: SkillWithProgress }) {
   const difficultyColors = {
     basico: "bg-green-100 text-green-700",
@@ -266,7 +272,6 @@ function SkillCard({ skill }: { skill: SkillWithProgress }) {
   );
 }
 
-type AchievementWithUnlock = { name: string; description: string | null; rarity: string; unlocked?: number; unlocked_at?: string };
 function AchievementCard({ achievement }: { achievement: AchievementWithUnlock }) {
   const rarityColors = {
     Comum: "from-gray-400 to-gray-500",
@@ -295,7 +300,6 @@ function AchievementCard({ achievement }: { achievement: AchievementWithUnlock }
   );
 }
 
-type TitleWithUnlock = { id: number; name: string; rarity: string; unlocked?: number; is_active?: number };
 function TitleCard({ title, onActivate }: { title: TitleWithUnlock; onActivate: (id: number) => void }) {
   const rarityColors = {
     Comum: "border-gray-400",

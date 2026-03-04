@@ -6,8 +6,8 @@ import { Avatar } from "@/react-app/components/ui/avatar";
 import { Card } from "@/react-app/components/ui/card";
 import { Trophy, Medal, Crown, Flame, Zap } from "lucide-react";
 import { api } from "@/react-app/utils/api";
-
-type RankingPlayer = { username: string; full_name: string; level: number; xp: number; current_streak: number };
+import type { RankingPlayer } from "@/shared/types";
+import { safeGet } from "@/utils/typeHelpers";
 
 export default function Ranking() {
   const { user } = useAuth();
@@ -54,11 +54,11 @@ export default function Ranking() {
           <p className="text-emerald-100">Top atletas do FitLoot</p>
         </div>
 
-        {ranking.length >= 3 && (
+        {safeGet(ranking, 0) && safeGet(ranking, 1) && safeGet(ranking, 2) && (
           <div className="flex items-end justify-center gap-2 mb-6">
-            <PodiumCard position={2} player={ranking[1]} height="h-24" />
-            <PodiumCard position={1} player={ranking[0]} height="h-32" />
-            <PodiumCard position={3} player={ranking[2]} height="h-20" />
+            <PodiumCard position={2} player={safeGet(ranking, 1)} height="h-24" />
+            <PodiumCard position={1} player={safeGet(ranking, 0)} height="h-32" />
+            <PodiumCard position={3} player={safeGet(ranking, 2)} height="h-20" />
           </div>
         )}
       </div>
@@ -87,9 +87,12 @@ function PodiumCard({
   height,
 }: {
   position: number;
-  player: RankingPlayer;
+  player: RankingPlayer | undefined;
   height: string;
 }) {
+  if (!player) {
+    return null;
+  }
   const getMedalIcon = () => {
     if (position === 1) return <Crown className="w-6 h-6 text-yellow-400" />;
     if (position === 2) return <Medal className="w-5 h-5 text-gray-300" />;
