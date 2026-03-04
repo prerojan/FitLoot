@@ -42,9 +42,19 @@ npm ci
 npm test
 ```
 
-2.1. Se estiver em ambiente sem acesso ao npm, rode validação estática leve:
+2.1. Se estiver em ambiente sem acesso ao npm, rode validação estática leve (padrão para ambiente AI):
 ```bash
 npm run check:lite
+```
+
+Alias de validação padrão leve:
+```bash
+npm run validate
+```
+
+2.2. Alias explícito para ambiente AI:
+```bash
+npm run ai:check
 ```
 
 3. (Opcional) Rode também a validação de deploy do worker:
