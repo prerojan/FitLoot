@@ -240,6 +240,7 @@ export type MiniGameCompleteRequest = z.infer<typeof MiniGameCompleteRequestSche
 export const AiChatRequestSchema = z.object({
   message: z.string().min(1),
   history: z.array(z.object({ role: z.string(), content: z.string() })).optional(),
+  mode: z.enum(["suporte", "motivacional", "tecnico"]).optional(),
 });
 export type AiChatRequest = z.infer<typeof AiChatRequestSchema>;
 
