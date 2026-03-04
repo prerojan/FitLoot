@@ -2,6 +2,10 @@ import { useEffect, useState } from "react";
 import { useAuth } from "@/react-app/App";
 import { useNavigate } from "react-router";
 import BottomNav from "@/react-app/components/BottomNav";
+import { Badge } from "@/react-app/components/ui/badge";
+import { Avatar } from "@/react-app/components/ui/avatar";
+import { Button } from "@/react-app/components/ui/button";
+import { Card } from "@/react-app/components/ui/card";
 import { Users, Search, UserPlus, Check, X, Swords, TrendingUp, Loader2 } from "lucide-react";
 import { api } from "@/react-app/utils/api";
 
@@ -150,7 +154,7 @@ export default function Friends() {
         <div className="max-w-screen-xl mx-auto px-4 py-6">
           <div className="flex items-center gap-3 mb-4">
             <Users className="w-8 h-8 text-emerald-600" />
-            <h1 className="text-3xl font-bold text-gray-900">Amigos</h1>
+            <h1 className="fl-title-page">Amigos</h1>
           </div>
 
           {/* Search Bar */}
@@ -164,35 +168,40 @@ export default function Friends() {
               onKeyPress={(e) => e.key === 'Enter' && searchUsers()}
               className="w-full pl-12 pr-4 py-3 rounded-full border-2 border-gray-200 focus:border-emerald-500 focus:outline-none"
             />
-            <button
+            <Button
               onClick={searchUsers}
               disabled={searching}
-              className="absolute right-2 top-1/2 transform -translate-y-1/2 bg-emerald-500 text-white px-6 py-2 rounded-full hover:bg-emerald-600 disabled:opacity-50"
+              variant="primary"
+              className="absolute right-2 top-1/2 transform -translate-y-1/2 px-6 py-2 rounded-full disabled:opacity-50"
             >
               {searching ? <Loader2 className="w-5 h-5 animate-spin" /> : "Buscar"}
-            </button>
+            </Button>
           </div>
 
           {/* Search Results */}
           {searchResults.length > 0 && (
-            <div className="mt-4 bg-white rounded-2xl shadow-lg p-4 space-y-2">
+            <Card className="mt-4 p-4 space-y-2">
               {searchResults.map((result) => (
                 <div key={result.user_id} className="flex items-center justify-between p-3 hover:bg-gray-50 rounded-xl">
-                  <div>
-                    <div className="font-bold text-gray-900">{result.username}</div>
-                    <div className="text-sm text-gray-500">{result.full_name}</div>
-                    <div className="text-xs text-emerald-600">Nível {result.level}</div>
+                  <div className="flex items-center gap-3">
+                    <Avatar name={result.full_name || result.username} className="h-10 w-10 text-sm bg-emerald-100 text-emerald-700" />
+                    <div>
+                      <div className="font-bold text-gray-900">{result.username}</div>
+                      <div className="text-sm text-gray-500">{result.full_name}</div>
+                      <Badge className="mt-1">Nível {result.level}</Badge>
+                    </div>
                   </div>
-                  <button
+                  <Button
                     onClick={() => sendFriendRequest(result.user_id)}
-                    className="bg-emerald-500 text-white px-4 py-2 rounded-full hover:bg-emerald-600 flex items-center gap-2"
+                    variant="primary"
+                    className="px-4 py-2 rounded-full flex items-center gap-2"
                   >
                     <UserPlus className="w-4 h-4" />
                     Adicionar
-                  </button>
+                  </Button>
                 </div>
               ))}
-            </div>
+            </Card>
           )}
         </div>
       </div>
@@ -201,10 +210,10 @@ export default function Friends() {
         {/* Pending Requests */}
         {pendingRequests.length > 0 && (
           <div className="mb-6">
-            <h2 className="text-xl font-bold text-gray-900 mb-4">Solicitações Pendentes ({pendingRequests.length})</h2>
+            <h2 className="fl-title-card mb-4">Solicitações Pendentes ({pendingRequests.length})</h2>
             <div className="space-y-3">
               {pendingRequests.map((request) => (
-                <div key={request.id} className="bg-white rounded-2xl p-4 shadow-lg flex items-center justify-between">
+                <div key={request.id} className="fl-card p-4 flex items-center justify-between">
                   <div>
                     <div className="font-bold text-gray-900">{request.friend_username}</div>
                     <div className="text-sm text-gray-500">{request.friend_full_name}</div>
@@ -212,7 +221,7 @@ export default function Friends() {
                   <div className="flex gap-2">
                     <button
                       onClick={() => acceptFriendRequest(request.id)}
-                      className="bg-emerald-500 text-white p-2 rounded-full hover:bg-emerald-600"
+                      className="fl-btn-primary p-2 rounded-full"
                     >
                       <Check className="w-5 h-5" />
                     </button>
@@ -230,7 +239,7 @@ export default function Friends() {
         )}
 
         {/* Friends List */}
-        <h2 className="text-xl font-bold text-gray-900 mb-4">Meus Amigos ({friends.length})</h2>
+        <h2 className="fl-title-card mb-4">Meus Amigos ({friends.length})</h2>
         
         {friends.length === 0 ? (
           <div className="text-center py-12">
@@ -241,7 +250,7 @@ export default function Friends() {
         ) : (
           <div className="grid md:grid-cols-2 gap-4">
             {friends.map((friend) => (
-              <div key={friend.id} className="bg-white rounded-2xl p-6 shadow-lg hover:shadow-xl transition-shadow">
+              <div key={friend.id} className="fl-card p-6 hover:shadow-xl transition-shadow">
                 <div className="flex items-start justify-between mb-4">
                   <div>
                     <div className="font-bold text-xl text-gray-900">{friend.friend_username}</div>
