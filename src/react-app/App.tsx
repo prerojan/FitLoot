@@ -10,6 +10,7 @@ import LandingPage from "@/react-app/pages/Landing";
 import Friends from "@/react-app/pages/Friends";
 import MiniGames from "@/react-app/pages/MiniGames";
 import AIChat from "@/react-app/pages/AIChat";
+import FoodAnalysis from "@/react-app/pages/FoodAnalysis";
 import { api } from "@/react-app/utils/api";
 
 
@@ -119,6 +120,7 @@ export default function App() {
           <Route path="/friends" element={<ProtectedRoute><Friends /></ProtectedRoute>} />
           <Route path="/minigames" element={<ProtectedRoute><MiniGames /></ProtectedRoute>} />
           <Route path="/ai-chat" element={<ProtectedRoute><AIChat /></ProtectedRoute>} />
+          <Route path="/food-analysis" element={<ProtectedRoute><FoodAnalysis /></ProtectedRoute>} />
 
           {/* Fallback */}
           <Route path="*" element={<Navigate to="/" replace />} />

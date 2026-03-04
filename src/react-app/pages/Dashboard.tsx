@@ -8,6 +8,7 @@ import AIRecommendations from "@/react-app/components/AIRecommendations"
 import AIMissionGenerator from "@/react-app/components/AIMissionGenerator"
 import { Flame, Footprints, Target, Zap } from "lucide-react";
 import { Bot } from "lucide-react";
+import { Camera } from "lucide-react";
 import type { Mission, UserProgression, DailyMetrics, UserProfile, Title } from "@/shared/types";
 import { api } from "@/react-app/utils/api";
 
@@ -182,6 +183,13 @@ export default function Dashboard() {
         className="fixed bottom-28 right-6 bg-emerald-600 text-white p-4 rounded-full shadow-lg hover:bg-emerald-700 transition-all"
       >
         <Bot className="w-6 h-6" />
+      </button>
+
+      <button
+        onClick={() => navigate("/food-analysis")}
+        className="fixed bottom-28 left-6 bg-teal-600 text-white p-4 rounded-full shadow-lg hover:bg-teal-700 transition-all"
+      >
+        <Camera className="w-6 h-6" />
       </button>
 
       <BottomNav active="missions" />
