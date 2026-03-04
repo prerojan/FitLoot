@@ -9,21 +9,12 @@ import {
   MiniGameChallengeRequestSchema,
   MiniGameCompleteRequestSchema,
   AiChatRequestSchema,
+  AiAnalyzeFoodRequestSchema,
   AuthRegisterRequestSchema,
   LoginRequestSchema,
   UserPlanRequestSchema,
   UpdateMeRequestSchema,
 } from "../shared/types";
-
-
-
-// Tipos para a API do Claude
-interface ClaudeResponse {
-  content: Array<{
-    type: string;
-    text: string;
-  }>;
-}
 
 // Tipo do usuário autenticado
 interface AuthUser {
@@ -1090,6 +1081,189 @@ async function createDailyMissions(db: D1Database, userId: string) {
 
 // AI-powered endpoints
 
+type ApiErrorCode =
+  | "SERVICE_NOT_CONFIGURED"
+  | "AUTH_FAILED"
+  | "TIMEOUT"
+  | "UPSTREAM_ERROR"
+  | "INVALID_RESPONSE"
+  | "RATE_LIMITED";
+
+class ApiIntegrationError extends Error {
+  code: ApiErrorCode;
+  status: number;
+
+  constructor(code: ApiErrorCode, status: number, message: string) {
+    super(message);
+    this.code = code;
+    this.status = status;
+  }
+}
+
+const RATE_LIMIT_WINDOW_MS = 60_000;
+const RATE_LIMIT_MAX_CALLS = 20;
+const timeoutMsByService = {
+  openai: 12000,
+  usda: 8000,
+  vision: 8000,
+} as const;
+
+const requestRateMap = new Map<string, number[]>();
+
+function enforceRateLimit(key: string) {
+  const now = Date.now();
+  const hits = requestRateMap.get(key) ?? [];
+  const validHits = hits.filter((ts) => now - ts < RATE_LIMIT_WINDOW_MS);
+  if (validHits.length >= RATE_LIMIT_MAX_CALLS) {
+    throw new ApiIntegrationError("RATE_LIMITED", 429, "Muitas requisições externas. Tente novamente em instantes.");
+  }
+  validHits.push(now);
+  requestRateMap.set(key, validHits);
+}
+
+function toFriendlyErrorResponse(error: unknown) {
+  if (error instanceof ApiIntegrationError) {
+    return {
+      status: error.status,
+      payload: {
+        error: error.message,
+        code: error.code,
+      },
+    };
+  }
+  return {
+    status: 500,
+    payload: {
+      error: "Serviço temporariamente indisponível. Tente novamente em alguns instantes.",
+      code: "UPSTREAM_ERROR" satisfies ApiErrorCode,
+    },
+  };
+}
+
+async function fetchJsonWithTimeout<T>(
+  url: string,
+  init: RequestInit,
+  timeoutMs: number
+): Promise<T> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { ...init, signal: controller.signal });
+    if (response.status === 401 || response.status === 403) {
+      throw new ApiIntegrationError("AUTH_FAILED", 502, "Falha de autenticação com serviço externo.");
+    }
+    if (!response.ok) {
+      throw new ApiIntegrationError("UPSTREAM_ERROR", 502, "Falha ao consultar serviço externo.");
+    }
+    return (await response.json()) as T;
+  } catch (error) {
+    if (error instanceof ApiIntegrationError) throw error;
+    if ((error as Error).name === "AbortError") {
+      throw new ApiIntegrationError("TIMEOUT", 504, "Tempo de resposta excedido em serviço externo.");
+    }
+    throw new ApiIntegrationError("UPSTREAM_ERROR", 502, "Falha ao consultar serviço externo.");
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function callOpenAIChat(
+  c: import("hono").Context<AppContext>,
+  messages: Array<{ role: string; content: string }>,
+  maxTokens = 1000,
+  jsonMode = false
+) {
+  if (!c.env.OPENAI_API_KEY) {
+    throw new ApiIntegrationError("SERVICE_NOT_CONFIGURED", 503, "OpenAI não configurada.");
+  }
+  enforceRateLimit(`openai:${c.get("user")?.id ?? "anon"}`);
+  return fetchJsonWithTimeout<OpenAIChatCompletionResponse>(
+    "https://api.openai.com/v1/chat/completions",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${c.env.OPENAI_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: "gpt-4o",
+        messages,
+        max_tokens: maxTokens,
+        ...(jsonMode ? { response_format: { type: "json_object" } } : {}),
+      }),
+    },
+    timeoutMsByService.openai
+  );
+}
+
+type USDAResponse = {
+  foods?: Array<{
+    description?: string;
+    foodNutrients?: Array<{ nutrientName?: string; value?: number }>;
+  }>;
+};
+
+async function searchFoodOnUSDA(c: import("hono").Context<AppContext>, query: string) {
+  if (!c.env.USDA_API_KEY) {
+    throw new ApiIntegrationError("SERVICE_NOT_CONFIGURED", 503, "USDA não configurada.");
+  }
+  enforceRateLimit(`usda:${c.get("user")?.id ?? "anon"}`);
+  const url = new URL("https://api.nal.usda.gov/fdc/v1/foods/search");
+  url.searchParams.set("api_key", c.env.USDA_API_KEY);
+  url.searchParams.set("query", query);
+  url.searchParams.set("pageSize", "1");
+  return fetchJsonWithTimeout<USDAResponse>(url.toString(), { method: "GET" }, timeoutMsByService.usda);
+}
+
+type VisionResponse = {
+  responses?: Array<{
+    fullTextAnnotation?: { text?: string };
+  }>;
+};
+
+async function extractLabelTextWithVision(c: import("hono").Context<AppContext>, imageBase64: string) {
+  if (!c.env.GOOGLE_CLOUD_VISION_KEY) {
+    throw new ApiIntegrationError("SERVICE_NOT_CONFIGURED", 503, "Google Vision não configurada.");
+  }
+  enforceRateLimit(`vision:${c.get("user")?.id ?? "anon"}`);
+  const url = `https://vision.googleapis.com/v1/images:annotate?key=${c.env.GOOGLE_CLOUD_VISION_KEY}`;
+  const body = {
+    requests: [{
+      image: { content: imageBase64 },
+      features: [{ type: "TEXT_DETECTION", maxResults: 1 }],
+    }],
+  };
+  const data = await fetchJsonWithTimeout<VisionResponse>(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  }, timeoutMsByService.vision);
+  return data.responses?.[0]?.fullTextAnnotation?.text ?? "";
+}
+
+function parseNutritionFromOcrLabel(text: string) {
+  if (!text) return null;
+
+  const normalize = (value?: string) => (value ? Number(value.replace(",", ".")) : null);
+  const kcal = normalize(text.match(/(\d+[\.,]?\d*)\s*kcal/i)?.[1]);
+  const kJ = normalize(text.match(/(\d+[\.,]?\d*)\s*kj/i)?.[1]);
+  const protein = normalize(text.match(/prote[ií]n[aa]s?[^\d]*(\d+[\.,]?\d*)\s*g/i)?.[1]);
+  const carbs = normalize(text.match(/carboidratos?[^\d]*(\d+[\.,]?\d*)\s*g/i)?.[1]);
+  const fats = normalize(text.match(/gorduras?(?:\s+totais?)?[^\d]*(\d+[\.,]?\d*)\s*g/i)?.[1]);
+
+  if ([kcal, kJ, protein, carbs, fats].every((item) => item === null)) {
+    return null;
+  }
+
+  return {
+    calories: kcal,
+    energy_kj: kJ,
+    protein,
+    carbs,
+    fats,
+  };
+}
+
 type ConditioningLevel = "sedentario" | "iniciante" | "intermediario" | "avancado";
 
 type MissionDraft = {
@@ -1185,33 +1359,22 @@ app.post("/api/ai/generate-missions", authMiddleware, async (c) => {
   let error: string | null = null;
 
   try {
-    const openaiRes = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${c.env.OPENAI_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: "gpt-4o",
-        messages: [{ role: "user", content: `Gere 2 missões fitness desafiadoras e alcançáveis para um usuário com condicionamento ${conditioning}, objetivo ${profile?.main_goal}, lesões: ${profile?.injuries || "nenhuma"}, equipamentos: ${profile?.equipment || "nenhum"}. Responda em JSON estruturado.` }],
-        max_tokens: 800,
-      }),
-    });
+    const openaiData = await callOpenAIChat(c, [{
+      role: "user",
+      content: `Gere duas missões fitness para o perfil abaixo e responda JSON com a chave missions (array).
+Condicionamento: ${conditioning}
+Objetivo: ${profile?.main_goal}
+Lesões: ${profile?.injuries || "nenhuma"}
+Equipamentos: ${profile?.equipment || "nenhum"}`,
+    }], 800, true);
 
-    if (!openaiRes.ok) {
-      throw new Error("OpenAI indisponível");
-    }
-
-    const openaiData = (await openaiRes.json()) as OpenAIChatCompletionResponse;
-    const content = openaiData.choices?.[0]?.message?.content ?? "";
-    const jsonMatch = content.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      const parsed = JSON.parse(jsonMatch[0]) as { missions?: MissionDraft[] };
-      aiMissions = parsed.missions ?? [];
-    }
-  } catch (_err) {
+    const content = openaiData.choices?.[0]?.message?.content ?? "{}";
+    const parsed = JSON.parse(content) as { missions?: MissionDraft[] };
+    aiMissions = parsed.missions ?? [];
+  } catch (err) {
     error = "Falha na IA";
     fallback = true;
+    console.error("[generate-missions]", err);
   }
 
   const totalMissions = [...baseMissions.slice(0, 3), ...aiMissions.slice(0, 2)];
@@ -1272,31 +1435,17 @@ Contexto do usuário:
 - Força: ${attributes?.strength}
 - Modo: ${mode}`;
 
-    const openaiRes = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${c.env.OPENAI_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: "gpt-4o",
-        messages: [
-          { role: "system", content: systemPrompt },
-          ...conversationHistory.map((msg) => ({ role: msg.role, content: msg.content })),
-          { role: "user", content: userMessage },
-        ],
-        max_tokens: 1000,
-      }),
-    });
+    const openaiData = await callOpenAIChat(c, [
+      { role: "system", content: systemPrompt },
+      ...conversationHistory.map((msg) => ({ role: msg.role, content: msg.content })),
+      { role: "user", content: userMessage },
+    ]);
 
-    if (!openaiRes.ok) throw new Error("AI API error");
-
-    const openaiData = (await openaiRes.json()) as OpenAIChatCompletionResponse;
     const content = openaiData.choices?.[0]?.message?.content ?? "";
     return c.json({ message: content });
   } catch (error) {
-    console.error("AI chat error:", error);
-    return c.json({ message: "Desculpe, tive um problema ao processar sua mensagem. Tente novamente!", error: "IA indisponível", fallback: true });
+    const friendly = toFriendlyErrorResponse(error);
+    return c.json(friendly.payload, friendly.status);
   }
 });
 
@@ -1304,7 +1453,6 @@ Contexto do usuário:
 app.get("/api/ai/recommendations", authMiddleware, async (c) => {
   const user = c.get("user");
   if (!user) return c.json({ error: "Unauthorized" }, 401);
-  if (!c.env.ANTHROPIC_API_KEY) return c.json({ error: "AI not configured" }, 503);
 
   try {
     const [profile, progression, attributes, skills, completedMissions] = await Promise.all([
@@ -1325,69 +1473,18 @@ app.get("/api/ai/recommendations", authMiddleware, async (c) => {
       `).bind(user.id).first(),
     ]);
 
-    const prompt = `Analise este perfil fitness gamificado e gere recomendações personalizadas.
-
-DADOS DO USUÁRIO:
+    const prompt = `Analise este perfil fitness gamificado e gere recomendações personalizadas em JSON.
 Nível: ${progression?.level}
-XP Total: ${progression?.xp}
-Missões Completas: ${completedMissions?.count}
-Streak Atual: ${progression?.current_streak} dias
+XP: ${progression?.xp}
+Missões completas: ${completedMissions?.count}
+Streak: ${progression?.current_streak}
 Objetivo: ${profile?.main_goal}
+Atributos: força ${attributes?.strength}, constituição ${attributes?.constitution}, vitalidade ${attributes?.vitality}, destreza ${attributes?.dexterity}, foco ${attributes?.focus}
+Skills: ${(skills.results as Array<{ name: string; total_reps: number }>).slice(0, 5).map((s) => `${s.name}:${s.total_reps}`).join(",")}`;
 
-ATRIBUTOS:
-Força: ${attributes?.strength}
-Constituição: ${attributes?.constitution}
-Vitalidade: ${attributes?.vitality}
-Destreza: ${attributes?.dexterity}
-Foco: ${attributes?.focus}
-
-SKILLS MAIS USADAS:
-${(skills.results as Array<{ name: string; total_reps: number }>).slice(0, 5).map((s) => `${s.name}: ${s.total_reps} reps`).join("\n")}
-
-Analise e responda APENAS com JSON:
-{
-  "next_skill_recommendation": {
-    "name": "nome da skill",
-    "reason": "por que o usuário deve focar nisso"
-  },
-  "weak_attribute": {
-    "name": "nome do atributo mais fraco",
-    "suggestion": "como melhorar"
-  },
-  "training_focus": {
-    "type": "tipo de treino recomendado",
-    "reason": "justificativa baseada no objetivo"
-  },
-  "motivation_message": "mensagem motivadora personalizada"
-}`;
-
-    const aiResponse = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "anthropic-version": "2023-06-01",
-        "x-api-key": c.env.ANTHROPIC_API_KEY,
-      },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
-        max_tokens: 1500,
-        messages: [{ role: "user", content: prompt }],
-      }),
-    });
-
-    if (!aiResponse.ok) {
-      throw new Error("AI API error");
-    }
-
-    const aiData = await aiResponse.json() as ClaudeResponse;
-    const content = aiData.content[0].text;
-
-    const jsonMatch = content.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      throw new Error("Invalid AI response format");
-    }
-
-    const recommendations = JSON.parse(jsonMatch[0]);
+    const openaiData = await callOpenAIChat(c, [{ role: "user", content: prompt }], 1000, true);
+    const content = openaiData.choices?.[0]?.message?.content ?? "{}";
+    const recommendations = JSON.parse(content);
 
     return c.json({
       success: true,
@@ -1399,8 +1496,8 @@ Analise e responda APENAS com JSON:
       },
     });
   } catch (error) {
-    console.error("Recommendations error:", error);
-    return c.json({ error: "Failed to generate recommendations" }, 500);
+    const friendly = toFriendlyErrorResponse(error);
+    return c.json(friendly.payload, friendly.status);
   }
 });
 
@@ -1408,7 +1505,6 @@ Analise e responda APENAS com JSON:
 app.get("/api/ai/workout-suggestions", authMiddleware, async (c) => {
   const user = c.get("user");
   if (!user) return c.json({ error: "Unauthorized" }, 401);
-  if (!c.env.ANTHROPIC_API_KEY) return c.json({ error: "AI not configured" }, 503);
 
   try {
     const [profile, progression, metrics] = await Promise.all([
@@ -1417,58 +1513,186 @@ app.get("/api/ai/workout-suggestions", authMiddleware, async (c) => {
       c.env.fitloot_db.prepare("SELECT * FROM daily_metrics WHERE user_id = ? ORDER BY date DESC LIMIT 1").bind(user.id).first(),
     ]);
 
-    const prompt = `Baseado nestes dados de hoje, sugira um treino:
+    const prompt = `Sugira treino em JSON com workout_type, duration_minutes, intensity, exercises e motivation. Contexto: nível ${progression?.level}, objetivo ${profile?.main_goal}, passos ${metrics?.steps || 0}, calorias ${metrics?.calories_burned || 0}.`;
 
-Usuário: Nível ${progression?.level}
-Objetivo: ${profile?.main_goal}
-Atividade hoje: ${metrics?.steps || 0} passos, ${metrics?.calories_burned || 0} calorias
-
-Responda APENAS com JSON:
-{
-  "workout_type": "tipo de treino ideal para agora",
-  "duration_minutes": número,
-  "intensity": "low|medium|high",
-  "exercises": ["exercício 1", "exercício 2", "exercício 3"],
-  "motivation": "mensagem motivadora"
-}`;
-
-    const aiResponse = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "anthropic-version": "2023-06-01",
-        "x-api-key": c.env.ANTHROPIC_API_KEY,
-      },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
-        max_tokens: 1000,
-        messages: [{ role: "user", content: prompt }],
-      }),
-    });
-
-    if (!aiResponse.ok) {
-      throw new Error("AI API error");
-    }
-
-    const aiData = await aiResponse.json() as ClaudeResponse;
-    const content = aiData.content[0].text;
-
-    const jsonMatch = content.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      throw new Error("Invalid AI response format");
-    }
-
-    const workout = JSON.parse(jsonMatch[0]) as Record<string, unknown>;
+    const openaiData = await callOpenAIChat(c, [{ role: "user", content: prompt }], 900, true);
+    const content = openaiData.choices?.[0]?.message?.content ?? "{}";
+    const workout = JSON.parse(content) as Record<string, unknown>;
 
     return c.json({
       success: true,
       workout,
     });
   } catch (error) {
-    console.error("Workout suggestions error:", error);
-    return c.json({ error: "Failed to generate workout suggestions" }, 500);
+    const friendly = toFriendlyErrorResponse(error);
+    return c.json(friendly.payload, friendly.status);
   }
 });
+
+// 5. Food analysis pipeline (OpenAI Vision + OCR + USDA + fallback)
+app.post("/api/ai/analyze-food", authMiddleware, async (c) => {
+  const user = c.get("user");
+  if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+  try {
+    const raw = await c.req.json();
+    const parsed = AiAnalyzeFoodRequestSchema.safeParse(raw);
+    if (!parsed.success) {
+      return c.json({ error: "Invalid input", details: parsed.error.flatten() }, 400);
+    }
+
+    const { food_description, image_base64 } = parsed.data;
+    let visionText = "";
+    if (image_base64) {
+      visionText = await extractLabelTextWithVision(c, image_base64);
+    }
+
+    const identifyPrompt = `Analise a refeição e responda APENAS em JSON no formato {"items":[{"food_name":"","portion_description":"","portion_multiplier":1}]}.
+Contexto textual: ${food_description || "não informado"}
+Texto OCR do rótulo: ${visionText || "não identificado"}.`;
+    const aiData = await callOpenAIChat(c, [{ role: "user", content: identifyPrompt }], 700, true);
+    const aiContent = aiData.choices?.[0]?.message?.content ?? "{}";
+    const identified = JSON.parse(aiContent) as {
+      items?: Array<{ food_name?: string; portion_description?: string; portion_multiplier?: number }>;
+    };
+
+    const ocrNutrition = parseNutritionFromOcrLabel(visionText);
+    const items = (identified.items ?? []).filter((item) => item.food_name && item.food_name.trim().length > 0);
+
+    if (items.length === 0 && !ocrNutrition) {
+      throw new ApiIntegrationError("INVALID_RESPONSE", 422, "Não foi possível identificar alimentos na imagem. Tente novamente com outra foto.");
+    }
+
+    const analyzedItems: Array<{
+      food_name: string;
+      portion_description: string;
+      calories: number | null;
+      protein: number | null;
+      carbs: number | null;
+      fats: number | null;
+      energy_kj: number | null;
+      source: "usda" | "estimate" | "ocr_label";
+      warning?: string;
+    }> = [];
+
+    for (const item of items) {
+      const query = item.food_name!.trim();
+      const multiplier = Number(item.portion_multiplier ?? 1);
+
+      try {
+        const usda = await searchFoodOnUSDA(c, query);
+        const first = usda.foods?.[0];
+        if (!first) throw new Error("not-found");
+        const nutrients = first.foodNutrients ?? [];
+        const byName = (name: string) => nutrients.find((n) => n.nutrientName?.toLowerCase() === name.toLowerCase())?.value ?? null;
+
+        const calories = byName("Energy");
+        const protein = byName("Protein");
+        const carbs = byName("Carbohydrate, by difference");
+        const fats = byName("Total lipid (fat)");
+
+        analyzedItems.push({
+          food_name: query,
+          portion_description: item.portion_description || "porção estimada",
+          calories: calories !== null ? Math.round(calories * multiplier) : null,
+          energy_kj: calories !== null ? Math.round(calories * 4.184 * multiplier) : null,
+          protein: protein !== null ? Number((protein * multiplier).toFixed(1)) : null,
+          carbs: carbs !== null ? Number((carbs * multiplier).toFixed(1)) : null,
+          fats: fats !== null ? Number((fats * multiplier).toFixed(1)) : null,
+          source: "usda",
+        });
+      } catch {
+        const estimatePrompt = `Estime APENAS JSON com calories, protein, carbs, fats para ${query} (${item.portion_description || "porção média"}).`;
+        const fallbackData = await callOpenAIChat(c, [{ role: "user", content: estimatePrompt }], 350, true);
+        const estimate = JSON.parse(fallbackData.choices?.[0]?.message?.content ?? "{}") as {
+          calories?: number;
+          protein?: number;
+          carbs?: number;
+          fats?: number;
+        };
+
+        analyzedItems.push({
+          food_name: query,
+          portion_description: item.portion_description || "porção estimada",
+          calories: estimate.calories ?? null,
+          energy_kj: estimate.calories ? Math.round(estimate.calories * 4.184) : null,
+          protein: estimate.protein ?? null,
+          carbs: estimate.carbs ?? null,
+          fats: estimate.fats ?? null,
+          source: "estimate",
+          warning: "Alimento não encontrado no USDA. Valores estimados por IA.",
+        });
+      }
+    }
+
+    if (ocrNutrition) {
+      analyzedItems.push({
+        food_name: "Rótulo identificado",
+        portion_description: "dados extraídos do rótulo",
+        calories: ocrNutrition.calories,
+        energy_kj: ocrNutrition.energy_kj,
+        protein: ocrNutrition.protein,
+        carbs: ocrNutrition.carbs,
+        fats: ocrNutrition.fats,
+        source: "ocr_label",
+      });
+    }
+
+    const totals = analyzedItems.reduce(
+      (acc, item) => {
+        acc.calories += item.calories ?? 0;
+        acc.energy_kj += item.energy_kj ?? 0;
+        acc.protein += item.protein ?? 0;
+        acc.carbs += item.carbs ?? 0;
+        acc.fats += item.fats ?? 0;
+        return acc;
+      },
+      { calories: 0, energy_kj: 0, protein: 0, carbs: 0, fats: 0 }
+    );
+
+    const macroTotal = totals.protein + totals.carbs + totals.fats;
+    const percentages = {
+      protein: macroTotal > 0 ? Number(((totals.protein / macroTotal) * 100).toFixed(1)) : 0,
+      carbs: macroTotal > 0 ? Number(((totals.carbs / macroTotal) * 100).toFixed(1)) : 0,
+      fats: macroTotal > 0 ? Number(((totals.fats / macroTotal) * 100).toFixed(1)) : 0,
+    };
+
+    return c.json({
+      success: true,
+      ocr_text: visionText || undefined,
+      items: analyzedItems,
+      totals: {
+        calories: Math.round(totals.calories),
+        energy_kj: Math.round(totals.energy_kj),
+        protein: Number(totals.protein.toFixed(1)),
+        carbs: Number(totals.carbs.toFixed(1)),
+        fats: Number(totals.fats.toFixed(1)),
+        macro_percentages: percentages,
+      },
+      has_estimates: analyzedItems.some((item) => item.source === "estimate"),
+      estimation_warning: analyzedItems.some((item) => item.source === "estimate")
+        ? "Alguns alimentos não foram encontrados no USDA e foram estimados por IA."
+        : undefined,
+    });
+  } catch (error) {
+    const friendly = toFriendlyErrorResponse(error);
+    return c.json(friendly.payload, friendly.status);
+  }
+});
+
+// 6. Healthchecks for external services
+app.get("/api/health/external", authMiddleware, async (c) => {
+  return c.json({
+    openai: Boolean(c.env.OPENAI_API_KEY),
+    usda: Boolean(c.env.USDA_API_KEY),
+    google_vision: Boolean(c.env.GOOGLE_CLOUD_VISION_KEY),
+    anthropic: Boolean(c.env.ANTHROPIC_API_KEY),
+  });
+});
+
+app.get("/api/health/openai", authMiddleware, async (c) => c.json({ ok: Boolean(c.env.OPENAI_API_KEY) }));
+app.get("/api/health/usda", authMiddleware, async (c) => c.json({ ok: Boolean(c.env.USDA_API_KEY) }));
+app.get("/api/health/vision", authMiddleware, async (c) => c.json({ ok: Boolean(c.env.GOOGLE_CLOUD_VISION_KEY) }));
 
 // -----------------------------
 // SPA fallback (APENAS após todas as rotas /api/* definidas)
