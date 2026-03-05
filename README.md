@@ -145,3 +145,22 @@ Healthcheck rápido do Worker:
 ```bash
 curl http://localhost:8787/health
 ```
+
+
+### Inicializar D1 local (evita erro `no such table` no `wrangler dev --local`)
+
+Se aparecer erro como `D1_ERROR: no such table: users`, aplique as migrations no banco local do Worker:
+
+```bash
+wrangler d1 execute fitloot-db --local --file migrations/001_fitloot_schema.sql
+wrangler d1 execute fitloot-db --local --file migrations/002_auth_tables.sql
+wrangler d1 execute fitloot-db --local --file migrations/003_add_plan_to_users.sql
+wrangler d1 execute fitloot-db --local --file migrations/004_add_password_salt_if_missing.sql
+wrangler d1 execute fitloot-db --local --file migrations/005_onboarding_flag.sql
+```
+
+Depois reinicie o worker local e valide:
+
+```bash
+curl http://localhost:8787/health
+```

@@ -35,11 +35,51 @@ type AppContext = {
   };
 };
 
+
+let cachedSchemaState: { ready: boolean; checkedAt: number } | null = null;
+const SCHEMA_CACHE_TTL_MS = 10_000;
+
+async function hasCoreSchema(db: D1Database) {
+  const now = Date.now();
+  if (cachedSchemaState && now - cachedSchemaState.checkedAt < SCHEMA_CACHE_TTL_MS) {
+    return cachedSchemaState.ready;
+  }
+
+  try {
+    const result = await db.prepare(
+      `SELECT COUNT(*) as count FROM sqlite_master WHERE type='table' AND name IN ('users', 'sessions')`
+    ).first<{ count: number }>();
+
+    const ready = Number(result?.count ?? 0) >= 2;
+    cachedSchemaState = { ready, checkedAt: now };
+    return ready;
+  } catch (error) {
+    console.error('[schema-check]', error);
+    cachedSchemaState = { ready: false, checkedAt: now };
+    return false;
+  }
+}
+
+function databaseNotInitializedResponse(c: import("hono").Context<AppContext>) {
+  return c.json(
+    {
+      error: 'Banco local não inicializado. Execute as migrations D1 antes de usar a API.',
+      code: 'DB_NOT_INITIALIZED',
+    },
+    503
+  );
+}
+
 // Middleware de autenticação próprio
 async function authMiddleware(
   c: import("hono").Context<{ Bindings: Env; Variables: { user: AuthUser } }>,
   next: () => Promise<void>
 ) {
+  const schemaReady = await hasCoreSchema(c.env.fitloot_db);
+  if (!schemaReady) {
+    return databaseNotInitializedResponse(c);
+  }
+
   const sessionId = safeGet(c.req.header('Cookie')?.match(/session_id=([^;]+)/) ?? [], 1);
 
   if (!sessionId) {
@@ -153,6 +193,9 @@ app.post(
   "/api/auth/register",
   zValidator("json", AuthRegisterRequestSchema),
   async (c) => {
+    const schemaReady = await hasCoreSchema(c.env.fitloot_db);
+    if (!schemaReady) return databaseNotInitializedResponse(c);
+
     try {
       const data = c.req.valid("json");
 
@@ -191,6 +234,9 @@ app.post(
   "/api/auth/login",
   zValidator("json", LoginRequestSchema),
   async (c) => {
+    const schemaReady = await hasCoreSchema(c.env.fitloot_db);
+    if (!schemaReady) return databaseNotInitializedResponse(c);
+
     const data = c.req.valid("json");
 
     const userRow = await c.env.fitloot_db
@@ -1751,6 +1797,7 @@ Texto OCR do rótulo: ${visionText || "não identificado"}.`;
 
 app.get("/health", async (c) => {
   const host = new URL(c.req.url).hostname;
+  const schemaReady = await hasCoreSchema(c.env.fitloot_db);
   const environment = host === "localhost" || host === "127.0.0.1" ? "local" : "production";
 
   return c.json({
@@ -1760,6 +1807,7 @@ app.get("/health", async (c) => {
     hasUSDA: Boolean(c.env.USDA_API_KEY),
     hasVision: Boolean(c.env.GOOGLE_CLOUD_VISION_KEY),
     hasDB: Boolean(c.env.fitloot_db),
+    hasCoreSchema: schemaReady,
     environment,
   });
 });
