@@ -1748,6 +1748,22 @@ Texto OCR do rótulo: ${visionText || "não identificado"}.`;
   }
 });
 
+
+app.get("/health", async (c) => {
+  const host = new URL(c.req.url).hostname;
+  const environment = host === "localhost" || host === "127.0.0.1" ? "local" : "production";
+
+  return c.json({
+    ok: true,
+    timestamp: new Date().toISOString(),
+    hasOpenAI: Boolean(c.env.OPENAI_API_KEY),
+    hasUSDA: Boolean(c.env.USDA_API_KEY),
+    hasVision: Boolean(c.env.GOOGLE_CLOUD_VISION_KEY),
+    hasDB: Boolean(c.env.fitloot_db),
+    environment,
+  });
+});
+
 // 6. Healthchecks for external services
 app.get("/api/health/external", authMiddleware, async (c) => {
   return c.json({
