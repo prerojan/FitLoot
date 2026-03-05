@@ -30,6 +30,12 @@ npm run dev:worker
 4. Rodar ambos ao mesmo tempo
 npm run dev:all
 
+5. Preparar variáveis locais do Worker (sem commitar secrets)
+```bash
+cp .dev.vars.example .dev.vars
+# Preencha .dev.vars com suas chaves locais antes de rodar wrangler dev
+```
+
 🧪 Testes
 
 1. Instale as dependências:
@@ -119,3 +125,42 @@ O FitLoot utiliza Google OAuth integrado ao Cloudflare Workers com cookies HttpO
 📬 Contato & Suporte
 
 Em breve!
+
+
+## Configuração de ambiente do Worker
+
+Este projeto usa **ambiente padrão único** do Wrangler (sem `--env`), de acordo com os scripts existentes em `package.json` (`wrangler dev --local` e `wrangler deploy`).
+
+Cadastre os secrets no ambiente padrão:
+
+```bash
+wrangler secret put OPENAI_API_KEY
+wrangler secret put USDA_API_KEY
+wrangler secret put GOOGLE_CLOUD_VISION_KEY
+wrangler secret put ANTHROPIC_API_KEY
+```
+
+Healthcheck rápido do Worker:
+
+```bash
+curl http://localhost:8787/health
+```
+
+
+### Inicializar D1 local (evita erro `no such table` no `wrangler dev --local`)
+
+Se aparecer erro como `D1_ERROR: no such table: users`, aplique as migrations no banco local do Worker:
+
+```bash
+wrangler d1 execute fitloot-db --local --file migrations/001_fitloot_schema.sql
+wrangler d1 execute fitloot-db --local --file migrations/002_auth_tables.sql
+wrangler d1 execute fitloot-db --local --file migrations/003_add_plan_to_users.sql
+wrangler d1 execute fitloot-db --local --file migrations/004_add_password_salt_if_missing.sql
+wrangler d1 execute fitloot-db --local --file migrations/005_onboarding_flag.sql
+```
+
+Depois reinicie o worker local e valide:
+
+```bash
+curl http://localhost:8787/health
+```
