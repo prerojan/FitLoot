@@ -388,7 +388,7 @@ app.post("/api/onboarding", authMiddleware, zValidator("json", OnboardingRequest
   }
 
   // Create initial daily missions
-  await createDailyMissions(c.env.fitloot_db, user.id);
+  await ensurePeriodicMissions(c.env.fitloot_db, user.id);
 
   return c.json({ success: true }, 201);
 });
@@ -455,11 +455,14 @@ app.get("/api/missions", authMiddleware, async (c) => {
   const user = c.get("user");
   if (!user) return c.json({ error: "Unauthorized" }, 401);
   
+  await ensurePeriodicMissions(c.env.fitloot_db, user.id);
+
   const missions = await c.env.fitloot_db.prepare(
     `SELECT m.*, s.name as skill_name FROM missions m
     LEFT JOIN skills s ON m.skill_id = s.id
     WHERE m.user_id = ? AND m.is_completed = 0
-    ORDER BY m.type, m.created_at`
+    AND (m.deadline IS NULL OR m.deadline > datetime('now'))
+    ORDER BY CASE m.type WHEN 'daily' THEN 1 WHEN 'weekly' THEN 2 WHEN 'monthly' THEN 3 ELSE 4 END, m.created_at`
   ).bind(user.id).all();
 
   return c.json(missions.results);
@@ -1043,40 +1046,97 @@ app.post("/api/mini-games/:id/complete", authMiddleware, zValidator("json", Mini
   });
 });
 
-// Helper function to create daily missions
-async function createDailyMissions(db: D1Database, userId: string) {
-  const tomorrow = new Date(Date.now() + 86400000).toISOString();
+type MissionPeriod = "daily" | "weekly" | "monthly";
 
-  // Get user's unlocked skills
+function futureIsoForPeriod(period: MissionPeriod) {
+  const now = Date.now();
+  const durations: Record<MissionPeriod, number> = {
+    daily: 24 * 60 * 60 * 1000,
+    weekly: 7 * 24 * 60 * 60 * 1000,
+    monthly: 30 * 24 * 60 * 60 * 1000,
+  };
+
+  return new Date(now + durations[period]).toISOString();
+}
+
+function missionConfigByPeriod(period: MissionPeriod) {
+  if (period === "weekly") {
+    return {
+      amount: 2,
+      reps: 120,
+      xp: 180,
+      points: 55,
+      titlePrefix: "Missão Semanal",
+    };
+  }
+
+  if (period === "monthly") {
+    return {
+      amount: 1,
+      reps: 450,
+      xp: 480,
+      points: 150,
+      titlePrefix: "Missão Mensal",
+    };
+  }
+
+  return {
+    amount: 3,
+    reps: 20,
+    xp: 50,
+    points: 10,
+    titlePrefix: "Missão Diária",
+  };
+}
+
+async function createMissionsForPeriod(db: D1Database, userId: string, period: MissionPeriod) {
   const userSkills = await db.prepare(
     "SELECT skill_id FROM user_skills WHERE user_id = ?"
-  ).bind(userId).all();
+  ).bind(userId).all<{ skill_id: number }>();
 
-  if (userSkills.results.length === 0) return;
+  if (userSkills.results.length === 0) {
+    console.warn(`[missions] usuário ${userId} sem skills para gerar ${period}`);
+    return;
+  }
 
-  // Create 3 daily missions
-  const skillIds = userSkills.results.map(s => s.skill_id);
-  const randomSkills = skillIds.sort(() => 0.5 - Math.random()).slice(0, 3);
+  const config = missionConfigByPeriod(period);
+  const skillIds = userSkills.results.map((skill) => Number(skill.skill_id));
+  const randomized = [...skillIds].sort(() => 0.5 - Math.random()).slice(0, config.amount);
+  const deadline = futureIsoForPeriod(period);
 
-  for (const skillId of randomSkills) {
-    const skill = await db.prepare(
-      "SELECT * FROM skills WHERE id = ?"
-    ).bind(skillId).first();
+  for (const skillId of randomized) {
+    const skill = await db.prepare("SELECT id, name FROM skills WHERE id = ?").bind(skillId).first<{ id: number; name: string }>();
+    if (!skill) continue;
 
-    if (skill) {
-      await db.prepare(
-        `INSERT INTO missions (user_id, type, title, description, skill_id, target_reps, xp_reward, points_reward, deadline, updated_at)
-          VALUES (?, 'daily', ?, ?, ?, ?, ?, ?, ?, datetime('now'))`
-      ).bind(
-        userId,
-        `Complete ${20} ${skill.name}`,
-        `Execute ${20} repetições de ${skill.name}`,
-        skillId,
-        20,
-        50,
-        10,
-        tomorrow
-      ).run();
+    await db.prepare(
+      `INSERT INTO missions (user_id, type, title, description, skill_id, target_reps, xp_reward, points_reward, deadline, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`
+    ).bind(
+      userId,
+      period,
+      `${config.titlePrefix}: ${skill.name}`,
+      `Execute ${config.reps} repetições de ${skill.name} até o prazo da missão.`,
+      skill.id,
+      config.reps,
+      config.xp,
+      config.points,
+      deadline
+    ).run();
+  }
+}
+
+async function ensurePeriodicMissions(db: D1Database, userId: string) {
+  const periods: MissionPeriod[] = ["daily", "weekly", "monthly"];
+
+  for (const period of periods) {
+    const existing = await db.prepare(
+      `SELECT COUNT(*) as count FROM missions
+       WHERE user_id = ? AND type = ? AND is_completed = 0
+       AND (deadline IS NULL OR deadline > datetime('now'))`
+    ).bind(userId, period).first<{ count: number }>();
+
+    if (Number(existing?.count ?? 0) === 0) {
+      await createMissionsForPeriod(db, userId, period);
     }
   }
 }
@@ -1446,6 +1506,7 @@ Contexto do usuário:
     const content = safeGet(openaiData.choices ?? [], 0)?.message?.content ?? "";
     return c.json({ message: content });
   } catch (error) {
+    console.error("[ai-chat]", error);
     const friendly = toFriendlyErrorResponse(error);
     return c.json(friendly.payload, toStatusCode(friendly.status));
   }
@@ -1606,7 +1667,8 @@ Texto OCR do rótulo: ${visionText || "não identificado"}.`;
           fats: fats !== null ? Number((fats * multiplier).toFixed(1)) : null,
           source: "usda",
         });
-      } catch {
+      } catch (itemError) {
+        console.warn(`[analyze-food][usda-fallback] ${query}`, itemError);
         const estimatePrompt = `Estime APENAS JSON com calories, protein, carbs, fats para ${query} (${item.portion_description || "porção média"}).`;
         const fallbackData = await callOpenAIChat(c, [{ role: "user", content: estimatePrompt }], 350, true);
         const estimate = JSON.parse(safeGet(fallbackData.choices ?? [], 0)?.message?.content ?? "{}") as {
@@ -1680,9 +1742,26 @@ Texto OCR do rótulo: ${visionText || "não identificado"}.`;
         : undefined,
     });
   } catch (error) {
+    console.error("[analyze-food]", error);
     const friendly = toFriendlyErrorResponse(error);
     return c.json(friendly.payload, toStatusCode(friendly.status));
   }
+});
+
+
+app.get("/health", async (c) => {
+  const host = new URL(c.req.url).hostname;
+  const environment = host === "localhost" || host === "127.0.0.1" ? "local" : "production";
+
+  return c.json({
+    ok: true,
+    timestamp: new Date().toISOString(),
+    hasOpenAI: Boolean(c.env.OPENAI_API_KEY),
+    hasUSDA: Boolean(c.env.USDA_API_KEY),
+    hasVision: Boolean(c.env.GOOGLE_CLOUD_VISION_KEY),
+    hasDB: Boolean(c.env.fitloot_db),
+    environment,
+  });
 });
 
 // 6. Healthchecks for external services
