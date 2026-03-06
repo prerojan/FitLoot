@@ -111,7 +111,8 @@ export interface Env {
   ASSETS: Fetcher;
   OPENAI_API_KEY: string;
   USDA_API_KEY: string;
-  GOOGLE_CLOUD_VISION_KEY: string;
+  RAPID_API_KEY?: string;
+  RAPID_API_HOST?: string;
   ANTHROPIC_API_KEY?: string;
 }
 // --------------------------------
@@ -1213,7 +1214,7 @@ const RATE_LIMIT_MAX_CALLS = 20;
 const timeoutMsByService = {
   openai: 12000,
   usda: 8000,
-  vision: 8000,
+  rapidapi: 8000,
 } as const;
 
 const requestRateMap = new Map<string, number[]>();
@@ -1294,7 +1295,7 @@ async function callOpenAIChat(
         "Authorization": `Bearer ${c.env.OPENAI_API_KEY}`,
       },
       body: JSON.stringify({
-        model: "gpt-4o",
+        model: "openai/gpt-oss-120b:free",
         messages,
         max_tokens: maxTokens,
         ...(jsonMode ? { response_format: { type: "json_object" } } : {}),
@@ -1311,6 +1312,14 @@ type USDAResponse = {
   }>;
 };
 
+type RapidApiNutritionResponse = Array<{
+  name?: string;
+  calories?: number;
+  protein_g?: number;
+  carbohydrates_total_g?: number;
+  fat_total_g?: number;
+}>;
+
 async function searchFoodOnUSDA(c: import("hono").Context<AppContext>, query: string) {
   if (!c.env.USDA_API_KEY) {
     throw new ApiIntegrationError("SERVICE_NOT_CONFIGURED", 503, "USDA não configurada.");
@@ -1323,30 +1332,24 @@ async function searchFoodOnUSDA(c: import("hono").Context<AppContext>, query: st
   return fetchJsonWithTimeout<USDAResponse>(url.toString(), { method: "GET" }, timeoutMsByService.usda);
 }
 
-type VisionResponse = {
-  responses?: Array<{
-    fullTextAnnotation?: { text?: string };
-  }>;
-};
-
-async function extractLabelTextWithVision(c: import("hono").Context<AppContext>, imageBase64: string) {
-  if (!c.env.GOOGLE_CLOUD_VISION_KEY) {
-    throw new ApiIntegrationError("SERVICE_NOT_CONFIGURED", 503, "Google Vision não configurada.");
+async function searchFoodOnRapidApi(c: import("hono").Context<AppContext>, query: string) {
+  if (!c.env.RAPID_API_KEY) {
+    throw new ApiIntegrationError("SERVICE_NOT_CONFIGURED", 503, "RapidAPI não configurada.");
   }
-  enforceRateLimit(`vision:${c.get("user")?.id ?? "anon"}`);
-  const url = `https://vision.googleapis.com/v1/images:annotate?key=${c.env.GOOGLE_CLOUD_VISION_KEY}`;
-  const body = {
-    requests: [{
-      image: { content: imageBase64 },
-      features: [{ type: "TEXT_DETECTION", maxResults: 1 }],
-    }],
-  };
-  const data = await fetchJsonWithTimeout<VisionResponse>(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  }, timeoutMsByService.vision);
-  return safeGet(data.responses ?? [], 0)?.fullTextAnnotation?.text ?? "";
+  const host = c.env.RAPID_API_HOST || "nutrition-by-api-ninjas.p.rapidapi.com";
+  enforceRateLimit(`rapidapi:${c.get("user")?.id ?? "anon"}`);
+  const url = `https://${host}/v1/nutrition?query=${encodeURIComponent(query)}`;
+  return fetchJsonWithTimeout<RapidApiNutritionResponse>(
+    url,
+    {
+      method: "GET",
+      headers: {
+        "X-RapidAPI-Key": c.env.RAPID_API_KEY,
+        "X-RapidAPI-Host": host,
+      },
+    },
+    timeoutMsByService.rapidapi
+  );
 }
 
 function parseNutritionFromOcrLabel(text: string) {
@@ -1638,7 +1641,7 @@ app.get("/api/ai/workout-suggestions", authMiddleware, async (c) => {
   }
 });
 
-// 5. Food analysis pipeline (OpenAI Vision + OCR + USDA + fallback)
+// 5. Food analysis pipeline (MediaPipe client detection + USDA + RapidAPI fallback + AI estimate)
 app.post("/api/ai/analyze-food", authMiddleware, async (c) => {
   const user = c.get("user");
   if (!user) return c.json({ error: "Unauthorized" }, 401);
@@ -1650,23 +1653,22 @@ app.post("/api/ai/analyze-food", authMiddleware, async (c) => {
       return c.json({ error: "Invalid input", details: parsed.error.flatten() }, 400);
     }
 
-    const { food_description, image_base64 } = parsed.data;
-    let visionText = "";
-    if (image_base64) {
-      visionText = await extractLabelTextWithVision(c, image_base64);
+    const { food_description, identified_items = [], ocr_text } = parsed.data;
+    let items = identified_items.filter((item) => item.food_name && item.food_name.trim().length > 0);
+
+    if (items.length === 0 && food_description) {
+      const identifyPrompt = `Analise a refeição e responda APENAS em JSON no formato {"items":[{"food_name":"","portion_description":"","portion_multiplier":1}]}.
+Contexto textual: ${food_description || "não informado"}
+Texto OCR do rótulo: ${ocr_text || "não identificado"}.`;
+      const aiData = await callOpenAIChat(c, [{ role: "user", content: identifyPrompt }], 700, true);
+      const aiContent = safeGet(aiData.choices ?? [], 0)?.message?.content ?? "{}";
+      const identified = JSON.parse(aiContent) as {
+        items?: Array<{ food_name?: string; portion_description?: string; portion_multiplier?: number }>;
+      };
+      items = (identified.items ?? []).filter((item) => item.food_name && item.food_name.trim().length > 0);
     }
 
-    const identifyPrompt = `Analise a refeição e responda APENAS em JSON no formato {"items":[{"food_name":"","portion_description":"","portion_multiplier":1}]}.
-Contexto textual: ${food_description || "não informado"}
-Texto OCR do rótulo: ${visionText || "não identificado"}.`;
-    const aiData = await callOpenAIChat(c, [{ role: "user", content: identifyPrompt }], 700, true);
-    const aiContent = safeGet(aiData.choices ?? [], 0)?.message?.content ?? "{}";
-    const identified = JSON.parse(aiContent) as {
-      items?: Array<{ food_name?: string; portion_description?: string; portion_multiplier?: number }>;
-    };
-
-    const ocrNutrition = parseNutritionFromOcrLabel(visionText);
-    const items = (identified.items ?? []).filter((item) => item.food_name && item.food_name.trim().length > 0);
+    const ocrNutrition = parseNutritionFromOcrLabel(ocr_text ?? "");
 
     if (items.length === 0 && !ocrNutrition) {
       throw new ApiIntegrationError("INVALID_RESPONSE", 422, "Não foi possível identificar alimentos na imagem. Tente novamente com outra foto.");
@@ -1680,7 +1682,7 @@ Texto OCR do rótulo: ${visionText || "não identificado"}.`;
       carbs: number | null;
       fats: number | null;
       energy_kj: number | null;
-      source: "usda" | "estimate" | "ocr_label";
+      source: "usda" | "rapidapi" | "estimate" | "ocr_label";
       warning?: string;
     }> = [];
 
@@ -1715,26 +1717,52 @@ Texto OCR do rótulo: ${visionText || "não identificado"}.`;
         });
       } catch (itemError) {
         console.warn(`[analyze-food][usda-fallback] ${query}`, itemError);
-        const estimatePrompt = `Estime APENAS JSON com calories, protein, carbs, fats para ${query} (${item.portion_description || "porção média"}).`;
-        const fallbackData = await callOpenAIChat(c, [{ role: "user", content: estimatePrompt }], 350, true);
-        const estimate = JSON.parse(safeGet(fallbackData.choices ?? [], 0)?.message?.content ?? "{}") as {
-          calories?: number;
-          protein?: number;
-          carbs?: number;
-          fats?: number;
-        };
+        try {
+          const rapidResult = await searchFoodOnRapidApi(c, query);
+          const firstRapid = safeGet(rapidResult ?? [], 0);
+          if (!firstRapid) {
+            throw new Error("rapidapi-not-found");
+          }
 
-        analyzedItems.push({
-          food_name: query,
-          portion_description: item.portion_description || "porção estimada",
-          calories: estimate.calories ?? null,
-          energy_kj: estimate.calories ? Math.round(estimate.calories * 4.184) : null,
-          protein: estimate.protein ?? null,
-          carbs: estimate.carbs ?? null,
-          fats: estimate.fats ?? null,
-          source: "estimate",
-          warning: "Alimento não encontrado no USDA. Valores estimados por IA.",
-        });
+          const rapidCalories = Number(firstRapid.calories ?? 0);
+          const rapidProtein = Number(firstRapid.protein_g ?? 0);
+          const rapidCarbs = Number(firstRapid.carbohydrates_total_g ?? 0);
+          const rapidFats = Number(firstRapid.fat_total_g ?? 0);
+
+          analyzedItems.push({
+            food_name: query,
+            portion_description: item.portion_description || "porção estimada",
+            calories: Number.isFinite(rapidCalories) ? Math.round(rapidCalories * multiplier) : null,
+            energy_kj: Number.isFinite(rapidCalories) ? Math.round(rapidCalories * 4.184 * multiplier) : null,
+            protein: Number.isFinite(rapidProtein) ? Number((rapidProtein * multiplier).toFixed(1)) : null,
+            carbs: Number.isFinite(rapidCarbs) ? Number((rapidCarbs * multiplier).toFixed(1)) : null,
+            fats: Number.isFinite(rapidFats) ? Number((rapidFats * multiplier).toFixed(1)) : null,
+            source: "rapidapi",
+            warning: "Alimento não encontrado no USDA. Valores retornados pela RapidAPI.",
+          });
+        } catch (rapidError) {
+          console.warn(`[analyze-food][rapidapi-fallback] ${query}`, rapidError);
+          const estimatePrompt = `Estime APENAS JSON com calories, protein, carbs, fats para ${query} (${item.portion_description || "porção média"}).`;
+          const fallbackData = await callOpenAIChat(c, [{ role: "user", content: estimatePrompt }], 350, true);
+          const estimate = JSON.parse(safeGet(fallbackData.choices ?? [], 0)?.message?.content ?? "{}") as {
+            calories?: number;
+            protein?: number;
+            carbs?: number;
+            fats?: number;
+          };
+
+          analyzedItems.push({
+            food_name: query,
+            portion_description: item.portion_description || "porção estimada",
+            calories: estimate.calories ?? null,
+            energy_kj: estimate.calories ? Math.round(estimate.calories * 4.184) : null,
+            protein: estimate.protein ?? null,
+            carbs: estimate.carbs ?? null,
+            fats: estimate.fats ?? null,
+            source: "estimate",
+            warning: "Alimento não encontrado no USDA/RapidAPI. Valores estimados por IA.",
+          });
+        }
       }
     }
 
@@ -1772,7 +1800,7 @@ Texto OCR do rótulo: ${visionText || "não identificado"}.`;
 
     return c.json({
       success: true,
-      ocr_text: visionText || undefined,
+      ocr_text: ocr_text || undefined,
       items: analyzedItems,
       totals: {
         calories: Math.round(totals.calories),
@@ -1782,9 +1810,9 @@ Texto OCR do rótulo: ${visionText || "não identificado"}.`;
         fats: Number(totals.fats.toFixed(1)),
         macro_percentages: percentages,
       },
-      has_estimates: analyzedItems.some((item) => item.source === "estimate"),
+      has_estimates: analyzedItems.some((item) => item.source !== "usda"),
       estimation_warning: analyzedItems.some((item) => item.source === "estimate")
-        ? "Alguns alimentos não foram encontrados no USDA e foram estimados por IA."
+        ? "Alguns alimentos não foram encontrados no USDA/RapidAPI e foram estimados por IA."
         : undefined,
     });
   } catch (error) {
@@ -1805,7 +1833,8 @@ app.get("/health", async (c) => {
     timestamp: new Date().toISOString(),
     hasOpenAI: Boolean(c.env.OPENAI_API_KEY),
     hasUSDA: Boolean(c.env.USDA_API_KEY),
-    hasVision: Boolean(c.env.GOOGLE_CLOUD_VISION_KEY),
+    hasRapidAPI: Boolean(c.env.RAPID_API_KEY),
+    hasVision: false,
     hasDB: Boolean(c.env.fitloot_db),
     hasCoreSchema: schemaReady,
     environment,
@@ -1817,14 +1846,16 @@ app.get("/api/health/external", authMiddleware, async (c) => {
   return c.json({
     openai: Boolean(c.env.OPENAI_API_KEY),
     usda: Boolean(c.env.USDA_API_KEY),
-    google_vision: Boolean(c.env.GOOGLE_CLOUD_VISION_KEY),
+    rapidapi: Boolean(c.env.RAPID_API_KEY),
+    google_vision: false,
     anthropic: Boolean(c.env.ANTHROPIC_API_KEY),
   });
 });
 
 app.get("/api/health/openai", authMiddleware, async (c) => c.json({ ok: Boolean(c.env.OPENAI_API_KEY) }));
 app.get("/api/health/usda", authMiddleware, async (c) => c.json({ ok: Boolean(c.env.USDA_API_KEY) }));
-app.get("/api/health/vision", authMiddleware, async (c) => c.json({ ok: Boolean(c.env.GOOGLE_CLOUD_VISION_KEY) }));
+app.get("/api/health/rapidapi", authMiddleware, async (c) => c.json({ ok: Boolean(c.env.RAPID_API_KEY) }));
+app.get("/api/health/vision", authMiddleware, async (c) => c.json({ ok: false, deprecated: true }));
 
 // -----------------------------
 // SPA fallback (APENAS após todas as rotas /api/* definidas)

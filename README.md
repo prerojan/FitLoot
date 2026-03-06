@@ -136,7 +136,8 @@ Cadastre os secrets no ambiente padrão:
 ```bash
 wrangler secret put OPENAI_API_KEY
 wrangler secret put USDA_API_KEY
-wrangler secret put GOOGLE_CLOUD_VISION_KEY
+wrangler secret put RAPID_API_KEY
+# opcional: wrangler secret put RAPID_API_HOST
 wrangler secret put ANTHROPIC_API_KEY
 ```
 
@@ -145,6 +146,16 @@ Healthcheck rápido do Worker:
 ```bash
 curl http://localhost:8787/health
 ```
+
+
+### Pipeline de análise alimentar (atual)
+
+- Detecção visual no frontend com MediaPipe Tasks Vision (classificação local no navegador).
+- Worker recebe `identified_items` e consulta nutricional com prioridade:
+  1. USDA (primário)
+  2. RapidAPI Nutritional (fallback)
+  3. Estimativa por IA (último fallback)
+
 
 
 ### Inicializar D1 local (evita erro `no such table` no `wrangler dev --local`)
