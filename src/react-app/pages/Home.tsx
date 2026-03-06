@@ -89,6 +89,7 @@ const Home: FC = () => {
       }
 
       // Após login, atualiza contexto global e redireciona
+      localStorage.setItem("fitloot_authenticated_hint", "1");
       await checkAuth();
       navigate("/dashboard");
     } catch {
