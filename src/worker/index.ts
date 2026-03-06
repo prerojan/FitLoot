@@ -231,6 +231,38 @@ app.post(
   }
 );
 
+app.get("/api/auth/check-availability", async (c) => {
+  const emailQuery = (c.req.query("email") || "").trim().toLowerCase();
+  const usernameQuery = (c.req.query("username") || "").trim();
+
+  if (!emailQuery && !usernameQuery) {
+    return c.json({
+      emailAvailable: null,
+      usernameAvailable: null,
+      message: "Informe email e/ou username para validação.",
+    }, 400);
+  }
+
+  try {
+    const [emailExisting, usernameExisting] = await Promise.all([
+      emailQuery
+        ? c.env.fitloot_db.prepare("SELECT id FROM users WHERE lower(email) = ?").bind(emailQuery).first<{ id: string }>()
+        : Promise.resolve(null),
+      usernameQuery
+        ? c.env.fitloot_db.prepare("SELECT id FROM user_profiles WHERE username = ?").bind(usernameQuery).first<{ id: string }>()
+        : Promise.resolve(null),
+    ]);
+
+    return c.json({
+      emailAvailable: emailQuery ? !emailExisting : null,
+      usernameAvailable: usernameQuery ? !usernameExisting : null,
+    });
+  } catch (error) {
+    console.error("[check-availability]", error);
+    return c.json({ error: "Falha ao validar disponibilidade." }, 500);
+  }
+});
+
 app.post(
   "/api/auth/login",
   zValidator("json", LoginRequestSchema),

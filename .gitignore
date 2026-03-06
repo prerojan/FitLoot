@@ -1,11 +1,44 @@
-dist/
-node_modules/
-.wrangler/
+# Ambiente
+.env
+.env.*
 .dev.vars
 .dev.vars.*
-.env
-.env.local
-.env.*.local
+!.dev.vars.example
+
+# Dependências
+node_modules/
+
+# Build
+dist/
+.wrangler/
+.output/
+
+# Logs
 *.log
+logs/
+
+# Sistema operacional
+.DS_Store
+Thumbs.db
+
+# IDEs e editores
+.vscode/
+.idea/
+*.suo
+*.swp
+
+# Cache
+.cache/
+.turbo/
+.eslintcache
+
+# Arquivos sensíveis
+*.pem
+*.key
+*.cert
+*.p12
+secrets/
+
+# Projeto
 worker-configuration.d.ts
 !.dev.vars.example

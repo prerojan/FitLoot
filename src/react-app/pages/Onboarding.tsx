@@ -280,6 +280,13 @@ const STEP_ICONS = [UserRound, Ruler, Target, Activity, Shield];
 
 type GoalValue = ProfileStep["main_goal"];
 
+type AvailabilityState = {
+  status: "idle" | "checking" | "available" | "unavailable" | "invalid";
+  message?: string;
+};
+
+
+
 const GOAL_OPTIONS: { value: GoalValue; label: string; icon: typeof Target }[] = [
   { value: "perder_peso", label: "Perder peso", icon: Zap },
   { value: "ganhar_massa", label: "Ganhar massa muscular", icon: Dumbbell },
@@ -297,6 +304,15 @@ const EQUIPMENT_OPTIONS: { id: string; label: string; icon: typeof Dumbbell }[] 
   { id: "kettlebell", label: "Kettlebell", icon: Weight },
 ];
 
+function availabilityMessage(state: AvailabilityState): { tone: "green" | "red" | "muted"; text: string } | null {
+  if (state.status === "available") return { tone: "green", text: "✅ Disponível" };
+  if (state.status === "unavailable") return { tone: "red", text: `❌ ${state.message || "Já cadastrado"}` };
+  if (state.status === "invalid") return { tone: "red", text: `❌ ${state.message || "Valor inválido"}` };
+  if (state.status === "checking") return { tone: "muted", text: "Validando..." };
+  return null;
+}
+
+
 export default function Onboarding() {
   const { user, loading: authLoading, checkAuth } = useAuth();
   const navigate = useNavigate();
@@ -313,6 +329,11 @@ export default function Onboarding() {
   const [showPassword, setShowPassword] = useState(false);
   const [selectedGoals, setSelectedGoals] = useState<GoalValue[]>([]);
   const [selectedEquipment, setSelectedEquipment] = useState<string[]>([]);
+  const [usernameAvailability, setUsernameAvailability] = useState<AvailabilityState>({ status: "idle" });
+  const [emailAvailability, setEmailAvailability] = useState<AvailabilityState>({ status: "idle" });
+
+  const usernameReqRef = useRef(0);
+  const emailReqRef = useRef(0);
 
   const totalSteps = 5;
 
@@ -330,13 +351,129 @@ export default function Onboarding() {
   }, [authLoading, navigate, user]);
 
   const setCredential = (field: keyof CredentialsStep) => (e: ChangeEvent<HTMLInputElement>) => {
-    setCredentials((c) => ({ ...c, [field]: e.target.value }));
+    const nextValue = e.target.value;
+    setCredentials((c) => ({ ...c, [field]: nextValue }));
+    if (field === "email") {
+      setEmailAvailability({ status: "idle" });
+    }
   };
 
   const setProfileField =
     (field: keyof ProfileStep) => (e: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
-      setProfile((p) => ({ ...p, [field]: e.target.value }));
+      const nextValue = e.target.value;
+      setProfile((p) => ({ ...p, [field]: nextValue }));
+      if (field === "username") {
+        setUsernameAvailability({ status: "idle" });
+      }
     };
+
+  const validateUsername = useCallback(async (rawUsername: string) => {
+    const username = rawUsername.trim();
+    if (!username) {
+      setUsernameAvailability({ status: "idle" });
+      return true;
+    }
+
+    if (username.length < 3) {
+      setUsernameAvailability({ status: "invalid", message: "Mínimo de 3 caracteres." });
+      return false;
+    }
+
+    const requestId = ++usernameReqRef.current;
+    setUsernameAvailability({ status: "checking" });
+
+    try {
+      const response = await api(`/api/auth/check-availability?username=${encodeURIComponent(username)}`);
+      const payload = (await response.json().catch(() => null)) as { usernameAvailable?: boolean } | null;
+
+      if (requestId !== usernameReqRef.current) return false;
+
+      if (!response.ok || payload?.usernameAvailable === undefined) {
+        setUsernameAvailability({ status: "invalid", message: "Não foi possível validar agora." });
+        return false;
+      }
+
+      if (!payload.usernameAvailable) {
+        setUsernameAvailability({ status: "unavailable", message: "Nome de usuário já está em uso." });
+        return false;
+      }
+
+      setUsernameAvailability({ status: "available" });
+      return true;
+    } catch {
+      if (requestId === usernameReqRef.current) {
+        setUsernameAvailability({ status: "invalid", message: "Erro de conexão ao validar." });
+      }
+      return false;
+    }
+  }, []);
+
+  const validateEmail = useCallback(async (rawEmail: string) => {
+    const email = rawEmail.trim().toLowerCase();
+    if (!email) {
+      setEmailAvailability({ status: "idle" });
+      return true;
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      setEmailAvailability({ status: "invalid", message: "E-mail inválido." });
+      return false;
+    }
+
+    const requestId = ++emailReqRef.current;
+    setEmailAvailability({ status: "checking" });
+
+    try {
+      const response = await api(`/api/auth/check-availability?email=${encodeURIComponent(email)}`);
+      const payload = (await response.json().catch(() => null)) as { emailAvailable?: boolean } | null;
+
+      if (requestId !== emailReqRef.current) return false;
+
+      if (!response.ok || payload?.emailAvailable === undefined) {
+        setEmailAvailability({ status: "invalid", message: "Não foi possível validar agora." });
+        return false;
+      }
+
+      if (!payload.emailAvailable) {
+        setEmailAvailability({ status: "unavailable", message: "E-mail já está cadastrado." });
+        return false;
+      }
+
+      setEmailAvailability({ status: "available" });
+      return true;
+    } catch {
+      if (requestId === emailReqRef.current) {
+        setEmailAvailability({ status: "invalid", message: "Erro de conexão ao validar." });
+      }
+      return false;
+    }
+  }, []);
+
+  useEffect(() => {
+    const username = profile.username.trim();
+    if (!username) {
+      setUsernameAvailability({ status: "idle" });
+      return;
+    }
+    const timer = setTimeout(() => {
+      void validateUsername(username);
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [profile.username, validateUsername]);
+
+  useEffect(() => {
+    const email = credentials.email.trim();
+    if (!email) {
+      setEmailAvailability({ status: "idle" });
+      return;
+    }
+    const timer = setTimeout(() => {
+      void validateEmail(email);
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [credentials.email, validateEmail]);
+
 
   const handleIdentityNext = (e: FormEvent) => {
     e.preventDefault();
@@ -344,6 +481,11 @@ export default function Onboarding() {
 
     if (!profile.full_name.trim() || !profile.username.trim() || profile.username.length < 3) {
       setStepError("Preencha nome completo e nome de usuário (mín. 3 caracteres).");
+      return;
+    }
+
+    if (usernameAvailability.status === "checking" || usernameAvailability.status === "unavailable" || usernameAvailability.status === "invalid") {
+      setStepError(usernameAvailability.message ?? "Escolha um nome de usuário disponível.");
       return;
     }
 
@@ -432,6 +574,11 @@ export default function Onboarding() {
       return;
     }
 
+    if (emailAvailability.status === "checking" || emailAvailability.status === "unavailable" || emailAvailability.status === "invalid") {
+      setStepError(emailAvailability.message ?? "Use um e-mail disponível para criar a conta.");
+      return;
+    }
+
     setStepLoading(true);
 
     try {
@@ -467,6 +614,7 @@ export default function Onboarding() {
         return;
       }
 
+      localStorage.setItem("fitloot_authenticated_hint", "1");
       await checkAuth();
 
       const patchRes = await api("/api/users/me", {
@@ -599,15 +747,31 @@ export default function Onboarding() {
                 />
               </Field>
 
-              <Field label="Nome de usuário" leftIcon={<User className="h-4 w-4" />}>
+              <Field
+                label="Nome de usuário"
+                leftIcon={<User className="h-4 w-4" />}
+                rightSlot={
+                  usernameAvailability.status === "checking"
+                    ? <span className="text-xs text-gray-500">...</span>
+                    : usernameAvailability.status === "available"
+                      ? <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                      : null
+                }
+              >
                 <Input
                   value={profile.username}
                   onChange={setProfileField("username")}
+                  onBlur={() => { void validateUsername(profile.username); }}
                   placeholder="nome_de_usuario"
                   minLength={3}
                   className={FIELD_INPUT}
                 />
               </Field>
+              {availabilityMessage(usernameAvailability) && (
+                <p className={`-mt-3 text-xs ${availabilityMessage(usernameAvailability)?.tone === "green" ? "text-emerald-600" : availabilityMessage(usernameAvailability)?.tone === "red" ? "text-red-600" : "text-gray-500"}`}>
+                  {availabilityMessage(usernameAvailability)?.text}
+                </p>
+              )}
 
               <div>
                 <label className="mb-2 block text-sm font-medium text-gray-700">Gênero</label>
@@ -641,7 +805,12 @@ export default function Onboarding() {
                 unit="anos"
               />
 
-              <Button type="submit" size="lg" className="mt-6 w-full rounded-xl">
+              <Button
+                type="submit"
+                size="lg"
+                className="mt-6 w-full rounded-xl"
+                disabled={usernameAvailability.status === "checking" || usernameAvailability.status === "unavailable" || usernameAvailability.status === "invalid"}
+              >
                 Continuar <ChevronRight className="ml-1 h-4 w-4" />
               </Button>
             </form>
@@ -918,16 +1087,31 @@ export default function Onboarding() {
               <div className="space-y-3 border-t border-gray-200 pt-4">
                 <h3 className="font-bold text-gray-900">Crie sua conta</h3>
 
-                <Field label="E-mail">
+                <Field
+                  label="E-mail"
+                  rightSlot={
+                    emailAvailability.status === "checking"
+                      ? <span className="text-xs text-gray-500">...</span>
+                      : emailAvailability.status === "available"
+                        ? <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                        : null
+                  }
+                >
                   <Input
                     type="email"
                     value={credentials.email}
                     onChange={setCredential("email")}
+                    onBlur={() => { void validateEmail(credentials.email); }}
                     placeholder="E-mail"
                     required
                     className={FIELD_INPUT}
                   />
                 </Field>
+                {availabilityMessage(emailAvailability) && (
+                  <p className={`-mt-2 text-xs ${availabilityMessage(emailAvailability)?.tone === "green" ? "text-emerald-600" : availabilityMessage(emailAvailability)?.tone === "red" ? "text-red-600" : "text-gray-500"}`}>
+                    {availabilityMessage(emailAvailability)?.text}
+                  </p>
+                )}
 
                 <Field
                   label="Senha"
@@ -1029,7 +1213,10 @@ export default function Onboarding() {
                   !credentials.email ||
                   !credentials.password ||
                   credentials.password.length < 8 ||
-                  credentials.password !== credentials.confirmPassword
+                  credentials.password !== credentials.confirmPassword ||
+                  emailAvailability.status === "checking" ||
+                  emailAvailability.status === "unavailable" ||
+                  emailAvailability.status === "invalid"
                 }
                 size="lg"
                 className="w-full rounded-xl disabled:opacity-50"
