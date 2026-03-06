@@ -134,7 +134,7 @@ Este projeto usa **ambiente padrão único** do Wrangler (sem `--env`), de acord
 Cadastre os secrets no ambiente padrão:
 
 ```bash
-wrangler secret put OPENAI_API_KEY
+wrangler secret put HF_TOKEN
 wrangler secret put USDA_API_KEY
 wrangler secret put RAPID_API_KEY
 # opcional: wrangler secret put RAPID_API_HOST
@@ -150,8 +150,10 @@ curl http://localhost:8787/health
 
 ### Pipeline de análise alimentar (atual)
 
-- Detecção visual no frontend com MediaPipe Tasks Vision (classificação local no navegador).
-- Worker recebe `identified_items` e consulta nutricional com prioridade:
+Modelo de IA usado no backend: `openai/gpt-oss-120b:groq` via Hugging Face Router.
+
+- Detecção visual no frontend com MediaPipe Tasks Vision (Object Detector via `vision_bundle.mjs`).
+- Worker recebe `identified_items` e consulta nutricional com prioridade (com IA via Hugging Face):
   1. USDA (primário)
   2. RapidAPI Nutritional (fallback)
   3. Estimativa por IA (último fallback)

@@ -40,48 +40,69 @@ type IdentifiedItem = {
   portion_multiplier: number;
 };
 
-type ImageClassifierResult = {
-  classifications?: Array<{
-    categories?: Array<{
-      categoryName?: string;
-      score?: number;
-    }>;
+type MediaPipeCategory = {
+  categoryName?: string;
+  score?: number;
+};
+
+type MediaPipeDetectionResult = {
+  detections?: Array<{
+    categories?: MediaPipeCategory[];
   }>;
 };
 
-let classifierPromise: Promise<{ classify: (image: HTMLImageElement) => ImageClassifierResult }> | null = null;
+type MediaPipeObjectDetector = {
+  detect: (image: HTMLImageElement) => MediaPipeDetectionResult;
+};
 
-async function getFoodClassifier() {
-  if (!classifierPromise) {
-    classifierPromise = (async () => {
-      const module = (await import("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/+esm")) as {
-        FilesetResolver: { forVisionTasks: (path: string) => Promise<unknown> };
-        ImageClassifier: {
-          createFromOptions: (
-            fileset: unknown,
-            options: Record<string, unknown>
-          ) => Promise<{ classify: (image: HTMLImageElement) => ImageClassifierResult }>;
-        };
-      };
+type MediaPipeFilesetResolver = {
+  forVisionTasks: (path: string) => Promise<unknown>;
+};
 
-      const fileset = await module.FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm");
-      return module.ImageClassifier.createFromOptions(fileset, {
+type MediaPipeObjectDetectorFactory = {
+  createFromOptions: (vision: unknown, options: Record<string, unknown>) => Promise<MediaPipeObjectDetector>;
+};
+
+declare global {
+  interface Window {
+    FilesetResolver?: MediaPipeFilesetResolver;
+    ObjectDetector?: MediaPipeObjectDetectorFactory;
+  }
+}
+
+let detectorPromise: Promise<MediaPipeObjectDetector> | null = null;
+
+async function getFoodDetector() {
+  if (!window.FilesetResolver || !window.ObjectDetector) {
+    throw new Error("MediaPipe Vision não carregado. Verifique o script vision_bundle.mjs no index.html.");
+  }
+
+  if (!detectorPromise) {
+    detectorPromise = (async () => {
+      const vision = await window.FilesetResolver!.forVisionTasks(
+        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
+      );
+
+      return window.ObjectDetector!.createFromOptions(vision, {
         baseOptions: {
           modelAssetPath:
-            "https://storage.googleapis.com/mediapipe-models/image_classifier/efficientnet_lite0/int8/1/efficientnet_lite0.tflite",
+            "https://storage.googleapis.com/mediapipe-tasks/object_detector/efficientdet_lite0_uint8.tflite",
         },
+        scoreThreshold: 0.35,
         maxResults: 5,
+        runningMode: "IMAGE",
       });
     })();
   }
 
-  return classifierPromise;
+  return detectorPromise;
 }
 
-function toIdentifiedItems(result: ImageClassifierResult): IdentifiedItem[] {
-  const categories = safeGet(result.classifications ?? [], 0)?.categories ?? [];
-  return categories
-    .filter((category) => Number(category.score ?? 0) >= 0.15)
+function toIdentifiedItems(result: MediaPipeDetectionResult): IdentifiedItem[] {
+  const detections = result.detections ?? [];
+  return detections
+    .flatMap((detection) => detection.categories ?? [])
+    .filter((category) => Number(category.score ?? 0) >= 0.2)
     .slice(0, 3)
     .map((category) => ({
       food_name: String(category.categoryName || "alimento"),
@@ -126,9 +147,9 @@ export default function FoodAnalysis() {
   };
 
   const identifyFoodWithMediaPipe = async (image: HTMLImageElement) => {
-    const classifier = await getFoodClassifier();
-    const classification = classifier.classify(image);
-    const items = toIdentifiedItems(classification);
+    const detector = await getFoodDetector();
+    const detection = detector.detect(image);
+    const items = toIdentifiedItems(detection);
 
     if (items.length === 0) {
       throw new Error("Não foi possível identificar alimentos com o modelo local. Tente outra foto.");

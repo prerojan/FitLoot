@@ -109,7 +109,7 @@ async function authMiddleware(
 export interface Env {
   fitloot_db: D1Database;
   ASSETS: Fetcher;
-  OPENAI_API_KEY: string;
+  HF_TOKEN: string;
   USDA_API_KEY: string;
   RAPID_API_KEY?: string;
   RAPID_API_HOST?: string;
@@ -1212,7 +1212,7 @@ class ApiIntegrationError extends Error {
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const RATE_LIMIT_MAX_CALLS = 20;
 const timeoutMsByService = {
-  openai: 12000,
+  huggingface: 12000,
   usda: 8000,
   rapidapi: 8000,
 } as const;
@@ -1282,26 +1282,26 @@ async function callOpenAIChat(
   maxTokens = 1000,
   jsonMode = false
 ) {
-  if (!c.env.OPENAI_API_KEY) {
-    throw new ApiIntegrationError("SERVICE_NOT_CONFIGURED", 503, "OpenAI não configurada.");
+  if (!c.env.HF_TOKEN) {
+    throw new ApiIntegrationError("SERVICE_NOT_CONFIGURED", 503, "Hugging Face não configurada.");
   }
-  enforceRateLimit(`openai:${c.get("user")?.id ?? "anon"}`);
+  enforceRateLimit(`huggingface:${c.get("user")?.id ?? "anon"}`);
   return fetchJsonWithTimeout<OpenAIChatCompletionResponse>(
-    "https://api.openai.com/v1/chat/completions",
+    "https://router.huggingface.co/v1/chat/completions",
     {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Authorization": `Bearer ${c.env.OPENAI_API_KEY}`,
+        "Authorization": `Bearer ${c.env.HF_TOKEN}`,
       },
       body: JSON.stringify({
-        model: "openai/gpt-oss-120b:free",
+        model: "openai/gpt-oss-120b:groq",
         messages,
         max_tokens: maxTokens,
         ...(jsonMode ? { response_format: { type: "json_object" } } : {}),
       }),
     },
-    timeoutMsByService.openai
+    timeoutMsByService.huggingface
   );
 }
 
@@ -1843,7 +1843,8 @@ app.get("/health", async (c) => {
   return c.json({
     ok: true,
     timestamp: new Date().toISOString(),
-    hasOpenAI: Boolean(c.env.OPENAI_API_KEY),
+    hasHuggingFace: Boolean(c.env.HF_TOKEN),
+    hasOpenAI: false,
     hasUSDA: Boolean(c.env.USDA_API_KEY),
     hasRapidAPI: Boolean(c.env.RAPID_API_KEY),
     hasVision: false,
@@ -1856,7 +1857,8 @@ app.get("/health", async (c) => {
 // 6. Healthchecks for external services
 app.get("/api/health/external", authMiddleware, async (c) => {
   return c.json({
-    openai: Boolean(c.env.OPENAI_API_KEY),
+    huggingface: Boolean(c.env.HF_TOKEN),
+    openai: false,
     usda: Boolean(c.env.USDA_API_KEY),
     rapidapi: Boolean(c.env.RAPID_API_KEY),
     google_vision: false,
@@ -1864,7 +1866,8 @@ app.get("/api/health/external", authMiddleware, async (c) => {
   });
 });
 
-app.get("/api/health/openai", authMiddleware, async (c) => c.json({ ok: Boolean(c.env.OPENAI_API_KEY) }));
+app.get("/api/health/openai", authMiddleware, async (c) => c.json({ ok: false, deprecated: true }));
+app.get("/api/health/huggingface", authMiddleware, async (c) => c.json({ ok: Boolean(c.env.HF_TOKEN) }));
 app.get("/api/health/usda", authMiddleware, async (c) => c.json({ ok: Boolean(c.env.USDA_API_KEY) }));
 app.get("/api/health/rapidapi", authMiddleware, async (c) => c.json({ ok: Boolean(c.env.RAPID_API_KEY) }));
 app.get("/api/health/vision", authMiddleware, async (c) => c.json({ ok: false, deprecated: true }));

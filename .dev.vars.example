@@ -1,4 +1,4 @@
-OPENAI_API_KEY=
+HF_TOKEN=
 USDA_API_KEY=
 RAPID_API_KEY=
 RAPID_API_HOST=nutrition-by-api-ninjas.p.rapidapi.com
