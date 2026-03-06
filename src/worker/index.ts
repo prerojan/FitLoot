@@ -35,11 +35,51 @@ type AppContext = {
   };
 };
 
+
+let cachedSchemaState: { ready: boolean; checkedAt: number } | null = null;
+const SCHEMA_CACHE_TTL_MS = 10_000;
+
+async function hasCoreSchema(db: D1Database) {
+  const now = Date.now();
+  if (cachedSchemaState && now - cachedSchemaState.checkedAt < SCHEMA_CACHE_TTL_MS) {
+    return cachedSchemaState.ready;
+  }
+
+  try {
+    const result = await db.prepare(
+      `SELECT COUNT(*) as count FROM sqlite_master WHERE type='table' AND name IN ('users', 'sessions')`
+    ).first<{ count: number }>();
+
+    const ready = Number(result?.count ?? 0) >= 2;
+    cachedSchemaState = { ready, checkedAt: now };
+    return ready;
+  } catch (error) {
+    console.error('[schema-check]', error);
+    cachedSchemaState = { ready: false, checkedAt: now };
+    return false;
+  }
+}
+
+function databaseNotInitializedResponse(c: import("hono").Context<AppContext>) {
+  return c.json(
+    {
+      error: 'Banco local não inicializado. Execute as migrations D1 antes de usar a API.',
+      code: 'DB_NOT_INITIALIZED',
+    },
+    503
+  );
+}
+
 // Middleware de autenticação próprio
 async function authMiddleware(
   c: import("hono").Context<{ Bindings: Env; Variables: { user: AuthUser } }>,
   next: () => Promise<void>
 ) {
+  const schemaReady = await hasCoreSchema(c.env.fitloot_db);
+  if (!schemaReady) {
+    return databaseNotInitializedResponse(c);
+  }
+
   const sessionId = safeGet(c.req.header('Cookie')?.match(/session_id=([^;]+)/) ?? [], 1);
 
   if (!sessionId) {
@@ -71,7 +111,8 @@ export interface Env {
   ASSETS: Fetcher;
   OPENAI_API_KEY: string;
   USDA_API_KEY: string;
-  GOOGLE_CLOUD_VISION_KEY: string;
+  RAPID_API_KEY?: string;
+  RAPID_API_HOST?: string;
   ANTHROPIC_API_KEY?: string;
 }
 // --------------------------------
@@ -153,6 +194,9 @@ app.post(
   "/api/auth/register",
   zValidator("json", AuthRegisterRequestSchema),
   async (c) => {
+    const schemaReady = await hasCoreSchema(c.env.fitloot_db);
+    if (!schemaReady) return databaseNotInitializedResponse(c);
+
     try {
       const data = c.req.valid("json");
 
@@ -191,6 +235,9 @@ app.post(
   "/api/auth/login",
   zValidator("json", LoginRequestSchema),
   async (c) => {
+    const schemaReady = await hasCoreSchema(c.env.fitloot_db);
+    if (!schemaReady) return databaseNotInitializedResponse(c);
+
     const data = c.req.valid("json");
 
     const userRow = await c.env.fitloot_db
@@ -388,7 +435,7 @@ app.post("/api/onboarding", authMiddleware, zValidator("json", OnboardingRequest
   }
 
   // Create initial daily missions
-  await createDailyMissions(c.env.fitloot_db, user.id);
+  await ensurePeriodicMissions(c.env.fitloot_db, user.id);
 
   return c.json({ success: true }, 201);
 });
@@ -455,11 +502,14 @@ app.get("/api/missions", authMiddleware, async (c) => {
   const user = c.get("user");
   if (!user) return c.json({ error: "Unauthorized" }, 401);
   
+  await ensurePeriodicMissions(c.env.fitloot_db, user.id);
+
   const missions = await c.env.fitloot_db.prepare(
     `SELECT m.*, s.name as skill_name FROM missions m
     LEFT JOIN skills s ON m.skill_id = s.id
     WHERE m.user_id = ? AND m.is_completed = 0
-    ORDER BY m.type, m.created_at`
+    AND (m.deadline IS NULL OR m.deadline > datetime('now'))
+    ORDER BY CASE m.type WHEN 'daily' THEN 1 WHEN 'weekly' THEN 2 WHEN 'monthly' THEN 3 ELSE 4 END, m.created_at`
   ).bind(user.id).all();
 
   return c.json(missions.results);
@@ -1043,40 +1093,97 @@ app.post("/api/mini-games/:id/complete", authMiddleware, zValidator("json", Mini
   });
 });
 
-// Helper function to create daily missions
-async function createDailyMissions(db: D1Database, userId: string) {
-  const tomorrow = new Date(Date.now() + 86400000).toISOString();
+type MissionPeriod = "daily" | "weekly" | "monthly";
 
-  // Get user's unlocked skills
+function futureIsoForPeriod(period: MissionPeriod) {
+  const now = Date.now();
+  const durations: Record<MissionPeriod, number> = {
+    daily: 24 * 60 * 60 * 1000,
+    weekly: 7 * 24 * 60 * 60 * 1000,
+    monthly: 30 * 24 * 60 * 60 * 1000,
+  };
+
+  return new Date(now + durations[period]).toISOString();
+}
+
+function missionConfigByPeriod(period: MissionPeriod) {
+  if (period === "weekly") {
+    return {
+      amount: 2,
+      reps: 120,
+      xp: 180,
+      points: 55,
+      titlePrefix: "Missão Semanal",
+    };
+  }
+
+  if (period === "monthly") {
+    return {
+      amount: 1,
+      reps: 450,
+      xp: 480,
+      points: 150,
+      titlePrefix: "Missão Mensal",
+    };
+  }
+
+  return {
+    amount: 3,
+    reps: 20,
+    xp: 50,
+    points: 10,
+    titlePrefix: "Missão Diária",
+  };
+}
+
+async function createMissionsForPeriod(db: D1Database, userId: string, period: MissionPeriod) {
   const userSkills = await db.prepare(
     "SELECT skill_id FROM user_skills WHERE user_id = ?"
-  ).bind(userId).all();
+  ).bind(userId).all<{ skill_id: number }>();
 
-  if (userSkills.results.length === 0) return;
+  if (userSkills.results.length === 0) {
+    console.warn(`[missions] usuário ${userId} sem skills para gerar ${period}`);
+    return;
+  }
 
-  // Create 3 daily missions
-  const skillIds = userSkills.results.map(s => s.skill_id);
-  const randomSkills = skillIds.sort(() => 0.5 - Math.random()).slice(0, 3);
+  const config = missionConfigByPeriod(period);
+  const skillIds = userSkills.results.map((skill) => Number(skill.skill_id));
+  const randomized = [...skillIds].sort(() => 0.5 - Math.random()).slice(0, config.amount);
+  const deadline = futureIsoForPeriod(period);
 
-  for (const skillId of randomSkills) {
-    const skill = await db.prepare(
-      "SELECT * FROM skills WHERE id = ?"
-    ).bind(skillId).first();
+  for (const skillId of randomized) {
+    const skill = await db.prepare("SELECT id, name FROM skills WHERE id = ?").bind(skillId).first<{ id: number; name: string }>();
+    if (!skill) continue;
 
-    if (skill) {
-      await db.prepare(
-        `INSERT INTO missions (user_id, type, title, description, skill_id, target_reps, xp_reward, points_reward, deadline, updated_at)
-          VALUES (?, 'daily', ?, ?, ?, ?, ?, ?, ?, datetime('now'))`
-      ).bind(
-        userId,
-        `Complete ${20} ${skill.name}`,
-        `Execute ${20} repetições de ${skill.name}`,
-        skillId,
-        20,
-        50,
-        10,
-        tomorrow
-      ).run();
+    await db.prepare(
+      `INSERT INTO missions (user_id, type, title, description, skill_id, target_reps, xp_reward, points_reward, deadline, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`
+    ).bind(
+      userId,
+      period,
+      `${config.titlePrefix}: ${skill.name}`,
+      `Execute ${config.reps} repetições de ${skill.name} até o prazo da missão.`,
+      skill.id,
+      config.reps,
+      config.xp,
+      config.points,
+      deadline
+    ).run();
+  }
+}
+
+async function ensurePeriodicMissions(db: D1Database, userId: string) {
+  const periods: MissionPeriod[] = ["daily", "weekly", "monthly"];
+
+  for (const period of periods) {
+    const existing = await db.prepare(
+      `SELECT COUNT(*) as count FROM missions
+       WHERE user_id = ? AND type = ? AND is_completed = 0
+       AND (deadline IS NULL OR deadline > datetime('now'))`
+    ).bind(userId, period).first<{ count: number }>();
+
+    if (Number(existing?.count ?? 0) === 0) {
+      await createMissionsForPeriod(db, userId, period);
     }
   }
 }
@@ -1107,7 +1214,7 @@ const RATE_LIMIT_MAX_CALLS = 20;
 const timeoutMsByService = {
   openai: 12000,
   usda: 8000,
-  vision: 8000,
+  rapidapi: 8000,
 } as const;
 
 const requestRateMap = new Map<string, number[]>();
@@ -1188,7 +1295,7 @@ async function callOpenAIChat(
         "Authorization": `Bearer ${c.env.OPENAI_API_KEY}`,
       },
       body: JSON.stringify({
-        model: "gpt-4o",
+        model: "openai/gpt-oss-120b:free",
         messages,
         max_tokens: maxTokens,
         ...(jsonMode ? { response_format: { type: "json_object" } } : {}),
@@ -1205,6 +1312,14 @@ type USDAResponse = {
   }>;
 };
 
+type RapidApiNutritionResponse = Array<{
+  name?: string;
+  calories?: number;
+  protein_g?: number;
+  carbohydrates_total_g?: number;
+  fat_total_g?: number;
+}>;
+
 async function searchFoodOnUSDA(c: import("hono").Context<AppContext>, query: string) {
   if (!c.env.USDA_API_KEY) {
     throw new ApiIntegrationError("SERVICE_NOT_CONFIGURED", 503, "USDA não configurada.");
@@ -1217,30 +1332,24 @@ async function searchFoodOnUSDA(c: import("hono").Context<AppContext>, query: st
   return fetchJsonWithTimeout<USDAResponse>(url.toString(), { method: "GET" }, timeoutMsByService.usda);
 }
 
-type VisionResponse = {
-  responses?: Array<{
-    fullTextAnnotation?: { text?: string };
-  }>;
-};
-
-async function extractLabelTextWithVision(c: import("hono").Context<AppContext>, imageBase64: string) {
-  if (!c.env.GOOGLE_CLOUD_VISION_KEY) {
-    throw new ApiIntegrationError("SERVICE_NOT_CONFIGURED", 503, "Google Vision não configurada.");
+async function searchFoodOnRapidApi(c: import("hono").Context<AppContext>, query: string) {
+  if (!c.env.RAPID_API_KEY) {
+    throw new ApiIntegrationError("SERVICE_NOT_CONFIGURED", 503, "RapidAPI não configurada.");
   }
-  enforceRateLimit(`vision:${c.get("user")?.id ?? "anon"}`);
-  const url = `https://vision.googleapis.com/v1/images:annotate?key=${c.env.GOOGLE_CLOUD_VISION_KEY}`;
-  const body = {
-    requests: [{
-      image: { content: imageBase64 },
-      features: [{ type: "TEXT_DETECTION", maxResults: 1 }],
-    }],
-  };
-  const data = await fetchJsonWithTimeout<VisionResponse>(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  }, timeoutMsByService.vision);
-  return safeGet(data.responses ?? [], 0)?.fullTextAnnotation?.text ?? "";
+  const host = c.env.RAPID_API_HOST || "nutrition-by-api-ninjas.p.rapidapi.com";
+  enforceRateLimit(`rapidapi:${c.get("user")?.id ?? "anon"}`);
+  const url = `https://${host}/v1/nutrition?query=${encodeURIComponent(query)}`;
+  return fetchJsonWithTimeout<RapidApiNutritionResponse>(
+    url,
+    {
+      method: "GET",
+      headers: {
+        "X-RapidAPI-Key": c.env.RAPID_API_KEY,
+        "X-RapidAPI-Host": host,
+      },
+    },
+    timeoutMsByService.rapidapi
+  );
 }
 
 function parseNutritionFromOcrLabel(text: string) {
@@ -1446,6 +1555,7 @@ Contexto do usuário:
     const content = safeGet(openaiData.choices ?? [], 0)?.message?.content ?? "";
     return c.json({ message: content });
   } catch (error) {
+    console.error("[ai-chat]", error);
     const friendly = toFriendlyErrorResponse(error);
     return c.json(friendly.payload, toStatusCode(friendly.status));
   }
@@ -1531,7 +1641,7 @@ app.get("/api/ai/workout-suggestions", authMiddleware, async (c) => {
   }
 });
 
-// 5. Food analysis pipeline (OpenAI Vision + OCR + USDA + fallback)
+// 5. Food analysis pipeline (MediaPipe client detection + USDA + RapidAPI fallback + AI estimate)
 app.post("/api/ai/analyze-food", authMiddleware, async (c) => {
   const user = c.get("user");
   if (!user) return c.json({ error: "Unauthorized" }, 401);
@@ -1543,23 +1653,22 @@ app.post("/api/ai/analyze-food", authMiddleware, async (c) => {
       return c.json({ error: "Invalid input", details: parsed.error.flatten() }, 400);
     }
 
-    const { food_description, image_base64 } = parsed.data;
-    let visionText = "";
-    if (image_base64) {
-      visionText = await extractLabelTextWithVision(c, image_base64);
+    const { food_description, identified_items = [], ocr_text } = parsed.data;
+    let items = identified_items.filter((item) => item.food_name && item.food_name.trim().length > 0);
+
+    if (items.length === 0 && food_description) {
+      const identifyPrompt = `Analise a refeição e responda APENAS em JSON no formato {"items":[{"food_name":"","portion_description":"","portion_multiplier":1}]}.
+Contexto textual: ${food_description || "não informado"}
+Texto OCR do rótulo: ${ocr_text || "não identificado"}.`;
+      const aiData = await callOpenAIChat(c, [{ role: "user", content: identifyPrompt }], 700, true);
+      const aiContent = safeGet(aiData.choices ?? [], 0)?.message?.content ?? "{}";
+      const identified = JSON.parse(aiContent) as {
+        items?: Array<{ food_name?: string; portion_description?: string; portion_multiplier?: number }>;
+      };
+      items = (identified.items ?? []).filter((item) => item.food_name && item.food_name.trim().length > 0);
     }
 
-    const identifyPrompt = `Analise a refeição e responda APENAS em JSON no formato {"items":[{"food_name":"","portion_description":"","portion_multiplier":1}]}.
-Contexto textual: ${food_description || "não informado"}
-Texto OCR do rótulo: ${visionText || "não identificado"}.`;
-    const aiData = await callOpenAIChat(c, [{ role: "user", content: identifyPrompt }], 700, true);
-    const aiContent = safeGet(aiData.choices ?? [], 0)?.message?.content ?? "{}";
-    const identified = JSON.parse(aiContent) as {
-      items?: Array<{ food_name?: string; portion_description?: string; portion_multiplier?: number }>;
-    };
-
-    const ocrNutrition = parseNutritionFromOcrLabel(visionText);
-    const items = (identified.items ?? []).filter((item) => item.food_name && item.food_name.trim().length > 0);
+    const ocrNutrition = parseNutritionFromOcrLabel(ocr_text ?? "");
 
     if (items.length === 0 && !ocrNutrition) {
       throw new ApiIntegrationError("INVALID_RESPONSE", 422, "Não foi possível identificar alimentos na imagem. Tente novamente com outra foto.");
@@ -1573,7 +1682,7 @@ Texto OCR do rótulo: ${visionText || "não identificado"}.`;
       carbs: number | null;
       fats: number | null;
       energy_kj: number | null;
-      source: "usda" | "estimate" | "ocr_label";
+      source: "usda" | "rapidapi" | "estimate" | "ocr_label";
       warning?: string;
     }> = [];
 
@@ -1606,27 +1715,54 @@ Texto OCR do rótulo: ${visionText || "não identificado"}.`;
           fats: fats !== null ? Number((fats * multiplier).toFixed(1)) : null,
           source: "usda",
         });
-      } catch {
-        const estimatePrompt = `Estime APENAS JSON com calories, protein, carbs, fats para ${query} (${item.portion_description || "porção média"}).`;
-        const fallbackData = await callOpenAIChat(c, [{ role: "user", content: estimatePrompt }], 350, true);
-        const estimate = JSON.parse(safeGet(fallbackData.choices ?? [], 0)?.message?.content ?? "{}") as {
-          calories?: number;
-          protein?: number;
-          carbs?: number;
-          fats?: number;
-        };
+      } catch (itemError) {
+        console.warn(`[analyze-food][usda-fallback] ${query}`, itemError);
+        try {
+          const rapidResult = await searchFoodOnRapidApi(c, query);
+          const firstRapid = safeGet(rapidResult ?? [], 0);
+          if (!firstRapid) {
+            throw new Error("rapidapi-not-found");
+          }
 
-        analyzedItems.push({
-          food_name: query,
-          portion_description: item.portion_description || "porção estimada",
-          calories: estimate.calories ?? null,
-          energy_kj: estimate.calories ? Math.round(estimate.calories * 4.184) : null,
-          protein: estimate.protein ?? null,
-          carbs: estimate.carbs ?? null,
-          fats: estimate.fats ?? null,
-          source: "estimate",
-          warning: "Alimento não encontrado no USDA. Valores estimados por IA.",
-        });
+          const rapidCalories = Number(firstRapid.calories ?? 0);
+          const rapidProtein = Number(firstRapid.protein_g ?? 0);
+          const rapidCarbs = Number(firstRapid.carbohydrates_total_g ?? 0);
+          const rapidFats = Number(firstRapid.fat_total_g ?? 0);
+
+          analyzedItems.push({
+            food_name: query,
+            portion_description: item.portion_description || "porção estimada",
+            calories: Number.isFinite(rapidCalories) ? Math.round(rapidCalories * multiplier) : null,
+            energy_kj: Number.isFinite(rapidCalories) ? Math.round(rapidCalories * 4.184 * multiplier) : null,
+            protein: Number.isFinite(rapidProtein) ? Number((rapidProtein * multiplier).toFixed(1)) : null,
+            carbs: Number.isFinite(rapidCarbs) ? Number((rapidCarbs * multiplier).toFixed(1)) : null,
+            fats: Number.isFinite(rapidFats) ? Number((rapidFats * multiplier).toFixed(1)) : null,
+            source: "rapidapi",
+            warning: "Alimento não encontrado no USDA. Valores retornados pela RapidAPI.",
+          });
+        } catch (rapidError) {
+          console.warn(`[analyze-food][rapidapi-fallback] ${query}`, rapidError);
+          const estimatePrompt = `Estime APENAS JSON com calories, protein, carbs, fats para ${query} (${item.portion_description || "porção média"}).`;
+          const fallbackData = await callOpenAIChat(c, [{ role: "user", content: estimatePrompt }], 350, true);
+          const estimate = JSON.parse(safeGet(fallbackData.choices ?? [], 0)?.message?.content ?? "{}") as {
+            calories?: number;
+            protein?: number;
+            carbs?: number;
+            fats?: number;
+          };
+
+          analyzedItems.push({
+            food_name: query,
+            portion_description: item.portion_description || "porção estimada",
+            calories: estimate.calories ?? null,
+            energy_kj: estimate.calories ? Math.round(estimate.calories * 4.184) : null,
+            protein: estimate.protein ?? null,
+            carbs: estimate.carbs ?? null,
+            fats: estimate.fats ?? null,
+            source: "estimate",
+            warning: "Alimento não encontrado no USDA/RapidAPI. Valores estimados por IA.",
+          });
+        }
       }
     }
 
@@ -1664,7 +1800,7 @@ Texto OCR do rótulo: ${visionText || "não identificado"}.`;
 
     return c.json({
       success: true,
-      ocr_text: visionText || undefined,
+      ocr_text: ocr_text || undefined,
       items: analyzedItems,
       totals: {
         calories: Math.round(totals.calories),
@@ -1674,15 +1810,35 @@ Texto OCR do rótulo: ${visionText || "não identificado"}.`;
         fats: Number(totals.fats.toFixed(1)),
         macro_percentages: percentages,
       },
-      has_estimates: analyzedItems.some((item) => item.source === "estimate"),
+      has_estimates: analyzedItems.some((item) => item.source !== "usda"),
       estimation_warning: analyzedItems.some((item) => item.source === "estimate")
-        ? "Alguns alimentos não foram encontrados no USDA e foram estimados por IA."
+        ? "Alguns alimentos não foram encontrados no USDA/RapidAPI e foram estimados por IA."
         : undefined,
     });
   } catch (error) {
+    console.error("[analyze-food]", error);
     const friendly = toFriendlyErrorResponse(error);
     return c.json(friendly.payload, toStatusCode(friendly.status));
   }
+});
+
+
+app.get("/health", async (c) => {
+  const host = new URL(c.req.url).hostname;
+  const schemaReady = await hasCoreSchema(c.env.fitloot_db);
+  const environment = host === "localhost" || host === "127.0.0.1" ? "local" : "production";
+
+  return c.json({
+    ok: true,
+    timestamp: new Date().toISOString(),
+    hasOpenAI: Boolean(c.env.OPENAI_API_KEY),
+    hasUSDA: Boolean(c.env.USDA_API_KEY),
+    hasRapidAPI: Boolean(c.env.RAPID_API_KEY),
+    hasVision: false,
+    hasDB: Boolean(c.env.fitloot_db),
+    hasCoreSchema: schemaReady,
+    environment,
+  });
 });
 
 // 6. Healthchecks for external services
@@ -1690,14 +1846,16 @@ app.get("/api/health/external", authMiddleware, async (c) => {
   return c.json({
     openai: Boolean(c.env.OPENAI_API_KEY),
     usda: Boolean(c.env.USDA_API_KEY),
-    google_vision: Boolean(c.env.GOOGLE_CLOUD_VISION_KEY),
+    rapidapi: Boolean(c.env.RAPID_API_KEY),
+    google_vision: false,
     anthropic: Boolean(c.env.ANTHROPIC_API_KEY),
   });
 });
 
 app.get("/api/health/openai", authMiddleware, async (c) => c.json({ ok: Boolean(c.env.OPENAI_API_KEY) }));
 app.get("/api/health/usda", authMiddleware, async (c) => c.json({ ok: Boolean(c.env.USDA_API_KEY) }));
-app.get("/api/health/vision", authMiddleware, async (c) => c.json({ ok: Boolean(c.env.GOOGLE_CLOUD_VISION_KEY) }));
+app.get("/api/health/rapidapi", authMiddleware, async (c) => c.json({ ok: Boolean(c.env.RAPID_API_KEY) }));
+app.get("/api/health/vision", authMiddleware, async (c) => c.json({ ok: false, deprecated: true }));
 
 // -----------------------------
 // SPA fallback (APENAS após todas as rotas /api/* definidas)
