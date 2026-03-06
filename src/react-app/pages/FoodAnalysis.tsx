@@ -15,7 +15,7 @@ type AnalysisItem = {
   carbs: number | null;
   fats: number | null;
   energy_kj: number | null;
-  source: "usda" | "estimate" | "ocr_label";
+  source: "usda" | "rapidapi" | "estimate" | "ocr_label";
   warning?: string;
 };
 
@@ -33,6 +33,83 @@ type AnalysisResult = {
   has_estimates?: boolean;
   estimation_warning?: string;
 };
+
+type IdentifiedItem = {
+  food_name: string;
+  portion_description: string;
+  portion_multiplier: number;
+};
+
+type MediaPipeCategory = {
+  categoryName?: string;
+  score?: number;
+};
+
+type MediaPipeDetectionResult = {
+  detections?: Array<{
+    categories?: MediaPipeCategory[];
+  }>;
+};
+
+type MediaPipeObjectDetector = {
+  detect: (image: HTMLImageElement) => MediaPipeDetectionResult;
+};
+
+type MediaPipeFilesetResolver = {
+  forVisionTasks: (path: string) => Promise<unknown>;
+};
+
+type MediaPipeObjectDetectorFactory = {
+  createFromOptions: (vision: unknown, options: Record<string, unknown>) => Promise<MediaPipeObjectDetector>;
+};
+
+declare global {
+  interface Window {
+    FilesetResolver?: MediaPipeFilesetResolver;
+    ObjectDetector?: MediaPipeObjectDetectorFactory;
+  }
+}
+
+let detectorPromise: Promise<MediaPipeObjectDetector> | null = null;
+
+async function getFoodDetector() {
+  if (!window.FilesetResolver || !window.ObjectDetector) {
+    throw new Error("MediaPipe Vision não carregado. Verifique o script vision_bundle.mjs no index.html.");
+  }
+
+  if (!detectorPromise) {
+    detectorPromise = (async () => {
+      const vision = await window.FilesetResolver!.forVisionTasks(
+        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
+      );
+
+      return window.ObjectDetector!.createFromOptions(vision, {
+        baseOptions: {
+          modelAssetPath:
+            "https://storage.googleapis.com/mediapipe-tasks/object_detector/efficientdet_lite0_uint8.tflite",
+        },
+        scoreThreshold: 0.35,
+        maxResults: 5,
+        runningMode: "IMAGE",
+      });
+    })();
+  }
+
+  return detectorPromise;
+}
+
+function toIdentifiedItems(result: MediaPipeDetectionResult): IdentifiedItem[] {
+  const detections = result.detections ?? [];
+  return detections
+    .flatMap((detection) => detection.categories ?? [])
+    .filter((category) => Number(category.score ?? 0) >= 0.2)
+    .slice(0, 3)
+    .map((category) => ({
+      food_name: String(category.categoryName || "alimento"),
+      portion_description: "porção média",
+      portion_multiplier: 1,
+    }));
+}
 
 export default function FoodAnalysis() {
   const navigate = useNavigate();
@@ -69,14 +146,38 @@ export default function FoodAnalysis() {
     setStreamActive(false);
   };
 
+  const identifyFoodWithMediaPipe = async (image: HTMLImageElement) => {
+    const detector = await getFoodDetector();
+    const detection = detector.detect(image);
+    const items = toIdentifiedItems(detection);
+
+    if (items.length === 0) {
+      throw new Error("Não foi possível identificar alimentos com o modelo local. Tente outra foto.");
+    }
+
+    return items;
+  };
+
   const runAnalysis = async (base64: string) => {
     setLoading(true);
     setError(null);
     setResult(null);
+
     try {
+      const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = () => reject(new Error("Falha ao carregar imagem para análise local."));
+        img.src = `data:image/jpeg;base64,${base64}`;
+      });
+
+      const identifiedItems = await identifyFoodWithMediaPipe(image);
       const response = await api("/api/ai/analyze-food", {
         method: "POST",
-        body: JSON.stringify({ image_base64: base64 }),
+        body: JSON.stringify({
+          identified_items: identifiedItems,
+          food_description: identifiedItems.map((item) => item.food_name).join(", "),
+        }),
       });
 
       const data = await response.json();
@@ -157,7 +258,7 @@ export default function FoodAnalysis() {
     <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 pb-24">
       <div className="bg-gradient-to-r from-emerald-500 to-teal-600 text-white px-6 pt-8 pb-6 rounded-b-3xl shadow-xl">
         <h1 className="text-2xl font-bold">Análise de alimentos</h1>
-        <p className="text-emerald-100 text-sm mt-1">Foto por câmera ou galeria, com OCR + USDA + IA</p>
+        <p className="text-emerald-100 text-sm mt-1">Foto por câmera ou galeria, com MediaPipe + USDA + fallback</p>
       </div>
 
       <div className="px-6 py-6 space-y-4">
@@ -240,7 +341,7 @@ export default function FoodAnalysis() {
                   <p className="font-semibold text-gray-900">{item.food_name}</p>
                   <p className="text-gray-600">{item.portion_description}</p>
                   <p className="text-gray-700 mt-1">{item.calories ?? "-"} kcal • P {item.protein ?? "-"}g • C {item.carbs ?? "-"}g • G {item.fats ?? "-"}g</p>
-                  {item.source !== "usda" && <p className="text-amber-600 mt-1">Fonte: {item.source === "estimate" ? "estimativa IA" : "OCR do rótulo"}</p>}
+                  {item.source !== "usda" && <p className="text-amber-600 mt-1">Fonte: {item.source === "estimate" ? "estimativa IA" : item.source === "rapidapi" ? "RapidAPI" : "OCR do rótulo"}</p>}
                 </div>
               ))}
             </Card>
