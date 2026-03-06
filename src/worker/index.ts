@@ -1641,6 +1641,18 @@ app.get("/api/ai/workout-suggestions", authMiddleware, async (c) => {
   }
 });
 
+type IdentifiedFoodItem = {
+  food_name: string;
+  portion_description?: string;
+  portion_multiplier?: number;
+};
+
+function isIdentifiedFoodItem(item: unknown): item is IdentifiedFoodItem {
+  if (!item || typeof item !== "object") return false;
+  const value = item as { food_name?: unknown };
+  return typeof value.food_name === "string" && value.food_name.trim().length > 0;
+}
+
 // 5. Food analysis pipeline (MediaPipe client detection + USDA + RapidAPI fallback + AI estimate)
 app.post("/api/ai/analyze-food", authMiddleware, async (c) => {
   const user = c.get("user");
@@ -1654,7 +1666,7 @@ app.post("/api/ai/analyze-food", authMiddleware, async (c) => {
     }
 
     const { food_description, identified_items = [], ocr_text } = parsed.data;
-    let items = identified_items.filter((item) => item.food_name && item.food_name.trim().length > 0);
+    let items: IdentifiedFoodItem[] = identified_items.filter(isIdentifiedFoodItem);
 
     if (items.length === 0 && food_description) {
       const identifyPrompt = `Analise a refeição e responda APENAS em JSON no formato {"items":[{"food_name":"","portion_description":"","portion_multiplier":1}]}.
@@ -1665,7 +1677,7 @@ Texto OCR do rótulo: ${ocr_text || "não identificado"}.`;
       const identified = JSON.parse(aiContent) as {
         items?: Array<{ food_name?: string; portion_description?: string; portion_multiplier?: number }>;
       };
-      items = (identified.items ?? []).filter((item) => item.food_name && item.food_name.trim().length > 0);
+      items = (identified.items ?? []).filter(isIdentifiedFoodItem);
     }
 
     const ocrNutrition = parseNutritionFromOcrLabel(ocr_text ?? "");
