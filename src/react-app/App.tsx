@@ -65,6 +65,13 @@ export default function App() {
   const [loading, setLoading] = useState(true);
 
   const checkAuth = async () => {
+    const hasSessionHint = localStorage.getItem("fitloot_authenticated_hint") === "1";
+    if (!hasSessionHint) {
+      setUser(null);
+      setLoading(false);
+      return;
+    }
+
     try {
       const response = await api('/api/users/me');
 
@@ -74,8 +81,7 @@ export default function App() {
       } else {
         setUser(null);
       }
-    } catch (error) {
-      console.error('Auth check failed:', error);
+    } catch {
       setUser(null);
     } finally {
       setLoading(false);
@@ -83,6 +89,7 @@ export default function App() {
   };
 
   const logout = () => {
+    localStorage.removeItem("fitloot_authenticated_hint");
     setUser(null);
   };
 
