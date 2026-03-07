@@ -301,7 +301,7 @@ export const AiAnalyzeFoodRequestSchema = z.object({
     portion_multiplier: z.number().positive().optional(),
   })).optional(),
   ocr_text: z.string().optional(),
-}).refine((data) => data.food_description !== undefined || data.image_base64 !== undefined || (data.identified_items?.length ?? 0) > 0, {
+}).refine((data: AiAnalyzeFoodRequestInput) => data.food_description !== undefined || data.image_base64 !== undefined || (data.identified_items?.length ?? 0) > 0, {
   message: "Food description or image required",
 });
 export type AiAnalyzeFoodRequest = z.infer<typeof AiAnalyzeFoodRequestSchema>;
