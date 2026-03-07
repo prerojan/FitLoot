@@ -98,32 +98,50 @@ async function authMiddleware(
     });
   }
 
-  const sessionId = safeGet(c.req.header('Cookie')?.match(/session_id=([^;]+)/) ?? [], 1);
+  try {
+    const sessionId = safeGet(c.req.header("Cookie")?.match(/session_id=([^;]+)/) ?? [], 1);
 
-  if (!sessionId) {
-    return c.json({ error: 'Unauthorized' }, 401);
+    if (!sessionId) {
+      return c.json({ error: "Unauthorized", code: "SESSION_COOKIE_MISSING" }, 401);
+    }
+
+    const session = await c.env.fitloot_db
+      .prepare('SELECT id, user_id FROM sessions WHERE id = ? AND expires_at > datetime("now")')
+      .bind(sessionId)
+      .first<{ id: string; user_id: string }>();
+
+    if (!session) {
+      return c.json({ error: "Unauthorized", code: "SESSION_INVALID" }, 401);
+    }
+
+    const userRecord = await c.env.fitloot_db
+      .prepare("SELECT id, email, name, avatar_url, COALESCE(onboarding_completed, 0) as onboarding_completed FROM users WHERE id = ?")
+      .bind(session.user_id)
+      .first<{ id: string; email: string; name: string; avatar_url: string | null; onboarding_completed: number }>();
+
+    if (!userRecord) {
+      return c.json({ error: "Usuário não encontrado", code: "USER_NOT_FOUND" }, 404);
+    }
+
+    (c as import("hono").Context<AppContext>).set("user", {
+      id: userRecord.id,
+      email: userRecord.email,
+      name: userRecord.name,
+      avatar_url: userRecord.avatar_url ?? undefined,
+      onboarding_completed: Number(userRecord.onboarding_completed) === 1 ? 1 : 0,
+    });
+
+    await ensureUserCounterRow(c.env.fitloot_db, userRecord.id);
+    await expirePendingMissionsAndUpdateStreak(c.env.fitloot_db, userRecord.id);
+
+    await next();
+  } catch (error) {
+    console.error("[authMiddleware]", {
+      message: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    });
+    return c.json({ error: "Erro interno", code: "INTERNAL_ERROR" }, 500);
   }
-
-  const session = await c.env.fitloot_db.prepare(
-    'SELECT s.id as session_id, s.user_id, s.expires_at, u.email, u.name, u.avatar_url, COALESCE(u.onboarding_completed, 0) as onboarding_completed FROM sessions s JOIN users u ON s.user_id = u.id WHERE s.id = ? AND s.expires_at > datetime("now")'
-  ).bind(sessionId).first();
-
-  if (!session) {
-    return c.json({ error: 'Unauthorized' }, 401);
-  }
-
-  (c as import("hono").Context<AppContext>).set("user", {
-    id: session.user_id as string,
-    email: session.email as string,
-    name: session.name as string,
-    avatar_url: session.avatar_url as string | undefined,
-    onboarding_completed: Number(session.onboarding_completed) === 1 ? 1 : 0,
-  });
-
-  await ensureUserCounterRow(c.env.fitloot_db, session.user_id as string);
-  await expirePendingMissionsAndUpdateStreak(c.env.fitloot_db, session.user_id as string);
-
-  await next();
 }
 
 // ---------- ENV TYPES ----------
@@ -138,6 +156,8 @@ export interface Env {
   EXERCISE_DB_KEY?: string | undefined;
   API_NINJAS_KEY?: string | undefined;
   GYMFIT_API_KEY?: string | undefined;
+  FRONTEND_ORIGIN?: string | undefined;
+  FRONTEND_ORIGINS?: string | undefined;
 }
 // --------------------------------
 
@@ -850,14 +870,21 @@ app.get("/favicon.ico", (c) => {
 });
 
 app.use("*", async (c, next) => {
-  const origin = c.req.header("Origin") || "";
-
-  c.header("Access-Control-Allow-Origin", origin);
+  const origin = resolveCorsOrigin(c.req.header("Origin"), new URL(c.req.url), c.env);
+  if (origin) {
+    c.header("Access-Control-Allow-Origin", origin);
+  }
   c.header("Access-Control-Allow-Credentials", "true");
-  c.header("Access-Control-Allow-Headers", "Content-Type, Cookie, Authorization");
+  c.header("Access-Control-Allow-Headers", "Content-Type");
   c.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+  c.header("Vary", "Origin");
 
   if (c.req.method === "OPTIONS") {
+    if (!origin) {
+      return c.newResponse("", {
+        status: 403,
+      });
+    }
     return c.newResponse("", {
       status: 204,
     });
@@ -3207,3 +3234,30 @@ export default {
     ctx.waitUntil(processDailyReset(env));
   },
 };
+const DEFAULT_ALLOWED_ORIGINS = [
+  "http://localhost:5173",
+  "http://127.0.0.1:5173",
+  "http://localhost:4173",
+  "https://fitloot.vercel.app",
+  "https://fitloot-worker.suportefitloot.workers.dev",
+];
+
+function buildAllowedOrigins(env: Env) {
+  const configuredOrigins = [env.FRONTEND_ORIGIN, env.FRONTEND_ORIGINS]
+    .filter(Boolean)
+    .flatMap((value) => String(value).split(","))
+    .map((value) => value.trim())
+    .filter(Boolean);
+
+  return new Set([...DEFAULT_ALLOWED_ORIGINS, ...configuredOrigins]);
+}
+
+function resolveCorsOrigin(requestOrigin: string | undefined, requestUrl: URL, env: Env) {
+  const allowedOrigins = buildAllowedOrigins(env);
+
+  if (!requestOrigin) {
+    return requestUrl.origin;
+  }
+
+  return allowedOrigins.has(requestOrigin) ? requestOrigin : null;
+}
