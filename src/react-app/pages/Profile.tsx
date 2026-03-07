@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ChangeEventHandler } from "react";
 import { useNavigate } from "react-router";
 import { useAuth } from "@/react-app/App";
 import BottomNav from "@/react-app/components/BottomNav";
@@ -24,12 +24,16 @@ export default function Profile() {
   const [titles, setTitles] = useState<TitleWithUnlock[]>([]);
   const [activeTab, setActiveTab] = useState<'attributes' | 'skills' | 'achievements' | 'titles'>('attributes');
   const [loading, setLoading] = useState(true);
+  const [isMobile, setIsMobile] = useState(false);
+  const [customizationSaving, setCustomizationSaving] = useState(false);
+  const [bgPreview, setBgPreview] = useState<string | null>(null);
 
   useEffect(() => {
     if (!user) {
       navigate("/app");
       return;
     }
+    setIsMobile(window.innerWidth <= 768);
     loadData();
   }, [user, navigate]);
 
@@ -44,7 +48,9 @@ export default function Profile() {
         api("/api/titles"),
       ]);
 
-      setProfile(await profileRes.json());
+      const profileData = await profileRes.json();
+      setProfile(profileData);
+      setBgPreview(profileData?.custom_background_type === "image" ? profileData?.custom_background_value ?? null : null);
       setAttributes(await attrsRes.json());
       setProgression(await progRes.json());
       setSkills(await skillsRes.json());
@@ -69,6 +75,52 @@ export default function Profile() {
     } catch (error) {
       console.error("Error activating title:", error);
     }
+  };
+
+  const saveCustomization = async (payload: Record<string, unknown>) => {
+    try {
+      setCustomizationSaving(true);
+      const res = await api('/api/profile/customization', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (res.ok) await loadData();
+    } catch (error) {
+      console.error('Error saving customization', error);
+    } finally {
+      setCustomizationSaving(false);
+    }
+  };
+
+  const setSkillFocus = async (focus: 'calistenia' | 'yoga') => {
+    try {
+      await api('/api/profile/skill-focus', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ active_skill_focus: focus }),
+      });
+      await loadData();
+    } catch (error) {
+      console.error('Error changing focus', error);
+    }
+  };
+
+  const onPickBackgroundImage: ChangeEventHandler<HTMLInputElement> = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const value = String(reader.result || "");
+      if (!value.includes(",")) return;
+      setBgPreview(value);
+      const root = document.documentElement;
+      root.style.setProperty('--app-bg-image', `url(${value})`);
+      root.style.setProperty('--app-bg-color', 'transparent');
+      await saveCustomization({ custom_background_type: 'image', custom_background_value: value });
+    };
+    reader.readAsDataURL(file);
   };
 
   if (loading) {
@@ -184,6 +236,30 @@ export default function Profile() {
           </div>
         )}
       </div>
+
+      {isMobile && (
+        <div className="px-6 pb-6">
+          <div className="bg-white/80 backdrop-blur-sm rounded-2xl p-4 shadow-lg space-y-3">
+            <h3 className="font-bold text-gray-900">Personalização (mobile)</h3>
+            <div className="grid grid-cols-2 gap-2">
+              <button onClick={() => saveCustomization({ custom_primary_color: 'green' })} className="fl-btn-secondary rounded-xl py-2">Primária verde</button>
+              <button onClick={() => saveCustomization({ custom_secondary_color: 'dark' })} className="fl-btn-secondary rounded-xl py-2">Secundária dark</button>
+              <button onClick={() => saveCustomization({ custom_font: 'bold' })} className="fl-btn-secondary rounded-xl py-2">Fonte título</button>
+              <button onClick={() => saveCustomization({ custom_background_type: 'color', custom_background_value: '#0f172a' })} className="fl-btn-secondary rounded-xl py-2">Fundo sólido</button>
+              <label className="fl-btn-secondary rounded-xl py-2 text-center cursor-pointer">
+                Escolher foto
+                <input type="file" accept="image/*" className="hidden" onChange={onPickBackgroundImage} />
+              </label>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <button onClick={() => setSkillFocus('calistenia')} className={`rounded-xl py-2 ${profile?.active_skill_focus === 'calistenia' ? 'fl-btn-primary' : 'fl-btn-secondary'}`}>Foco Calistenia</button>
+              <button onClick={() => setSkillFocus('yoga')} className={`rounded-xl py-2 ${profile?.active_skill_focus === 'yoga' ? 'fl-btn-primary' : 'fl-btn-secondary'}`}>Foco Yoga</button>
+            </div>
+            {bgPreview && <img src={bgPreview} alt="Prévia do fundo" className="w-full h-28 object-cover rounded-xl border border-gray-200" />}
+            {customizationSaving && <p className="text-xs text-gray-500">Salvando...</p>}
+          </div>
+        </div>
+      )}
 
       <BottomNav active="profile" />
     </div>

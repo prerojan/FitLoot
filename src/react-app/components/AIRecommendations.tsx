@@ -1,13 +1,8 @@
-// ====================================
-// src/react-app/components/AIRecommendations.tsx
-// Componente de Recomendações com IA (use no Dashboard)
-// ====================================
-
 import { useState, useEffect } from "react";
 import { Sparkles, TrendingUp, Target, Lightbulb, Loader2 } from "lucide-react";
 import { api } from "@/react-app/utils/api";
 
-interface Recommendations {
+type Recommendations = {
   next_skill_recommendation: {
     name: string;
     reason: string;
@@ -21,6 +16,51 @@ interface Recommendations {
     reason: string;
   };
   motivation_message: string;
+};
+
+function parseRecommendations(raw: unknown): Recommendations | null {
+  if (!raw || typeof raw !== "object") return null;
+  const data = raw as Record<string, unknown>;
+
+  const nextSkill = (data.next_skill_recommendation ?? {}) as Record<string, unknown>;
+  const weakAttribute = (data.weak_attribute ?? {}) as Record<string, unknown>;
+  const trainingFocus = (data.training_focus ?? {}) as Record<string, unknown>;
+
+  const parsed: Recommendations = {
+    next_skill_recommendation: {
+      name: typeof nextSkill.name === "string" && nextSkill.name.trim() ? nextSkill.name : "Sugestão indisponível",
+      reason:
+        typeof nextSkill.reason === "string" && nextSkill.reason.trim()
+          ? nextSkill.reason
+          : "A IA não retornou justificativa para a próxima skill.",
+    },
+    weak_attribute: {
+      name:
+        typeof weakAttribute.name === "string" && weakAttribute.name.trim()
+          ? weakAttribute.name
+          : "Atributo não identificado",
+      suggestion:
+        typeof weakAttribute.suggestion === "string" && weakAttribute.suggestion.trim()
+          ? weakAttribute.suggestion
+          : "Sem sugestão detalhada no momento.",
+    },
+    training_focus: {
+      type:
+        typeof trainingFocus.type === "string" && trainingFocus.type.trim()
+          ? trainingFocus.type
+          : "Foco geral",
+      reason:
+        typeof trainingFocus.reason === "string" && trainingFocus.reason.trim()
+          ? trainingFocus.reason
+          : "Sem detalhes adicionais fornecidos.",
+    },
+    motivation_message:
+      typeof data.motivation_message === "string" && data.motivation_message.trim()
+        ? data.motivation_message
+        : "Continue consistente: pequenos passos diários geram grandes resultados.",
+  };
+
+  return parsed;
 }
 
 export default function AIRecommendations() {
@@ -43,10 +83,14 @@ export default function AIRecommendations() {
         throw new Error("Failed to load recommendations");
       }
 
-      const data = await response.json();
-      setRecommendations(data.recommendations);
-    } catch (err) {
-      console.error("Error loading recommendations:", err);
+      const data = (await response.json()) as { recommendations?: unknown };
+      const parsed = parseRecommendations(data.recommendations);
+      if (!parsed) {
+        throw new Error("Invalid recommendations payload");
+      }
+
+      setRecommendations(parsed);
+    } catch {
       setError("Não foi possível carregar as recomendações");
     } finally {
       setLoading(false);
@@ -87,7 +131,6 @@ export default function AIRecommendations() {
         <h2 className="fl-title-card">Recomendações IA</h2>
       </div>
 
-      {/* Motivation Message */}
       <div className="bg-gradient-to-r from-purple-500 to-pink-500 rounded-2xl p-4 text-white shadow-lg">
         <div className="flex items-start gap-3">
           <Sparkles className="w-5 h-5 mt-1 flex-shrink-0" />
@@ -95,7 +138,6 @@ export default function AIRecommendations() {
         </div>
       </div>
 
-      {/* Next Skill */}
       <div className="fl-card p-4 shadow-md">
         <div className="flex items-start gap-3">
           <div className="bg-emerald-100 p-2 rounded-lg">
@@ -103,17 +145,12 @@ export default function AIRecommendations() {
           </div>
           <div className="flex-1">
             <h3 className="font-bold text-gray-900 mb-1">Próxima Skill Recomendada</h3>
-            <p className="text-emerald-600 font-medium text-sm mb-2">
-              {recommendations.next_skill_recommendation.name}
-            </p>
-            <p className="text-gray-600 text-xs">
-              {recommendations.next_skill_recommendation.reason}
-            </p>
+            <p className="text-emerald-600 font-medium text-sm mb-2">{recommendations.next_skill_recommendation.name}</p>
+            <p className="text-gray-600 text-xs">{recommendations.next_skill_recommendation.reason}</p>
           </div>
         </div>
       </div>
 
-      {/* Weak Attribute */}
       <div className="fl-card p-4 shadow-md">
         <div className="flex items-start gap-3">
           <div className="bg-orange-100 p-2 rounded-lg">
@@ -121,17 +158,12 @@ export default function AIRecommendations() {
           </div>
           <div className="flex-1">
             <h3 className="font-bold text-gray-900 mb-1">Área para Melhorar</h3>
-            <p className="text-orange-600 font-medium text-sm mb-2">
-              {recommendations.weak_attribute.name}
-            </p>
-            <p className="text-gray-600 text-xs">
-              {recommendations.weak_attribute.suggestion}
-            </p>
+            <p className="text-orange-600 font-medium text-sm mb-2">{recommendations.weak_attribute.name}</p>
+            <p className="text-gray-600 text-xs">{recommendations.weak_attribute.suggestion}</p>
           </div>
         </div>
       </div>
 
-      {/* Training Focus */}
       <div className="fl-card p-4 shadow-md">
         <div className="flex items-start gap-3">
           <div className="bg-blue-100 p-2 rounded-lg">
@@ -139,17 +171,12 @@ export default function AIRecommendations() {
           </div>
           <div className="flex-1">
             <h3 className="font-bold text-gray-900 mb-1">Foco do Treino</h3>
-            <p className="text-blue-600 font-medium text-sm mb-2">
-              {recommendations.training_focus.type}
-            </p>
-            <p className="text-gray-600 text-xs">
-              {recommendations.training_focus.reason}
-            </p>
+            <p className="text-blue-600 font-medium text-sm mb-2">{recommendations.training_focus.type}</p>
+            <p className="text-gray-600 text-xs">{recommendations.training_focus.reason}</p>
           </div>
         </div>
       </div>
 
-      {/* Refresh Button */}
       <button
         onClick={loadRecommendations}
         className="w-full px-4 py-3 bg-gradient-to-r from-emerald-500 to-teal-600 text-white rounded-xl font-medium shadow-lg hover:shadow-xl transition-shadow"

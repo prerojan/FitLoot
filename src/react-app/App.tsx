@@ -1,39 +1,33 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router";
-import { useState, useEffect, createContext, useContext } from "react";
+import { useState, useEffect, createContext, useContext, lazy, Suspense } from "react";
+import PageLoader from "@/react-app/components/PageLoader";
+import { ROUTE_PATHS, AUTHENTICATED_HINT_KEY } from "@/react-app/constants/auth";
+import { useAuthBootstrap } from "@/react-app/hooks/useAuthBootstrap";
 import HomePage from "@/react-app/pages/Home";
-import Onboarding from "@/react-app/pages/Onboarding";
-import Dashboard from "@/react-app/pages/Dashboard";
-import Profile from "@/react-app/pages/Profile";
-import Shop from "@/react-app/pages/Shop";
-import Ranking from "@/react-app/pages/Ranking";
 import LandingPage from "@/react-app/pages/Landing";
-import Friends from "@/react-app/pages/Friends";
-import MiniGames from "@/react-app/pages/MiniGames";
-import AIChat from "@/react-app/pages/AIChat";
-import FoodAnalysis from "@/react-app/pages/FoodAnalysis";
-import { api } from "@/react-app/utils/api";
+import Onboarding from "@/react-app/pages/Onboarding";
+import { prefetchCoreRoutes, resolveAuthenticatedStartRoute } from "@/react-app/services/authService";
+import type { AuthContextType, User } from "@/react-app/types/auth";
 
-
-interface User {
-  id: string;
-  email: string;
-  name: string;
-  avatar_url?: string;
-  onboarding_completed: number;
-}
-
-interface AuthContextType {
-  user: User | null;
-  loading: boolean;
-  checkAuth: () => Promise<void>;
-  logout: () => void;
-}
+const Dashboard = lazy(() => import("@/react-app/pages/Dashboard"));
+const Profile = lazy(() => import("@/react-app/pages/Profile"));
+const Shop = lazy(() => import("@/react-app/pages/Shop"));
+const Ranking = lazy(() => import("@/react-app/pages/Ranking"));
+const Friends = lazy(() => import("@/react-app/pages/Friends"));
+const MiniGames = lazy(() => import("@/react-app/pages/MiniGames"));
+const AIChat = lazy(() => import("@/react-app/pages/AIChat"));
+const FoodAnalysis = lazy(() => import("@/react-app/pages/FoodAnalysis"));
+const NotFoundPage = lazy(() => import("@/react-app/pages/NotFound"));
 
 const AuthContext = createContext<AuthContextType>({
   user: null,
   loading: true,
-  checkAuth: async () => { },
-  logout: () => { },
+  checkAuth: async () => {
+    return undefined;
+  },
+  logout: () => {
+    return undefined;
+  },
 });
 
 export const useAuth = () => useContext(AuthContext);
@@ -41,22 +35,9 @@ export const useAuth = () => useContext(AuthContext);
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 flex items-center justify-center">
-        <div className="text-emerald-600 text-xl">Carregando...</div>
-      </div>
-    );
-  }
-
-  if (!user) {
-    return <Navigate to="/app" replace />;
-  }
-
-  if (user.onboarding_completed !== 1) {
-    return <Navigate to="/onboarding" replace />;
-  }
-
+  if (loading) return <PageLoader />;
+  if (!user) return <Navigate to={ROUTE_PATHS.app} replace />;
+  if (user.onboarding_completed !== 1) return <Navigate to={ROUTE_PATHS.onboarding} replace />;
   return <>{children}</>;
 }
 
@@ -64,67 +45,49 @@ export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const checkAuth = async () => {
-    try {
-      const response = await api('/api/users/me');
-
-      if (response.ok) {
-        const userData = await response.json();
-        setUser(userData);
-      } else {
-        setUser(null);
-      }
-    } catch (error) {
-      console.error('Auth check failed:', error);
-      setUser(null);
-    } finally {
-      setLoading(false);
-    }
-  };
+  const checkAuth = useAuthBootstrap({ setUser, setLoading });
 
   const logout = () => {
+    localStorage.removeItem(AUTHENTICATED_HINT_KEY);
     setUser(null);
   };
 
   useEffect(() => {
-    checkAuth();
+    void checkAuth();
+  }, [checkAuth]);
+
+  useEffect(() => {
+    prefetchCoreRoutes();
   }, []);
+
+  const appRouteElement = loading ? (
+    <PageLoader />
+  ) : user ? (
+    <Navigate to={resolveAuthenticatedStartRoute(user)} replace />
+  ) : (
+    <HomePage />
+  );
 
   return (
     <AuthContext.Provider value={{ user, loading, checkAuth, logout }}>
       <Router>
-        <Routes>
-          {/* Landing page pública */}
-          <Route path="/" element={<LandingPage />} />
-
-          {/* Página de login: só redireciona quando loading terminou */}
-          <Route path="/app" element={
-            loading
-              ? (
-                <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 flex items-center justify-center">
-                  <div className="text-emerald-600 text-xl">Carregando...</div>
-                </div>
-              )
-              : user
-                ? <Navigate to={user.onboarding_completed === 1 ? "/home" : "/onboarding"} replace />
-                : <HomePage />
-          } />
-
-          {/* Rotas protegidas */}
-          <Route path="/home" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
-          <Route path="/onboarding" element={<Onboarding />} />
-          <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
-          <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
-          <Route path="/shop" element={<ProtectedRoute><Shop /></ProtectedRoute>} />
-          <Route path="/ranking" element={<ProtectedRoute><Ranking /></ProtectedRoute>} />
-          <Route path="/friends" element={<ProtectedRoute><Friends /></ProtectedRoute>} />
-          <Route path="/minigames" element={<ProtectedRoute><MiniGames /></ProtectedRoute>} />
-          <Route path="/ai-chat" element={<ProtectedRoute><AIChat /></ProtectedRoute>} />
-          <Route path="/food-analysis" element={<ProtectedRoute><FoodAnalysis /></ProtectedRoute>} />
-
-          {/* Fallback */}
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+        <Suspense fallback={<PageLoader />}>
+          <Routes>
+            <Route path={ROUTE_PATHS.landing} element={<LandingPage />} />
+            <Route path={ROUTE_PATHS.app} element={appRouteElement} />
+            <Route path={ROUTE_PATHS.home} element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+            <Route path={ROUTE_PATHS.onboarding} element={<Onboarding />} />
+            <Route path={ROUTE_PATHS.dashboard} element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+            <Route path={ROUTE_PATHS.profile} element={<ProtectedRoute><Profile /></ProtectedRoute>} />
+            <Route path={ROUTE_PATHS.shop} element={<ProtectedRoute><Shop /></ProtectedRoute>} />
+            <Route path={ROUTE_PATHS.ranking} element={<ProtectedRoute><Ranking /></ProtectedRoute>} />
+            <Route path={ROUTE_PATHS.friends} element={<ProtectedRoute><Friends /></ProtectedRoute>} />
+            <Route path={ROUTE_PATHS.minigames} element={<ProtectedRoute><MiniGames /></ProtectedRoute>} />
+            <Route path={ROUTE_PATHS.aiChat} element={<ProtectedRoute><AIChat /></ProtectedRoute>} />
+            <Route path={ROUTE_PATHS.foodAnalysis} element={<ProtectedRoute><FoodAnalysis /></ProtectedRoute>} />
+            <Route path={ROUTE_PATHS.wildcard} element={<NotFoundPage />} />
+          </Routes>
+        </Suspense>
       </Router>
     </AuthContext.Provider>
   );

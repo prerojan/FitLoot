@@ -15,6 +15,13 @@ export const UserProfileSchema = z.object({
   custom_color: z.string().nullable(),
   custom_font: z.string().nullable(),
   custom_border: z.string().nullable(),
+  active_skill_focus: z.string().nullable().optional(),
+  custom_primary_color: z.string().nullable().optional(),
+  custom_secondary_color: z.string().nullable().optional(),
+  custom_background_type: z.string().nullable().optional(),
+  custom_background_value: z.string().nullable().optional(),
+  custom_title_id: z.number().nullable().optional(),
+  showcased_achievements: z.string().nullable().optional(),
   created_at: z.string(),
   updated_at: z.string(),
 });
@@ -104,6 +111,7 @@ export const MissionSchema = z.object({
   is_completed: z.number(),
   completed_at: z.string().nullable(),
   verified_by_sensor: z.number(),
+  status: z.string().optional(),
   created_at: z.string(),
   updated_at: z.string(),
 });
@@ -119,6 +127,11 @@ export const AchievementSchema = z.object({
   icon: z.string().nullable(),
   requirement_type: z.string(),
   requirement_value: z.number().nullable(),
+  category: z.string().optional(),
+  color: z.string().optional(),
+  secret: z.number().optional(),
+  condition: z.string().nullable().optional(),
+  reference: z.string().nullable().optional(),
   created_at: z.string(),
   updated_at: z.string(),
 });
@@ -132,6 +145,9 @@ export const TitleSchema = z.object({
   rarity: z.string(),
   requirement_type: z.string(),
   requirement_value: z.number().nullable(),
+  description: z.string().nullable().optional(),
+  reference: z.string().nullable().optional(),
+  unlock_condition: z.string().nullable().optional(),
   created_at: z.string(),
   updated_at: z.string(),
 });
@@ -176,11 +192,14 @@ export type SkillWithProgress = Skill & {
 export type AchievementWithUnlock = Achievement & {
   unlocked?: number;
   unlocked_at?: string;
+  progress_current?: number;
+  progress_required?: number;
 };
 
 export type TitleWithUnlock = Title & {
   unlocked?: number;
   is_active?: number;
+  is_equipped?: number;
 };
 
 export type RankingPlayer = {
@@ -265,6 +284,7 @@ export const AiChatRequestSchema = z.object({
   message: z.string().min(1),
   history: z.array(z.object({ role: z.string(), content: z.string() })).optional(),
   mode: z.enum(["suporte", "motivacional", "tecnico"]).optional(),
+  session_count: z.number().min(1).optional(),
 });
 export type AiChatRequest = z.infer<typeof AiChatRequestSchema>;
 
@@ -272,7 +292,13 @@ export type AiChatRequest = z.infer<typeof AiChatRequestSchema>;
 export const AiAnalyzeFoodRequestSchema = z.object({
   food_description: z.string().optional(),
   image_base64: z.string().optional(),
-}).refine((data) => data.food_description !== undefined || data.image_base64 !== undefined, {
+  identified_items: z.array(z.object({
+    food_name: z.string().min(1),
+    portion_description: z.string().optional(),
+    portion_multiplier: z.number().positive().optional(),
+  })).optional(),
+  ocr_text: z.string().optional(),
+}).refine((data) => data.food_description !== undefined || data.image_base64 !== undefined || (data.identified_items?.length ?? 0) > 0, {
   message: "Food description or image required",
 });
 export type AiAnalyzeFoodRequest = z.infer<typeof AiAnalyzeFoodRequestSchema>;

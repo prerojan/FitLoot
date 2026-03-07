@@ -17,7 +17,7 @@ interface GeneratedMission {
   difficulty: string;
 }
 
-export default function AIMissionGenerator({ onMissionsGenerated }: { onMissionsGenerated?: () => void }) {
+export default function AIMissionGenerator({ onMissionsGenerated, conditioning }: { onMissionsGenerated?: () => void; conditioning?: string }) {
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -31,13 +31,13 @@ export default function AIMissionGenerator({ onMissionsGenerated }: { onMissions
 
       const response = await api("/api/ai/generate-missions", {
         method: "POST",
+        body: JSON.stringify({ conditioning }),
       });
 
-      if (!response.ok) {
-        throw new Error("Failed to generate missions");
-      }
-
       const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data?.error || "Failed to generate missions");
+      }
       setGeneratedMissions(data.missions);
       setSuccess(true);
 
