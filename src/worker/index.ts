@@ -113,6 +113,9 @@ async function authMiddleware(
     onboarding_completed: Number(session.onboarding_completed) === 1 ? 1 : 0,
   });
 
+  await ensureUserCounterRow(c.env.fitloot_db, session.user_id as string);
+  await expirePendingMissionsAndUpdateStreak(c.env.fitloot_db, session.user_id as string);
+
   await next();
 }
 
@@ -187,6 +190,12 @@ const coreSkillSeeds: SkillSeed[] = [
   { name: "Pistol Squat", category: "calistenia", difficulty: "calistenia", tier: "calistenico", requiredLevel: 9, description: "Agachamento unilateral", unlockMessage: "Pistol Squat desbloqueado.", prerequisites: ["Agachamento"], attributeRequirements: { vitality: 28 } },
   { name: "Dragon Flag", category: "calistenia", difficulty: "calistenia", tier: "calistenico", requiredLevel: 13, description: "Core avançado", unlockMessage: "Dragon Flag desbloqueada.", prerequisites: ["Abdominal"], attributeRequirements: { strength: 34, focus: 24 } },
   { name: "L-Sit", category: "calistenia", difficulty: "calistenia", tier: "calistenico", requiredLevel: 8, description: "Sustentação em L", unlockMessage: "L-Sit desbloqueado.", prerequisites: ["Prancha"], attributeRequirements: { strength: 24, focus: 18 } },
+  { name: "Crow Pose", category: "yoga", difficulty: "calistenia", tier: "calistenico", requiredLevel: 6, description: "Equilíbrio em braços", unlockMessage: "Crow Pose desbloqueada.", attributeRequirements: { focus: 18, dexterity: 18 } },
+  { name: "Headstand", category: "yoga", difficulty: "calistenia", tier: "calistenico", requiredLevel: 8, description: "Invertida na cabeça", unlockMessage: "Headstand desbloqueada.", attributeRequirements: { strength: 22, focus: 22 } },
+  { name: "Wheel Pose", category: "yoga", difficulty: "calistenia", tier: "calistenico", requiredLevel: 9, description: "Ponte avançada", unlockMessage: "Wheel Pose desbloqueada.", attributeRequirements: { vitality: 20 } },
+  { name: "Firefly Pose", category: "yoga", difficulty: "calistenia", tier: "calistenico", requiredLevel: 11, description: "Equilíbrio avançado", unlockMessage: "Firefly Pose desbloqueada.", attributeRequirements: { strength: 28, focus: 22 } },
+  { name: "Eight Angle Pose", category: "yoga", difficulty: "calistenia", tier: "calistenico", requiredLevel: 12, description: "Torção com braços", unlockMessage: "Eight Angle Pose desbloqueada.", attributeRequirements: { dexterity: 30, focus: 24 } },
+  { name: "Scorpion Pose", category: "yoga", difficulty: "calistenia", tier: "calistenico", requiredLevel: 15, description: "Invertida avançada", unlockMessage: "Scorpion Pose desbloqueada.", attributeRequirements: { strength: 35, dexterity: 32 } },
 ];
 
 const stageProgressionSeed: SkillStageSeed[] = [
@@ -199,6 +208,12 @@ const stageProgressionSeed: SkillStageSeed[] = [
   ["Pistol Squat", ["Box Pistol", "Assisted Pistol", "Counterbalance Pistol", "Slow Eccentric Pistol", "Partial ROM Pistol", "Pistol Squat completo"]],
   ["Dragon Flag", ["Hollow Hold", "Reverse Crunch", "Dragon Flag Negativa", "Half Dragon Flag", "Strict Dragon Flag", "Dragon Flag completa"]],
   ["L-Sit", ["Seated Compression", "Tuck Sit", "One Leg L-Sit", "Alternating L-Sit", "V-Sit Prep", "L-Sit completo"]],
+  ["Crow Pose", ["Core Engagement Basics", "Wrist Strengthening", "Squat Hold Balance", "Tripod Head Balance", "Crow Pose completo"]],
+  ["Headstand", ["Neck and Shoulder Strengthening", "Dolphin Pose", "Supported Headstand (wall)", "Headstand Balance", "Freestanding Headstand"]],
+  ["Wheel Pose", ["Bridge Prep", "Thoracic Mobility", "Wheel Assist", "Wheel Hold", "Wheel Pose completa"]],
+  ["Firefly Pose", ["Hamstring Prep", "Arm Balance Prep", "Tuck Firefly", "Firefly Hold", "Firefly Pose completa"]],
+  ["Eight Angle Pose", ["Twist Prep", "Leg Lock Drill", "Eight Angle Assisted", "Eight Angle Hold", "Eight Angle Pose completa"]],
+  ["Scorpion Pose", ["Forearm Stand Prep", "Backbend Mobility", "Wall Scorpion", "Scorpion Balance", "Scorpion Pose completa"]],
 ]
   .flatMap(([skillName, stages], idxSkill) => (stages as string[]).map((name, idx) => ({
     skillName: String(skillName),
@@ -261,6 +276,55 @@ const achievementSeeds = [
   { name: "Fantasma", description: "Condição secreta", category: "secreta", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "open_gap6_complete_day7", icon: "👻", reference: "" },
   { name: "Conversa de Louco", description: "Condição secreta", category: "secreta", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "chat_session_100", icon: "🤯", reference: "" },
   { name: "Glitch", description: "Condição secreta", category: "secreta", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "report_bug_chat", icon: "🐞", reference: "" },
+  { name: "Aquecendo o Motor", description: "3 dias seguidos", category: "streak", rarity: "Comum", color: "#D1D5DB", secret: 0, condition: "streak>=3", icon: "🔥", reference: "" },
+  { name: "Semana Completa", description: "7 dias seguidos", category: "streak", rarity: "Comum", color: "#D1D5DB", secret: 0, condition: "streak>=7", icon: "📆", reference: "" },
+  { name: "Ritmo Certo", description: "14 dias seguidos", category: "streak", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "streak>=14", icon: "🟢", reference: "" },
+  { name: "Sem Parar", description: "21 dias seguidos", category: "streak", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "streak>=21", icon: "🏃", reference: "" },
+  { name: "Mês de Ferro", description: "30 dias seguidos", category: "streak", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "streak>=30", icon: "💪", reference: "" },
+  { name: "Disciplina Absurda", description: "60 dias seguidos", category: "streak", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "streak>=60", icon: "🧱", reference: "" },
+  { name: "Inabalável", description: "100 dias seguidos", category: "streak", rarity: "Mítico", color: "#EF4444", secret: 0, condition: "streak>=100", icon: "🛡️", reference: "" },
+  { name: "Um Ano de Dor", description: "365 dias seguidos", category: "streak", rarity: "Mítico", color: "#EF4444", secret: 0, condition: "streak>=365", icon: "📛", reference: "" },
+  { name: "Acontece", description: "Quebrar streak pela primeira vez", category: "streak_break", rarity: "Comum", color: "#D1D5DB", secret: 0, condition: "streak_break>=1", icon: "💥", reference: "" },
+  { name: "Voltar é Difícil", description: "Quebrar streak de 30+", category: "streak_break", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "streak_break>=30", icon: "↩️", reference: "" },
+  { name: "Tudo Ruiu", description: "Quebrar streak de 100+", category: "streak_break", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "streak_break>=100", icon: "🌪️", reference: "" },
+  { name: "A Queda Épica", description: "Quebrar streak de 365+", category: "streak_break", rarity: "Mítico", color: "#EF4444", secret: 0, condition: "streak_break>=365", icon: "🕳️", reference: "" },
+  { name: "Tudo pela Streak", description: "Manter streak com 1 missão em 7 dias", category: "streak_minimal", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "minimal_streak>=7", icon: "1️⃣", reference: "" },
+  { name: "O Minimalista", description: "Manter streak com 1 missão em 30 dias", category: "streak_minimal", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "minimal_streak>=30", icon: "🧩", reference: "" },
+  { name: "Engenharia de Streak", description: "Manter streak com 1 missão em 100 dias", category: "streak_minimal", rarity: "Mítico", color: "#EF4444", secret: 0, condition: "minimal_streak>=100", icon: "⚙️", reference: "" },
+  { name: "A Arte da Preguiça", description: "Condição secreta", category: "streak_minimal", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "single_mission_30", icon: "😴", reference: "" },
+  { name: "De Volta ao Jogo", description: "Reconstruir para 7 dias", category: "streak_rebuild", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "rebuild>=7", icon: "🔁", reference: "" },
+  { name: "Fênix", description: "Quebrar 30+ e reconstruir 30+", category: "streak_rebuild", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "rebuild_from30", icon: "🦅", reference: "" },
+  { name: "Lenda Resiliente", description: "Quebrar 100+ e reconstruir 100+", category: "streak_rebuild", rarity: "Mítico", color: "#EF4444", secret: 0, condition: "rebuild_from100", icon: "🧬", reference: "" },
+  { name: "Por um Fio", description: "Últimos 5 minutos 5x", category: "timing", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "timing_last5m>=5", icon: "⏳", reference: "" },
+  { name: "Especialista em Timing", description: "Últimos 5 minutos 20x", category: "timing", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "timing_last5m>=20", icon: "🎯", reference: "" },
+  { name: "Missão às 23:59", description: "Condição secreta", category: "timing", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "timing_2355_streak>=7", icon: "🕛", reference: "" },
+  { name: "404 Not Found", description: "Condição secreta", category: "secreta", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "route_not_found", icon: "❓", reference: "" },
+  { name: "Hoje Não", description: "Falhar 1 missão da meta", category: "meta_fail", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "goal_fail>=1", icon: "🙃", reference: "" },
+  { name: "Amanhã Eu Começo", description: "Falhar 3 missões da meta em dias diferentes", category: "meta_fail", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "goal_fail_days>=3", icon: "📆", reference: "" },
+  { name: "Meta? Que Meta?", description: "Falhar 5 missões da meta", category: "meta_fail", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "goal_fail>=5", icon: "🎯", reference: "" },
+  { name: "Plano de Mentira", description: "Falhar 15 missões da meta", category: "meta_fail", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "goal_fail>=15", icon: "🧾", reference: "" },
+  { name: "Autobiotagem", description: "Falhar 30 missões da meta", category: "meta_fail", rarity: "Mítico", color: "#EF4444", secret: 0, condition: "goal_fail>=30", icon: "🧨", reference: "" },
+  { name: "Speedrun do Fracasso", description: "Condição secreta", category: "meta_fail", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "goal_fail_7d", icon: "🏴", reference: "" },
+  { name: "No Caminho Certo", description: "7 missões da meta concluídas", category: "meta_done", rarity: "Comum", color: "#D1D5DB", secret: 0, condition: "goal_done>=7", icon: "➡️", reference: "" },
+  { name: "Focado", description: "30 missões da meta concluídas", category: "meta_done", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "goal_done>=30", icon: "🎯", reference: "" },
+  { name: "Sem Desvios", description: "7 dias sem falhar missão da meta", category: "meta_done", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "goal_nofail>=7", icon: "🧭", reference: "" },
+  { name: "Comprometido", description: "100 missões da meta concluídas", category: "meta_done", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "goal_done>=100", icon: "📌", reference: "" },
+  { name: "Olho no Alvo", description: "30 dias sem falhar missão da meta", category: "meta_done", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "goal_nofail>=30", icon: "👁️", reference: "" },
+  { name: "Obsessão Saudável", description: "365 missões da meta", category: "meta_done", rarity: "Mítico", color: "#EF4444", secret: 0, condition: "goal_done>=365", icon: "🧠", reference: "" },
+  { name: "Inabalável no Propósito", description: "100 dias sem falhar missão da meta", category: "meta_done", rarity: "Mítico", color: "#EF4444", secret: 0, condition: "goal_nofail>=100", icon: "🛡️", reference: "" },
+  { name: "A Meta era Essa?", description: "Condição secreta", category: "meta_change", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "goal_return_30", icon: "🔄", reference: "" },
+  { name: "Primeiro Resultado", description: "10% da meta", category: "meta_progress", rarity: "Comum", color: "#D1D5DB", secret: 0, condition: "goal_progress>=10", icon: "🔟", reference: "" },
+  { name: "Meio Caminho", description: "50% da meta", category: "meta_progress", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "goal_progress>=50", icon: "5️⃣0️⃣", reference: "" },
+  { name: "Quase Lá", description: "90% da meta", category: "meta_progress", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "goal_progress>=90", icon: "9️⃣0️⃣", reference: "" },
+  { name: "Meta Batida", description: "100% da meta", category: "meta_progress", rarity: "Mítico", color: "#EF4444", secret: 0, condition: "goal_progress>=100", icon: "💯", reference: "" },
+  { name: "Além da Meta", description: "120% da meta", category: "meta_progress", rarity: "Mítico", color: "#EF4444", secret: 0, condition: "goal_progress>=120", icon: "🚀", reference: "" },
+  { name: "Overachiever", description: "Condição secreta", category: "meta_progress", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "goal_half_time", icon: "⚡", reference: "" },
+  { name: "Novo Capítulo", description: "Primeira troca de meta", category: "meta_change", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "goal_change>=1", icon: "📖", reference: "" },
+  { name: "Indefinido", description: "3 trocas de meta", category: "meta_change", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "goal_change>=3", icon: "🧭", reference: "" },
+  { name: "A Jornada é o Destino", description: "Condição secreta", category: "meta_change", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "all_goals_done", icon: "🗺️", reference: "" },
+  { name: "Dupla Ameaça", description: "Streak 30 + meta perfeita", category: "meta_combo", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "combo30", icon: "⚔️", reference: "" },
+  { name: "Máquina de Resultados", description: "Streak 100 + meta perfeita", category: "meta_combo", rarity: "Mítico", color: "#EF4444", secret: 0, condition: "combo100", icon: "🏭", reference: "" },
+  { name: "Perfeição", description: "Condição secreta", category: "meta_combo", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "combo30_all", icon: "✨", reference: "" },
 ];
 
 function conditioningOrder(level: ConditioningLevel): number {
@@ -309,6 +373,59 @@ async function ensureGamificationCatalog(db: D1Database) {
 
 async function ensureUserCounterRow(db: D1Database, userId: string) {
   await db.prepare(`INSERT OR IGNORE INTO user_event_counters (user_id, updated_at) VALUES (?, datetime('now'))`).bind(userId).run();
+}
+
+async function expirePendingMissionsAndUpdateStreak(db: D1Database, userId: string) {
+  const now = new Date();
+  const today = now.toISOString().split('T')[0];
+  const yesterday = new Date(now.getTime() - 86400000).toISOString().split('T')[0];
+
+  let expired: { results: Array<{ id: number }> } = { results: [] };
+  try {
+    expired = await db.prepare(
+      `SELECT id FROM missions WHERE user_id = ? AND is_completed = 0 AND COALESCE(status,'pending') = 'pending' AND deadline IS NOT NULL AND date(deadline) < date('now')`
+    ).bind(userId).all<{ id: number }>();
+  } catch {
+    // status column may not exist before latest migration
+    return;
+  }
+
+  for (const mission of expired.results) {
+    await db.prepare("UPDATE missions SET status = 'failed', updated_at = datetime('now') WHERE id = ?").bind(mission.id).run();
+    await onMissionFailed(db, userId, mission.id);
+  }
+
+  const progression = await db.prepare("SELECT current_streak, best_streak, last_activity_date FROM user_progression WHERE user_id = ?").bind(userId).first<{ current_streak: number; best_streak: number; last_activity_date: string | null }>();
+
+  const completedToday = await db.prepare(
+    `SELECT COUNT(*) as c FROM missions WHERE user_id = ? AND is_completed = 1 AND date(completed_at) = ?`
+  ).bind(userId, today).first<{ c: number }>();
+
+  const completedYesterday = await db.prepare(
+    `SELECT COUNT(*) as c, MAX(completed_at) as last_time FROM missions WHERE user_id = ? AND is_completed = 1 AND date(completed_at) = ?`
+  ).bind(userId, yesterday).first<{ c: number; last_time: string | null }>();
+
+  const currentStreak = Number(progression?.current_streak ?? 0);
+  const lastActivity = progression?.last_activity_date;
+
+  if (lastActivity && lastActivity < yesterday && currentStreak > 0) {
+    await onStreakBroken(db, userId, currentStreak);
+    await db.prepare("UPDATE user_progression SET current_streak = 0, updated_at = datetime('now') WHERE user_id = ?").bind(userId).run();
+  }
+
+  if (Number(completedYesterday?.c ?? 0) > 0 && lastActivity !== yesterday) {
+    const previousBest = Number(progression?.best_streak ?? 0);
+    const rebuilt = currentStreak + 1;
+    await db.prepare(`UPDATE user_progression SET current_streak = ?, best_streak = MAX(COALESCE(best_streak,0), ?), last_activity_date = ?, updated_at = datetime('now') WHERE user_id = ?`)
+      .bind(rebuilt, rebuilt, yesterday, userId).run();
+    await onStreakContinued(db, userId, rebuilt, Number(completedYesterday?.c ?? 0), completedYesterday?.last_time ?? undefined);
+    await onStreakRebuilt(db, userId, rebuilt, previousBest);
+  }
+
+  if (Number(completedToday?.c ?? 0) > 0) {
+    const refreshed = await db.prepare("SELECT current_streak FROM user_progression WHERE user_id = ?").bind(userId).first<{ current_streak: number }>();
+    await onStreakContinued(db, userId, Number(refreshed?.current_streak ?? 0), Number(completedToday?.c ?? 0));
+  }
 }
 
 async function logUserEvent(db: D1Database, userId: string, eventType: string, payload: Record<string, unknown>) {
@@ -372,6 +489,199 @@ async function evaluateLevelTitles(db: D1Database, userId: string, level: number
   }
 }
 
+async function onStreakContinued(db: D1Database, userId: string, streakDays: number, missionsCompletedToday: number, lastMissionDate?: string) {
+  await logUserEvent(db, userId, "onStreakContinued", { streakDays, missionsCompletedToday });
+
+  const milestones: Array<[number, string]> = [
+    [3, "Aquecendo o Motor"], [7, "Semana Completa"], [14, "Ritmo Certo"], [21, "Sem Parar"],
+    [30, "Mês de Ferro"], [60, "Disciplina Absurda"], [100, "Inabalável"], [365, "Um Ano de Dor"],
+  ];
+  for (const [value, name] of milestones) {
+    if (streakDays >= value) await unlockAchievementIfNeeded(db, userId, name, streakDays, value);
+  }
+
+  if (missionsCompletedToday === 1) {
+    await db.prepare(`UPDATE user_event_counters
+      SET minimal_streak_days = COALESCE(minimal_streak_days,0)+1,
+          single_mission_days_streak = COALESCE(single_mission_days_streak,0)+1,
+          updated_at = datetime('now')
+      WHERE user_id = ?`).bind(userId).run();
+  } else if (missionsCompletedToday > 1) {
+    await db.prepare(`UPDATE user_event_counters
+      SET single_mission_days_streak = 0,
+          updated_at = datetime('now')
+      WHERE user_id = ?`).bind(userId).run();
+  }
+
+  const counters = await db.prepare(`SELECT minimal_streak_days, single_mission_days_streak, timing_last5m_count, timing_2355_streak FROM user_event_counters WHERE user_id = ?`)
+    .bind(userId).first<{ minimal_streak_days: number; single_mission_days_streak: number; timing_last5m_count: number; timing_2355_streak: number }>();
+  const minimal = Number(counters?.minimal_streak_days ?? 0);
+  const singleStreak = Number(counters?.single_mission_days_streak ?? 0);
+  if (minimal >= 7) await unlockAchievementIfNeeded(db, userId, "Tudo pela Streak", minimal, 7);
+  if (minimal >= 30) await unlockAchievementIfNeeded(db, userId, "O Minimalista", minimal, 30);
+  if (minimal >= 100) await unlockAchievementIfNeeded(db, userId, "Engenharia de Streak", minimal, 100);
+  if (singleStreak >= 30) await unlockAchievementIfNeeded(db, userId, "A Arte da Preguiça", singleStreak, 30);
+
+  if (lastMissionDate) {
+    const d = new Date(lastMissionDate);
+    const h = d.getHours();
+    const m = d.getMinutes();
+    if (h === 23 && m >= 55) {
+      await db.prepare(`UPDATE user_event_counters SET timing_last5m_count = COALESCE(timing_last5m_count,0)+1, timing_2355_streak = COALESCE(timing_2355_streak,0)+1, updated_at=datetime('now') WHERE user_id = ?`)
+        .bind(userId).run();
+      const t = await db.prepare(`SELECT timing_last5m_count, timing_2355_streak FROM user_event_counters WHERE user_id = ?`).bind(userId).first<{ timing_last5m_count: number; timing_2355_streak: number }>();
+      if (Number(t?.timing_last5m_count ?? 0) >= 5) await unlockAchievementIfNeeded(db, userId, "Por um Fio", Number(t?.timing_last5m_count ?? 0), 5);
+      if (Number(t?.timing_last5m_count ?? 0) >= 20) await unlockAchievementIfNeeded(db, userId, "Especialista em Timing", Number(t?.timing_last5m_count ?? 0), 20);
+      if (Number(t?.timing_2355_streak ?? 0) >= 7) await unlockAchievementIfNeeded(db, userId, "Missão às 23:59", Number(t?.timing_2355_streak ?? 0), 7);
+    } else {
+      await db.prepare(`UPDATE user_event_counters SET timing_2355_streak = 0, updated_at=datetime('now') WHERE user_id = ?`).bind(userId).run();
+    }
+  }
+}
+
+async function onStreakBroken(db: D1Database, userId: string, streakDaysBefore: number) {
+  await logUserEvent(db, userId, "onStreakBroken", { streakDaysBefore });
+  await db.prepare(`UPDATE user_event_counters
+    SET streak_loss_count = COALESCE(streak_loss_count,0)+1,
+        last_streak_break_size = ?,
+        single_mission_days_streak = 0,
+        updated_at = datetime('now')
+    WHERE user_id = ?`).bind(streakDaysBefore, userId).run();
+
+  if (streakDaysBefore >= 1) await unlockAchievementIfNeeded(db, userId, "Acontece", streakDaysBefore, 1);
+  if (streakDaysBefore >= 30) await unlockAchievementIfNeeded(db, userId, "Voltar é Difícil", streakDaysBefore, 30);
+  if (streakDaysBefore >= 100) await unlockAchievementIfNeeded(db, userId, "Tudo Ruiu", streakDaysBefore, 100);
+  if (streakDaysBefore >= 365) await unlockAchievementIfNeeded(db, userId, "A Queda Épica", streakDaysBefore, 365);
+}
+
+async function onStreakRebuilt(db: D1Database, userId: string, newStreakDays: number, previousBestStreak: number) {
+  await logUserEvent(db, userId, "onStreakRebuilt", { newStreakDays, previousBestStreak });
+  if (newStreakDays >= 7) await unlockAchievementIfNeeded(db, userId, "De Volta ao Jogo", newStreakDays, 7);
+  if (previousBestStreak >= 30 && newStreakDays >= 30) await unlockAchievementIfNeeded(db, userId, "Fênix", newStreakDays, 30);
+  if (previousBestStreak >= 100 && newStreakDays >= 100) await unlockAchievementIfNeeded(db, userId, "Lenda Resiliente", newStreakDays, 100);
+}
+
+async function onMissionFailed(db: D1Database, userId: string, missionId: number) {
+  await logUserEvent(db, userId, "onMissionFailed", { missionId });
+  await db.prepare(`UPDATE user_event_counters SET missions_failed = COALESCE(missions_failed,0)+1, updated_at=datetime('now') WHERE user_id = ?`).bind(userId).run();
+  await checkMissionRelevance(userId, missionId, db, 'failed');
+}
+
+type GoalMissionRelevance = {
+  isGoalRelevant: boolean;
+  missionGroup: string;
+  missionType: string;
+  userGoal: string;
+};
+
+async function ensureGoalStatsRow(db: D1Database, userId: string, goal: string | null) {
+  await db.prepare(`INSERT OR IGNORE INTO user_goal_stats (user_id, original_goal, current_goal, updated_at) VALUES (?, ?, ?, datetime('now'))`)
+    .bind(userId, goal ?? 'saude_geral', goal ?? 'saude_geral').run();
+}
+
+async function getMissionContext(db: D1Database, missionId: number) {
+  return db.prepare(
+    `SELECT m.id, m.type, m.title, m.description, s.category as skill_category
+      FROM missions m
+      LEFT JOIN skills s ON s.id = m.skill_id
+      WHERE m.id = ?`
+  ).bind(missionId).first<{ id: number; type: string; title: string; description: string | null; skill_category: string | null }>();
+}
+
+function isMissionRelevantToGoal(missionGroup: string, missionType: string, userGoal: string) {
+  const group = missionGroup.toLowerCase();
+  if (userGoal === 'ganhar_massa') return ['peito','costas','pernas','ombro','triceps','biceps'].some((g) => group.includes(g)) || missionType !== 'daily';
+  if (userGoal === 'perder_peso') return ['full','core','cardio','mobilidade'].some((g) => group.includes(g)) || missionType === 'daily';
+  if (userGoal === 'resistencia') return ['core','pernas','cardio'].some((g) => group.includes(g)) || missionType !== 'monthly';
+  if (userGoal === 'calistenia') return ['calistenia','core','yoga'].some((g) => group.includes(g));
+  return true;
+}
+
+async function checkMissionRelevance(userId: string, missionId: number, db: D1Database, mode: 'failed' | 'completed'): Promise<GoalMissionRelevance> {
+  const [mission, profile] = await Promise.all([
+    getMissionContext(db, missionId),
+    db.prepare("SELECT main_goal FROM user_profiles WHERE user_id = ?").bind(userId).first<{ main_goal: string | null }>(),
+  ]);
+
+  const userGoal = profile?.main_goal ?? 'saude_geral';
+  await ensureGoalStatsRow(db, userId, userGoal);
+
+  const missionGroup = String(mission?.skill_category ?? mission?.title ?? mission?.description ?? 'geral');
+  const missionType = String(mission?.type ?? 'daily');
+  const isGoalRelevant = isMissionRelevantToGoal(missionGroup, missionType, userGoal);
+
+  if (!isGoalRelevant) return { isGoalRelevant, missionGroup, missionType, userGoal };
+
+  const today = new Date().toISOString().split('T')[0];
+  const stats = await db.prepare("SELECT * FROM user_goal_stats WHERE user_id = ?").bind(userId).first<Record<string, unknown>>();
+
+  if (mode === 'failed') {
+    const sameDay = String(stats?.goal_fail_last_day ?? '') === today;
+    const failCount = Number(stats?.goal_fail_count ?? 0) + 1;
+    const distinctDays = Number(stats?.goal_fail_distinct_days ?? 0) + (sameDay ? 0 : 1);
+    const consecutiveFailDays = sameDay ? Number(stats?.goal_fail_consecutive_days ?? 0) : Number(stats?.goal_fail_consecutive_days ?? 0) + 1;
+    await db.prepare(`UPDATE user_goal_stats SET goal_fail_count = ?, goal_fail_distinct_days = ?, goal_fail_last_day = ?, goal_fail_consecutive_days = ?, updated_at = datetime('now') WHERE user_id = ?`)
+      .bind(failCount, distinctDays, today, consecutiveFailDays, userId).run();
+    await onGoalMissionFailed(db, userId, failCount, distinctDays, consecutiveFailDays);
+  } else {
+    const sameDay = String(stats?.goal_completed_last_day ?? '') === today;
+    const completedCount = Number(stats?.goal_completed_count ?? 0) + 1;
+    const completedConsecutive = sameDay ? Number(stats?.goal_completed_consecutive_days ?? 0) : Number(stats?.goal_completed_consecutive_days ?? 0) + 1;
+    const noFailStreak = sameDay ? Number(stats?.goal_no_fail_streak_days ?? 0) : Number(stats?.goal_no_fail_streak_days ?? 0) + 1;
+    await db.prepare(`UPDATE user_goal_stats SET goal_completed_count = ?, goal_completed_last_day = ?, goal_completed_consecutive_days = ?, goal_no_fail_streak_days = ?,
+      missions_after_return = CASE WHEN returned_to_original_count > 0 AND current_goal = original_goal THEN COALESCE(missions_after_return,0) + 1 ELSE missions_after_return END,
+      updated_at = datetime('now') WHERE user_id = ?`)
+      .bind(completedCount, today, completedConsecutive, noFailStreak, userId).run();
+    const returnedStats = await db.prepare("SELECT missions_after_return, returned_to_original_count FROM user_goal_stats WHERE user_id = ?").bind(userId).first<{ missions_after_return: number; returned_to_original_count: number }>();
+    if (Number(returnedStats?.returned_to_original_count ?? 0) > 0 && Number(returnedStats?.missions_after_return ?? 0) >= 30) {
+      await unlockAchievementIfNeeded(db, userId, 'A Meta era Essa?', Number(returnedStats?.missions_after_return ?? 0), 30);
+    }
+    await onGoalMissionCompleted(db, userId, completedCount, completedConsecutive, noFailStreak);
+  }
+
+  return { isGoalRelevant, missionGroup, missionType, userGoal };
+}
+
+async function onGoalMissionFailed(db: D1Database, userId: string, failCount: number, distinctDays: number, consecutiveFailDays: number) {
+  await logUserEvent(db, userId, 'onGoalMissionFailed', { failCount, distinctDays, consecutiveFailDays });
+  if (failCount >= 1) await unlockAchievementIfNeeded(db, userId, 'Hoje Não', failCount, 1);
+  if (distinctDays >= 3) await unlockAchievementIfNeeded(db, userId, 'Amanhã Eu Começo', distinctDays, 3);
+  if (failCount >= 5) await unlockAchievementIfNeeded(db, userId, 'Meta? Que Meta?', failCount, 5);
+  if (failCount >= 15) await unlockAchievementIfNeeded(db, userId, 'Plano de Mentira', failCount, 15);
+  if (failCount >= 30) await unlockAchievementIfNeeded(db, userId, 'Autobiotagem', failCount, 30);
+  if (consecutiveFailDays >= 7) await unlockAchievementIfNeeded(db, userId, 'Speedrun do Fracasso', consecutiveFailDays, 7);
+}
+
+async function onGoalMissionCompleted(db: D1Database, userId: string, completedCount: number, consecutiveDays: number, noFailStreak: number) {
+  await logUserEvent(db, userId, 'onGoalMissionCompleted', { completedCount, consecutiveDays, noFailStreak });
+  if (completedCount >= 7) await unlockAchievementIfNeeded(db, userId, 'No Caminho Certo', completedCount, 7);
+  if (completedCount >= 30) await unlockAchievementIfNeeded(db, userId, 'Focado', completedCount, 30);
+  if (completedCount >= 100) await unlockAchievementIfNeeded(db, userId, 'Comprometido', completedCount, 100);
+  if (completedCount >= 365) await unlockAchievementIfNeeded(db, userId, 'Obsessão Saudável', completedCount, 365);
+  if (consecutiveDays >= 7) await unlockAchievementIfNeeded(db, userId, 'Sem Desvios', consecutiveDays, 7);
+  if (consecutiveDays >= 30) await unlockAchievementIfNeeded(db, userId, 'Olho no Alvo', consecutiveDays, 30);
+  if (noFailStreak >= 100) await unlockAchievementIfNeeded(db, userId, 'Inabalável no Propósito', noFailStreak, 100);
+
+  const streak = await db.prepare("SELECT current_streak FROM user_progression WHERE user_id = ?").bind(userId).first<{ current_streak: number }>();
+  if (Number(streak?.current_streak ?? 0) >= 30 && noFailStreak >= 30) await unlockAchievementIfNeeded(db, userId, 'Dupla Ameaça', 30, 30);
+  if (Number(streak?.current_streak ?? 0) >= 100 && noFailStreak >= 100) await unlockAchievementIfNeeded(db, userId, 'Máquina de Resultados', 100, 100);
+}
+
+async function onGoalProgress(db: D1Database, userId: string, progressPercent: number) {
+  await logUserEvent(db, userId, 'onGoalProgress', { progressPercent });
+  if (progressPercent >= 10) await unlockAchievementIfNeeded(db, userId, 'Primeiro Resultado', progressPercent, 10);
+  if (progressPercent >= 50) await unlockAchievementIfNeeded(db, userId, 'Meio Caminho', progressPercent, 50);
+  if (progressPercent >= 90) await unlockAchievementIfNeeded(db, userId, 'Quase Lá', progressPercent, 90);
+  if (progressPercent >= 100) await unlockAchievementIfNeeded(db, userId, 'Meta Batida', progressPercent, 100);
+  if (progressPercent >= 120) await unlockAchievementIfNeeded(db, userId, 'Além da Meta', progressPercent, 120);
+}
+
+async function onGoalChanged(db: D1Database, userId: string, oldGoal: string, newGoal: string, changeCount: number) {
+  await logUserEvent(db, userId, 'onGoalChanged', { oldGoal, newGoal, changeCount });
+  if (changeCount >= 1) await unlockAchievementIfNeeded(db, userId, 'Novo Capítulo', changeCount, 1);
+  if (changeCount >= 3) await unlockAchievementIfNeeded(db, userId, 'Indefinido', changeCount, 3);
+}
+
 async function onMissionComplete(db: D1Database, userId: string, missionId: number) {
   await logUserEvent(db, userId, "onMissionComplete", { missionId });
   await evaluateMissionAchievementsAndTitles(db, userId);
@@ -410,6 +720,18 @@ async function onRankingUpdate(db: D1Database, userId: string, position: number)
   await logUserEvent(db, userId, "onRankingUpdate", { position });
 }
 
+async function onFriendAdded(db: D1Database, userId: string) {
+  await logUserEvent(db, userId, "onFriendAdded", {});
+  const [rankData, friendsCount] = await Promise.all([
+    db.prepare(`SELECT COUNT(*) + 1 as position FROM user_progression WHERE (level > (SELECT level FROM user_progression WHERE user_id = ?) OR (level = (SELECT level FROM user_progression WHERE user_id = ?) AND xp > (SELECT xp FROM user_progression WHERE user_id = ?)))`)
+      .bind(userId, userId, userId).first<{ position: number }>(),
+    db.prepare(`SELECT COUNT(*) as c FROM friendships WHERE user_id = ? OR friend_id = ? OR friend_user_id = ?`).bind(userId, userId, userId).first<{ c: number }>(),
+  ]);
+  if (Number(rankData?.position ?? 999) <= 10 && Number(friendsCount?.c ?? 0) === 0) {
+    await unlockAchievementIfNeeded(db, userId, "Ghost", 1, 1);
+  }
+}
+
 async function onProfileCustomization(db: D1Database, userId: string, customizations: Record<string, unknown>) {
   await logUserEvent(db, userId, "onProfileCustomization", customizations);
 }
@@ -423,6 +745,18 @@ async function onAppOpen(db: D1Database, userId: string, timestamp: string) {
   await db.prepare(`UPDATE user_event_counters SET app_last_open_at = ?, app_open_gap_days = ?, updated_at = datetime('now') WHERE user_id = ?`)
     .bind(timestamp, gapDays, userId).run();
   await logUserEvent(db, userId, "onAppOpen", { gapDays, timestamp });
+
+  const hour = new Date(timestamp).getHours();
+  if (hour >= 2 && hour < 4) {
+    await unlockAchievementIfNeeded(db, userId, "Insônia", 1, 1);
+  }
+
+  if (gapDays >= 6) {
+    const missionToday = await db.prepare(`SELECT COUNT(*) as c FROM missions WHERE user_id = ? AND is_completed = 1 AND date(completed_at) = date('now')`).bind(userId).first<{ c: number }>();
+    if (Number(missionToday?.c ?? 0) >= 1) {
+      await unlockAchievementIfNeeded(db, userId, "Fantasma", Number(gapDays), 7);
+    }
+  }
 }
 
 async function buildInitialTrainingPlan(mainGoal: string | null | undefined, conditioning: ConditioningLevel, equipment: string | null | undefined, injuries: string | null | undefined) {
@@ -709,6 +1043,14 @@ app.post("/api/app/open", authMiddleware, async (c) => {
   return c.json({ success: true });
 });
 
+app.post('/api/events/route-not-found', authMiddleware, async (c) => {
+  const user = c.get('user');
+  if (!user) return c.json({ error: 'Unauthorized' }, 401);
+  await logUserEvent(c.env.fitloot_db, user.id, 'onRouteNotFound', {});
+  await unlockAchievementIfNeeded(c.env.fitloot_db, user.id, '404 Not Found', 1, 1);
+  return c.json({ success: true });
+});
+
 app.patch(
   "/api/users/me",
   authMiddleware,
@@ -798,6 +1140,97 @@ app.get("/api/profile", authMiddleware, async (c) => {
   return c.json(profile);
 });
 
+app.post("/api/profile/customization", authMiddleware, async (c) => {
+  const user = c.get("user");
+  if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+  const body = await c.req.json().catch(() => ({})) as Record<string, unknown>;
+  const customPrimaryColor = typeof body.custom_primary_color === 'string' ? body.custom_primary_color : null;
+  const customSecondaryColor = typeof body.custom_secondary_color === 'string' ? body.custom_secondary_color : null;
+  const customBackgroundType = typeof body.custom_background_type === 'string' ? body.custom_background_type : null;
+  const customBackgroundValue = typeof body.custom_background_value === 'string' ? body.custom_background_value : null;
+  const customFont = typeof body.custom_font === 'string' ? body.custom_font : null;
+  const customTitleId = Number.isFinite(Number(body.custom_title_id)) ? Number(body.custom_title_id) : null;
+  const showcasedAchievements = Array.isArray(body.showcased_achievements) ? JSON.stringify(body.showcased_achievements) : null;
+
+  await c.env.fitloot_db.prepare(
+    `UPDATE user_profiles SET
+      custom_primary_color = COALESCE(?, custom_primary_color),
+      custom_secondary_color = COALESCE(?, custom_secondary_color),
+      custom_background_type = COALESCE(?, custom_background_type),
+      custom_background_value = COALESCE(?, custom_background_value),
+      custom_font = COALESCE(?, custom_font),
+      custom_title_id = COALESCE(?, custom_title_id),
+      showcased_achievements = COALESCE(?, showcased_achievements),
+      updated_at = datetime('now')
+      WHERE user_id = ?`
+  ).bind(customPrimaryColor, customSecondaryColor, customBackgroundType, customBackgroundValue, customFont, customTitleId, showcasedAchievements, user.id).run();
+
+  await onProfileCustomization(c.env.fitloot_db, user.id, {
+    custom_primary_color: customPrimaryColor,
+    custom_secondary_color: customSecondaryColor,
+    custom_background_type: customBackgroundType,
+    custom_background_value: customBackgroundValue,
+    custom_font: customFont,
+    custom_title_id: customTitleId,
+    showcased_achievements: showcasedAchievements,
+  });
+
+  const done = [customPrimaryColor, customSecondaryColor, customBackgroundType, customBackgroundValue, customFont, customTitleId, showcasedAchievements]
+    .every((v) => v !== null && v !== undefined && v !== "");
+  if (done) {
+    await unlockAchievementIfNeeded(c.env.fitloot_db, user.id, "Mestre Artesão", 1, 1);
+  }
+
+  const profile = await c.env.fitloot_db.prepare("SELECT * FROM user_profiles WHERE user_id = ?").bind(user.id).first();
+  return c.json({ success: true, profile });
+});
+
+app.post("/api/profile/skill-focus", authMiddleware, async (c) => {
+  const user = c.get("user");
+  if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+  const body = await c.req.json().catch(() => ({})) as { active_skill_focus?: string };
+  const focus = body.active_skill_focus === 'yoga' ? 'yoga' : 'calistenia';
+  await c.env.fitloot_db.prepare("UPDATE user_profiles SET active_skill_focus = ?, updated_at = datetime('now') WHERE user_id = ?")
+    .bind(focus, user.id).run();
+
+  return c.json({ success: true, active_skill_focus: focus });
+});
+
+app.post("/api/profile/goal", authMiddleware, async (c) => {
+  const user = c.get("user");
+  if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+  const body = await c.req.json().catch(() => ({})) as { main_goal?: string };
+  const newGoal = String(body.main_goal ?? '').trim();
+  if (!newGoal) return c.json({ error: 'main_goal obrigatório' }, 400);
+
+  const current = await c.env.fitloot_db.prepare("SELECT main_goal FROM user_profiles WHERE user_id = ?").bind(user.id).first<{ main_goal: string | null }>();
+  const oldGoal = current?.main_goal ?? 'saude_geral';
+
+  await c.env.fitloot_db.prepare("UPDATE user_profiles SET main_goal = ?, updated_at = datetime('now') WHERE user_id = ?").bind(newGoal, user.id).run();
+  await ensureGoalStatsRow(c.env.fitloot_db, user.id, newGoal);
+
+  const stats = await c.env.fitloot_db.prepare("SELECT goal_change_count, original_goal, completed_goals FROM user_goal_stats WHERE user_id = ?").bind(user.id).first<{ goal_change_count: number; original_goal: string; completed_goals: string | null }>();
+  const changeCount = Number(stats?.goal_change_count ?? 0) + (oldGoal !== newGoal ? 1 : 0);
+  const completedGoals = new Set<string>(JSON.parse(stats?.completed_goals || '[]'));
+  if (oldGoal) completedGoals.add(oldGoal);
+
+  let returned = 0;
+  if ((stats?.original_goal ?? oldGoal) === newGoal && oldGoal !== newGoal) {
+    returned = 1;
+  }
+
+  await c.env.fitloot_db.prepare(`UPDATE user_goal_stats SET current_goal = ?, goal_change_count = ?, completed_goals = ?, returned_to_original_count = COALESCE(returned_to_original_count,0) + ?, missions_after_return = CASE WHEN ? = 1 THEN 0 ELSE missions_after_return END, updated_at = datetime('now') WHERE user_id = ?`)
+    .bind(newGoal, changeCount, JSON.stringify(Array.from(completedGoals)), returned, returned, user.id).run();
+
+  await onGoalChanged(c.env.fitloot_db, user.id, oldGoal, newGoal, changeCount);
+  if (completedGoals.size >= 5) await unlockAchievementIfNeeded(c.env.fitloot_db, user.id, 'A Jornada é o Destino', completedGoals.size, 5);
+
+  return c.json({ success: true, old_goal: oldGoal, new_goal: newGoal, change_count: changeCount });
+});
+
 app.post("/api/onboarding", authMiddleware, zValidator("json", OnboardingRequestSchema), async (c) => {
   const user = c.get("user");
   if (!user) return c.json({ error: "Unauthorized" }, 401);
@@ -865,6 +1298,7 @@ app.post("/api/onboarding", authMiddleware, zValidator("json", OnboardingRequest
 
   const plan = await buildInitialTrainingPlan(data.main_goal, conditioning, data.equipment ?? null, data.injuries ?? null);
   await upsertTrainingPlan(c.env.fitloot_db, user.id, plan, data.main_goal, conditioning, data.equipment ?? null, data.injuries ?? null);
+  await ensureGoalStatsRow(c.env.fitloot_db, user.id, data.main_goal);
   await ensureUserCounterRow(c.env.fitloot_db, user.id);
   await logUserEvent(c.env.fitloot_db, user.id, 'onboarding_completed', { conditioning, main_goal: data.main_goal });
   await evaluateLevelTitles(c.env.fitloot_db, user.id, 1);
@@ -995,9 +1429,13 @@ app.get("/api/missions", authMiddleware, async (c) => {
   const missions = await c.env.fitloot_db.prepare(
     `SELECT m.*, s.name as skill_name FROM missions m
     LEFT JOIN skills s ON m.skill_id = s.id
-    WHERE m.user_id = ? AND m.is_completed = 0
-    AND (m.deadline IS NULL OR m.deadline > datetime('now'))
-    ORDER BY CASE m.type WHEN 'daily' THEN 1 WHEN 'weekly' THEN 2 WHEN 'monthly' THEN 3 ELSE 4 END, m.created_at`
+    WHERE m.user_id = ?
+    AND (
+      m.is_completed = 1
+      OR (m.is_completed = 0 AND (m.deadline IS NULL OR m.deadline > datetime('now')))
+      OR (COALESCE(m.status,'pending') = 'failed' AND date(m.updated_at) >= date('now', '-3 day'))
+    )
+    ORDER BY CASE m.type WHEN 'daily' THEN 1 WHEN 'weekly' THEN 2 WHEN 'monthly' THEN 3 ELSE 4 END, m.created_at DESC`
   ).bind(user.id).all();
 
   return c.json(missions.results);
@@ -1019,7 +1457,7 @@ app.post("/api/missions/complete", authMiddleware, zValidator("json", CompleteMi
 
   // Update mission
   await c.env.fitloot_db.prepare(
-  `UPDATE missions SET is_completed = 1, completed_at = datetime('now'), 
+  `UPDATE missions SET is_completed = 1, status = 'completed', completed_at = datetime('now'), 
     verified_by_sensor = ?, updated_at = datetime('now')
     WHERE id = ?`
   ).bind(data.sensor_verified ? 1 : 0, data.mission_id).run();
@@ -1031,13 +1469,14 @@ app.post("/api/missions/complete", authMiddleware, zValidator("json", CompleteMi
 
   const today = assertString(safeGet(new Date().toISOString().split('T'), 0));
   let streakMultiplier = 1;
+  let newStreak = Number(progression?.current_streak || 0);
   
   if (progression?.last_activity_date !== today) {
     const yesterday = assertString(safeGet(new Date(Date.now() - 86400000).toISOString().split('T'), 0));
-    let newStreak = 1;
+    newStreak = 1;
     
     if (progression?.last_activity_date === yesterday) {
-      newStreak = Number(progression.current_streak || 0) + 1;
+      newStreak = Number(progression?.current_streak || 0) + 1;
     }
     
     streakMultiplier = 1 + (newStreak * 0.1);
@@ -1100,7 +1539,16 @@ app.post("/api/missions/complete", authMiddleware, zValidator("json", CompleteMi
     hour: currentHour,
     leveledUp,
   });
+  const completedToday = await c.env.fitloot_db.prepare("SELECT COUNT(*) as c FROM missions WHERE user_id = ? AND is_completed = 1 AND date(completed_at) = date('now')").bind(user.id).first<{ c: number }>();
+  await onStreakContinued(c.env.fitloot_db, user.id, newStreak, Number(completedToday?.c ?? 1), new Date().toISOString());
   await onMissionComplete(c.env.fitloot_db, user.id, Number(mission.id));
+  const relevance = await checkMissionRelevance(user.id, Number(mission.id), c.env.fitloot_db, 'completed');
+  if (relevance.isGoalRelevant) {
+    const gs = await c.env.fitloot_db.prepare("SELECT goal_completed_count FROM user_goal_stats WHERE user_id = ?").bind(user.id).first<{ goal_completed_count: number }>();
+    const progressPercent = Math.min(200, Math.floor((Number(gs?.goal_completed_count ?? 0) / 100) * 100));
+    await c.env.fitloot_db.prepare("UPDATE user_goal_stats SET goal_progress_percent = ?, updated_at = datetime('now') WHERE user_id = ?").bind(progressPercent, user.id).run();
+    await onGoalProgress(c.env.fitloot_db, user.id, progressPercent);
+  }
   if (currentHour >= 2 && currentHour < 4) {
     await unlockAchievementIfNeeded(c.env.fitloot_db, user.id, 'Insônia', 1, 1);
   }
@@ -1371,124 +1819,163 @@ app.get("/api/ranking/global", authMiddleware, async (c) => {
 });
 
 // Friends endpoints
-app.get("/api/users/search", authMiddleware, async (c) => {
+app.get("/api/friends/search", authMiddleware, async (c) => {
   const user = c.get("user");
   if (!user) return c.json({ error: "Unauthorized" }, 401);
-  
-  const query = c.req.query("q");
-  if (!query || query.length < 3) {
-    return c.json([]);
-  }
+
+  const username = (c.req.query("username") ?? "").trim();
+  if (username.length < 3) return c.json([]);
 
   const users = await c.env.fitloot_db.prepare(
-  `SELECT up.user_id, up.username, up.full_name, pr.level, pr.xp
-    FROM user_profiles up
-    INNER JOIN user_progression pr ON up.user_id = pr.user_id
-    WHERE up.user_id != ? AND up.username LIKE ?
-    LIMIT 20`
-  ).bind(user.id, `%${query}%`).all();
+    `SELECT up.user_id, up.username, up.full_name, pr.level, pr.xp
+      FROM user_profiles up
+      INNER JOIN user_progression pr ON up.user_id = pr.user_id
+      WHERE up.user_id != ? AND up.username LIKE ?
+      LIMIT 20`
+  ).bind(user.id, `%${username}%`).all();
 
   return c.json(users.results);
 });
 
-app.post("/api/friends/request", authMiddleware, zValidator("json", FriendRequestSchema), async (c) => {
+app.get("/api/users/search", authMiddleware, async (c) => {
   const user = c.get("user");
   if (!user) return c.json({ error: "Unauthorized" }, 401);
-  
-  const data = c.req.valid("json");
+  const q = (c.req.query("q") ?? "").trim();
+  if (q.length < 3) return c.json([]);
+  const users = await c.env.fitloot_db.prepare(
+    `SELECT up.user_id, up.username, up.full_name, pr.level, pr.xp
+      FROM user_profiles up
+      INNER JOIN user_progression pr ON up.user_id = pr.user_id
+      WHERE up.user_id != ? AND up.username LIKE ?
+      LIMIT 20`
+  ).bind(user.id, `%${q}%`).all();
+  return c.json(users.results);
+});
 
-  // Check if friendship already exists
-  const existing = await c.env.fitloot_db.prepare(
-  `SELECT id FROM friendships 
-    WHERE (user_id = ? AND friend_user_id = ?) 
-    OR (user_id = ? AND friend_user_id = ?)`
-  ).bind(user.id, data.friend_user_id, data.friend_user_id, user.id).first();
+app.post("/api/friends/request", authMiddleware, async (c) => {
+  const user = c.get("user");
+  if (!user) return c.json({ error: "Unauthorized" }, 401);
 
-  if (existing) {
-    return c.json({ error: "Friendship already exists" }, 400);
+  const body = await c.req.json().catch(() => ({})) as { username?: string; friend_user_id?: string };
+  const username = String(body.username ?? "").trim();
+  let targetUserId = String(body.friend_user_id ?? "").trim();
+
+  if (!targetUserId) {
+    if (!username) return c.json({ error: "username é obrigatório" }, 400);
+    const target = await c.env.fitloot_db.prepare("SELECT user_id FROM user_profiles WHERE username = ?").bind(username).first<{ user_id: string }>();
+    if (!target?.user_id) return c.json({ error: "Usuário não encontrado" }, 404);
+    targetUserId = target.user_id;
   }
 
+  if (targetUserId === user.id) return c.json({ error: "Não é possível adicionar a si mesmo" }, 400);
+
+  const existingFriend = await c.env.fitloot_db.prepare(
+    `SELECT id FROM friendships WHERE (user_id = ? AND friend_id = ?) OR (user_id = ? AND friend_id = ?)`
+  ).bind(user.id, targetUserId, targetUserId, user.id).first();
+  if (existingFriend) return c.json({ error: "Já são amigos" }, 400);
+
+  const existingReq = await c.env.fitloot_db.prepare(
+    `SELECT id FROM friend_requests WHERE ((from_user_id = ? AND to_user_id = ?) OR (from_user_id = ? AND to_user_id = ?)) AND status = 'pending'`
+  ).bind(user.id, targetUserId, targetUserId, user.id).first();
+  if (existingReq) return c.json({ error: "Solicitação pendente" }, 400);
+
   await c.env.fitloot_db.prepare(
-    `INSERT INTO friendships (user_id, friend_user_id, status, updated_at)
-    VALUES (?, ?, 'pending', datetime('now'))`
-  ).bind(user.id, data.friend_user_id).run();
+    `INSERT INTO friend_requests (from_user_id, to_user_id, status, updated_at) VALUES (?, ?, 'pending', datetime('now'))`
+  ).bind(user.id, targetUserId).run();
 
   return c.json({ success: true }, 201);
+});
+
+app.post("/api/friends/accept", authMiddleware, async (c) => {
+  const user = c.get("user");
+  if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+  const body = await c.req.json().catch(() => ({})) as { request_id?: number };
+  const requestId = Number(body.request_id);
+  if (!requestId) return c.json({ error: "request_id obrigatório" }, 400);
+
+  const request = await c.env.fitloot_db.prepare(
+    `SELECT * FROM friend_requests WHERE id = ? AND to_user_id = ? AND status = 'pending'`
+  ).bind(requestId, user.id).first<{ id: number; from_user_id: string; to_user_id: string }>();
+  if (!request) return c.json({ error: "Solicitação não encontrada" }, 404);
+
+  await c.env.fitloot_db.prepare("UPDATE friend_requests SET status = 'accepted', updated_at = datetime('now') WHERE id = ?").bind(requestId).run();
+  await c.env.fitloot_db.prepare("INSERT OR IGNORE INTO friendships (user_id, friend_id, created_at, updated_at) VALUES (?, ?, datetime('now'), datetime('now'))")
+    .bind(request.from_user_id, request.to_user_id).run();
+  await c.env.fitloot_db.prepare("INSERT OR IGNORE INTO friendships (user_id, friend_id, created_at, updated_at) VALUES (?, ?, datetime('now'), datetime('now'))")
+    .bind(request.to_user_id, request.from_user_id).run();
+
+  await onFriendAdded(c.env.fitloot_db, request.to_user_id);
+  await onFriendAdded(c.env.fitloot_db, request.from_user_id);
+
+  return c.json({ success: true });
+});
+
+app.post("/api/friends/reject", authMiddleware, async (c) => {
+  const user = c.get("user");
+  if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+  const body = await c.req.json().catch(() => ({})) as { request_id?: number };
+  const requestId = Number(body.request_id);
+  if (!requestId) return c.json({ error: "request_id obrigatório" }, 400);
+
+  await c.env.fitloot_db.prepare(
+    `UPDATE friend_requests SET status = 'rejected', updated_at = datetime('now') WHERE id = ? AND to_user_id = ?`
+  ).bind(requestId, user.id).run();
+
+  return c.json({ success: true });
+});
+
+app.delete("/api/friends/:friendId", authMiddleware, async (c) => {
+  const user = c.get("user");
+  if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+  const friendId = c.req.param("friendId");
+  await c.env.fitloot_db.prepare(`DELETE FROM friendships WHERE (user_id = ? AND friend_id = ?) OR (user_id = ? AND friend_id = ?)`)
+    .bind(user.id, friendId, friendId, user.id).run();
+  return c.json({ success: true });
+});
+
+app.get("/api/friends", authMiddleware, async (c) => {
+  const user = c.get("user");
+  if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+  const friends = await c.env.fitloot_db.prepare(
+    `SELECT f.id, f.friend_id as friend_user_id, up.username as friend_username,
+      up.full_name as friend_full_name, pr.level as friend_level, pr.xp as friend_xp,
+      pr.current_streak as friend_streak
+    FROM friendships f
+    INNER JOIN user_profiles up ON f.friend_id = up.user_id
+    INNER JOIN user_progression pr ON f.friend_id = pr.user_id
+    WHERE f.user_id = ?
+    ORDER BY friend_level DESC, friend_xp DESC`
+  ).bind(user.id).all();
+
+  return c.json(friends.results);
 });
 
 app.get("/api/friends/requests", authMiddleware, async (c) => {
   const user = c.get("user");
   if (!user) return c.json({ error: "Unauthorized" }, 401);
-  
+
   const requests = await c.env.fitloot_db.prepare(
-    `SELECT f.id, f.user_id as friend_user_id, up.username as friend_username, 
-    up.full_name as friend_full_name, pr.level as friend_level, pr.xp as friend_xp,
-    pr.current_streak as friend_streak
-    FROM friendships f
-    INNER JOIN user_profiles up ON f.user_id = up.user_id
-    INNER JOIN user_progression pr ON f.user_id = pr.user_id
-    WHERE f.friend_user_id = ? AND f.status = 'pending'
-    ORDER BY f.created_at DESC`
+    `SELECT fr.id, fr.from_user_id as friend_user_id, up.username as friend_username,
+      up.full_name as friend_full_name, pr.level as friend_level, pr.xp as friend_xp,
+      pr.current_streak as friend_streak, fr.created_at
+    FROM friend_requests fr
+    INNER JOIN user_profiles up ON fr.from_user_id = up.user_id
+    INNER JOIN user_progression pr ON fr.from_user_id = pr.user_id
+    WHERE fr.to_user_id = ? AND fr.status = 'pending'
+    ORDER BY fr.created_at DESC`
   ).bind(user.id).all();
 
   return c.json(requests.results);
 });
 
-app.post("/api/friends/:id/accept", authMiddleware, async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
-  
-  const requestId = parseInt(c.req.param("id"));
-
-  await c.env.fitloot_db.prepare(
-    `UPDATE friendships SET status = 'accepted', updated_at = datetime('now') 
-    WHERE id = ? AND friend_user_id = ?`
-  ).bind(requestId, user.id).run();
-
-  return c.json({ success: true });
-});
-
-app.post("/api/friends/:id/reject", authMiddleware, async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
-  
-  const requestId = parseInt(c.req.param("id"));
-
-  await c.env.fitloot_db.prepare(
-    "DELETE FROM friendships WHERE id = ? AND friend_user_id = ?"
-  ).bind(requestId, user.id).run();
-
-  return c.json({ success: true });
-});
-
-app.get("/api/friends/list", authMiddleware, async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
-  
-  const friends = await c.env.fitloot_db.prepare(
-    `SELECT f.id, f.friend_user_id, up.username as friend_username, 
-    up.full_name as friend_full_name, pr.level as friend_level, pr.xp as friend_xp,
-    pr.current_streak as friend_streak
-    FROM friendships f
-    INNER JOIN user_profiles up ON f.friend_user_id = up.user_id
-    INNER JOIN user_progression pr ON f.friend_user_id = pr.user_id
-    WHERE f.user_id = ? AND f.status = 'accepted'
-    
-    UNION
-    
-    SELECT f.id, f.user_id as friend_user_id, up.username as friend_username,
-    up.full_name as friend_full_name, pr.level as friend_level, pr.xp as friend_xp,
-    pr.current_streak as friend_streak
-    FROM friendships f
-    INNER JOIN user_profiles up ON f.user_id = up.user_id
-    INNER JOIN user_progression pr ON f.user_id = pr.user_id
-    WHERE f.friend_user_id = ? AND f.status = 'accepted'
-    
-    ORDER BY friend_level DESC`
-  ).bind(user.id, user.id).all();
-
-  return c.json(friends.results);
-});
+// legacy aliases
+app.get("/api/friends/list", authMiddleware, async (c) => app.fetch(new Request(new URL('/api/friends', c.req.url).toString(), { method: 'GET', headers: c.req.raw.headers }), c.env, c.executionCtx));
+app.post("/api/friends/:id/accept", authMiddleware, async (c) => app.fetch(new Request(new URL('/api/friends/accept', c.req.url).toString(), { method: 'POST', headers: c.req.raw.headers, body: JSON.stringify({ request_id: Number(c.req.param('id')) }) }), c.env, c.executionCtx));
+app.post("/api/friends/:id/reject", authMiddleware, async (c) => app.fetch(new Request(new URL('/api/friends/reject', c.req.url).toString(), { method: 'POST', headers: c.req.raw.headers, body: JSON.stringify({ request_id: Number(c.req.param('id')) }) }), c.env, c.executionCtx));
 
 // Mini-games endpoints
 app.post("/api/mini-games/challenge", authMiddleware, zValidator("json", MiniGameChallengeRequestSchema), async (c) => {
@@ -1649,12 +2136,12 @@ function futureIsoForPeriod(period: MissionPeriod) {
 }
 
 async function fetchExerciseDbExercises(env: Env, muscle: string, equipment: string): Promise<ExerciseRef[]> {
-  if (!env.EXERCISE_DB_KEY) throw new Error("exercise-db-key-missing");
+  if (!env.RAPID_API_KEY) throw new Error("rapidapi-key-missing");
   const data = await fetchJsonWithTimeout<Array<Record<string, unknown>>>(
     `https://exercisedb.p.rapidapi.com/exercises/target/${encodeURIComponent(muscle)}?limit=8`,
     {
       headers: {
-        "X-RapidAPI-Key": env.EXERCISE_DB_KEY,
+        "X-RapidAPI-Key": env.RAPID_API_KEY,
         "X-RapidAPI-Host": "exercisedb.p.rapidapi.com",
       },
     },
@@ -1670,12 +2157,13 @@ async function fetchExerciseDbExercises(env: Env, muscle: string, equipment: str
 }
 
 async function fetchApiNinjasExercises(env: Env, muscle: string): Promise<ExerciseRef[]> {
-  if (!env.API_NINJAS_KEY) throw new Error("api-ninjas-key-missing");
+  if (!env.RAPID_API_KEY) throw new Error("rapidapi-key-missing");
   const data = await fetchJsonWithTimeout<Array<Record<string, unknown>>>(
-    `https://api.api-ninjas.com/v1/exercises?muscle=${encodeURIComponent(muscle)}`,
+    `https://exercises-by-api-ninjas.p.rapidapi.com/v1/exercises?muscle=${encodeURIComponent(muscle)}`,
     {
       headers: {
-        "X-Api-Key": env.API_NINJAS_KEY,
+        "X-RapidAPI-Key": env.RAPID_API_KEY,
+        "X-RapidAPI-Host": "exercises-by-api-ninjas.p.rapidapi.com",
       },
     },
     8000
@@ -1690,12 +2178,12 @@ async function fetchApiNinjasExercises(env: Env, muscle: string): Promise<Exerci
 }
 
 async function fetchGymFitExercises(env: Env, muscle: string): Promise<ExerciseRef[]> {
-  if (!env.GYMFIT_API_KEY) throw new Error("gymfit-key-missing");
+  if (!env.RAPID_API_KEY) throw new Error("rapidapi-key-missing");
   const data = await fetchJsonWithTimeout<{ exercises?: Array<Record<string, unknown>> }>(
     `https://gym-fit.p.rapidapi.com/exercises?muscle=${encodeURIComponent(muscle)}`,
     {
       headers: {
-        "X-RapidAPI-Key": env.GYMFIT_API_KEY,
+        "X-RapidAPI-Key": env.RAPID_API_KEY,
         "X-RapidAPI-Host": "gym-fit.p.rapidapi.com",
       },
     },
@@ -1774,9 +2262,19 @@ function missionConfigByPeriod(period: MissionPeriod) {
 }
 
 async function createMissionsForPeriod(env: Env, db: D1Database, userId: string, period: MissionPeriod) {
-  const userSkills = await db.prepare(
+  const profile = await db.prepare("SELECT active_skill_focus FROM user_profiles WHERE user_id = ?").bind(userId).first<{ active_skill_focus: string | null }>();
+  const activeFocus = profile?.active_skill_focus === 'yoga' ? 'yoga' : 'calistenia';
+
+  const userSkillsResult = await db.prepare(
     "SELECT us.skill_id, us.current_stage, s.name, s.category, s.tier FROM user_skills us INNER JOIN skills s ON s.id = us.skill_id WHERE us.user_id = ? AND COALESCE(us.status,'unlocked') != 'locked'"
   ).bind(userId).all<{ skill_id: number; current_stage: number; name: string; category: string; tier: string }>();
+
+  const userSkills = {
+    results: userSkillsResult.results.filter((skill) => {
+      if (activeFocus === 'yoga') return skill.category === 'yoga' || skill.category === 'core';
+      return skill.category !== 'yoga';
+    }),
+  };
 
   const config = missionConfigByPeriod(period);
   const deadline = futureIsoForPeriod(period);
@@ -2204,7 +2702,26 @@ app.post("/api/ai/chat", authMiddleware, async (c) => {
     if (!parsed.success) {
       return c.json({ error: "Invalid input", details: parsed.error.flatten() }, 400);
     }
-    const { message: userMessage, history: conversationHistory = [], mode = "suporte" } = parsed.data;
+    const { message: userMessage, history: conversationHistory = [], mode = "suporte", session_count } = parsed.data;
+
+    await ensureUserCounterRow(c.env.fitloot_db, user.id);
+    const currentCounter = await c.env.fitloot_db.prepare("SELECT chat_messages, repeated_message_streak, last_chat_message FROM user_event_counters WHERE user_id = ?")
+      .bind(user.id).first<{ chat_messages: number; repeated_message_streak: number; last_chat_message: string | null }>();
+    const sameMessage = (currentCounter?.last_chat_message ?? "") === userMessage;
+    const nextRepeat = sameMessage ? Number(currentCounter?.repeated_message_streak ?? 0) + 1 : 1;
+    await c.env.fitloot_db.prepare(
+      `UPDATE user_event_counters SET
+        chat_messages = COALESCE(chat_messages, 0) + 1,
+        repeated_message_streak = ?,
+        last_chat_message = ?,
+        updated_at = datetime('now')
+      WHERE user_id = ?`
+    ).bind(nextRepeat, userMessage, user.id).run();
+    await logUserEvent(c.env.fitloot_db, user.id, 'chat_message', { size: userMessage.length, repeated: sameMessage });
+    await onChatMessage(c.env.fitloot_db, user.id, Number(session_count ?? (Number(currentCounter?.chat_messages ?? 0) + 1)));
+    if (Number(session_count ?? 0) >= 100) {
+      await unlockAchievementIfNeeded(c.env.fitloot_db, user.id, "Conversa de Louco", Number(session_count), 100);
+    }
 
     await ensureUserCounterRow(c.env.fitloot_db, user.id);
     const currentCounter = await c.env.fitloot_db.prepare("SELECT chat_messages, repeated_message_streak, last_chat_message FROM user_event_counters WHERE user_id = ?")
@@ -2619,6 +3136,22 @@ app.get("/health", async (c) => {
   });
 });
 
+async function processDailyReset(env: Env) {
+  const db = env.fitloot_db;
+  const today = new Date().toISOString().split('T')[0];
+  const state = await db.prepare("SELECT value FROM app_state WHERE key = 'last_daily_reset_date'").first<{ value: string | null }>();
+  if (state?.value === today) return;
+
+  const users = await db.prepare("SELECT user_id FROM user_profiles").all<{ user_id: string }>();
+  for (const user of users.results) {
+    await ensureUserCounterRow(db, user.user_id);
+    await expirePendingMissionsAndUpdateStreak(db, user.user_id);
+  }
+
+  await db.prepare("INSERT INTO app_state (key, value, updated_at) VALUES ('last_daily_reset_date', ?, datetime('now')) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')")
+    .bind(today).run();
+}
+
 // 6. Healthchecks for external services
 app.get("/api/health/external", authMiddleware, async (c) => {
   return c.json({
@@ -2656,4 +3189,9 @@ app.get("*", async (c, next) => {
 });
 
 
-export default app;
+export default {
+  fetch: app.fetch,
+  async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
+    ctx.waitUntil(processDailyReset(env));
+  },
+};

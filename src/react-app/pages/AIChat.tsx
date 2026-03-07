@@ -67,6 +67,7 @@ export default function AIChat() {
   ]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [sessionMessageCount, setSessionMessageCount] = useState(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -94,6 +95,8 @@ export default function AIChat() {
       timestamp: new Date(),
     };
 
+    const nextSessionCount = sessionMessageCount + 1;
+    setSessionMessageCount(nextSessionCount);
     setMessages((prev) => [...prev, userMessage]);
     setInput("");
     setLoading(true);
@@ -110,6 +113,7 @@ export default function AIChat() {
         body: JSON.stringify({
           message: input,
           history,
+          session_count: nextSessionCount,
         }),
       });
 

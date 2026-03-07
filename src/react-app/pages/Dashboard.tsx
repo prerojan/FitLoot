@@ -11,6 +11,7 @@ import { Bot } from "lucide-react";
 import { Camera } from "lucide-react";
 import type { Mission, UserProgression, DailyMetrics, UserProfile, Title } from "@/shared/types";
 import { api } from "@/react-app/utils/api";
+import PageLoader from "@/react-app/components/PageLoader";
 
 export default function Dashboard() {
   const { user } = useAuth();
@@ -97,16 +98,13 @@ export default function Dashboard() {
   };
 
   if (loading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 flex items-center justify-center">
-        <div className="text-emerald-600">Carregando...</div>
-      </div>
-    );
+    return <PageLoader />;
   }
 
-  const dailyMissions = missions.filter(m => m.type === 'daily');
-  const weeklyMissions = missions.filter(m => m.type === 'weekly');
-  const monthlyMissions = missions.filter(m => m.type === 'monthly');
+  const dailyMissions = missions.filter(m => m.type === 'daily' && m.is_completed !== 1);
+  const failedMissions = missions.filter(m => (m as Mission & { status?: string }).status === 'failed' && m.is_completed !== 1);
+  const weeklyMissions = missions.filter(m => m.type === 'weekly' && m.is_completed !== 1 && (m as Mission & { status?: string }).status !== 'failed');
+  const monthlyMissions = missions.filter(m => m.type === 'monthly' && m.is_completed !== 1 && (m as Mission & { status?: string }).status !== 'failed');
 
   const xpForNextLevel = (progression?.level || 1) * 100;
   const xpProgress = ((progression?.xp || 0) / xpForNextLevel) * 100;
@@ -156,6 +154,15 @@ export default function Dashboard() {
           missions={dailyMissions}
           onComplete={handleMissionComplete}
         />
+
+        {failedMissions.length > 0 && (
+          <MissionSection
+            title="Missões Expiradas"
+            icon={<Target className="w-5 h-5" />}
+            missions={failedMissions}
+            onComplete={handleMissionComplete}
+          />
+        )}
 
         {weeklyMissions.length > 0 && (
           <MissionSection

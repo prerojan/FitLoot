@@ -15,6 +15,13 @@ export const UserProfileSchema = z.object({
   custom_color: z.string().nullable(),
   custom_font: z.string().nullable(),
   custom_border: z.string().nullable(),
+  active_skill_focus: z.string().nullable().optional(),
+  custom_primary_color: z.string().nullable().optional(),
+  custom_secondary_color: z.string().nullable().optional(),
+  custom_background_type: z.string().nullable().optional(),
+  custom_background_value: z.string().nullable().optional(),
+  custom_title_id: z.number().nullable().optional(),
+  showcased_achievements: z.string().nullable().optional(),
   created_at: z.string(),
   updated_at: z.string(),
 });
@@ -104,6 +111,7 @@ export const MissionSchema = z.object({
   is_completed: z.number(),
   completed_at: z.string().nullable(),
   verified_by_sensor: z.number(),
+  status: z.string().optional(),
   created_at: z.string(),
   updated_at: z.string(),
 });
@@ -276,6 +284,7 @@ export const AiChatRequestSchema = z.object({
   message: z.string().min(1),
   history: z.array(z.object({ role: z.string(), content: z.string() })).optional(),
   mode: z.enum(["suporte", "motivacional", "tecnico"]).optional(),
+  session_count: z.number().min(1).optional(),
 });
 export type AiChatRequest = z.infer<typeof AiChatRequestSchema>;
 
