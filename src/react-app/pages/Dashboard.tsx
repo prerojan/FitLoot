@@ -147,7 +147,7 @@ export default function Dashboard() {
 
       {/* Missions */}
       <div className="px-6 py-6 space-y-6">
-        <AIMissionGenerator onMissionsGenerated={loadData} conditioning={profile?.initial_conditioning} />
+        <AIMissionGenerator onMissionsGenerated={loadData} conditioning={profile?.initial_conditioning ?? undefined} />
         <MissionSection
           title="Missões Diárias"
           icon={<Target className="w-5 h-5" />}

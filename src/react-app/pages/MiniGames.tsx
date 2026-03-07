@@ -21,7 +21,7 @@ interface MiniGame {
   created_at: string;
 }
 
-interface Skill {
+interface MiniGameSkill {
   id: number;
   name: string;
   category: string;
@@ -36,7 +36,7 @@ export default function MiniGames() {
   
   const [activeGames, setActiveGames] = useState<MiniGame[]>([]);
   const [completedGames, setCompletedGames] = useState<MiniGame[]>([]);
-  const [skills, setSkills] = useState<Skill[]>([]);
+  const [skills, setSkills] = useState<MiniGameSkill[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreateForm, setShowCreateForm] = useState(!!challengeUserId);
   

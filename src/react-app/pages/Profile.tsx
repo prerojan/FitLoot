@@ -1,4 +1,4 @@
-import { useEffect, useState, type ChangeEventHandler } from "react";
+import { useEffect, useRef, useState, type ChangeEventHandler } from "react";
 import { useNavigate } from "react-router";
 import { useAuth } from "@/react-app/App";
 import BottomNav from "@/react-app/components/BottomNav";
@@ -12,6 +12,25 @@ import type {
   TitleWithUnlock,
 } from "@/shared/types";
 import { api } from "@/react-app/utils/api";
+import { applyProfileTheme } from "@/react-app/utils/theme";
+
+
+
+const FONT_OPTIONS = [
+  { label: "Rajdhani", value: "rajdhani", family: "Rajdhani, sans-serif" },
+  { label: "Orbitron", value: "orbitron", family: "Orbitron, sans-serif" },
+  { label: "Exo 2", value: "exo2", family: "Exo 2, sans-serif" },
+  { label: "Bebas Neue", value: "bebas-neue", family: "Bebas Neue, sans-serif" },
+  { label: "Teko", value: "teko", family: "Teko, sans-serif" },
+  { label: "Russo One", value: "russo-one", family: "Russo One, sans-serif" },
+  { label: "Audiowide", value: "audiowide", family: "Audiowide, sans-serif" },
+  { label: "Press Start 2P", value: "press-start-2p", family: '"Press Start 2P", cursive' },
+  { label: "Cinzel", value: "cinzel", family: "Cinzel, serif" },
+  { label: "Bangers", value: "bangers", family: "Bangers, cursive" },
+] as const;
+
+const DEFAULT_PRIMARY_COLOR = "#10b981";
+const DEFAULT_SECONDARY_COLOR = "#14b8a6";
 
 export default function Profile() {
   const { user, logout } = useAuth();
@@ -27,6 +46,11 @@ export default function Profile() {
   const [isMobile, setIsMobile] = useState(false);
   const [customizationSaving, setCustomizationSaving] = useState(false);
   const [bgPreview, setBgPreview] = useState<string | null>(null);
+  const [primaryColor, setPrimaryColor] = useState(DEFAULT_PRIMARY_COLOR);
+  const [secondaryColor, setSecondaryColor] = useState(DEFAULT_SECONDARY_COLOR);
+  const [customFont, setCustomFont] = useState<string>("rajdhani");
+  const primaryColorInputRef = useRef<HTMLInputElement>(null);
+  const secondaryColorInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!user) {
@@ -51,6 +75,9 @@ export default function Profile() {
       const profileData = await profileRes.json();
       setProfile(profileData);
       setBgPreview(profileData?.custom_background_type === "image" ? profileData?.custom_background_value ?? null : null);
+      setPrimaryColor(profileData?.custom_primary_color ?? DEFAULT_PRIMARY_COLOR);
+      setSecondaryColor(profileData?.custom_secondary_color ?? DEFAULT_SECONDARY_COLOR);
+      setCustomFont(profileData?.custom_font ?? "rajdhani");
       setAttributes(await attrsRes.json());
       setProgression(await progRes.json());
       setSkills(await skillsRes.json());
@@ -85,7 +112,16 @@ export default function Profile() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      if (res.ok) await loadData();
+      if (res.ok) {
+        applyProfileTheme({
+          custom_primary_color: typeof payload.custom_primary_color === "string" ? payload.custom_primary_color : profile?.custom_primary_color ?? null,
+          custom_secondary_color: typeof payload.custom_secondary_color === "string" ? payload.custom_secondary_color : profile?.custom_secondary_color ?? null,
+          custom_font: typeof payload.custom_font === "string" ? payload.custom_font : profile?.custom_font ?? null,
+          custom_background_type: typeof payload.custom_background_type === "string" ? payload.custom_background_type : profile?.custom_background_type ?? null,
+          custom_background_value: typeof payload.custom_background_value === "string" ? payload.custom_background_value : profile?.custom_background_value ?? null,
+        });
+        await loadData();
+      }
     } catch (error) {
       console.error('Error saving customization', error);
     } finally {
@@ -104,6 +140,25 @@ export default function Profile() {
     } catch (error) {
       console.error('Error changing focus', error);
     }
+  };
+
+  const applyPrimaryColor = async (nextColor: string) => {
+    setPrimaryColor(nextColor);
+    const root = document.documentElement;
+    root.style.setProperty("--app-primary-color", nextColor);
+    await saveCustomization({ custom_primary_color: nextColor });
+  };
+
+  const applySecondaryColor = async (nextColor: string) => {
+    setSecondaryColor(nextColor);
+    const root = document.documentElement;
+    root.style.setProperty("--app-secondary-color", nextColor);
+    await saveCustomization({ custom_secondary_color: nextColor });
+  };
+
+  const applyFont = async (font: string) => {
+    setCustomFont(font);
+    await saveCustomization({ custom_font: font });
   };
 
   const onPickBackgroundImage: ChangeEventHandler<HTMLInputElement> = async (event) => {
@@ -136,10 +191,10 @@ export default function Profile() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 pb-24">
       {/* Header */}
-      <div className="bg-gradient-to-r from-emerald-500 to-teal-600 text-white px-6 pt-8 pb-8 rounded-b-3xl shadow-xl">
+      <div className="text-white px-6 pt-8 pb-8 rounded-b-3xl shadow-xl" style={{ background: "linear-gradient(90deg, var(--app-primary-color), var(--app-secondary-color))" }}>
         <div className="flex items-start justify-between mb-4">
           <div>
-            <h1 className="text-3xl font-bold">{profile?.full_name}</h1>
+            <h1 className="text-3xl font-bold fl-profile-title">{profile?.full_name}</h1>
             <p className="text-emerald-100">@{profile?.username}</p>
             {activeTitle && (
               <div className="inline-block mt-2 px-4 py-1.5 bg-white/20 backdrop-blur-sm rounded-full text-sm font-medium">
@@ -241,12 +296,59 @@ export default function Profile() {
         <div className="px-6 pb-6">
           <div className="bg-white/80 backdrop-blur-sm rounded-2xl p-4 shadow-lg space-y-3">
             <h3 className="font-bold text-gray-900">Personalização (mobile)</h3>
-            <div className="grid grid-cols-2 gap-2">
-              <button onClick={() => saveCustomization({ custom_primary_color: 'green' })} className="fl-btn-secondary rounded-xl py-2">Primária verde</button>
-              <button onClick={() => saveCustomization({ custom_secondary_color: 'dark' })} className="fl-btn-secondary rounded-xl py-2">Secundária dark</button>
-              <button onClick={() => saveCustomization({ custom_font: 'bold' })} className="fl-btn-secondary rounded-xl py-2">Fonte título</button>
-              <button onClick={() => saveCustomization({ custom_background_type: 'color', custom_background_value: '#0f172a' })} className="fl-btn-secondary rounded-xl py-2">Fundo sólido</button>
-              <label className="fl-btn-secondary rounded-xl py-2 text-center cursor-pointer">
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  onClick={() => primaryColorInputRef.current?.click()}
+                  className="h-12 rounded-lg border-2 border-white/20 shadow-inner"
+                  style={{ backgroundColor: primaryColor }}
+                  type="button"
+                  aria-label="Selecionar cor primária"
+                />
+                <button
+                  onClick={() => secondaryColorInputRef.current?.click()}
+                  className="h-12 rounded-lg border-2 border-white/20 shadow-inner"
+                  style={{ backgroundColor: secondaryColor }}
+                  type="button"
+                  aria-label="Selecionar cor secundária"
+                />
+              </div>
+              <div className="flex justify-between text-xs text-gray-500">
+                <span>Cor primária</span>
+                <span>Cor secundária</span>
+              </div>
+              <input
+                ref={primaryColorInputRef}
+                type="color"
+                value={primaryColor}
+                onChange={(event) => { void applyPrimaryColor(event.target.value); }}
+                className="sr-only"
+              />
+              <input
+                ref={secondaryColorInputRef}
+                type="color"
+                value={secondaryColor}
+                onChange={(event) => { void applySecondaryColor(event.target.value); }}
+                className="sr-only"
+              />
+
+              <label className="block text-sm font-medium text-gray-700">Fonte do título</label>
+              <div className="grid grid-cols-2 gap-2">
+                {FONT_OPTIONS.map((fontOption) => (
+                  <button
+                    key={fontOption.value}
+                    type="button"
+                    onClick={() => { void applyFont(fontOption.value); }}
+                    className={`rounded-xl border px-3 py-2 text-left text-sm transition-colors ${customFont === fontOption.value ? "border-emerald-500 bg-emerald-50" : "border-gray-200 bg-white hover:border-emerald-200"}`}
+                    style={{ fontFamily: fontOption.family }}
+                  >
+                    {fontOption.label}
+                  </button>
+                ))}
+              </div>
+
+              <button onClick={() => saveCustomization({ custom_background_type: 'color', custom_background_value: '#0f172a' })} className="fl-btn-secondary rounded-xl py-2 w-full">Fundo sólido</button>
+              <label className="fl-btn-secondary rounded-xl py-2 text-center cursor-pointer block">
                 Escolher foto
                 <input type="file" accept="image/*" className="hidden" onChange={onPickBackgroundImage} />
               </label>

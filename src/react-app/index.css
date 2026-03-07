@@ -2,10 +2,14 @@
 @tailwind components;
 @tailwind utilities;
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Rajdhani:wght@400;500;600;700&family=Orbitron:wght@400;500;700;800;900&family=Exo+2:wght@400;500;600;700;800&family=Bebas+Neue&family=Teko:wght@400;500;600;700&family=Russo+One&family=Audiowide&family=Press+Start+2P&family=Cinzel:wght@400;500;600;700&family=Bangers&display=swap');
 
 :root {
   font-family: 'Inter', system-ui, Avenir, Helvetica, Arial, sans-serif;
+  --app-primary-color: #10b981;
+  --app-secondary-color: #14b8a6;
+  --app-bg-color: #f8fafc;
+  --app-bg-image: none;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -20,6 +24,11 @@ body {
   margin: 0;
   padding: 0;
   overflow-x: hidden;
+  background-color: var(--app-bg-color);
+  background-image: var(--app-bg-image);
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
 }
 
 @layer components {
@@ -50,7 +59,30 @@ body {
   .fl-btn-primary:hover {
     @apply from-emerald-600 to-teal-700;
   }
+
+  .fl-btn-secondary {
+    @apply bg-white border border-gray-200 text-gray-700 font-medium transition-colors;
+  }
+
+  .fl-btn-secondary:hover {
+    @apply bg-gray-50 border-gray-300;
+  }
 }
+
+.fl-profile-title {
+  font-family: Inter, system-ui, sans-serif;
+}
+
+.font-title-rajdhani .fl-profile-title { font-family: 'Rajdhani', sans-serif; }
+.font-title-orbitron .fl-profile-title { font-family: 'Orbitron', sans-serif; }
+.font-title-exo2 .fl-profile-title { font-family: 'Exo 2', sans-serif; }
+.font-title-bebas-neue .fl-profile-title { font-family: 'Bebas Neue', sans-serif; }
+.font-title-teko .fl-profile-title { font-family: 'Teko', sans-serif; }
+.font-title-russo-one .fl-profile-title { font-family: 'Russo One', sans-serif; }
+.font-title-audiowide .fl-profile-title { font-family: 'Audiowide', sans-serif; }
+.font-title-press-start-2p .fl-profile-title { font-family: 'Press Start 2P', cursive; }
+.font-title-cinzel .fl-profile-title { font-family: 'Cinzel', serif; }
+.font-title-bangers .fl-profile-title { font-family: 'Bangers', cursive; }
 
 @keyframes fadeIn {
   from {

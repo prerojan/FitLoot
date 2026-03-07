@@ -37,11 +37,12 @@ export function useAuthBootstrap({ setUser, setLoading }: UseAuthBootstrapParams
         });
       }
 
-      void fetchProfileTheme()
-        .then((profile) => {
-          applyProfileTheme(profile);
-        })
-        .catch(() => undefined);
+      try {
+        const profile = await fetchProfileTheme();
+        applyProfileTheme(profile);
+      } catch {
+        // noop
+      }
     } catch {
       setUser(null);
     } finally {
