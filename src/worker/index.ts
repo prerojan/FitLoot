@@ -17,6 +17,7 @@ import {
 } from "../shared/types";
 import { assertString, safeGet } from "../utils/typeHelpers";
 import { toStatusCode } from "./httpHelpers";
+import { processDailyResetForAllUsers } from "./services/dailyReset";
 
 // Tipo do usuário autenticado
 interface AuthUser {
@@ -2723,22 +2724,6 @@ app.post("/api/ai/chat", authMiddleware, async (c) => {
       await unlockAchievementIfNeeded(c.env.fitloot_db, user.id, "Conversa de Louco", Number(session_count), 100);
     }
 
-    await ensureUserCounterRow(c.env.fitloot_db, user.id);
-    const currentCounter = await c.env.fitloot_db.prepare("SELECT chat_messages, repeated_message_streak, last_chat_message FROM user_event_counters WHERE user_id = ?")
-      .bind(user.id).first<{ chat_messages: number; repeated_message_streak: number; last_chat_message: string | null }>();
-    const sameMessage = (currentCounter?.last_chat_message ?? "") === userMessage;
-    const nextRepeat = sameMessage ? Number(currentCounter?.repeated_message_streak ?? 0) + 1 : 1;
-    await c.env.fitloot_db.prepare(
-      `UPDATE user_event_counters SET
-        chat_messages = COALESCE(chat_messages, 0) + 1,
-        repeated_message_streak = ?,
-        last_chat_message = ?,
-        updated_at = datetime('now')
-      WHERE user_id = ?`
-    ).bind(nextRepeat, userMessage, user.id).run();
-    await logUserEvent(c.env.fitloot_db, user.id, 'chat_message', { size: userMessage.length, repeated: sameMessage });
-    await onChatMessage(c.env.fitloot_db, user.id, Number(currentCounter?.chat_messages ?? 0) + 1);
-
     const [profile, progression, attributes] = await Promise.all([
       c.env.fitloot_db.prepare("SELECT * FROM user_profiles WHERE user_id = ?").bind(user.id).first(),
       c.env.fitloot_db.prepare("SELECT * FROM user_progression WHERE user_id = ?").bind(user.id).first(),
@@ -3137,19 +3122,13 @@ app.get("/health", async (c) => {
 });
 
 async function processDailyReset(env: Env) {
-  const db = env.fitloot_db;
-  const today = new Date().toISOString().split('T')[0];
-  const state = await db.prepare("SELECT value FROM app_state WHERE key = 'last_daily_reset_date'").first<{ value: string | null }>();
-  if (state?.value === today) return;
-
-  const users = await db.prepare("SELECT user_id FROM user_profiles").all<{ user_id: string }>();
-  for (const user of users.results) {
-    await ensureUserCounterRow(db, user.user_id);
-    await expirePendingMissionsAndUpdateStreak(db, user.user_id);
-  }
-
-  await db.prepare("INSERT INTO app_state (key, value, updated_at) VALUES ('last_daily_reset_date', ?, datetime('now')) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')")
-    .bind(today).run();
+  await processDailyResetForAllUsers({
+    db: env.fitloot_db,
+    processUser: async (userId) => {
+      await ensureUserCounterRow(env.fitloot_db, userId);
+      await expirePendingMissionsAndUpdateStreak(env.fitloot_db, userId);
+    },
+  });
 }
 
 // 6. Healthchecks for external services

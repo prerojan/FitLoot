@@ -1,7 +1,8 @@
 import { useEffect } from "react";
 import { useNavigate } from "react-router";
 import { useAuth } from "@/react-app/App";
-import { api } from "@/react-app/utils/api";
+import { PENDING_404_ACHIEVEMENT_KEY, ROUTE_PATHS } from "@/react-app/constants/auth";
+import { triggerRouteNotFoundAchievement } from "@/react-app/services/achievementService";
 
 export default function NotFound() {
   const { user } = useAuth();
@@ -9,10 +10,10 @@ export default function NotFound() {
 
   useEffect(() => {
     if (user) {
-      api('/api/events/route-not-found', { method: 'POST' }).catch(() => {});
-    } else {
-      localStorage.setItem('fitloot_pending_404_achievement', '1');
+      void triggerRouteNotFoundAchievement().catch(() => undefined);
+      return;
     }
+    localStorage.setItem(PENDING_404_ACHIEVEMENT_KEY, "1");
   }, [user]);
 
   return (
@@ -22,7 +23,7 @@ export default function NotFound() {
         <h1 className="text-2xl font-bold text-gray-900">Ops, página perdida</h1>
         <p className="text-gray-600">Essa rota não existe no FitLoot. Bora voltar para a aventura principal?</p>
         <button
-          onClick={() => navigate(user ? '/home' : '/app')}
+          onClick={() => navigate(user ? ROUTE_PATHS.home : ROUTE_PATHS.app)}
           className="fl-btn-primary w-full rounded-xl py-3"
         >
           Voltar
