@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type ChangeEventHandler } from "react";
+import { useMemo, useRef, useState, useEffect, type ChangeEventHandler } from "react";
 import { useNavigate } from "react-router";
 import { Camera, ImagePlus, Loader2, RefreshCw, Save, AlertTriangle, CheckCircle2 } from "lucide-react";
 import BottomNav from "@/react-app/components/BottomNav";
@@ -15,7 +15,7 @@ type AnalysisItem = {
   carbs: number | null;
   fats: number | null;
   energy_kj: number | null;
-  source: "usda" | "estimate" | "ocr_label";
+  source: "usda" | "rapidapi" | "estimate" | "ocr_label";
   warning?: string;
 };
 
@@ -33,6 +33,70 @@ type AnalysisResult = {
   has_estimates?: boolean;
   estimation_warning?: string;
 };
+
+type IdentifiedItem = {
+  food_name: string;
+  portion_description: string;
+  portion_multiplier: number;
+};
+
+type MediaPipeClassifier = {
+  classify: (image: HTMLImageElement) => {
+    classifications?: Array<{
+      categories?: Array<{ categoryName?: string; score?: number }>;
+    }>;
+  };
+};
+
+let classifierPromise: Promise<MediaPipeClassifier> | null = null;
+
+type MediaPipeVisionModule = {
+  FilesetResolver: {
+    forVisionTasks: (wasmRootPath: string) => Promise<unknown>;
+  };
+  ImageClassifier: {
+    createFromOptions: (vision: unknown, options: Record<string, unknown>) => Promise<MediaPipeClassifier>;
+  };
+};
+
+async function loadVisionModule(): Promise<MediaPipeVisionModule> {
+  const moduleUrl = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/+esm";
+  return (await import(/* @vite-ignore */ moduleUrl)) as MediaPipeVisionModule;
+}
+
+async function getFoodClassifier() {
+  if (!classifierPromise) {
+    classifierPromise = (async () => {
+      const visionModule = await loadVisionModule();
+      const vision = await visionModule.FilesetResolver.forVisionTasks(
+        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
+      );
+
+      return visionModule.ImageClassifier.createFromOptions(vision, {
+        baseOptions: {
+          modelAssetPath:
+            "https://storage.googleapis.com/mediapipe-models/image_classifier/efficientnet_lite0/int8/1/efficientnet_lite0.tflite",
+        },
+        maxResults: 5,
+        runningMode: "IMAGE",
+      });
+    })();
+  }
+
+  return classifierPromise;
+}
+
+function toIdentifiedItems(result: { classifications?: Array<{ categories?: Array<{ categoryName?: string; score?: number }> }> }): IdentifiedItem[] {
+  const categories = safeGet(result.classifications ?? [], 0)?.categories ?? [];
+  return categories
+    .filter((category) => Number(category.score ?? 0) >= 0.2)
+    .slice(0, 3)
+    .map((category) => ({
+      food_name: String(category.categoryName || "alimento"),
+      portion_description: "porção média",
+      portion_multiplier: 1,
+    }));
+}
 
 export default function FoodAnalysis() {
   const navigate = useNavigate();
@@ -69,14 +133,74 @@ export default function FoodAnalysis() {
     setStreamActive(false);
   };
 
+  const [mediaPipeReady, setMediaPipeReady] = useState(false);
+  const [mediaPipeLoading, setMediaPipeLoading] = useState(true);
+  const [mediaPipeError, setMediaPipeError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    const bootstrap = async () => {
+      try {
+        setMediaPipeLoading(true);
+        await getFoodClassifier();
+        if (!active) return;
+        setMediaPipeReady(true);
+        setMediaPipeError(null);
+      } catch {
+        if (!active) return;
+        setMediaPipeReady(false);
+        setMediaPipeError("Não foi possível inicializar o MediaPipe. Verifique sua conexão e tente novamente.");
+      } finally {
+        if (active) setMediaPipeLoading(false);
+      }
+    };
+
+    void bootstrap();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const identifyFoodWithMediaPipe = async (image: HTMLImageElement) => {
+    const classifier = await getFoodClassifier();
+    const prediction = classifier.classify(image);
+    const items = toIdentifiedItems(prediction);
+
+    if (items.length === 0) {
+      throw new Error("Não foi possível identificar alimentos com o modelo local. Tente outra foto.");
+    }
+
+    return items;
+  };
+
   const runAnalysis = async (base64: string) => {
     setLoading(true);
     setError(null);
     setResult(null);
+
     try {
+      if (mediaPipeLoading) {
+        throw new Error("Aguarde, inicializando análise de imagem...");
+      }
+
+      if (!mediaPipeReady) {
+        throw new Error(mediaPipeError || "MediaPipe não está pronto para análise.");
+      }
+
+      const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = () => reject(new Error("Falha ao carregar imagem para análise local."));
+        img.src = `data:image/jpeg;base64,${base64}`;
+      });
+
+      const identifiedItems = await identifyFoodWithMediaPipe(image);
       const response = await api("/api/ai/analyze-food", {
         method: "POST",
-        body: JSON.stringify({ image_base64: base64 }),
+        body: JSON.stringify({
+          identified_items: identifiedItems,
+          food_description: identifiedItems.map((item) => item.food_name).join(", "),
+        }),
       });
 
       const data = await response.json();
@@ -157,7 +281,7 @@ export default function FoodAnalysis() {
     <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 pb-24">
       <div className="bg-gradient-to-r from-emerald-500 to-teal-600 text-white px-6 pt-8 pb-6 rounded-b-3xl shadow-xl">
         <h1 className="text-2xl font-bold">Análise de alimentos</h1>
-        <p className="text-emerald-100 text-sm mt-1">Foto por câmera ou galeria, com OCR + USDA + IA</p>
+        <p className="text-emerald-100 text-sm mt-1">Foto por câmera ou galeria, com MediaPipe + USDA + fallback</p>
       </div>
 
       <div className="px-6 py-6 space-y-4">
@@ -185,6 +309,14 @@ export default function FoodAnalysis() {
 
           {cameraError && (
             <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-amber-700 text-sm">{cameraError}</div>
+          )}
+
+          {mediaPipeLoading && (
+            <div className="bg-gray-50 border border-gray-200 rounded-xl p-3 text-gray-600 text-sm">Inicializando MediaPipe...</div>
+          )}
+
+          {mediaPipeError && (
+            <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-red-700 text-sm">{mediaPipeError}</div>
           )}
 
           {streamActive && <video ref={videoRef} className="w-full rounded-2xl" autoPlay playsInline muted />}
@@ -240,7 +372,7 @@ export default function FoodAnalysis() {
                   <p className="font-semibold text-gray-900">{item.food_name}</p>
                   <p className="text-gray-600">{item.portion_description}</p>
                   <p className="text-gray-700 mt-1">{item.calories ?? "-"} kcal • P {item.protein ?? "-"}g • C {item.carbs ?? "-"}g • G {item.fats ?? "-"}g</p>
-                  {item.source !== "usda" && <p className="text-amber-600 mt-1">Fonte: {item.source === "estimate" ? "estimativa IA" : "OCR do rótulo"}</p>}
+                  {item.source !== "usda" && <p className="text-amber-600 mt-1">Fonte: {item.source === "estimate" ? "estimativa IA" : item.source === "rapidapi" ? "RapidAPI" : "OCR do rótulo"}</p>}
                 </div>
               ))}
             </Card>
