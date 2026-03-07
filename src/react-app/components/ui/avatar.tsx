@@ -1,9 +1,9 @@
 import { cn } from '@/react-app/utils';
 
 interface AvatarProps {
-  src?: string | null;
-  name?: string;
-  className?: string;
+  src?: string | null | undefined;
+  name?: string | undefined;
+  className?: string | undefined;
 }
 
 export function Avatar({ src, name, className }: AvatarProps) {

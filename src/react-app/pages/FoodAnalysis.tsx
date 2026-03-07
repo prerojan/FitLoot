@@ -16,7 +16,7 @@ type AnalysisItem = {
   fats: number | null;
   energy_kj: number | null;
   source: "usda" | "rapidapi" | "estimate" | "ocr_label";
-  warning?: string;
+  warning?: string | undefined;
 };
 
 type AnalysisResult = {
@@ -30,8 +30,8 @@ type AnalysisResult = {
     fats: number;
     macro_percentages: { protein: number; carbs: number; fats: number };
   };
-  has_estimates?: boolean;
-  estimation_warning?: string;
+  has_estimates?: boolean | undefined;
+  estimation_warning?: string | undefined;
 };
 
 type IdentifiedItem = {
@@ -43,7 +43,7 @@ type IdentifiedItem = {
 type MediaPipeClassifier = {
   classify: (image: HTMLImageElement) => {
     classifications?: Array<{
-      categories?: Array<{ categoryName?: string; score?: number }>;
+      categories?: Array<{ categoryName?: string | undefined; score?: number | undefined }>;
     }>;
   };
 };
@@ -86,7 +86,7 @@ async function getFoodClassifier() {
   return classifierPromise;
 }
 
-function toIdentifiedItems(result: { classifications?: Array<{ categories?: Array<{ categoryName?: string; score?: number }> }> }): IdentifiedItem[] {
+function toIdentifiedItems(result: { classifications?: Array<{ categories?: Array<{ categoryName?: string | undefined; score?: number | undefined }> }> }): IdentifiedItem[] {
   const categories = safeGet(result.classifications ?? [], 0)?.categories ?? [];
   return categories
     .filter((category) => Number(category.score ?? 0) >= 0.2)

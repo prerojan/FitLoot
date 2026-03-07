@@ -282,7 +282,7 @@ type GoalValue = ProfileStep["main_goal"];
 
 type AvailabilityState = {
   status: "idle" | "checking" | "available" | "unavailable" | "invalid";
-  message?: string;
+  message?: string | undefined;
 };
 
 
@@ -384,7 +384,7 @@ export default function Onboarding() {
 
     try {
       const response = await api(`/api/auth/check-availability?username=${encodeURIComponent(username)}`);
-      const payload = (await response.json().catch(() => null)) as { usernameAvailable?: boolean } | null;
+      const payload = (await response.json().catch(() => null)) as { usernameAvailable?: boolean | undefined } | null;
 
       if (requestId !== usernameReqRef.current) return false;
 
@@ -426,7 +426,7 @@ export default function Onboarding() {
 
     try {
       const response = await api(`/api/auth/check-availability?email=${encodeURIComponent(email)}`);
-      const payload = (await response.json().catch(() => null)) as { emailAvailable?: boolean } | null;
+      const payload = (await response.json().catch(() => null)) as { emailAvailable?: boolean | undefined } | null;
 
       if (requestId !== emailReqRef.current) return false;
 
@@ -650,7 +650,7 @@ export default function Onboarding() {
 
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        setStepError((data as { error?: string }).error ?? "Erro ao salvar perfil.");
+        setStepError((data as { error?: string | undefined }).error ?? "Erro ao salvar perfil.");
         setStepLoading(false);
         return;
       }
