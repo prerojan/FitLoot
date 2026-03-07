@@ -37,7 +37,9 @@ type AppContext = {
 
 
 let cachedSchemaState: { ready: boolean; checkedAt: number } | null = null;
+let catalogInitCheckedAt = 0;
 const SCHEMA_CACHE_TTL_MS = 10_000;
+const CATALOG_CACHE_TTL_MS = 60_000;
 
 async function hasCoreSchema(db: D1Database) {
   const now = Date.now();
@@ -70,6 +72,13 @@ function databaseNotInitializedResponse(c: import("hono").Context<AppContext>) {
   );
 }
 
+async function ensureCatalogReady(db: D1Database) {
+  const now = Date.now();
+  if (now - catalogInitCheckedAt < CATALOG_CACHE_TTL_MS) return;
+  await ensureGamificationCatalog(db);
+  catalogInitCheckedAt = now;
+}
+
 // Middleware de autenticação próprio
 async function authMiddleware(
   c: import("hono").Context<{ Bindings: Env; Variables: { user: AuthUser } }>,
@@ -79,6 +88,8 @@ async function authMiddleware(
   if (!schemaReady) {
     return databaseNotInitializedResponse(c);
   }
+
+  await ensureCatalogReady(c.env.fitloot_db);
 
   const sessionId = safeGet(c.req.header('Cookie')?.match(/session_id=([^;]+)/) ?? [], 1);
 
@@ -114,12 +125,380 @@ export interface Env {
   RAPID_API_KEY?: string;
   RAPID_API_HOST?: string;
   ANTHROPIC_API_KEY?: string;
+  EXERCISE_DB_KEY?: string;
+  API_NINJAS_KEY?: string;
+  GYMFIT_API_KEY?: string;
 }
 // --------------------------------
 
 
 const app = new Hono<AppContext>();
 
+
+type ConditioningLevel = "sedentario" | "iniciante" | "intermediario" | "avancado";
+
+type ExerciseRef = { name: string; muscle: string; equipment?: string; difficulty?: string; instructions?: string };
+
+type SkillSeed = {
+  name: string;
+  category: string;
+  difficulty: string;
+  tier: "iniciante" | "intermediario" | "avancado" | "calistenico";
+  requiredLevel: number;
+  description: string;
+  unlockMessage: string;
+  prerequisites?: string[];
+  attributeRequirements?: Record<string, number>;
+};
+
+type SkillStageSeed = {
+  skillName: string;
+  stageNumber: number;
+  name: string;
+  description: string;
+  levelRequired: number;
+  exerciseReference: string;
+};
+
+const localExercisePool: ExerciseRef[] = [
+  { name: "Push-up", muscle: "chest", equipment: "bodyweight", difficulty: "beginner" },
+  { name: "Air Squat", muscle: "legs", equipment: "bodyweight", difficulty: "beginner" },
+  { name: "Plank", muscle: "core", equipment: "bodyweight", difficulty: "beginner" },
+  { name: "Glute Bridge", muscle: "glutes", equipment: "bodyweight", difficulty: "beginner" },
+  { name: "Burpee", muscle: "full body", equipment: "bodyweight", difficulty: "intermediate" },
+  { name: "Pike Push-up", muscle: "shoulders", equipment: "bodyweight", difficulty: "intermediate" },
+  { name: "Lunge", muscle: "legs", equipment: "bodyweight", difficulty: "beginner" },
+  { name: "Superman Hold", muscle: "back", equipment: "bodyweight", difficulty: "beginner" },
+];
+
+const coreSkillSeeds: SkillSeed[] = [
+  { name: "Flexão", category: "peito", difficulty: "basico", tier: "iniciante", requiredLevel: 1, description: "Empurrar horizontal com peso corporal", unlockMessage: "Flexão desbloqueada." },
+  { name: "Agachamento", category: "pernas", difficulty: "basico", tier: "iniciante", requiredLevel: 1, description: "Base para força de membros inferiores", unlockMessage: "Agachamento desbloqueado." },
+  { name: "Abdominal", category: "core", difficulty: "basico", tier: "iniciante", requiredLevel: 1, description: "Fortalecimento de core", unlockMessage: "Abdominal desbloqueado." },
+  { name: "Prancha", category: "core", difficulty: "basico", tier: "iniciante", requiredLevel: 1, description: "Isometria de core", unlockMessage: "Prancha desbloqueada." },
+  { name: "Barra Fixa", category: "costas", difficulty: "intermediario", tier: "intermediario", requiredLevel: 5, description: "Puxada vertical", unlockMessage: "Barra fixa disponível." },
+  { name: "Dips", category: "triceps", difficulty: "intermediario", tier: "intermediario", requiredLevel: 7, description: "Empurrar em barras paralelas", unlockMessage: "Dips desbloqueado." },
+  { name: "Handstand", category: "calistenia", difficulty: "calistenia", tier: "calistenico", requiredLevel: 6, description: "Progressão de equilíbrio invertido", unlockMessage: "Inicie sua jornada no handstand.", prerequisites: ["Prancha"], attributeRequirements: { strength: 20, dexterity: 20 } },
+  { name: "Front Lever", category: "calistenia", difficulty: "calistenia", tier: "calistenico", requiredLevel: 10, description: "Alavanca frontal", unlockMessage: "Front Lever desbloqueado.", prerequisites: ["Barra Fixa"], attributeRequirements: { strength: 30 } },
+  { name: "Back Lever", category: "calistenia", difficulty: "calistenia", tier: "calistenico", requiredLevel: 10, description: "Alavanca posterior", unlockMessage: "Back Lever desbloqueado.", prerequisites: ["Barra Fixa"], attributeRequirements: { strength: 30 } },
+  { name: "Planche", category: "calistenia", difficulty: "calistenia", tier: "calistenico", requiredLevel: 12, description: "Sustentação horizontal", unlockMessage: "Planche desbloqueada.", prerequisites: ["Dips"], attributeRequirements: { strength: 38 } },
+  { name: "Human Flag", category: "calistenia", difficulty: "calistenia", tier: "calistenico", requiredLevel: 14, description: "Bandeira humana", unlockMessage: "Human Flag desbloqueada.", attributeRequirements: { strength: 42, dexterity: 30 } },
+  { name: "Muscle Up", category: "calistenia", difficulty: "calistenia", tier: "calistenico", requiredLevel: 11, description: "Transição de barra", unlockMessage: "Muscle Up desbloqueado.", prerequisites: ["Barra Fixa", "Dips"], attributeRequirements: { strength: 36 } },
+  { name: "Pistol Squat", category: "calistenia", difficulty: "calistenia", tier: "calistenico", requiredLevel: 9, description: "Agachamento unilateral", unlockMessage: "Pistol Squat desbloqueado.", prerequisites: ["Agachamento"], attributeRequirements: { vitality: 28 } },
+  { name: "Dragon Flag", category: "calistenia", difficulty: "calistenia", tier: "calistenico", requiredLevel: 13, description: "Core avançado", unlockMessage: "Dragon Flag desbloqueada.", prerequisites: ["Abdominal"], attributeRequirements: { strength: 34, focus: 24 } },
+  { name: "L-Sit", category: "calistenia", difficulty: "calistenia", tier: "calistenico", requiredLevel: 8, description: "Sustentação em L", unlockMessage: "L-Sit desbloqueado.", prerequisites: ["Prancha"], attributeRequirements: { strength: 24, focus: 18 } },
+];
+
+const stageProgressionSeed: SkillStageSeed[] = [
+  ["Handstand", ["Quadruped Rocking", "Hollow Body", "Crow Pose", "Wall Walk", "How to Bail out of a Handstand", "Handstand completo"]],
+  ["Front Lever", ["Scapula Pull", "Tuck Front Lever", "Advanced Tuck Lever", "One Leg Front Lever", "Straddle Front Lever", "Front Lever completo"]],
+  ["Back Lever", ["Skin the Cat", "German Hang", "Tuck Back Lever", "Advanced Tuck Back Lever", "Straddle Back Lever", "Back Lever completo"]],
+  ["Planche", ["Planche Lean", "Frog Stand", "Tuck Planche", "Advanced Tuck Planche", "Straddle Planche", "Planche completa"]],
+  ["Human Flag", ["Side Plank", "Vertical Flag Hold", "Tuck Human Flag", "One Leg Flag", "Straddle Flag", "Human Flag completa"]],
+  ["Muscle Up", ["Explosive Pull-up", "Chest to Bar", "Transition Drill", "Band Assisted Muscle Up", "Negative Muscle Up", "Muscle Up completo"]],
+  ["Pistol Squat", ["Box Pistol", "Assisted Pistol", "Counterbalance Pistol", "Slow Eccentric Pistol", "Partial ROM Pistol", "Pistol Squat completo"]],
+  ["Dragon Flag", ["Hollow Hold", "Reverse Crunch", "Dragon Flag Negativa", "Half Dragon Flag", "Strict Dragon Flag", "Dragon Flag completa"]],
+  ["L-Sit", ["Seated Compression", "Tuck Sit", "One Leg L-Sit", "Alternating L-Sit", "V-Sit Prep", "L-Sit completo"]],
+]
+  .flatMap(([skillName, stages], idxSkill) => (stages as string[]).map((name, idx) => ({
+    skillName: String(skillName),
+    stageNumber: idx + 1,
+    name,
+    description: `Progressão ${idx + 1} de ${skillName}`,
+    levelRequired: 4 + idx * 2 + idxSkill % 2,
+    exerciseReference: name,
+  })));
+
+const titleSeeds = [
+  { name: "Recruta", description: "Primeiros passos", reference: "RPG", unlock_condition: "level:1", rarity: "Comum" },
+  { name: "Guerreiro do Core", description: "Nível 5", reference: "Calistenia", unlock_condition: "level:5", rarity: "Comum" },
+  { name: "Veterano de Ferro", description: "Nível 10", reference: "Musculação", unlock_condition: "level:10", rarity: "Incomum" },
+  { name: "Lâmina Afiada", description: "Nível 15", reference: "Ação", unlock_condition: "level:15", rarity: "Raro" },
+  { name: "Mestre do Peso Corporal", description: "Nível 20", reference: "Calistenia", unlock_condition: "level:20", rarity: "Raro" },
+  { name: "O Último de Nós", description: "Nível 30", reference: "TLOU", unlock_condition: "level:30", rarity: "Mítico" },
+  { name: "Lendário", description: "Nível 50", reference: "RPG", unlock_condition: "level:50", rarity: "Mítico" },
+  { name: "O Equilibrista", description: "Handstand completo", reference: "Calistenia", unlock_condition: "skill:Handstand:6", rarity: "Raro" },
+  { name: "Acima de Todos", description: "Muscle Up completo", reference: "Calistenia", unlock_condition: "skill:Muscle Up:6", rarity: "Raro" },
+  { name: "Força Gravitacional", description: "Planche completa", reference: "Calistenia", unlock_condition: "skill:Planche:6", rarity: "Mítico" },
+  { name: "Bandeira Humana", description: "Human Flag completa", reference: "Calistenia", unlock_condition: "skill:Human Flag:6", rarity: "Mítico" },
+  { name: "Suspenso no Tempo", description: "Front Lever completo", reference: "Calistenia", unlock_condition: "skill:Front Lever:6", rarity: "Raro" },
+  { name: "Shoto Style", description: "Referência Street Fighter", reference: "Street Fighter", unlock_condition: "missions:120", rarity: "Incomum" },
+  { name: "Iron Fist", description: "Referência Tekken", reference: "Tekken", unlock_condition: "strength:80", rarity: "Raro" },
+  { name: "King of Iron Body", description: "Referência jogos de luta", reference: "Fighting Games", unlock_condition: "level:35", rarity: "Mítico" },
+  { name: "300", description: "300 treinos completados", reference: "Filme 300", unlock_condition: "missions:300", rarity: "Mítico" },
+  { name: "Rocky", description: "30 dias de streak", reference: "Rocky", unlock_condition: "streak:30", rarity: "Raro" },
+  { name: "Predador", description: "Caça semanal concluída", reference: "Predador", unlock_condition: "weekly:1", rarity: "Incomum" },
+  { name: "Chosen Undead", description: "Falhou e insistiu", reference: "Dark Souls", unlock_condition: "failures:10", rarity: "Secreto" },
+  { name: "The Witcher", description: "Contrato semanal", reference: "The Witcher", unlock_condition: "weekly:5", rarity: "Raro" },
+  { name: "Demon Slayer", description: "5 habilidades desbloqueadas", reference: "Anime", unlock_condition: "skills:5", rarity: "Raro" },
+  { name: "Hollow", description: "Perdeu sequência 3x", reference: "Hollow Knight", unlock_condition: "streak_loss:3", rarity: "Secreto" },
+];
+
+const achievementSeeds = [
+  { name: "Primeiro Passo", description: "Completar a primeira missão", category: "missoes", rarity: "Comum", color: "#D1D5DB", secret: 0, condition: "missions_completed>=1", icon: "👣", reference: "" },
+  { name: "Aquecendo", description: "Completar 7 missões", category: "missoes", rarity: "Comum", color: "#D1D5DB", secret: 0, condition: "missions_completed>=7", icon: "🔥", reference: "" },
+  { name: "Rotina Formada", description: "Completar 30 missões", category: "missoes", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "missions_completed>=30", icon: "📅", reference: "" },
+  { name: "Sem Desculpas", description: "5 dias seguidos", category: "missoes", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "streak>=5", icon: "✅", reference: "" },
+  { name: "Máquina", description: "Completar 100 missões", category: "missoes", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "missions_completed>=100", icon: "⚙️", reference: "" },
+  { name: "Imparável", description: "30 dias consecutivos", category: "missoes", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "streak>=30", icon: "🏃", reference: "" },
+  { name: "Lenda Viva", description: "365 missões", category: "missoes", rarity: "Mítico", color: "#EF4444", secret: 0, condition: "missions_completed>=365", icon: "👑", reference: "" },
+  { name: "Primeira Conversa", description: "Primeira mensagem no FitBot", category: "chat", rarity: "Comum", color: "#D1D5DB", secret: 0, condition: "chat_messages>=1", icon: "💬", reference: "" },
+  { name: "Curioso", description: "50 perguntas ao FitBot", category: "chat", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "chat_messages>=50", icon: "🤔", reference: "" },
+  { name: "Aprendiz Dedicado", description: "200 interações no chat", category: "chat", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "chat_messages>=200", icon: "🧠", reference: "" },
+  { name: "Eco", description: "Condição secreta", category: "chat", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "repeat_message_streak>=5", icon: "🌀", reference: "" },
+  { name: "Na Disputa", description: "Entrar no top 100", category: "ranking", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "ranking<=100", icon: "🥉", reference: "" },
+  { name: "Elite", description: "Entrar no top 10", category: "ranking", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "ranking<=10", icon: "🥈", reference: "" },
+  { name: "O Escolhido", description: "Alcançar #1", category: "ranking", rarity: "Mítico", color: "#EF4444", secret: 0, condition: "ranking==1", icon: "🥇", reference: "" },
+  { name: "Ghost", description: "Condição secreta", category: "ranking", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "top10_no_friends", icon: "👤", reference: "" },
+  { name: "Primeiros Voos", description: "Primeira etapa do Handstand", category: "habilidades", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "skill_stage:Handstand>=1", icon: "🕊️", reference: "" },
+  { name: "Mestre do Equilíbrio", description: "Handstand completo", category: "habilidades", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "skill_stage:Handstand>=6", icon: "🤸", reference: "" },
+  { name: "Kalista", description: "Todas as skills calistênicas", category: "habilidades", rarity: "Mítico", color: "#EF4444", secret: 0, condition: "all_calisthenics", icon: "⚔️", reference: "" },
+  { name: "Jogador", description: "Primeiro minigame", category: "minigames", rarity: "Comum", color: "#D1D5DB", secret: 0, condition: "minigames_played>=1", icon: "🎮", reference: "" },
+  { name: "Competidor", description: "Vencer 10 minigames", category: "minigames", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "minigames_won>=10", icon: "🏅", reference: "" },
+  { name: "Imbatível", description: "50 vitórias seguidas", category: "minigames", rarity: "Mítico", color: "#EF4444", secret: 0, condition: "minigame_win_streak>=50", icon: "🔥", reference: "" },
+  { name: "Mestre Artesão", description: "Condição secreta", category: "secreta", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "craft_master", icon: "🛠️", reference: "Hollow Knight" },
+  { name: "Insônia", description: "Condição secreta", category: "secreta", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "mission_2am_4am", icon: "🌙", reference: "" },
+  { name: "Fantasma", description: "Condição secreta", category: "secreta", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "open_gap6_complete_day7", icon: "👻", reference: "" },
+  { name: "Conversa de Louco", description: "Condição secreta", category: "secreta", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "chat_session_100", icon: "🤯", reference: "" },
+  { name: "Glitch", description: "Condição secreta", category: "secreta", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "report_bug_chat", icon: "🐞", reference: "" },
+];
+
+function conditioningOrder(level: ConditioningLevel): number {
+  return { sedentario: 0, iniciante: 1, intermediario: 2, avancado: 3 }[level] ?? 0;
+}
+
+function skillTierOrder(tier: string): number {
+  return { iniciante: 1, intermediario: 2, avancado: 3, calistenico: 4 }[tier as keyof Record<string, number>] ?? 1;
+}
+
+async function ensureGamificationCatalog(db: D1Database) {
+  for (const skill of coreSkillSeeds) {
+    await db.prepare(`INSERT INTO skills (name, category, difficulty, description, calories_per_rep, strength_gain, constitution_gain, vitality_gain, dexterity_gain, focus_gain, required_level, tier, level_required, prerequisites, attribute_requirements, unlock_message, updated_at)
+      SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, datetime('now')
+      WHERE NOT EXISTS (SELECT 1 FROM skills WHERE name = ?)`)
+      .bind(skill.name, skill.category, skill.difficulty, skill.description, 0.5, 1, 1, 1, 1, 1, skill.requiredLevel, skill.tier, skill.requiredLevel, JSON.stringify(skill.prerequisites ?? []), JSON.stringify(skill.attributeRequirements ?? {}), skill.unlockMessage, skill.name)
+      .run();
+  }
+
+  for (const stage of stageProgressionSeed) {
+    const skill = await db.prepare("SELECT id FROM skills WHERE name = ?").bind(stage.skillName).first<{ id: number }>();
+    if (!skill?.id) continue;
+    await db.prepare(`INSERT INTO skill_stages (skill_id, stage_number, name, description, level_required, exercise_reference, updated_at)
+      SELECT ?,?,?,?,?,?, datetime('now')
+      WHERE NOT EXISTS (SELECT 1 FROM skill_stages WHERE skill_id = ? AND stage_number = ?)`)
+      .bind(skill.id, stage.stageNumber, stage.name, stage.description, stage.levelRequired, stage.exerciseReference, skill.id, stage.stageNumber)
+      .run();
+  }
+
+  for (const achievement of achievementSeeds) {
+    await db.prepare(`INSERT INTO achievements (name, description, rarity, icon, requirement_type, requirement_value, category, color, secret, condition, reference, updated_at)
+      SELECT ?,?,?,?,?,?,?,?,?,?,?, datetime('now')
+      WHERE NOT EXISTS (SELECT 1 FROM achievements WHERE name = ?)`)
+      .bind(achievement.name, achievement.description, achievement.rarity, achievement.icon, "event", 1, achievement.category, achievement.color, achievement.secret, achievement.condition, achievement.reference, achievement.name)
+      .run();
+  }
+
+  for (const title of titleSeeds) {
+    await db.prepare(`INSERT INTO titles (name, rarity, requirement_type, requirement_value, description, reference, unlock_condition, updated_at)
+      SELECT ?,?,?,?,?,?,?, datetime('now')
+      WHERE NOT EXISTS (SELECT 1 FROM titles WHERE name = ?)`)
+      .bind(title.name, title.rarity, "event", 1, title.description, title.reference, title.unlock_condition, title.name)
+      .run();
+  }
+}
+
+async function ensureUserCounterRow(db: D1Database, userId: string) {
+  await db.prepare(`INSERT OR IGNORE INTO user_event_counters (user_id, updated_at) VALUES (?, datetime('now'))`).bind(userId).run();
+}
+
+async function logUserEvent(db: D1Database, userId: string, eventType: string, payload: Record<string, unknown>) {
+  await db.prepare(`INSERT INTO user_event_log (user_id, event_type, payload_json) VALUES (?, ?, ?)`)
+    .bind(userId, eventType, JSON.stringify(payload)).run();
+}
+
+async function unlockTitleIfNeeded(db: D1Database, userId: string, titleName: string) {
+  const title = await db.prepare("SELECT id FROM titles WHERE name = ?").bind(titleName).first<{ id: number }>();
+  if (!title?.id) return;
+  await db.prepare(`INSERT OR IGNORE INTO user_titles (user_id, title_id, unlocked_at, updated_at) VALUES (?, ?, datetime('now'), datetime('now'))`)
+    .bind(userId, title.id).run();
+}
+
+async function unlockAchievementIfNeeded(db: D1Database, userId: string, achievementName: string, progressCurrent = 1, progressRequired = 1) {
+  const achievement = await db.prepare("SELECT id FROM achievements WHERE name = ?").bind(achievementName).first<{ id: number }>();
+  if (!achievement?.id) return;
+  await db.prepare(`INSERT OR IGNORE INTO user_achievements (user_id, achievement_id, unlocked_at, progress_current, progress_required, updated_at)
+    VALUES (?, ?, datetime('now'), ?, ?, datetime('now'))`)
+    .bind(userId, achievement.id, progressCurrent, progressRequired).run();
+}
+
+async function evaluateMissionAchievementsAndTitles(db: D1Database, userId: string) {
+  const counters = await db.prepare("SELECT * FROM user_event_counters WHERE user_id = ?").bind(userId).first<Record<string, unknown>>();
+  const missionsCompleted = Number(counters?.missions_completed ?? 0);
+  const consecutiveDays = Number(counters?.consecutive_days_completed ?? 0);
+
+  if (missionsCompleted >= 1) await unlockAchievementIfNeeded(db, userId, "Primeiro Passo", missionsCompleted, 1);
+  if (missionsCompleted >= 7) await unlockAchievementIfNeeded(db, userId, "Aquecendo", missionsCompleted, 7);
+  if (missionsCompleted >= 30) await unlockAchievementIfNeeded(db, userId, "Rotina Formada", missionsCompleted, 30);
+  if (missionsCompleted >= 100) await unlockAchievementIfNeeded(db, userId, "Máquina", missionsCompleted, 100);
+  if (missionsCompleted >= 365) await unlockAchievementIfNeeded(db, userId, "Lenda Viva", missionsCompleted, 365);
+  if (consecutiveDays >= 5) await unlockAchievementIfNeeded(db, userId, "Sem Desculpas", consecutiveDays, 5);
+  if (consecutiveDays >= 30) {
+    await unlockAchievementIfNeeded(db, userId, "Imparável", consecutiveDays, 30);
+    await unlockTitleIfNeeded(db, userId, "Rocky");
+  }
+  if (missionsCompleted >= 300) await unlockTitleIfNeeded(db, userId, "300");
+  if (missionsCompleted >= 120) await unlockTitleIfNeeded(db, userId, "Shoto Style");
+}
+
+async function evaluateChatAchievements(db: D1Database, userId: string) {
+  const counters = await db.prepare("SELECT chat_messages, repeated_message_streak FROM user_event_counters WHERE user_id = ?")
+    .bind(userId).first<{ chat_messages: number; repeated_message_streak: number }>();
+  const total = Number(counters?.chat_messages ?? 0);
+  const repeat = Number(counters?.repeated_message_streak ?? 0);
+
+  if (total >= 1) await unlockAchievementIfNeeded(db, userId, "Primeira Conversa", total, 1);
+  if (total >= 50) await unlockAchievementIfNeeded(db, userId, "Curioso", total, 50);
+  if (total >= 200) await unlockAchievementIfNeeded(db, userId, "Aprendiz Dedicado", total, 200);
+  if (repeat >= 5) await unlockAchievementIfNeeded(db, userId, "Eco", repeat, 5);
+}
+
+async function evaluateLevelTitles(db: D1Database, userId: string, level: number) {
+  const byLevel: Array<[number, string]> = [
+    [1, "Recruta"], [5, "Guerreiro do Core"], [10, "Veterano de Ferro"], [15, "Lâmina Afiada"],
+    [20, "Mestre do Peso Corporal"], [30, "O Último de Nós"], [50, "Lendário"],
+  ];
+  for (const [threshold, name] of byLevel) {
+    if (level >= threshold) await unlockTitleIfNeeded(db, userId, name);
+  }
+}
+
+async function onMissionComplete(db: D1Database, userId: string, missionId: number) {
+  await logUserEvent(db, userId, "onMissionComplete", { missionId });
+  await evaluateMissionAchievementsAndTitles(db, userId);
+}
+
+async function onLevelUp(db: D1Database, userId: string, newLevel: number) {
+  await logUserEvent(db, userId, "onLevelUp", { newLevel });
+  await evaluateLevelTitles(db, userId, newLevel);
+}
+
+async function onChatMessage(db: D1Database, userId: string, messageCount: number) {
+  await logUserEvent(db, userId, "onChatMessage", { messageCount });
+  await evaluateChatAchievements(db, userId);
+}
+
+async function onSkillUnlocked(db: D1Database, userId: string, skillId: number) {
+  await logUserEvent(db, userId, "onSkillUnlocked", { skillId });
+  const skill = await db.prepare("SELECT name, tier FROM skills WHERE id = ?").bind(skillId).first<{ name: string; tier: string }>();
+  const count = await db.prepare("SELECT COUNT(*) as c FROM user_skills WHERE user_id = ?").bind(userId).first<{ c: number }>();
+  const unlockedCount = Number(count?.c ?? 0);
+  if (unlockedCount >= 5) await unlockTitleIfNeeded(db, userId, "Demon Slayer");
+
+  if (skill?.name === "Handstand") {
+    await unlockAchievementIfNeeded(db, userId, "Primeiros Voos", 1, 1);
+  }
+
+  const calisthenics = await db.prepare(
+    `SELECT COUNT(*) as c FROM user_skills us INNER JOIN skills s ON s.id = us.skill_id WHERE us.user_id = ? AND s.tier = 'calistenico'`
+  ).bind(userId).first<{ c: number }>();
+  if (Number(calisthenics?.c ?? 0) >= 9) {
+    await unlockAchievementIfNeeded(db, userId, "Kalista", Number(calisthenics?.c ?? 0), 9);
+  }
+}
+
+async function onRankingUpdate(db: D1Database, userId: string, position: number) {
+  await logUserEvent(db, userId, "onRankingUpdate", { position });
+}
+
+async function onProfileCustomization(db: D1Database, userId: string, customizations: Record<string, unknown>) {
+  await logUserEvent(db, userId, "onProfileCustomization", customizations);
+}
+
+async function onAppOpen(db: D1Database, userId: string, timestamp: string) {
+  await ensureUserCounterRow(db, userId);
+  const current = await db.prepare("SELECT app_last_open_at FROM user_event_counters WHERE user_id = ?").bind(userId).first<{ app_last_open_at: string | null }>();
+  const previous = current?.app_last_open_at ? new Date(current.app_last_open_at).getTime() : Date.now();
+  const now = new Date(timestamp).getTime();
+  const gapDays = Math.max(0, Math.floor((now - previous) / 86400000));
+  await db.prepare(`UPDATE user_event_counters SET app_last_open_at = ?, app_open_gap_days = ?, updated_at = datetime('now') WHERE user_id = ?`)
+    .bind(timestamp, gapDays, userId).run();
+  await logUserEvent(db, userId, "onAppOpen", { gapDays, timestamp });
+}
+
+async function buildInitialTrainingPlan(mainGoal: string | null | undefined, conditioning: ConditioningLevel, equipment: string | null | undefined, injuries: string | null | undefined) {
+  const restDay = conditioning === "avancado" ? "domingo" : "quarta";
+  const weekly = {
+    segunda: { focus: "push", muscles: ["chest", "shoulders", "triceps"], intensity: "moderada" },
+    terca: { focus: "legs", muscles: ["legs", "glutes", "core"], intensity: "moderada" },
+    quarta: { focus: "rest", muscles: ["mobility", "stretching"], intensity: "leve" },
+    quinta: { focus: "pull", muscles: ["back", "biceps", "core"], intensity: "moderada" },
+    sexta: { focus: mainGoal === "calistenia" ? "skill" : "conditioning", muscles: ["full body"], intensity: "moderada" },
+    sabado: { focus: "recovery", muscles: ["mobility", "core"], intensity: "leve" },
+    domingo: { focus: restDay === "domingo" ? "rest" : "optional", muscles: ["walk", "stretching"], intensity: "leve" },
+  };
+
+  return {
+    goal: mainGoal ?? "saude_geral",
+    conditioning,
+    equipment: equipment ?? "",
+    injuries: injuries ?? "",
+    rest_days: [restDay],
+    weekly,
+    progression: "Primeiras 4 semanas com progressão linear de volume e técnica.",
+  };
+}
+
+async function upsertTrainingPlan(db: D1Database, userId: string, plan: Record<string, unknown>, mainGoal: string | null, conditioning: ConditioningLevel, equipment: string | null, injuries: string | null) {
+  await db.prepare(`INSERT INTO user_training_plans (user_id, main_goal, conditioning, training_frequency, equipment, injuries, weekly_plan_json, progression_notes, updated_at)
+    VALUES (?, ?, ?, 4, ?, ?, ?, ?, datetime('now'))
+    ON CONFLICT(user_id) DO UPDATE SET
+      main_goal=excluded.main_goal,
+      conditioning=excluded.conditioning,
+      equipment=excluded.equipment,
+      injuries=excluded.injuries,
+      weekly_plan_json=excluded.weekly_plan_json,
+      progression_notes=excluded.progression_notes,
+      updated_at=datetime('now')`)
+    .bind(userId, mainGoal, conditioning, equipment ?? "", injuries ?? "", JSON.stringify(plan), "progressão de base")
+    .run();
+}
+
+async function tryUnlockSkillsForLevel(db: D1Database, userId: string, level: number) {
+  const [profile, attrs] = await Promise.all([
+    db.prepare("SELECT initial_conditioning FROM user_profiles WHERE user_id = ?").bind(userId).first<{ initial_conditioning: ConditioningLevel }>(),
+    db.prepare("SELECT strength, constitution, vitality, dexterity, focus FROM user_attributes WHERE user_id = ?").bind(userId).first<Record<string, number>>(),
+  ]);
+  const conditioning = (profile?.initial_conditioning ?? "iniciante") as ConditioningLevel;
+
+  const candidates = await db.prepare(
+    `SELECT id, name, tier, level_required, prerequisites, attribute_requirements FROM skills
+      WHERE COALESCE(level_required, required_level) <= ?
+      AND id NOT IN (SELECT skill_id FROM user_skills WHERE user_id = ?)`
+  ).bind(level, userId).all<{ id: number; name: string; tier: string; level_required: number; prerequisites?: string; attribute_requirements?: string }>();
+
+  for (const skill of candidates.results) {
+    if (skillTierOrder(skill.tier) > conditioningOrder(conditioning) + 1) continue;
+    const prereqNames = JSON.parse(skill.prerequisites || "[]") as string[];
+    let hasPrereq = true;
+    for (const prereq of prereqNames) {
+      const row = await db.prepare(`SELECT 1 FROM user_skills us INNER JOIN skills s ON s.id = us.skill_id WHERE us.user_id = ? AND s.name = ?`).bind(userId, prereq).first();
+      if (!row) {
+        hasPrereq = false;
+        break;
+      }
+    }
+    if (!hasPrereq) continue;
+
+    const req = JSON.parse(skill.attribute_requirements || "{}") as Record<string, number>;
+    const attributesOk = Object.entries(req).every(([key, value]) => Number(attrs?.[key] ?? 0) >= Number(value));
+    if (!attributesOk) continue;
+
+    await db.prepare(`INSERT OR IGNORE INTO user_skills (user_id, skill_id, status, current_stage, total_reps, total_time, best_reps, unlocked_at, updated_at)
+      VALUES (?, ?, 'unlocked', 1, 0, 0, 0, datetime('now'), datetime('now'))`).bind(userId, skill.id).run();
+    await db.prepare(`UPDATE user_event_counters SET skills_unlocked = COALESCE(skills_unlocked,0)+1, updated_at=datetime('now') WHERE user_id = ?`).bind(userId).run();
+    await onSkillUnlocked(db, userId, skill.id);
+  }
+}
 
 app.get("/favicon.ico", (c) => {
   return c.body(new Uint8Array(), {
@@ -322,6 +701,14 @@ app.get("/api/users/me", authMiddleware, async (c) => {
   return c.json(c.get("user"));
 });
 
+app.post("/api/app/open", authMiddleware, async (c) => {
+  const user = c.get("user");
+  if (!user) return c.json({ error: "Unauthorized" }, 401);
+  const timestamp = new Date().toISOString();
+  await onAppOpen(c.env.fitloot_db, user.id, timestamp);
+  return c.json({ success: true });
+});
+
 app.patch(
   "/api/users/me",
   authMiddleware,
@@ -343,6 +730,11 @@ app.patch(
         .bind(data.photo_url || null, user.id)
         .run();
     }
+
+    await onProfileCustomization(c.env.fitloot_db, user.id, {
+      name_changed: data.name !== undefined,
+      photo_changed: data.photo_url !== undefined,
+    });
 
     const updated = await c.env.fitloot_db
       .prepare("SELECT id, email, name, avatar_url FROM users WHERE id = ?")
@@ -411,6 +803,7 @@ app.post("/api/onboarding", authMiddleware, zValidator("json", OnboardingRequest
   if (!user) return c.json({ error: "Unauthorized" }, 401);
   
   const data = c.req.valid("json");
+  await ensureGamificationCatalog(c.env.fitloot_db);
 
   // Check if username exists
   const existingUsername = await c.env.fitloot_db.prepare(
@@ -454,22 +847,32 @@ app.post("/api/onboarding", authMiddleware, zValidator("json", OnboardingRequest
     VALUES (?, 0, 1, 0, 0, 0, datetime('now'))`
   ).bind(user.id).run();
 
-  // Unlock basic skills
-  const basicSkills = await c.env.fitloot_db.prepare(
-    "SELECT id FROM skills WHERE required_level = 1"
-  ).all();
+  const conditioning = data.initial_conditioning as ConditioningLevel;
+  const maxTier = conditioningOrder(conditioning);
 
-  for (const skill of basicSkills.results) {
-    await c.env.fitloot_db.prepare(
-      `INSERT INTO user_skills (user_id, skill_id, total_reps, total_time, best_reps, updated_at)
-      VALUES (?, ?, 0, 0, 0, datetime('now'))`
-    ).bind(user.id, skill.id).run();
+  const initialSkills = await c.env.fitloot_db.prepare(
+    `SELECT id, tier, level_required FROM skills`
+  ).all<{ id: number; tier: string; level_required: number }>();
+
+  for (const skill of initialSkills.results) {
+    if (skillTierOrder(skill.tier) <= Math.max(1, maxTier) && Number(skill.level_required ?? 1) <= 1) {
+      await c.env.fitloot_db.prepare(
+        `INSERT OR IGNORE INTO user_skills (user_id, skill_id, status, current_stage, total_reps, total_time, best_reps, unlocked_at, updated_at)
+        VALUES (?, ?, 'unlocked', 1, 0, 0, 0, datetime('now'), datetime('now'))`
+      ).bind(user.id, skill.id).run();
+    }
   }
 
-  // Create initial daily missions
-  await ensurePeriodicMissions(c.env.fitloot_db, user.id);
+  const plan = await buildInitialTrainingPlan(data.main_goal, conditioning, data.equipment ?? null, data.injuries ?? null);
+  await upsertTrainingPlan(c.env.fitloot_db, user.id, plan, data.main_goal, conditioning, data.equipment ?? null, data.injuries ?? null);
+  await ensureUserCounterRow(c.env.fitloot_db, user.id);
+  await logUserEvent(c.env.fitloot_db, user.id, 'onboarding_completed', { conditioning, main_goal: data.main_goal });
+  await evaluateLevelTitles(c.env.fitloot_db, user.id, 1);
 
-  return c.json({ success: true }, 201);
+  // Create initial daily missions
+  await ensurePeriodicMissions(c.env, c.env.fitloot_db, user.id);
+
+  return c.json({ success: true, plan_created: true }, 201);
 });
 
 // Progression endpoints
@@ -501,11 +904,12 @@ app.get("/api/skills", authMiddleware, async (c) => {
   if (!user) return c.json({ error: "Unauthorized" }, 401);
   
   const userSkills = await c.env.fitloot_db.prepare(
-  `SELECT s.*, us.total_reps, us.total_time, us.best_reps, us.unlocked_at
+  `SELECT s.*, us.total_reps, us.total_time, us.best_reps, us.unlocked_at, us.status, us.current_stage,
+      (SELECT COUNT(*) FROM skill_stages ss WHERE ss.skill_id = s.id) as total_stages
     FROM skills s
     INNER JOIN user_skills us ON s.id = us.skill_id
     WHERE us.user_id = ?
-    ORDER BY s.required_level, s.id`
+    ORDER BY COALESCE(s.level_required, s.required_level), s.id`
   ).bind(user.id).all();
 
   return c.json(userSkills.results);
@@ -521,12 +925,64 @@ app.get("/api/skills/available", authMiddleware, async (c) => {
 
   const availableSkills = await c.env.fitloot_db.prepare(
     `SELECT s.* FROM skills s
-    WHERE s.required_level <= ?
+    WHERE COALESCE(s.level_required, s.required_level) <= ?
     AND s.id NOT IN (SELECT skill_id FROM user_skills WHERE user_id = ?)
-    ORDER BY s.required_level, s.id`
+    ORDER BY COALESCE(s.level_required, s.required_level), s.id`
   ).bind(progression?.level || 1, user.id).all();
 
   return c.json(availableSkills.results);
+});
+
+app.post("/api/skills/:id/stage/complete", authMiddleware, async (c) => {
+  const user = c.get("user");
+  if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+  const skillId = Number(c.req.param("id"));
+  if (!Number.isFinite(skillId)) return c.json({ error: "Invalid skill" }, 400);
+
+  const [progression, skillProgress] = await Promise.all([
+    c.env.fitloot_db.prepare("SELECT level FROM user_progression WHERE user_id = ?").bind(user.id).first<{ level: number }>(),
+    c.env.fitloot_db.prepare("SELECT current_stage FROM user_skills WHERE user_id = ? AND skill_id = ?").bind(user.id, skillId).first<{ current_stage: number }>(),
+  ]);
+
+  if (!skillProgress) return c.json({ error: "Skill not unlocked" }, 404);
+
+  const nextStage = Number(skillProgress.current_stage ?? 0) + 1;
+  const stageData = await c.env.fitloot_db.prepare(
+    "SELECT * FROM skill_stages WHERE skill_id = ? AND stage_number = ?"
+  ).bind(skillId, nextStage).first<{ level_required: number; stage_number: number }>();
+
+  if (!stageData) return c.json({ error: "No next stage" }, 400);
+  if (Number(progression?.level ?? 1) < Number(stageData.level_required ?? 1)) {
+    return c.json({ error: "Nível insuficiente para esta etapa" }, 400);
+  }
+
+  await c.env.fitloot_db.prepare(
+    "UPDATE user_skills SET current_stage = ?, status = 'in_progress', updated_at = datetime('now') WHERE user_id = ? AND skill_id = ?"
+  ).bind(nextStage, user.id, skillId).run();
+
+  if (nextStage >= 6) {
+    await c.env.fitloot_db.prepare(
+      "UPDATE user_skills SET status = 'unlocked', updated_at = datetime('now') WHERE user_id = ? AND skill_id = ?"
+    ).bind(user.id, skillId).run();
+
+    const skill = await c.env.fitloot_db.prepare("SELECT name FROM skills WHERE id = ?").bind(skillId).first<{ name: string }>();
+    const titleBySkill: Record<string, string> = {
+      Handstand: "O Equilibrista",
+      "Muscle Up": "Acima de Todos",
+      Planche: "Força Gravitacional",
+      "Human Flag": "Bandeira Humana",
+      "Front Lever": "Suspenso no Tempo",
+    };
+    const title = titleBySkill[skill?.name ?? ""];
+    if (title) await unlockTitleIfNeeded(c.env.fitloot_db, user.id, title);
+
+    if (skill?.name === "Handstand") {
+      await unlockAchievementIfNeeded(c.env.fitloot_db, user.id, "Mestre do Equilíbrio", 6, 6);
+    }
+  }
+
+  return c.json({ success: true, current_stage: nextStage });
 });
 
 // Missions endpoints
@@ -534,7 +990,7 @@ app.get("/api/missions", authMiddleware, async (c) => {
   const user = c.get("user");
   if (!user) return c.json({ error: "Unauthorized" }, 401);
   
-  await ensurePeriodicMissions(c.env.fitloot_db, user.id);
+  await ensurePeriodicMissions(c.env, c.env.fitloot_db, user.id);
 
   const missions = await c.env.fitloot_db.prepare(
     `SELECT m.*, s.name as skill_name FROM missions m
@@ -620,6 +1076,33 @@ app.post("/api/missions/complete", authMiddleware, zValidator("json", CompleteMi
       WHERE user_id = ?`
     ).bind(xpForNextLevel, user.id).run();
     leveledUp = true;
+    const afterLevel = await c.env.fitloot_db.prepare("SELECT level FROM user_progression WHERE user_id = ?").bind(user.id).first<{ level: number }>();
+    const newLevel = Number(afterLevel?.level ?? currentLevel + 1);
+    await onLevelUp(c.env.fitloot_db, user.id, newLevel);
+    await tryUnlockSkillsForLevel(c.env.fitloot_db, user.id, newLevel);
+  }
+
+  await ensureUserCounterRow(c.env.fitloot_db, user.id);
+  const currentHour = new Date().getHours();
+  await c.env.fitloot_db.prepare(
+    `UPDATE user_event_counters
+      SET missions_completed = COALESCE(missions_completed, 0) + 1,
+          consecutive_days_completed = ?,
+          longest_consecutive_days = MAX(COALESCE(longest_consecutive_days, 0), ?),
+          updated_at = datetime('now')
+      WHERE user_id = ?`
+  ).bind(newStreak, newStreak, user.id).run();
+  await logUserEvent(c.env.fitloot_db, user.id, 'mission_complete', {
+    missionId: mission.id,
+    period: mission.type,
+    xpGained,
+    pointsGained,
+    hour: currentHour,
+    leveledUp,
+  });
+  await onMissionComplete(c.env.fitloot_db, user.id, Number(mission.id));
+  if (currentHour >= 2 && currentHour < 4) {
+    await unlockAchievementIfNeeded(c.env.fitloot_db, user.id, 'Insônia', 1, 1);
   }
 
   // Update skill stats if applicable
@@ -664,14 +1147,29 @@ app.get("/api/achievements", authMiddleware, async (c) => {
   if (!user) return c.json({ error: "Unauthorized" }, 401);
   
   const achievements = await c.env.fitloot_db.prepare(
-  `SELECT a.*, ua.unlocked_at, 
+  `SELECT a.*, ua.unlocked_at, ua.progress_current, ua.progress_required,
     CASE WHEN ua.id IS NOT NULL THEN 1 ELSE 0 END as unlocked
     FROM achievements a
     LEFT JOIN user_achievements ua ON a.id = ua.achievement_id AND ua.user_id = ?
-    ORDER BY a.rarity, a.id`
-  ).bind(user.id).all();
+    ORDER BY a.secret ASC, a.rarity, a.id`
+  ).bind(user.id).all<Record<string, unknown>>();
 
-  return c.json(achievements.results);
+  const mapped = achievements.results.map((achievement) => {
+    const unlocked = Number(achievement.unlocked ?? 0) === 1;
+    const isSecret = Number(achievement.secret ?? 0) === 1;
+    if (isSecret && !unlocked) {
+      return {
+        ...achievement,
+        name: "?",
+        description: "Conquista secreta",
+        condition: null,
+        icon: "❓",
+      };
+    }
+    return achievement;
+  });
+
+  return c.json(mapped);
 });
 
 app.get("/api/titles", authMiddleware, async (c) => {
@@ -697,12 +1195,12 @@ app.post("/api/titles/:id/activate", authMiddleware, async (c) => {
 
   // Deactivate all titles
   await c.env.fitloot_db.prepare(
-    "UPDATE user_titles SET is_active = 0 WHERE user_id = ?"
+    "UPDATE user_titles SET is_active = 0, is_equipped = 0 WHERE user_id = ?"
   ).bind(user.id).run();
 
   // Activate selected title
   await c.env.fitloot_db.prepare(
-    "UPDATE user_titles SET is_active = 1, updated_at = datetime('now') WHERE user_id = ? AND title_id = ?"
+    "UPDATE user_titles SET is_active = 1, is_equipped = 1, updated_at = datetime('now') WHERE user_id = ? AND title_id = ?"
   ).bind(user.id, titleId).run();
 
   return c.json({ success: true });
@@ -849,15 +1347,27 @@ app.get("/api/food/today", authMiddleware, async (c) => {
 
 // Ranking
 app.get("/api/ranking/global", authMiddleware, async (c) => {
+  const user = c.get("user");
+  if (!user) return c.json({ error: "Unauthorized" }, 401);
+
   const ranking = await c.env.fitloot_db.prepare(
-    `SELECT up.username, up.full_name, pr.level, pr.xp, pr.current_streak, pr.points
+    `SELECT up.user_id, up.username, up.full_name, pr.level, pr.xp, pr.current_streak, pr.points
     FROM user_profiles up
     INNER JOIN user_progression pr ON up.user_id = pr.user_id
     ORDER BY pr.level DESC, pr.xp DESC
     LIMIT 100`
-  ).all();
+  ).all<{ user_id: string }>();
 
-  return c.json(ranking.results);
+  const position = ranking.results.findIndex((row) => row.user_id === user.id) + 1;
+  if (position > 0) {
+    await ensureUserCounterRow(c.env.fitloot_db, user.id);
+    await onRankingUpdate(c.env.fitloot_db, user.id, position);
+    if (position <= 100) await unlockAchievementIfNeeded(c.env.fitloot_db, user.id, 'Na Disputa', 100 - position + 1, 100);
+    if (position <= 10) await unlockAchievementIfNeeded(c.env.fitloot_db, user.id, 'Elite', 10 - position + 1, 10);
+    if (position === 1) await unlockAchievementIfNeeded(c.env.fitloot_db, user.id, 'O Escolhido', 1, 1);
+  }
+
+  return c.json(ranking.results.map((row) => { const { user_id, ...rest } = row as Record<string, unknown>; return rest; }));
 });
 
 // Friends endpoints
@@ -1138,6 +1648,101 @@ function futureIsoForPeriod(period: MissionPeriod) {
   return new Date(now + durations[period]).toISOString();
 }
 
+async function fetchExerciseDbExercises(env: Env, muscle: string, equipment: string): Promise<ExerciseRef[]> {
+  if (!env.EXERCISE_DB_KEY) throw new Error("exercise-db-key-missing");
+  const data = await fetchJsonWithTimeout<Array<Record<string, unknown>>>(
+    `https://exercisedb.p.rapidapi.com/exercises/target/${encodeURIComponent(muscle)}?limit=8`,
+    {
+      headers: {
+        "X-RapidAPI-Key": env.EXERCISE_DB_KEY,
+        "X-RapidAPI-Host": "exercisedb.p.rapidapi.com",
+      },
+    },
+    8000
+  );
+  return data.map((item) => ({
+    name: String(item.name ?? "Exercício"),
+    muscle: String(item.target ?? muscle),
+    equipment: String(item.equipment ?? equipment || "bodyweight"),
+    difficulty: "intermediate",
+    instructions: Array.isArray(item.instructions) ? String(item.instructions[0] ?? "") : "",
+  }));
+}
+
+async function fetchApiNinjasExercises(env: Env, muscle: string): Promise<ExerciseRef[]> {
+  if (!env.API_NINJAS_KEY) throw new Error("api-ninjas-key-missing");
+  const data = await fetchJsonWithTimeout<Array<Record<string, unknown>>>(
+    `https://api.api-ninjas.com/v1/exercises?muscle=${encodeURIComponent(muscle)}`,
+    {
+      headers: {
+        "X-Api-Key": env.API_NINJAS_KEY,
+      },
+    },
+    8000
+  );
+  return data.slice(0, 8).map((item) => ({
+    name: String(item.name ?? "Exercício"),
+    muscle: String(item.muscle ?? muscle),
+    equipment: String(item.equipment ?? "bodyweight"),
+    difficulty: String(item.difficulty ?? "beginner"),
+    instructions: String(item.instructions ?? ""),
+  }));
+}
+
+async function fetchGymFitExercises(env: Env, muscle: string): Promise<ExerciseRef[]> {
+  if (!env.GYMFIT_API_KEY) throw new Error("gymfit-key-missing");
+  const data = await fetchJsonWithTimeout<{ exercises?: Array<Record<string, unknown>> }>(
+    `https://gym-fit.p.rapidapi.com/exercises?muscle=${encodeURIComponent(muscle)}`,
+    {
+      headers: {
+        "X-RapidAPI-Key": env.GYMFIT_API_KEY,
+        "X-RapidAPI-Host": "gym-fit.p.rapidapi.com",
+      },
+    },
+    8000
+  );
+  return (data.exercises ?? []).slice(0, 8).map((item) => ({
+    name: String(item.name ?? "Exercício"),
+    muscle: String(item.muscle ?? muscle),
+    equipment: String(item.equipment ?? "bodyweight"),
+    difficulty: String(item.level ?? "beginner"),
+    instructions: String(item.instructions ?? ""),
+  }));
+}
+
+function pickLocalExercises(muscle: string): ExerciseRef[] {
+  return localExercisePool.filter((ex) => ex.muscle.includes(muscle) || muscle === "full body" || muscle === "mobility");
+}
+
+async function resolveExercisesWithFallback(env: Env, muscle: string, equipment: string): Promise<{ source: string; exercises: ExerciseRef[] }> {
+  try {
+    const ex = await fetchExerciseDbExercises(env, muscle, equipment);
+    if (ex.length > 0) return { source: "exercise_db", exercises: ex };
+  } catch (error) {
+    console.warn("[exercise-db]", error);
+  }
+
+  try {
+    const ex = await fetchApiNinjasExercises(env, muscle);
+    if (ex.length > 0) return { source: "api_ninjas", exercises: ex };
+  } catch (error) {
+    console.warn("[api-ninjas]", error);
+  }
+
+  try {
+    const ex = await fetchGymFitExercises(env, muscle);
+    if (ex.length > 0) return { source: "gym_fit", exercises: ex };
+  } catch (error) {
+    console.warn("[gym-fit]", error);
+  }
+
+  return { source: "local_pool", exercises: pickLocalExercises(muscle) };
+}
+
+function getWeekdayPtBr(now = new Date()) {
+  return ["domingo", "segunda", "terca", "quarta", "quinta", "sexta", "sabado"][now.getDay()];
+}
+
 function missionConfigByPeriod(period: MissionPeriod) {
   if (period === "weekly") {
     return {
@@ -1168,43 +1773,78 @@ function missionConfigByPeriod(period: MissionPeriod) {
   };
 }
 
-async function createMissionsForPeriod(db: D1Database, userId: string, period: MissionPeriod) {
+async function createMissionsForPeriod(env: Env, db: D1Database, userId: string, period: MissionPeriod) {
   const userSkills = await db.prepare(
-    "SELECT skill_id FROM user_skills WHERE user_id = ?"
-  ).bind(userId).all<{ skill_id: number }>();
+    "SELECT us.skill_id, us.current_stage, s.name, s.category, s.tier FROM user_skills us INNER JOIN skills s ON s.id = us.skill_id WHERE us.user_id = ? AND COALESCE(us.status,'unlocked') != 'locked'"
+  ).bind(userId).all<{ skill_id: number; current_stage: number; name: string; category: string; tier: string }>();
+
+  const config = missionConfigByPeriod(period);
+  const deadline = futureIsoForPeriod(period);
 
   if (userSkills.results.length === 0) {
     console.warn(`[missions] usuário ${userId} sem skills para gerar ${period}`);
+    const fallback = ["Mobilidade de quadril", "Caminhada leve", "Alongamento de coluna"].slice(0, config.amount);
+    for (const label of fallback) {
+      await db.prepare(`INSERT INTO missions (user_id, type, title, description, target_reps, xp_reward, points_reward, deadline, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`)
+        .bind(userId, period, `${config.titlePrefix}: ${label}`, `Missão de fallback para manter consistência: ${label}.`, config.reps, config.xp, config.points, deadline)
+        .run();
+    }
     return;
   }
 
-  const config = missionConfigByPeriod(period);
-  const skillIds = userSkills.results.map((skill) => Number(skill.skill_id));
-  const randomized = [...skillIds].sort(() => 0.5 - Math.random()).slice(0, config.amount);
-  const deadline = futureIsoForPeriod(period);
+  const planRow = await db.prepare("SELECT weekly_plan_json, equipment FROM user_training_plans WHERE user_id = ?").bind(userId).first<{ weekly_plan_json: string; equipment: string }>();
+  const weekday = getWeekdayPtBr();
+  const parsedPlan = planRow?.weekly_plan_json ? JSON.parse(planRow.weekly_plan_json) as Record<string, unknown> : {};
+  const dayPlan = (parsedPlan.weekly as Record<string, { focus?: string; muscles?: string[] }> | undefined)?.[weekday];
+  const dayFocus = dayPlan?.focus ?? "full body";
+  const muscles = dayPlan?.muscles ?? ["full body"];
+  const isRestDay = dayFocus === "rest";
 
-  for (const skillId of randomized) {
-    const skill = await db.prepare("SELECT id, name FROM skills WHERE id = ?").bind(skillId).first<{ id: number; name: string }>();
-    if (!skill) continue;
+  const muscle = isRestDay ? "mobility" : String(muscles[0] ?? "full body");
+  const exerciseResult = await resolveExercisesWithFallback(env, muscle, planRow?.equipment ?? "bodyweight");
 
-    await db.prepare(
-      `INSERT INTO missions (user_id, type, title, description, skill_id, target_reps, xp_reward, points_reward, deadline, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`
-    ).bind(
-      userId,
-      period,
-      `${config.titlePrefix}: ${skill.name}`,
-      `Execute ${config.reps} repetições de ${skill.name} até o prazo da missão.`,
-      skill.id,
-      config.reps,
-      config.xp,
-      config.points,
-      deadline
-    ).run();
+  const plannedCount = Math.max(1, Math.ceil(config.amount * 0.7));
+  const variationCount = Math.max(0, config.amount - plannedCount);
+
+  const planned = exerciseResult.exercises.slice(0, plannedCount);
+  const randomSkills = [...userSkills.results].sort(() => Math.random() - 0.5).slice(0, Math.max(variationCount, 1));
+
+  for (const ex of planned) {
+    await db.prepare(`INSERT INTO missions (user_id, type, title, description, target_reps, xp_reward, points_reward, deadline, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`)
+      .bind(
+        userId,
+        period,
+        `${config.titlePrefix}: ${ex.name}`,
+        isRestDay
+          ? `Dia de recuperação: execute ${ex.name} com foco em mobilidade e técnica.`
+          : `Treino do dia (${muscle}) usando ${exerciseResult.source}: ${ex.name}.`,
+        isRestDay ? Math.max(8, Math.floor(config.reps * 0.4)) : config.reps,
+        isRestDay ? Math.floor(config.xp * 0.6) : config.xp,
+        isRestDay ? Math.floor(config.points * 0.6) : config.points,
+        deadline
+      ).run();
+  }
+
+  for (const skill of randomSkills.slice(0, variationCount)) {
+    await db.prepare(`INSERT INTO missions (user_id, type, title, description, skill_id, target_reps, xp_reward, points_reward, deadline, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`)
+      .bind(
+        userId,
+        period,
+        `${config.titlePrefix}: ${skill.name}`,
+        `Variação inteligente (30%): complemente com ${skill.name}, respeitando seu plano principal.`,
+        skill.skill_id,
+        config.reps,
+        config.xp,
+        config.points,
+        deadline
+      ).run();
   }
 }
 
-async function ensurePeriodicMissions(db: D1Database, userId: string) {
+async function ensurePeriodicMissions(env: Env, db: D1Database, userId: string) {
   const periods: MissionPeriod[] = ["daily", "weekly", "monthly"];
 
   for (const period of periods) {
@@ -1215,7 +1855,7 @@ async function ensurePeriodicMissions(db: D1Database, userId: string) {
     ).bind(userId, period).first<{ count: number }>();
 
     if (Number(existing?.count ?? 0) === 0) {
-      await createMissionsForPeriod(db, userId, period);
+      await createMissionsForPeriod(env, db, userId, period);
     }
   }
 }
@@ -1565,6 +2205,22 @@ app.post("/api/ai/chat", authMiddleware, async (c) => {
       return c.json({ error: "Invalid input", details: parsed.error.flatten() }, 400);
     }
     const { message: userMessage, history: conversationHistory = [], mode = "suporte" } = parsed.data;
+
+    await ensureUserCounterRow(c.env.fitloot_db, user.id);
+    const currentCounter = await c.env.fitloot_db.prepare("SELECT chat_messages, repeated_message_streak, last_chat_message FROM user_event_counters WHERE user_id = ?")
+      .bind(user.id).first<{ chat_messages: number; repeated_message_streak: number; last_chat_message: string | null }>();
+    const sameMessage = (currentCounter?.last_chat_message ?? "") === userMessage;
+    const nextRepeat = sameMessage ? Number(currentCounter?.repeated_message_streak ?? 0) + 1 : 1;
+    await c.env.fitloot_db.prepare(
+      `UPDATE user_event_counters SET
+        chat_messages = COALESCE(chat_messages, 0) + 1,
+        repeated_message_streak = ?,
+        last_chat_message = ?,
+        updated_at = datetime('now')
+      WHERE user_id = ?`
+    ).bind(nextRepeat, userMessage, user.id).run();
+    await logUserEvent(c.env.fitloot_db, user.id, 'chat_message', { size: userMessage.length, repeated: sameMessage });
+    await onChatMessage(c.env.fitloot_db, user.id, Number(currentCounter?.chat_messages ?? 0) + 1);
 
     const [profile, progression, attributes] = await Promise.all([
       c.env.fitloot_db.prepare("SELECT * FROM user_profiles WHERE user_id = ?").bind(user.id).first(),

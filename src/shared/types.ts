@@ -119,6 +119,11 @@ export const AchievementSchema = z.object({
   icon: z.string().nullable(),
   requirement_type: z.string(),
   requirement_value: z.number().nullable(),
+  category: z.string().optional(),
+  color: z.string().optional(),
+  secret: z.number().optional(),
+  condition: z.string().nullable().optional(),
+  reference: z.string().nullable().optional(),
   created_at: z.string(),
   updated_at: z.string(),
 });
@@ -132,6 +137,9 @@ export const TitleSchema = z.object({
   rarity: z.string(),
   requirement_type: z.string(),
   requirement_value: z.number().nullable(),
+  description: z.string().nullable().optional(),
+  reference: z.string().nullable().optional(),
+  unlock_condition: z.string().nullable().optional(),
   created_at: z.string(),
   updated_at: z.string(),
 });
@@ -176,11 +184,14 @@ export type SkillWithProgress = Skill & {
 export type AchievementWithUnlock = Achievement & {
   unlocked?: number;
   unlocked_at?: string;
+  progress_current?: number;
+  progress_required?: number;
 };
 
 export type TitleWithUnlock = Title & {
   unlocked?: number;
   is_active?: number;
+  is_equipped?: number;
 };
 
 export type RankingPlayer = {
