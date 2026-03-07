@@ -16,18 +16,58 @@ interface Message {
   timestamp: Date;
 }
 
+function parseAIResponse(text: string): string {
+  if (!text) return "";
+
+  const lines = text
+    .replace(/\*\*(.*?)\*\*/g, "$1")
+    .replace(/\*(.*?)\*/g, "$1")
+    .replace(/^\s*#{1,6}\s*/gm, "")
+    .split("\n");
+
+  const normalized = lines
+    .map((line) => {
+      const trimmed = line.trim();
+      if (!trimmed) return "";
+
+      if (/^\|?\s*-{3,}/.test(trimmed) || /^\|[-\s:|]+\|$/.test(trimmed)) {
+        return "";
+      }
+
+      if (trimmed.startsWith("|")) {
+        return trimmed
+          .split("|")
+          .map((chunk) => chunk.trim())
+          .filter(Boolean)
+          .join(" • ");
+      }
+
+      if (/^[-*]\s+/.test(trimmed)) {
+        return `• ${trimmed.replace(/^[-*]\s+/, "")}`;
+      }
+
+      return line;
+    })
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
+  return normalized;
+}
+
 export default function AIChat() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [messages, setMessages] = useState<Message[]>([
     {
       role: "assistant",
-      content: "💪 Olá! Sou o FitBot, seu assistente fitness com IA! Como posso te ajudar hoje?",
+      content: "Olá! Sou o FitBot. Como posso te ajudar hoje?",
       timestamp: new Date(),
     },
   ]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [sessionMessageCount, setSessionMessageCount] = useState(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -55,6 +95,8 @@ export default function AIChat() {
       timestamp: new Date(),
     };
 
+    const nextSessionCount = sessionMessageCount + 1;
+    setSessionMessageCount(nextSessionCount);
     setMessages((prev) => [...prev, userMessage]);
     setInput("");
     setLoading(true);
@@ -71,6 +113,7 @@ export default function AIChat() {
         body: JSON.stringify({
           message: input,
           history,
+          session_count: nextSessionCount,
         }),
       });
 
@@ -81,7 +124,7 @@ export default function AIChat() {
 
       const assistantMessage: Message = {
         role: "assistant",
-        content: data.message,
+        content: parseAIResponse(String(data.message || "")),
         timestamp: new Date(),
       };
 
@@ -138,7 +181,7 @@ export default function AIChat() {
             }`}
           >
             <div
-              className={`p-2 rounded-full ${
+              className={`shrink-0 self-start p-2 rounded-full ${
                 message.role === "user"
                   ? "bg-emerald-500"
                   : "bg-white shadow-md"
@@ -174,7 +217,7 @@ export default function AIChat() {
 
         {loading && (
           <div className="flex gap-3">
-            <div className="p-2 rounded-full bg-white shadow-md">
+            <div className="shrink-0 self-start p-2 rounded-full bg-white shadow-md">
               <Bot className="w-5 h-5 text-emerald-600" />
             </div>
             <div className="bg-white shadow-md p-4 rounded-2xl rounded-tl-none">
@@ -218,7 +261,7 @@ export default function AIChat() {
           <button
             type="submit"
             disabled={loading || !input.trim()}
-            className="bg-gradient-to-r from-emerald-500 to-teal-600 text-white p-3 rounded-full shadow-lg hover:shadow-xl transition-shadow disabled:opacity-50 disabled:cursor-not-allowed"
+            className="shrink-0 w-10 h-10 bg-gradient-to-r from-emerald-500 to-teal-600 text-white rounded-full shadow-lg hover:shadow-xl transition-shadow disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
           >
             <Send className="w-5 h-5" />
           </button>

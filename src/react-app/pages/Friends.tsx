@@ -6,7 +6,8 @@ import { Badge } from "@/react-app/components/ui/badge";
 import { Avatar } from "@/react-app/components/ui/avatar";
 import { Button } from "@/react-app/components/ui/button";
 import { Card } from "@/react-app/components/ui/card";
-import { Users, Search, UserPlus, Check, X, Swords, TrendingUp, Loader2 } from "lucide-react";
+import { Users, Search, UserPlus, Check, X, Swords, TrendingUp } from "lucide-react";
+import PageLoader from "@/react-app/components/PageLoader";
 import { api } from "@/react-app/utils/api";
 
 interface Friend {
@@ -49,7 +50,7 @@ export default function Friends() {
   const loadFriends = async () => {
     try {
       const [friendsRes, requestsRes] = await Promise.all([
-        api("/api/friends/list"),
+        api("/api/friends"),
         api("/api/friends/requests")
       ]);
 
@@ -77,7 +78,7 @@ export default function Friends() {
 
     setSearching(true);
     try {
-      const response = await api(`/api/users/search?q=${encodeURIComponent(searchQuery)}`);
+      const response = await api(`/api/friends/search?username=${encodeURIComponent(searchQuery)}`);
       if (response.ok) {
         const data = await response.json();
         setSearchResults(data);
@@ -98,7 +99,7 @@ export default function Friends() {
       });
 
       if (response.ok) {
-        alert("Solicitação enviada!");
+        
         setSearchQuery("");
         setSearchResults([]);
       }
@@ -109,8 +110,10 @@ export default function Friends() {
 
   const acceptFriendRequest = async (requestId: number) => {
     try {
-      const response = await api(`/api/friends/${requestId}/accept`, {
-        method: "POST"
+      const response = await api(`/api/friends/accept`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ request_id: requestId }),
       });
 
       if (response.ok) {
@@ -123,8 +126,10 @@ export default function Friends() {
 
   const rejectFriendRequest = async (requestId: number) => {
     try {
-      const response = await api(`/api/friends/${requestId}/reject`, {
-        method: "POST"
+      const response = await api(`/api/friends/reject`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ request_id: requestId }),
       });
 
       if (response.ok) {
@@ -140,11 +145,7 @@ export default function Friends() {
   };
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50">
-        <Loader2 className="w-10 h-10 text-emerald-600 animate-spin" />
-      </div>
-    );
+    return <PageLoader />;
   }
 
   return (
@@ -172,9 +173,9 @@ export default function Friends() {
               onClick={searchUsers}
               disabled={searching}
               variant="primary"
-              className="absolute right-2 top-1/2 transform -translate-y-1/2 px-6 py-2 rounded-full disabled:opacity-50"
+              className="absolute right-2 top-1/2 transform -translate-y-1/2 h-10 min-w-[96px] rounded-full disabled:opacity-50 flex items-center justify-center"
             >
-              {searching ? <Loader2 className="w-5 h-5 animate-spin" /> : "Buscar"}
+              {searching ? "..." : "Buscar"}
             </Button>
           </div>
 
