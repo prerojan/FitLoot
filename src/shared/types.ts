@@ -192,16 +192,16 @@ export type SkillWithProgress = Skill & {
 };
 
 export type AchievementWithUnlock = Achievement & {
-  unlocked?: number;
-  unlocked_at?: string;
-  progress_current?: number;
-  progress_required?: number;
+  unlocked?: number | undefined;
+  unlocked_at?: string | undefined;
+  progress_current?: number | undefined;
+  progress_required?: number | undefined;
 };
 
 export type TitleWithUnlock = Title & {
-  unlocked?: number;
-  is_active?: number;
-  is_equipped?: number;
+  unlocked?: number | undefined;
+  is_active?: number | undefined;
+  is_equipped?: number | undefined;
 };
 
 export type RankingPlayer = {
@@ -301,7 +301,7 @@ export const AiAnalyzeFoodRequestSchema = z.object({
     portion_multiplier: z.number().positive().optional(),
   })).optional(),
   ocr_text: z.string().optional(),
-}).refine((data: AiAnalyzeFoodRequestInput) => data.food_description !== undefined || data.image_base64 !== undefined || (data.identified_items?.length ?? 0) > 0, {
+}).refine((data) => data.food_description !== undefined || data.image_base64 !== undefined || (data.identified_items?.length ?? 0) > 0, {
   message: "Food description or image required",
 });
 export type AiAnalyzeFoodRequest = z.infer<typeof AiAnalyzeFoodRequestSchema>;

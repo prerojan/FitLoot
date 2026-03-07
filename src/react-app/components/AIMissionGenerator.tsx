@@ -17,7 +17,7 @@ interface GeneratedMission {
   difficulty: string;
 }
 
-export default function AIMissionGenerator({ onMissionsGenerated, conditioning }: { onMissionsGenerated?: () => void; conditioning?: string }) {
+export default function AIMissionGenerator({ onMissionsGenerated, conditioning }: { onMissionsGenerated?: () => void; conditioning?: string | undefined }) {
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);

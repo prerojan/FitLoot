@@ -24,7 +24,7 @@ type LoginForm = {
 
 type ApiError = {
   error: string;
-  code?: string;
+  code?: string | undefined;
 };
 
 const Home: FC = () => {

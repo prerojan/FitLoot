@@ -60,7 +60,7 @@ export default function Dashboard() {
       setMissions(missionsData);
       setMetrics(metricsData);
 
-      const active = titlesData.find((t: { is_active?: number }) => t.is_active === 1);
+      const active = titlesData.find((t: { is_active?: number | undefined }) => t.is_active === 1);
       setActiveTitle(active || null);
     } catch (error) {
       console.error("Error loading data:", error);
@@ -102,9 +102,9 @@ export default function Dashboard() {
   }
 
   const dailyMissions = missions.filter(m => m.type === 'daily' && m.is_completed !== 1);
-  const failedMissions = missions.filter(m => (m as Mission & { status?: string }).status === 'failed' && m.is_completed !== 1);
-  const weeklyMissions = missions.filter(m => m.type === 'weekly' && m.is_completed !== 1 && (m as Mission & { status?: string }).status !== 'failed');
-  const monthlyMissions = missions.filter(m => m.type === 'monthly' && m.is_completed !== 1 && (m as Mission & { status?: string }).status !== 'failed');
+  const failedMissions = missions.filter(m => (m as Mission & { status?: string | undefined }).status === 'failed' && m.is_completed !== 1);
+  const weeklyMissions = missions.filter(m => m.type === 'weekly' && m.is_completed !== 1 && (m as Mission & { status?: string | undefined }).status !== 'failed');
+  const monthlyMissions = missions.filter(m => m.type === 'monthly' && m.is_completed !== 1 && (m as Mission & { status?: string | undefined }).status !== 'failed');
 
   const xpForNextLevel = (progression?.level || 1) * 100;
   const xpProgress = ((progression?.xp || 0) / xpForNextLevel) * 100;
@@ -147,7 +147,10 @@ export default function Dashboard() {
 
       {/* Missions */}
       <div className="px-6 py-6 space-y-6">
-        <AIMissionGenerator onMissionsGenerated={loadData} conditioning={profile?.initial_conditioning ?? undefined} />
+        <AIMissionGenerator
+          onMissionsGenerated={loadData}
+          {...(profile?.initial_conditioning ? { conditioning: profile.initial_conditioning } : {})}
+        />
         <MissionSection
           title="Missões Diárias"
           icon={<Target className="w-5 h-5" />}

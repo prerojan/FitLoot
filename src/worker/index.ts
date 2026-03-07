@@ -24,7 +24,7 @@ interface AuthUser {
   id: string;
   email: string;
   name: string;
-  avatar_url?: string;
+  avatar_url?: string | undefined;
   onboarding_completed: number;
 }
 
@@ -126,12 +126,12 @@ export interface Env {
   ASSETS: Fetcher;
   HF_TOKEN: string;
   USDA_API_KEY: string;
-  RAPID_API_KEY?: string;
-  RAPID_API_HOST?: string;
-  ANTHROPIC_API_KEY?: string;
-  EXERCISE_DB_KEY?: string;
-  API_NINJAS_KEY?: string;
-  GYMFIT_API_KEY?: string;
+  RAPID_API_KEY?: string | undefined;
+  RAPID_API_HOST?: string | undefined;
+  ANTHROPIC_API_KEY?: string | undefined;
+  EXERCISE_DB_KEY?: string | undefined;
+  API_NINJAS_KEY?: string | undefined;
+  GYMFIT_API_KEY?: string | undefined;
 }
 // --------------------------------
 
@@ -140,7 +140,7 @@ const app = new Hono<AppContext>();
 
 
 
-type ExerciseRef = { name: string; muscle: string; equipment?: string; difficulty?: string; instructions?: string };
+type ExerciseRef = { name: string; muscle: string; equipment?: string | undefined; difficulty?: string | undefined; instructions?: string | undefined };
 
 type SkillSeed = {
   name: string;
@@ -150,7 +150,7 @@ type SkillSeed = {
   requiredLevel: number;
   description: string;
   unlockMessage: string;
-  prerequisites?: string[];
+  prerequisites?: string[] | undefined;
   attributeRequirements?: Record<string, number>;
 };
 
@@ -489,7 +489,7 @@ async function evaluateLevelTitles(db: D1Database, userId: string, level: number
   }
 }
 
-async function onStreakContinued(db: D1Database, userId: string, streakDays: number, missionsCompletedToday: number, lastMissionDate?: string) {
+async function onStreakContinued(db: D1Database, userId: string, streakDays: number, missionsCompletedToday: number, lastMissionDate?: string | undefined) {
   await logUserEvent(db, userId, "onStreakContinued", { streakDays, missionsCompletedToday });
 
   const milestones: Array<[number, string]> = [
@@ -808,7 +808,7 @@ async function tryUnlockSkillsForLevel(db: D1Database, userId: string, level: nu
     `SELECT id, name, tier, level_required, prerequisites, attribute_requirements FROM skills
       WHERE COALESCE(level_required, required_level) <= ?
       AND id NOT IN (SELECT skill_id FROM user_skills WHERE user_id = ?)`
-  ).bind(level, userId).all<{ id: number; name: string; tier: string; level_required: number; prerequisites?: string; attribute_requirements?: string }>();
+  ).bind(level, userId).all<{ id: number; name: string; tier: string; level_required: number; prerequisites?: string | undefined; attribute_requirements?: string | undefined }>();
 
   for (const skill of candidates.results) {
     if (skillTierOrder(skill.tier) > conditioningOrder(conditioning) + 1) continue;
@@ -1190,7 +1190,7 @@ app.post("/api/profile/skill-focus", authMiddleware, async (c) => {
   const user = c.get("user");
   if (!user) return c.json({ error: "Unauthorized" }, 401);
 
-  const body = await c.req.json().catch(() => ({})) as { active_skill_focus?: string };
+  const body = await c.req.json().catch(() => ({})) as { active_skill_focus?: string | undefined };
   const focus = body.active_skill_focus === 'yoga' ? 'yoga' : 'calistenia';
   await c.env.fitloot_db.prepare("UPDATE user_profiles SET active_skill_focus = ?, updated_at = datetime('now') WHERE user_id = ?")
     .bind(focus, user.id).run();
@@ -1202,7 +1202,7 @@ app.post("/api/profile/goal", authMiddleware, async (c) => {
   const user = c.get("user");
   if (!user) return c.json({ error: "Unauthorized" }, 401);
 
-  const body = await c.req.json().catch(() => ({})) as { main_goal?: string };
+  const body = await c.req.json().catch(() => ({})) as { main_goal?: string | undefined };
   const newGoal = String(body.main_goal ?? '').trim();
   if (!newGoal) return c.json({ error: 'main_goal obrigatório' }, 400);
 
@@ -1856,7 +1856,7 @@ app.post("/api/friends/request", authMiddleware, async (c) => {
   const user = c.get("user");
   if (!user) return c.json({ error: "Unauthorized" }, 401);
 
-  const body = await c.req.json().catch(() => ({})) as { username?: string; friend_user_id?: string };
+  const body = await c.req.json().catch(() => ({})) as { username?: string | undefined; friend_user_id?: string | undefined };
   const username = String(body.username ?? "").trim();
   let targetUserId = String(body.friend_user_id ?? "").trim();
 
@@ -1890,7 +1890,7 @@ app.post("/api/friends/accept", authMiddleware, async (c) => {
   const user = c.get("user");
   if (!user) return c.json({ error: "Unauthorized" }, 401);
 
-  const body = await c.req.json().catch(() => ({})) as { request_id?: number };
+  const body = await c.req.json().catch(() => ({})) as { request_id?: number | undefined };
   const requestId = Number(body.request_id);
   if (!requestId) return c.json({ error: "request_id obrigatório" }, 400);
 
@@ -1915,7 +1915,7 @@ app.post("/api/friends/reject", authMiddleware, async (c) => {
   const user = c.get("user");
   if (!user) return c.json({ error: "Unauthorized" }, 401);
 
-  const body = await c.req.json().catch(() => ({})) as { request_id?: number };
+  const body = await c.req.json().catch(() => ({})) as { request_id?: number | undefined };
   const requestId = Number(body.request_id);
   if (!requestId) return c.json({ error: "request_id obrigatório" }, 400);
 
@@ -2294,7 +2294,7 @@ async function createMissionsForPeriod(env: Env, db: D1Database, userId: string,
   const planRow = await db.prepare("SELECT weekly_plan_json, equipment FROM user_training_plans WHERE user_id = ?").bind(userId).first<{ weekly_plan_json: string; equipment: string }>();
   const weekday = getWeekdayPtBr();
   const parsedPlan = planRow?.weekly_plan_json ? JSON.parse(planRow.weekly_plan_json) as Record<string, unknown> : {};
-  const dayPlan = (parsedPlan.weekly as Record<string, { focus?: string; muscles?: string[] }> | undefined)?.[weekday];
+  const dayPlan = (parsedPlan.weekly as Record<string, { focus?: string | undefined; muscles?: string[] | undefined }> | undefined)?.[weekday];
   const dayFocus = dayPlan?.focus ?? "full body";
   const muscles = dayPlan?.muscles ?? ["full body"];
   const isRestDay = dayFocus === "rest";
@@ -2477,17 +2477,17 @@ async function callOpenAIChat(
 
 type USDAResponse = {
   foods?: Array<{
-    description?: string;
-    foodNutrients?: Array<{ nutrientName?: string; value?: number }>;
+    description?: string | undefined;
+    foodNutrients?: Array<{ nutrientName?: string | undefined; value?: number | undefined }>;
   }>;
 };
 
 type RapidApiNutritionResponse = Array<{
-  name?: string;
-  calories?: number;
-  protein_g?: number;
-  carbohydrates_total_g?: number;
-  fat_total_g?: number;
+  name?: string | undefined;
+  calories?: number | undefined;
+  protein_g?: number | undefined;
+  carbohydrates_total_g?: number | undefined;
+  fat_total_g?: number | undefined;
 }>;
 
 async function searchFoodOnUSDA(c: import("hono").Context<AppContext>, query: string) {
@@ -2525,7 +2525,7 @@ async function searchFoodOnRapidApi(c: import("hono").Context<AppContext>, query
 function parseNutritionFromOcrLabel(text: string) {
   if (!text) return null;
 
-  const normalize = (value?: string) => (value ? Number(value.replace(",", ".")) : null);
+  const normalize = (value?: string | undefined) => (value ? Number(value.replace(",", ".")) : null);
   const kcal = normalize(safeGet(text.match(/(\d+[\.,]?\d*)\s*kcal/i) ?? [], 1));
   const kJ = normalize(safeGet(text.match(/(\d+[\.,]?\d*)\s*kj/i) ?? [], 1));
   const protein = normalize(safeGet(text.match(/prote[ií]n[aa]s?[^\d]*(\d+[\.,]?\d*)\s*g/i) ?? [], 1));
@@ -2553,14 +2553,14 @@ type MissionDraft = {
   xp_reward: number;
   points_reward: number;
   difficulty: string;
-  type?: string;
-  skill?: string;
+  type?: string | undefined;
+  skill?: string | undefined;
 };
 
 interface OpenAIChatCompletionResponse {
   choices?: Array<{
     message?: {
-      content?: string;
+      content?: string | undefined;
     };
   }>;
 }
@@ -2656,7 +2656,7 @@ Equipamentos: ${profile?.equipment || "nenhum"}`,
     const content = safeGet(openaiData.choices ?? [], 0)?.message?.content ?? "{}";
     const parsed = JSON.parse(content) as { missions?: MissionDraft[] };
     aiMissions = parsed.missions ?? [];
-  } catch (_err) {
+  } catch (err) {
     error = "Falha na IA";
     fallback = true;
     console.error("[generate-missions]", err);
@@ -2907,8 +2907,8 @@ app.get("/api/ai/workout-suggestions", authMiddleware, async (c) => {
 
 type IdentifiedFoodItem = {
   food_name: string;
-  portion_description?: string;
-  portion_multiplier?: number;
+  portion_description?: string | undefined;
+  portion_multiplier?: number | undefined;
 };
 
 function isIdentifiedFoodItem(item: unknown): item is IdentifiedFoodItem {
@@ -2939,7 +2939,7 @@ Texto OCR do rótulo: ${ocr_text || "não identificado"}.`;
       const aiData = await callOpenAIChat(c, [{ role: "user", content: identifyPrompt }], 700, true);
       const aiContent = safeGet(aiData.choices ?? [], 0)?.message?.content ?? "{}";
       const identified = JSON.parse(aiContent) as {
-        items?: Array<{ food_name?: string; portion_description?: string; portion_multiplier?: number }>;
+        items?: Array<{ food_name?: string | undefined; portion_description?: string | undefined; portion_multiplier?: number | undefined }>;
       };
       items = (identified.items ?? []).filter(isIdentifiedFoodItem);
     }
@@ -2959,7 +2959,7 @@ Texto OCR do rótulo: ${ocr_text || "não identificado"}.`;
       fats: number | null;
       energy_kj: number | null;
       source: "usda" | "rapidapi" | "estimate" | "ocr_label";
-      warning?: string;
+      warning?: string | undefined;
     }> = [];
 
     for (const item of items) {
@@ -3021,10 +3021,10 @@ Texto OCR do rótulo: ${ocr_text || "não identificado"}.`;
           const estimatePrompt = `Estime APENAS JSON com calories, protein, carbs, fats para ${query} (${item.portion_description || "porção média"}).`;
           const fallbackData = await callOpenAIChat(c, [{ role: "user", content: estimatePrompt }], 350, true);
           const estimate = JSON.parse(safeGet(fallbackData.choices ?? [], 0)?.message?.content ?? "{}") as {
-            calories?: number;
-            protein?: number;
-            carbs?: number;
-            fats?: number;
+            calories?: number | undefined;
+            protein?: number | undefined;
+            carbs?: number | undefined;
+            fats?: number | undefined;
           };
 
           analyzedItems.push({

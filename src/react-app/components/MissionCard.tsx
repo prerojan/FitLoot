@@ -7,7 +7,7 @@ import { Badge } from "@/react-app/components/ui/badge";
 import type { Mission } from "@/shared/types";
 
 interface MissionCardProps {
-  mission: Mission & { skill_name?: string };
+  mission: Mission & { skill_name?: string | undefined };
   onComplete: (id: number, reps: number, verified: boolean) => void;
 }
 
@@ -44,7 +44,7 @@ export default function MissionCard({ mission, onComplete }: MissionCardProps) {
     return `${days}d restantes`;
   };
 
-  const missionStatus = (mission as Mission & { status?: string }).status || (mission.is_completed === 1 ? 'completed' : 'pending');
+  const missionStatus = (mission as Mission & { status?: string | undefined }).status || (mission.is_completed === 1 ? 'completed' : 'pending');
   const isFailed = missionStatus === 'failed';
   const isCompleted = mission.is_completed === 1 || missionStatus === 'completed';
 

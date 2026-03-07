@@ -13,17 +13,17 @@ type ShopProductView = {
   points_cost: number;
   image_url: string | null;
   category: string;
-  partner_name?: string;
+  partner_name?: string | undefined;
 };
 
 type ShopOrderView = {
   id: number;
   product_name: string;
   image_url: string | null;
-  is_redeemed?: number;
-  qr_code?: string;
-  created_at?: string;
-  points_spent?: number;
+  is_redeemed?: number | undefined;
+  qr_code?: string | undefined;
+  created_at?: string | undefined;
+  points_spent?: number | undefined;
 };
 
 export default function Shop() {
@@ -75,7 +75,7 @@ export default function Shop() {
         await loadData();
         setActiveTab('orders');
       } else {
-        const data = (await response.json()) as { error?: string };
+        const data = (await response.json()) as { error?: string | undefined };
         alert(data.error || "Erro ao realizar compra");
       }
     } catch (error) {
