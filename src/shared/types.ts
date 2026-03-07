@@ -1,5 +1,7 @@
 import z from "zod";
 
+export type ConditioningLevel = "sedentario" | "iniciante" | "intermediario" | "avancado";
+
 // User Profile Schema
 export const UserProfileSchema = z.object({
   id: z.number(),
@@ -289,6 +291,7 @@ export const AiChatRequestSchema = z.object({
 export type AiChatRequest = z.infer<typeof AiChatRequestSchema>;
 
 // AI Analyze Food Request Schema
+
 export const AiAnalyzeFoodRequestSchema = z.object({
   food_description: z.string().optional(),
   image_base64: z.string().optional(),

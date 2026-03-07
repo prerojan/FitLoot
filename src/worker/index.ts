@@ -5,7 +5,6 @@ import {
   CompleteMissionRequestSchema,
   FoodScanRequestSchema,
   UpdateDailyMetricsRequestSchema,
-  FriendRequestSchema,
   MiniGameChallengeRequestSchema,
   MiniGameCompleteRequestSchema,
   AiChatRequestSchema,
@@ -14,6 +13,7 @@ import {
   LoginRequestSchema,
   UserPlanRequestSchema,
   UpdateMeRequestSchema,
+  ConditioningLevel,
 } from "../shared/types";
 import { assertString, safeGet } from "../utils/typeHelpers";
 import { toStatusCode } from "./httpHelpers";
@@ -139,7 +139,6 @@ export interface Env {
 const app = new Hono<AppContext>();
 
 
-type ConditioningLevel = "sedentario" | "iniciante" | "intermediario" | "avancado";
 
 type ExerciseRef = { name: string; muscle: string; equipment?: string; difficulty?: string; instructions?: string };
 
@@ -2151,7 +2150,7 @@ async function fetchExerciseDbExercises(env: Env, muscle: string, equipment: str
   return data.map((item) => ({
     name: String(item.name ?? "Exercício"),
     muscle: String(item.target ?? muscle),
-    equipment: String(item.equipment ?? equipment || "bodyweight"),
+    equipment: String(item.equipment ?? (equipment || "bodyweight")),
     difficulty: "intermediate",
     instructions: Array.isArray(item.instructions) ? String(item.instructions[0] ?? "") : "",
   }));
@@ -2546,8 +2545,6 @@ function parseNutritionFromOcrLabel(text: string) {
   };
 }
 
-type ConditioningLevel = "sedentario" | "iniciante" | "intermediario" | "avancado";
-
 type MissionDraft = {
   title: string;
   description: string;
@@ -2659,7 +2656,7 @@ Equipamentos: ${profile?.equipment || "nenhum"}`,
     const content = safeGet(openaiData.choices ?? [], 0)?.message?.content ?? "{}";
     const parsed = JSON.parse(content) as { missions?: MissionDraft[] };
     aiMissions = parsed.missions ?? [];
-  } catch (err) {
+  } catch (_err) {
     error = "Falha na IA";
     fallback = true;
     console.error("[generate-missions]", err);
@@ -3161,7 +3158,7 @@ app.get("*", async (c, next) => {
   try {
     // c.req é um Request válido para passar ao binding ASSETS
     return await c.env.ASSETS.fetch(c.req.raw);
-  } catch (err) {
+  } catch (_err) {
     // se falhar, passa para próximos handlers (ou 404)
     return next();
   }
@@ -3170,7 +3167,7 @@ app.get("*", async (c, next) => {
 
 export default {
   fetch: app.fetch,
-  async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
+  async scheduled(_event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
     ctx.waitUntil(processDailyReset(env));
   },
 };
