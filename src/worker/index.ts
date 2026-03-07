@@ -129,6 +129,9 @@ export interface Env {
   RAPID_API_KEY?: string;
   RAPID_API_HOST?: string;
   ANTHROPIC_API_KEY?: string;
+  EXERCISE_DB_KEY?: string;
+  API_NINJAS_KEY?: string;
+  GYMFIT_API_KEY?: string;
 }
 // --------------------------------
 
