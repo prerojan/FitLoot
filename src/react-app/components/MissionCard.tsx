@@ -44,8 +44,12 @@ export default function MissionCard({ mission, onComplete }: MissionCardProps) {
     return `${days}d restantes`;
   };
 
+  const missionStatus = (mission as Mission & { status?: string }).status || (mission.is_completed === 1 ? 'completed' : 'pending');
+  const isFailed = missionStatus === 'failed';
+  const isCompleted = mission.is_completed === 1 || missionStatus === 'completed';
+
   return (
-    <Card tone="soft" className="p-5 hover:shadow-xl transition-all">
+    <Card tone="soft" className={`p-5 transition-all ${isFailed ? 'border-2 border-red-200 bg-red-50 opacity-90' : 'hover:shadow-xl'} ${isCompleted ? 'border-2 border-emerald-200 bg-emerald-50' : ''}`}>
       <div className="flex items-start justify-between mb-3">
         <div className="flex-1">
           <h3 className="font-semibold text-gray-900 mb-1">{mission.title}</h3>
@@ -72,13 +76,17 @@ export default function MissionCard({ mission, onComplete }: MissionCardProps) {
       )}
 
       {mission.deadline && (
-        <div className="flex items-center gap-1 text-xs text-gray-500 mb-3">
+        <div className={`flex items-center gap-1 text-xs mb-3 ${isFailed ? 'text-red-600' : 'text-gray-500'}`}>
           <Clock className="w-3 h-3" />
-          <span>{getDeadlineText()}</span>
+          <span>{isFailed ? 'Expirada/falhou' : getDeadlineText()}</span>
         </div>
       )}
 
-      {!showComplete ? (
+      {isFailed ? (
+        <div className="w-full py-3 text-center rounded-xl bg-red-100 text-red-700 font-medium">Missão falhou por expiração</div>
+      ) : isCompleted ? (
+        <div className="w-full py-3 text-center rounded-xl bg-emerald-100 text-emerald-700 font-medium">Missão concluída</div>
+      ) : !showComplete ? (
         <Button
           onClick={() => setShowComplete(true)}
           variant="primary"

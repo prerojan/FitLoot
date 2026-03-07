@@ -1,18 +1,19 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router";
-import { useState, useEffect, createContext, useContext } from "react";
+import { useState, useEffect, createContext, useContext, lazy, Suspense } from "react";
 import HomePage from "@/react-app/pages/Home";
 import Onboarding from "@/react-app/pages/Onboarding";
-import Dashboard from "@/react-app/pages/Dashboard";
-import Profile from "@/react-app/pages/Profile";
-import Shop from "@/react-app/pages/Shop";
-import Ranking from "@/react-app/pages/Ranking";
 import LandingPage from "@/react-app/pages/Landing";
-import Friends from "@/react-app/pages/Friends";
-import MiniGames from "@/react-app/pages/MiniGames";
-import AIChat from "@/react-app/pages/AIChat";
-import FoodAnalysis from "@/react-app/pages/FoodAnalysis";
 import { api } from "@/react-app/utils/api";
+import PageLoader from "@/react-app/components/PageLoader";
 
+const Dashboard = lazy(() => import("@/react-app/pages/Dashboard"));
+const Profile = lazy(() => import("@/react-app/pages/Profile"));
+const Shop = lazy(() => import("@/react-app/pages/Shop"));
+const Ranking = lazy(() => import("@/react-app/pages/Ranking"));
+const Friends = lazy(() => import("@/react-app/pages/Friends"));
+const MiniGames = lazy(() => import("@/react-app/pages/MiniGames"));
+const AIChat = lazy(() => import("@/react-app/pages/AIChat"));
+const FoodAnalysis = lazy(() => import("@/react-app/pages/FoodAnalysis"));
 
 interface User {
   id: string;
@@ -41,22 +42,9 @@ export const useAuth = () => useContext(AuthContext);
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 flex items-center justify-center">
-        <div className="text-emerald-600 text-xl">Carregando...</div>
-      </div>
-    );
-  }
-
-  if (!user) {
-    return <Navigate to="/app" replace />;
-  }
-
-  if (user.onboarding_completed !== 1) {
-    return <Navigate to="/onboarding" replace />;
-  }
-
+  if (loading) return <PageLoader />;
+  if (!user) return <Navigate to="/app" replace />;
+  if (user.onboarding_completed !== 1) return <Navigate to="/onboarding" replace />;
   return <>{children}</>;
 }
 
@@ -65,17 +53,35 @@ export default function App() {
   const [loading, setLoading] = useState(true);
 
   const checkAuth = async () => {
+    const hasSessionHint = localStorage.getItem("fitloot_authenticated_hint") === "1";
+    if (!hasSessionHint) {
+      setUser(null);
+      setLoading(false);
+      return;
+    }
+
     try {
       const response = await api('/api/users/me');
-
       if (response.ok) {
         const userData = await response.json();
         setUser(userData);
+        api('/api/app/open', { method: 'POST' }).catch(() => {});
+        api('/api/profile').then((r) => r.json()).then((profile) => {
+          const root = document.documentElement;
+          root.classList.remove(...Array.from(root.classList).filter((c) => c.startsWith('theme-primary-') || c.startsWith('theme-secondary-') || c.startsWith('font-title-')));
+          if (profile?.custom_primary_color) root.classList.add(`theme-primary-${String(profile.custom_primary_color)}`);
+          if (profile?.custom_secondary_color) root.classList.add(`theme-secondary-${String(profile.custom_secondary_color)}`);
+          if (profile?.custom_font) root.classList.add(`font-title-${String(profile.custom_font)}`);
+          if (profile?.custom_background_type === 'image' && profile?.custom_background_value) {
+            root.style.setProperty('--app-bg-image', `url(${String(profile.custom_background_value)})`);
+          } else if (profile?.custom_background_type === 'color' && profile?.custom_background_value) {
+            root.style.setProperty('--app-bg-color', String(profile.custom_background_value));
+          }
+        }).catch(() => {});
       } else {
         setUser(null);
       }
-    } catch (error) {
-      console.error('Auth check failed:', error);
+    } catch {
       setUser(null);
     } finally {
       setLoading(false);
@@ -83,6 +89,7 @@ export default function App() {
   };
 
   const logout = () => {
+    localStorage.removeItem("fitloot_authenticated_hint");
     setUser(null);
   };
 
@@ -90,41 +97,31 @@ export default function App() {
     checkAuth();
   }, []);
 
+  useEffect(() => {
+    void import("@/react-app/pages/Dashboard");
+    void import("@/react-app/pages/Profile");
+  }, []);
+
   return (
     <AuthContext.Provider value={{ user, loading, checkAuth, logout }}>
       <Router>
-        <Routes>
-          {/* Landing page pública */}
-          <Route path="/" element={<LandingPage />} />
-
-          {/* Página de login: só redireciona quando loading terminou */}
-          <Route path="/app" element={
-            loading
-              ? (
-                <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 flex items-center justify-center">
-                  <div className="text-emerald-600 text-xl">Carregando...</div>
-                </div>
-              )
-              : user
-                ? <Navigate to={user.onboarding_completed === 1 ? "/home" : "/onboarding"} replace />
-                : <HomePage />
-          } />
-
-          {/* Rotas protegidas */}
-          <Route path="/home" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
-          <Route path="/onboarding" element={<Onboarding />} />
-          <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
-          <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
-          <Route path="/shop" element={<ProtectedRoute><Shop /></ProtectedRoute>} />
-          <Route path="/ranking" element={<ProtectedRoute><Ranking /></ProtectedRoute>} />
-          <Route path="/friends" element={<ProtectedRoute><Friends /></ProtectedRoute>} />
-          <Route path="/minigames" element={<ProtectedRoute><MiniGames /></ProtectedRoute>} />
-          <Route path="/ai-chat" element={<ProtectedRoute><AIChat /></ProtectedRoute>} />
-          <Route path="/food-analysis" element={<ProtectedRoute><FoodAnalysis /></ProtectedRoute>} />
-
-          {/* Fallback */}
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+        <Suspense fallback={<PageLoader />}>
+          <Routes>
+            <Route path="/" element={<LandingPage />} />
+            <Route path="/app" element={loading ? <PageLoader /> : user ? <Navigate to={user.onboarding_completed === 1 ? "/home" : "/onboarding"} replace /> : <HomePage />} />
+            <Route path="/home" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+            <Route path="/onboarding" element={<Onboarding />} />
+            <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+            <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
+            <Route path="/shop" element={<ProtectedRoute><Shop /></ProtectedRoute>} />
+            <Route path="/ranking" element={<ProtectedRoute><Ranking /></ProtectedRoute>} />
+            <Route path="/friends" element={<ProtectedRoute><Friends /></ProtectedRoute>} />
+            <Route path="/minigames" element={<ProtectedRoute><MiniGames /></ProtectedRoute>} />
+            <Route path="/ai-chat" element={<ProtectedRoute><AIChat /></ProtectedRoute>} />
+            <Route path="/food-analysis" element={<ProtectedRoute><FoodAnalysis /></ProtectedRoute>} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </Suspense>
       </Router>
     </AuthContext.Provider>
   );

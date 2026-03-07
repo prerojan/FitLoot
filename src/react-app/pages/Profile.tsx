@@ -24,12 +24,15 @@ export default function Profile() {
   const [titles, setTitles] = useState<TitleWithUnlock[]>([]);
   const [activeTab, setActiveTab] = useState<'attributes' | 'skills' | 'achievements' | 'titles'>('attributes');
   const [loading, setLoading] = useState(true);
+  const [isMobile, setIsMobile] = useState(false);
+  const [customizationSaving, setCustomizationSaving] = useState(false);
 
   useEffect(() => {
     if (!user) {
       navigate("/app");
       return;
     }
+    setIsMobile(window.innerWidth <= 768);
     loadData();
   }, [user, navigate]);
 
@@ -68,6 +71,35 @@ export default function Profile() {
       await loadData();
     } catch (error) {
       console.error("Error activating title:", error);
+    }
+  };
+
+  const saveCustomization = async (payload: Record<string, unknown>) => {
+    try {
+      setCustomizationSaving(true);
+      const res = await api('/api/profile/customization', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (res.ok) await loadData();
+    } catch (error) {
+      console.error('Error saving customization', error);
+    } finally {
+      setCustomizationSaving(false);
+    }
+  };
+
+  const setSkillFocus = async (focus: 'calistenia' | 'yoga') => {
+    try {
+      await api('/api/profile/skill-focus', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ active_skill_focus: focus }),
+      });
+      await loadData();
+    } catch (error) {
+      console.error('Error changing focus', error);
     }
   };
 
@@ -184,6 +216,25 @@ export default function Profile() {
           </div>
         )}
       </div>
+
+      {isMobile && (
+        <div className="px-6 pb-6">
+          <div className="bg-white/80 backdrop-blur-sm rounded-2xl p-4 shadow-lg space-y-3">
+            <h3 className="font-bold text-gray-900">Personalização (mobile)</h3>
+            <div className="grid grid-cols-2 gap-2">
+              <button onClick={() => saveCustomization({ custom_primary_color: 'green' })} className="fl-btn-secondary rounded-xl py-2">Primária verde</button>
+              <button onClick={() => saveCustomization({ custom_secondary_color: 'dark' })} className="fl-btn-secondary rounded-xl py-2">Secundária dark</button>
+              <button onClick={() => saveCustomization({ custom_font: 'bold' })} className="fl-btn-secondary rounded-xl py-2">Fonte título</button>
+              <button onClick={() => saveCustomization({ custom_background_type: 'color', custom_background_value: '#0f172a' })} className="fl-btn-secondary rounded-xl py-2">Fundo sólido</button>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <button onClick={() => setSkillFocus('calistenia')} className={`rounded-xl py-2 ${profile?.active_skill_focus === 'calistenia' ? 'fl-btn-primary' : 'fl-btn-secondary'}`}>Foco Calistenia</button>
+              <button onClick={() => setSkillFocus('yoga')} className={`rounded-xl py-2 ${profile?.active_skill_focus === 'yoga' ? 'fl-btn-primary' : 'fl-btn-secondary'}`}>Foco Yoga</button>
+            </div>
+            {customizationSaving && <p className="text-xs text-gray-500">Salvando...</p>}
+          </div>
+        </div>
+      )}
 
       <BottomNav active="profile" />
     </div>
