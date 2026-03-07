@@ -289,6 +289,17 @@ export const AiChatRequestSchema = z.object({
 export type AiChatRequest = z.infer<typeof AiChatRequestSchema>;
 
 // AI Analyze Food Request Schema
+type AiAnalyzeFoodRequestInput = {
+  food_description?: string;
+  image_base64?: string;
+  identified_items?: Array<{
+    food_name: string;
+    portion_description?: string;
+    portion_multiplier?: number;
+  }>;
+  ocr_text?: string;
+};
+
 export const AiAnalyzeFoodRequestSchema = z.object({
   food_description: z.string().optional(),
   image_base64: z.string().optional(),
@@ -298,7 +309,7 @@ export const AiAnalyzeFoodRequestSchema = z.object({
     portion_multiplier: z.number().positive().optional(),
   })).optional(),
   ocr_text: z.string().optional(),
-}).refine((data) => data.food_description !== undefined || data.image_base64 !== undefined || (data.identified_items?.length ?? 0) > 0, {
+}).refine((data: AiAnalyzeFoodRequestInput) => data.food_description !== undefined || data.image_base64 !== undefined || (data.identified_items?.length ?? 0) > 0, {
   message: "Food description or image required",
 });
 export type AiAnalyzeFoodRequest = z.infer<typeof AiAnalyzeFoodRequestSchema>;
