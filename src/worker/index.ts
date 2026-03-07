@@ -128,6 +128,9 @@ export interface Env {
   RAPID_API_KEY?: string;
   RAPID_API_HOST?: string;
   ANTHROPIC_API_KEY?: string;
+  EXERCISE_DB_KEY?: string;
+  API_NINJAS_KEY?: string;
+  GYMFIT_API_KEY?: string;
 }
 // --------------------------------
 
@@ -2719,6 +2722,22 @@ app.post("/api/ai/chat", authMiddleware, async (c) => {
     if (Number(session_count ?? 0) >= 100) {
       await unlockAchievementIfNeeded(c.env.fitloot_db, user.id, "Conversa de Louco", Number(session_count), 100);
     }
+
+    await ensureUserCounterRow(c.env.fitloot_db, user.id);
+    const currentCounter = await c.env.fitloot_db.prepare("SELECT chat_messages, repeated_message_streak, last_chat_message FROM user_event_counters WHERE user_id = ?")
+      .bind(user.id).first<{ chat_messages: number; repeated_message_streak: number; last_chat_message: string | null }>();
+    const sameMessage = (currentCounter?.last_chat_message ?? "") === userMessage;
+    const nextRepeat = sameMessage ? Number(currentCounter?.repeated_message_streak ?? 0) + 1 : 1;
+    await c.env.fitloot_db.prepare(
+      `UPDATE user_event_counters SET
+        chat_messages = COALESCE(chat_messages, 0) + 1,
+        repeated_message_streak = ?,
+        last_chat_message = ?,
+        updated_at = datetime('now')
+      WHERE user_id = ?`
+    ).bind(nextRepeat, userMessage, user.id).run();
+    await logUserEvent(c.env.fitloot_db, user.id, 'chat_message', { size: userMessage.length, repeated: sameMessage });
+    await onChatMessage(c.env.fitloot_db, user.id, Number(currentCounter?.chat_messages ?? 0) + 1);
 
     const [profile, progression, attributes] = await Promise.all([
       c.env.fitloot_db.prepare("SELECT * FROM user_profiles WHERE user_id = ?").bind(user.id).first(),
