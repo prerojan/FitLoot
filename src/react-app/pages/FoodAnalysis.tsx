@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type ChangeEventHandler } from "react";
+import { useMemo, useRef, useState, useEffect, type ChangeEventHandler } from "react";
 import { useNavigate } from "react-router";
 import { Camera, ImagePlus, Loader2, RefreshCw, Save, AlertTriangle, CheckCircle2 } from "lucide-react";
 import BottomNav from "@/react-app/components/BottomNav";
@@ -40,68 +40,55 @@ type IdentifiedItem = {
   portion_multiplier: number;
 };
 
-type MediaPipeCategory = {
-  categoryName?: string;
-  score?: number;
+type MediaPipeClassifier = {
+  classify: (image: HTMLImageElement) => {
+    classifications?: Array<{
+      categories?: Array<{ categoryName?: string; score?: number }>;
+    }>;
+  };
 };
 
-type MediaPipeDetectionResult = {
-  detections?: Array<{
-    categories?: MediaPipeCategory[];
-  }>;
+let classifierPromise: Promise<MediaPipeClassifier> | null = null;
+
+type MediaPipeVisionModule = {
+  FilesetResolver: {
+    forVisionTasks: (wasmRootPath: string) => Promise<unknown>;
+  };
+  ImageClassifier: {
+    createFromOptions: (vision: unknown, options: Record<string, unknown>) => Promise<MediaPipeClassifier>;
+  };
 };
 
-type MediaPipeObjectDetector = {
-  detect: (image: HTMLImageElement) => MediaPipeDetectionResult;
-};
-
-type MediaPipeFilesetResolver = {
-  forVisionTasks: (path: string) => Promise<unknown>;
-};
-
-type MediaPipeObjectDetectorFactory = {
-  createFromOptions: (vision: unknown, options: Record<string, unknown>) => Promise<MediaPipeObjectDetector>;
-};
-
-declare global {
-  interface Window {
-    FilesetResolver?: MediaPipeFilesetResolver;
-    ObjectDetector?: MediaPipeObjectDetectorFactory;
-  }
+async function loadVisionModule(): Promise<MediaPipeVisionModule> {
+  const moduleUrl = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/+esm";
+  return (await import(/* @vite-ignore */ moduleUrl)) as MediaPipeVisionModule;
 }
 
-let detectorPromise: Promise<MediaPipeObjectDetector> | null = null;
-
-async function getFoodDetector() {
-  if (!window.FilesetResolver || !window.ObjectDetector) {
-    throw new Error("MediaPipe Vision não carregado. Verifique o script vision_bundle.mjs no index.html.");
-  }
-
-  if (!detectorPromise) {
-    detectorPromise = (async () => {
-      const vision = await window.FilesetResolver!.forVisionTasks(
-        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
+async function getFoodClassifier() {
+  if (!classifierPromise) {
+    classifierPromise = (async () => {
+      const visionModule = await loadVisionModule();
+      const vision = await visionModule.FilesetResolver.forVisionTasks(
+        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
       );
 
-      return window.ObjectDetector!.createFromOptions(vision, {
+      return visionModule.ImageClassifier.createFromOptions(vision, {
         baseOptions: {
           modelAssetPath:
-            "https://storage.googleapis.com/mediapipe-tasks/object_detector/efficientdet_lite0_uint8.tflite",
+            "https://storage.googleapis.com/mediapipe-models/image_classifier/efficientnet_lite0/int8/1/efficientnet_lite0.tflite",
         },
-        scoreThreshold: 0.35,
         maxResults: 5,
         runningMode: "IMAGE",
       });
     })();
   }
 
-  return detectorPromise;
+  return classifierPromise;
 }
 
-function toIdentifiedItems(result: MediaPipeDetectionResult): IdentifiedItem[] {
-  const detections = result.detections ?? [];
-  return detections
-    .flatMap((detection) => detection.categories ?? [])
+function toIdentifiedItems(result: { classifications?: Array<{ categories?: Array<{ categoryName?: string; score?: number }> }> }): IdentifiedItem[] {
+  const categories = safeGet(result.classifications ?? [], 0)?.categories ?? [];
+  return categories
     .filter((category) => Number(category.score ?? 0) >= 0.2)
     .slice(0, 3)
     .map((category) => ({
@@ -146,10 +133,38 @@ export default function FoodAnalysis() {
     setStreamActive(false);
   };
 
+  const [mediaPipeReady, setMediaPipeReady] = useState(false);
+  const [mediaPipeLoading, setMediaPipeLoading] = useState(true);
+  const [mediaPipeError, setMediaPipeError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    const bootstrap = async () => {
+      try {
+        setMediaPipeLoading(true);
+        await getFoodClassifier();
+        if (!active) return;
+        setMediaPipeReady(true);
+        setMediaPipeError(null);
+      } catch {
+        if (!active) return;
+        setMediaPipeReady(false);
+        setMediaPipeError("Não foi possível inicializar o MediaPipe. Verifique sua conexão e tente novamente.");
+      } finally {
+        if (active) setMediaPipeLoading(false);
+      }
+    };
+
+    void bootstrap();
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const identifyFoodWithMediaPipe = async (image: HTMLImageElement) => {
-    const detector = await getFoodDetector();
-    const detection = detector.detect(image);
-    const items = toIdentifiedItems(detection);
+    const classifier = await getFoodClassifier();
+    const prediction = classifier.classify(image);
+    const items = toIdentifiedItems(prediction);
 
     if (items.length === 0) {
       throw new Error("Não foi possível identificar alimentos com o modelo local. Tente outra foto.");
@@ -164,6 +179,14 @@ export default function FoodAnalysis() {
     setResult(null);
 
     try {
+      if (mediaPipeLoading) {
+        throw new Error("Aguarde, inicializando análise de imagem...");
+      }
+
+      if (!mediaPipeReady) {
+        throw new Error(mediaPipeError || "MediaPipe não está pronto para análise.");
+      }
+
       const image = await new Promise<HTMLImageElement>((resolve, reject) => {
         const img = new Image();
         img.onload = () => resolve(img);
@@ -286,6 +309,14 @@ export default function FoodAnalysis() {
 
           {cameraError && (
             <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-amber-700 text-sm">{cameraError}</div>
+          )}
+
+          {mediaPipeLoading && (
+            <div className="bg-gray-50 border border-gray-200 rounded-xl p-3 text-gray-600 text-sm">Inicializando MediaPipe...</div>
+          )}
+
+          {mediaPipeError && (
+            <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-red-700 text-sm">{mediaPipeError}</div>
           )}
 
           {streamActive && <video ref={videoRef} className="w-full rounded-2xl" autoPlay playsInline muted />}
