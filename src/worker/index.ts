@@ -90,7 +90,13 @@ async function authMiddleware(
     return databaseNotInitializedResponse(c);
   }
 
-  await ensureCatalogReady(c.env.fitloot_db);
+  try {
+    await ensureCatalogReady(c.env.fitloot_db);
+  } catch (error) {
+    console.error("[authMiddleware][ensureCatalogReady] Falha ao inicializar catálogo de gamificação", {
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
 
   const sessionId = safeGet(c.req.header('Cookie')?.match(/session_id=([^;]+)/) ?? [], 1);
 
@@ -1032,7 +1038,37 @@ app.post(
 );
 
 app.get("/api/users/me", authMiddleware, async (c) => {
-  return c.json(c.get("user"));
+  const user = c.get("user");
+
+  try {
+    if (!user?.id) {
+      return c.json({ error: "Usuário não encontrado", code: "USER_NOT_FOUND" }, 404);
+    }
+
+    const userRecord = await c.env.fitloot_db
+      .prepare("SELECT id, email, name, avatar_url, COALESCE(onboarding_completed, 0) as onboarding_completed FROM users WHERE id = ?")
+      .bind(user.id)
+      .first<{ id: string; email: string; name: string; avatar_url: string | null; onboarding_completed: number }>();
+
+    if (!userRecord) {
+      return c.json({ error: "Usuário não encontrado", code: "USER_NOT_FOUND" }, 404);
+    }
+
+    return c.json({
+      id: userRecord.id,
+      email: userRecord.email,
+      name: userRecord.name,
+      avatar_url: userRecord.avatar_url ?? undefined,
+      onboarding_completed: Number(userRecord.onboarding_completed) === 1 ? 1 : 0,
+    });
+  } catch (err) {
+    console.error("[/api/users/me] Erro interno:", {
+      message: err instanceof Error ? err.message : String(err),
+      stack: err instanceof Error ? err.stack : undefined,
+      userId: user?.id,
+    });
+    return c.json({ error: "Erro interno", code: "INTERNAL_ERROR" }, 500);
+  }
 });
 
 app.post("/api/app/open", authMiddleware, async (c) => {

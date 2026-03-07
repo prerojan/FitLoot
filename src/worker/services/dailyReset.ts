@@ -1,4 +1,4 @@
-import { DAILY_RESET_STATE_KEY } from "@/worker/constants/appState";
+import { DAILY_RESET_STATE_KEY } from "../constants/appState";
 
 interface DailyResetDeps {
   db: D1Database;
