@@ -1,4 +1,4 @@
-import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router";
+﻿import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router";
 import { useState, useEffect, createContext, useContext, lazy, Suspense } from "react";
 import PageLoader from "@/react-app/components/PageLoader";
 import { ROUTE_PATHS, AUTHENTICATED_HINT_KEY } from "@/react-app/constants/auth";
@@ -8,6 +8,7 @@ import LandingPage from "@/react-app/pages/Landing";
 import Onboarding from "@/react-app/pages/Onboarding";
 import { prefetchCoreRoutes, resolveAuthenticatedStartRoute } from "@/react-app/services/authService";
 import type { AuthContextType, User } from "@/react-app/types/auth";
+import { applyProfileTheme } from "@/react-app/utils/theme";
 
 const Dashboard = lazy(() => import("@/react-app/pages/Dashboard"));
 const Profile = lazy(() => import("@/react-app/pages/Profile"));
@@ -49,6 +50,7 @@ export default function App() {
 
   const logout = () => {
     localStorage.removeItem(AUTHENTICATED_HINT_KEY);
+    applyProfileTheme(null);
     setUser(null);
   };
 

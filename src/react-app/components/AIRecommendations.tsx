@@ -1,6 +1,7 @@
-import { useState, useEffect } from "react";
-import { Sparkles, TrendingUp, Target, Lightbulb, Loader2 } from "lucide-react";
+﻿import { useState, useEffect } from "react";
+import { Sparkles, TrendingUp, Target, Lightbulb } from "lucide-react";
 import { api } from "@/react-app/utils/api";
+import LoadingBall from "@/react-app/components/LoadingBall";
 
 type Recommendations = {
   next_skill_recommendation: {
@@ -101,7 +102,7 @@ export default function AIRecommendations() {
     return (
       <div className="fl-card p-6">
         <div className="flex items-center justify-center gap-2 text-emerald-600">
-          <Loader2 className="w-5 h-5 animate-spin" />
+          <LoadingBall size="md" />
           <span className="text-sm">Analisando seu progresso...</span>
         </div>
       </div>
@@ -189,3 +190,4 @@ export default function AIRecommendations() {
     </div>
   );
 }
+

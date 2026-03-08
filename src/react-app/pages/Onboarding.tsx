@@ -1,4 +1,4 @@
-import {
+﻿import {
   useCallback,
   useEffect,
   useRef,
@@ -9,6 +9,7 @@ import {
 } from "react";
 import { useNavigate } from "react-router";
 import { useAuth } from "@/react-app/App";
+import PageLoader from "@/react-app/components/PageLoader";
 import { api } from "@/react-app/utils/api";
 import { safeGet } from "@/utils/typeHelpers";
 import { Button } from "@/react-app/components/ui/button";
@@ -305,9 +306,9 @@ const EQUIPMENT_OPTIONS: { id: string; label: string; icon: typeof Dumbbell }[] 
 ];
 
 function availabilityMessage(state: AvailabilityState): { tone: "green" | "red" | "muted"; text: string } | null {
-  if (state.status === "available") return { tone: "green", text: "✅ Disponível" };
-  if (state.status === "unavailable") return { tone: "red", text: `❌ ${state.message || "Já cadastrado"}` };
-  if (state.status === "invalid") return { tone: "red", text: `❌ ${state.message || "Valor inválido"}` };
+  if (state.status === "available") return { tone: "green", text: "Disponível" };
+  if (state.status === "unavailable") return { tone: "red", text: state.message || "Já cadastrado" };
+  if (state.status === "invalid") return { tone: "red", text: state.message || "Valor inválido" };
   if (state.status === "checking") return { tone: "muted", text: "Validando..." };
   return null;
 }
@@ -513,7 +514,7 @@ export default function Onboarding() {
       height < 140 ||
       height > 220
     ) {
-      setStepError("Altura (140–220 cm) e peso (40–200 kg) devem estar no intervalo válido.");
+      setStepError("Altura (140-220 cm) e peso (40-200 kg) devem estar no intervalo válido.");
       return;
     }
 
@@ -683,11 +684,7 @@ export default function Onboarding() {
   };
 
   if (authLoading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50">
-        <div className="text-emerald-600">Carregando...</div>
-      </div>
-    );
+    return <PageLoader />;
   }
 
   const progress = ((currentStep + 1) / totalSteps) * 100;
@@ -942,7 +939,7 @@ export default function Onboarding() {
                           onClick={() => setProfile((p) => ({ ...p, [key]: String(Math.max(0, val - 1)) }))}
                           className="h-8 w-8 rounded-lg bg-gray-100 font-bold"
                         >
-                          −
+                          -
                         </button>
                         <span className="w-8 font-bold text-emerald-700">{val}</span>
                         <button
@@ -1231,4 +1228,5 @@ export default function Onboarding() {
     </div>
   );
 }
+
 

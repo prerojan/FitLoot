@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useState } from "react";
+﻿import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { useAuth } from "@/react-app/App";
 import BottomNav from "@/react-app/components/BottomNav";
 import { ShoppingBag, Coins, QrCode, Package } from "lucide-react";
 import type { UserProgression } from "@/shared/types";
 import { api } from "@/react-app/utils/api";
+import PageLoader from "@/react-app/components/PageLoader";
 
 type ShopProductView = {
   id: number;
@@ -66,7 +67,7 @@ export default function Shop() {
       setProgression(progressionData);
     } catch (loadError) {
       console.error("Error loading shop data:", loadError);
-      setError("N�o foi poss�vel carregar a loja agora.");
+      setError("Não foi possível carregar a loja agora.");
     } finally {
       setLoading(false);
     }
@@ -107,11 +108,7 @@ export default function Shop() {
   };
 
   if (loading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 flex items-center justify-center">
-        <div className="text-emerald-600">Carregando...</div>
-      </div>
-    );
+    return <PageLoader />;
   }
 
   if (error) {
@@ -332,7 +329,7 @@ function OrderCard({ order }: { order: ShopOrderView }) {
             <span>{order.points_spent ?? 0} pontos</span>
           </div>
           <p className="text-xs text-gray-500">
-            {order.created_at ? new Date(order.created_at).toLocaleDateString('pt-BR') : '—'}
+            {order.created_at ? new Date(order.created_at).toLocaleDateString('pt-BR') : '-'}
           </p>
         </div>
 
@@ -368,5 +365,6 @@ function OrderCard({ order }: { order: ShopOrderView }) {
     </div>
   );
 }
+
 
 

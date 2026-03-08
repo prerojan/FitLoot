@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useRef, useState, type ChangeEventHandler } from "react";
+﻿import { useCallback, useEffect, useRef, useState, type ChangeEventHandler } from "react";
 import { useNavigate } from "react-router";
 import { useAuth } from "@/react-app/App";
 import BottomNav from "@/react-app/components/BottomNav";
-import { LogOut, Trophy, Award, Dumbbell, Target } from "lucide-react";
+import PageLoader from "@/react-app/components/PageLoader";
+import LoadingBall from "@/react-app/components/LoadingBall";
+import { LogOut, Trophy, Award, Dumbbell, Target, Settings } from "lucide-react";
 import type {
   UserProfile,
   UserAttributes,
@@ -13,8 +15,6 @@ import type {
 } from "@/shared/types";
 import { api } from "@/react-app/utils/api";
 import { applyProfileTheme } from "@/react-app/utils/theme";
-
-
 
 const FONT_OPTIONS = [
   { label: "Rajdhani", value: "rajdhani", family: "Rajdhani, sans-serif" },
@@ -35,24 +35,29 @@ const DEFAULT_SECONDARY_COLOR = "#14b8a6";
 export default function Profile() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [attributes, setAttributes] = useState<UserAttributes | null>(null);
   const [progression, setProgression] = useState<UserProgression | null>(null);
   const [skills, setSkills] = useState<SkillWithProgress[]>([]);
   const [achievements, setAchievements] = useState<AchievementWithUnlock[]>([]);
   const [titles, setTitles] = useState<TitleWithUnlock[]>([]);
-  const [activeTab, setActiveTab] = useState<'attributes' | 'skills' | 'achievements' | 'titles'>('attributes');
+  const [activeTab, setActiveTab] = useState<"attributes" | "skills" | "achievements" | "titles">("attributes");
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
   const [isMobile, setIsMobile] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
   const [customizationSaving, setCustomizationSaving] = useState(false);
   const [bgPreview, setBgPreview] = useState<string | null>(null);
   const [primaryColor, setPrimaryColor] = useState(DEFAULT_PRIMARY_COLOR);
   const [secondaryColor, setSecondaryColor] = useState(DEFAULT_SECONDARY_COLOR);
   const [customFont, setCustomFont] = useState<string>("rajdhani");
+
   const primaryColorInputRef = useRef<HTMLInputElement>(null);
   const secondaryColorInputRef = useRef<HTMLInputElement>(null);
-
 
   useEffect(() => {
     const updateViewport = () => {
@@ -87,20 +92,21 @@ export default function Profile() {
         throw new Error("Falha ao carregar perfil.");
       }
 
-      const profileData = await profileRes.json();
+      const profileData = (await profileRes.json()) as UserProfile;
       setProfile(profileData);
       setBgPreview(profileData?.custom_background_type === "image" ? profileData?.custom_background_value ?? null : null);
       setPrimaryColor(profileData?.custom_primary_color ?? DEFAULT_PRIMARY_COLOR);
       setSecondaryColor(profileData?.custom_secondary_color ?? DEFAULT_SECONDARY_COLOR);
       setCustomFont(profileData?.custom_font ?? "rajdhani");
-      setAttributes(await attrsRes.json());
-      setProgression(await progRes.json());
-      setSkills(await skillsRes.json());
-      setAchievements(await achievementsRes.json());
-      setTitles(await titlesRes.json());
-    } catch (loadError) {
-      console.error("Error loading profile:", loadError);
-      setError("N�o foi poss�vel carregar o perfil agora.");
+      applyProfileTheme(profileData);
+
+      setAttributes((await attrsRes.json()) as UserAttributes);
+      setProgression((await progRes.json()) as UserProgression);
+      setSkills((await skillsRes.json()) as SkillWithProgress[]);
+      setAchievements((await achievementsRes.json()) as AchievementWithUnlock[]);
+      setTitles((await titlesRes.json()) as TitleWithUnlock[]);
+    } catch {
+      setError("Não foi possível carregar o perfil agora.");
     } finally {
       setLoading(false);
     }
@@ -111,77 +117,94 @@ export default function Profile() {
       navigate("/app");
       return;
     }
+
     void loadData();
   }, [user, navigate, loadData]);
 
   const handleLogout = () => {
     logout();
     navigate("/app", { replace: true });
-    api("/api/logout", { credentials: "include" }).catch(() => {});
+    api("/api/logout", { credentials: "include" }).catch(() => undefined);
   };
+
   const handleActivateTitle = async (titleId: number) => {
     try {
       await api(`/api/titles/${titleId}/activate`, { method: "POST" });
       await loadData();
-    } catch (error) {
-      console.error("Error activating title:", error);
+    } catch {
+      setError("Não foi possível ativar o título agora.");
     }
+  };
+
+  const applyThemePreview = (changes: {
+    custom_primary_color?: string | null | undefined;
+    custom_secondary_color?: string | null | undefined;
+    custom_font?: string | null | undefined;
+    custom_background_type?: string | null | undefined;
+    custom_background_value?: string | null | undefined;
+  }) => {
+    applyProfileTheme({
+      custom_primary_color: changes.custom_primary_color ?? profile?.custom_primary_color ?? primaryColor,
+      custom_secondary_color: changes.custom_secondary_color ?? profile?.custom_secondary_color ?? secondaryColor,
+      custom_font: changes.custom_font ?? profile?.custom_font ?? customFont,
+      custom_background_type: changes.custom_background_type ?? profile?.custom_background_type ?? "color",
+      custom_background_value: changes.custom_background_value ?? profile?.custom_background_value ?? "#f8fafc",
+    });
   };
 
   const saveCustomization = async (payload: Record<string, unknown>) => {
     try {
       setCustomizationSaving(true);
-      const res = await api('/api/profile/customization', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      const response = await api("/api/profile/customization", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      if (res.ok) {
-        applyProfileTheme({
-          custom_primary_color: typeof payload.custom_primary_color === "string" ? payload.custom_primary_color : profile?.custom_primary_color ?? null,
-          custom_secondary_color: typeof payload.custom_secondary_color === "string" ? payload.custom_secondary_color : profile?.custom_secondary_color ?? null,
-          custom_font: typeof payload.custom_font === "string" ? payload.custom_font : profile?.custom_font ?? null,
-          custom_background_type: typeof payload.custom_background_type === "string" ? payload.custom_background_type : profile?.custom_background_type ?? null,
-          custom_background_value: typeof payload.custom_background_value === "string" ? payload.custom_background_value : profile?.custom_background_value ?? null,
-        });
-        await loadData();
+
+      if (!response.ok) {
+        throw new Error("Falha ao salvar personalização.");
       }
-    } catch (error) {
-      console.error('Error saving customization', error);
+
+      const responseData = (await response.json()) as { profile?: UserProfile | undefined };
+      if (responseData.profile) {
+        setProfile(responseData.profile);
+        applyProfileTheme(responseData.profile);
+      }
+    } catch {
+      setError("Não foi possível salvar personalização agora.");
     } finally {
       setCustomizationSaving(false);
     }
   };
 
-  const setSkillFocus = async (focus: 'calistenia' | 'yoga') => {
+  const setSkillFocus = async (focus: "calistenia" | "yoga") => {
     try {
-      await api('/api/profile/skill-focus', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      await api("/api/profile/skill-focus", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ active_skill_focus: focus }),
       });
-      await loadData();
-    } catch (error) {
-      console.error('Error changing focus', error);
+      setProfile((currentProfile) => currentProfile ? { ...currentProfile, active_skill_focus: focus } : currentProfile);
+    } catch {
+      setError("Não foi possível alterar o foco agora.");
     }
   };
 
   const applyPrimaryColor = async (nextColor: string) => {
     setPrimaryColor(nextColor);
-    const root = document.documentElement;
-    root.style.setProperty("--app-primary-color", nextColor);
+    applyThemePreview({ custom_primary_color: nextColor });
     await saveCustomization({ custom_primary_color: nextColor });
   };
 
   const applySecondaryColor = async (nextColor: string) => {
     setSecondaryColor(nextColor);
-    const root = document.documentElement;
-    root.style.setProperty("--app-secondary-color", nextColor);
+    applyThemePreview({ custom_secondary_color: nextColor });
     await saveCustomization({ custom_secondary_color: nextColor });
   };
 
   const applyFont = async (font: string) => {
     setCustomFont(font);
+    applyThemePreview({ custom_font: font });
     await saveCustomization({ custom_font: font });
   };
 
@@ -194,20 +217,19 @@ export default function Profile() {
       const value = String(reader.result || "");
       if (!value.includes(",")) return;
       setBgPreview(value);
-      const root = document.documentElement;
-      root.style.setProperty('--app-bg-image', `url(${value})`);
-      root.style.setProperty('--app-bg-color', 'transparent');
-      await saveCustomization({ custom_background_type: 'image', custom_background_value: value });
+      applyThemePreview({ custom_background_type: "image", custom_background_value: value });
+      await saveCustomization({ custom_background_type: "image", custom_background_value: value });
     };
     reader.readAsDataURL(file);
   };
 
+  const applySolidBackground = async () => {
+    applyThemePreview({ custom_background_type: "color", custom_background_value: "#0f172a" });
+    await saveCustomization({ custom_background_type: "color", custom_background_value: "#0f172a" });
+  };
+
   if (loading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 flex items-center justify-center">
-        <div className="text-emerald-600">Carregando...</div>
-      </div>
-    );
+    return <PageLoader />;
   }
 
   if (error) {
@@ -224,13 +246,12 @@ export default function Profile() {
     );
   }
 
-  const activeTitle = titles.find(t => t.is_active === 1);
+  const activeTitle = titles.find((title) => title.is_active === 1);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 pb-24">
-      {/* Header */}
       <div className="text-white px-6 pt-8 pb-8 rounded-b-3xl shadow-xl" style={{ background: "linear-gradient(90deg, var(--app-primary-color), var(--app-secondary-color))" }}>
-        <div className="flex items-start justify-between mb-4">
+        <div className="flex items-start justify-between mb-4 gap-3">
           <div>
             <h1 className="text-3xl font-bold fl-profile-title">{profile?.full_name}</h1>
             <p className="text-emerald-100">@{profile?.username}</p>
@@ -240,12 +261,22 @@ export default function Profile() {
               </div>
             )}
           </div>
-          <button
-            onClick={handleLogout}
-            className="text-white/80 hover:text-white transition-colors"
-          >
-            <LogOut className="w-6 h-6" />
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setSettingsOpen(true)}
+              className="text-white/80 hover:text-white transition-colors"
+              aria-label="Abrir configurações"
+            >
+              <Settings className="w-6 h-6" />
+            </button>
+            <button
+              onClick={handleLogout}
+              className="text-white/80 hover:text-white transition-colors"
+              aria-label="Sair"
+            >
+              <LogOut className="w-6 h-6" />
+            </button>
+          </div>
         </div>
 
         <div className="grid grid-cols-3 gap-4 mt-6">
@@ -255,39 +286,17 @@ export default function Profile() {
         </div>
       </div>
 
-      {/* Tabs */}
       <div className="px-6 mt-6">
         <div className="bg-white/80 backdrop-blur-sm rounded-2xl p-1 shadow-lg flex gap-1">
-          <TabButton
-            icon={<Target className="w-4 h-4" />}
-            label="Atributos"
-            active={activeTab === 'attributes'}
-            onClick={() => setActiveTab('attributes')}
-          />
-          <TabButton
-            icon={<Dumbbell className="w-4 h-4" />}
-            label="Habilidades"
-            active={activeTab === 'skills'}
-            onClick={() => setActiveTab('skills')}
-          />
-          <TabButton
-            icon={<Trophy className="w-4 h-4" />}
-            label="Conquistas"
-            active={activeTab === 'achievements'}
-            onClick={() => setActiveTab('achievements')}
-          />
-          <TabButton
-            icon={<Award className="w-4 h-4" />}
-            label="Títulos"
-            active={activeTab === 'titles'}
-            onClick={() => setActiveTab('titles')}
-          />
+          <TabButton icon={<Target className="w-4 h-4" />} label="Atributos" active={activeTab === "attributes"} onClick={() => setActiveTab("attributes")} />
+          <TabButton icon={<Dumbbell className="w-4 h-4" />} label="Habilidades" active={activeTab === "skills"} onClick={() => setActiveTab("skills")} />
+          <TabButton icon={<Trophy className="w-4 h-4" />} label="Conquistas" active={activeTab === "achievements"} onClick={() => setActiveTab("achievements")} />
+          <TabButton icon={<Award className="w-4 h-4" />} label="Títulos" active={activeTab === "titles"} onClick={() => setActiveTab("titles")} />
         </div>
       </div>
 
-      {/* Content */}
       <div className="px-6 mt-6 pb-6">
-        {activeTab === 'attributes' && attributes && (
+        {activeTab === "attributes" && attributes && (
           <div className="space-y-4">
             <AttributeBar label="FOR (Força)" value={attributes.strength} color="from-red-500 to-orange-500" />
             <AttributeBar label="CON (Constituição)" value={attributes.constitution} color="from-blue-500 to-cyan-500" />
@@ -297,7 +306,7 @@ export default function Profile() {
           </div>
         )}
 
-        {activeTab === 'skills' && (
+        {activeTab === "skills" && (
           <div className="space-y-3">
             {skills.length === 0 ? (
               <p className="text-center text-gray-500 py-8">Nenhuma habilidade desbloqueada ainda</p>
@@ -309,7 +318,7 @@ export default function Profile() {
           </div>
         )}
 
-        {activeTab === 'achievements' && (
+        {activeTab === "achievements" && (
           <div className="grid grid-cols-2 gap-3">
             {achievements.map((achievement) => (
               <AchievementCard key={achievement.id} achievement={achievement} />
@@ -317,86 +326,115 @@ export default function Profile() {
           </div>
         )}
 
-        {activeTab === 'titles' && (
+        {activeTab === "titles" && (
           <div className="space-y-3">
             {titles.map((title) => (
-              <TitleCard
-                key={title.id}
-                title={title}
-                onActivate={handleActivateTitle}
-              />
+              <TitleCard key={title.id} title={title} onActivate={handleActivateTitle} />
             ))}
           </div>
         )}
       </div>
 
-      {isMobile && (
-        <div className="px-6 pb-6">
-          <div className="bg-white/80 backdrop-blur-sm rounded-2xl p-4 shadow-lg space-y-3">
-            <h3 className="font-bold text-gray-900">Personalização (mobile)</h3>
-            <div className="space-y-3">
-              <div className="grid grid-cols-2 gap-3">
-                <button
-                  onClick={() => primaryColorInputRef.current?.click()}
-                  className="h-12 rounded-lg border-2 border-white/20 shadow-inner"
-                  style={{ backgroundColor: primaryColor }}
-                  type="button"
-                  aria-label="Selecionar cor primária"
-                />
-                <button
-                  onClick={() => secondaryColorInputRef.current?.click()}
-                  className="h-12 rounded-lg border-2 border-white/20 shadow-inner"
-                  style={{ backgroundColor: secondaryColor }}
-                  type="button"
-                  aria-label="Selecionar cor secundária"
-                />
-              </div>
-              <div className="flex justify-between text-xs text-gray-500">
-                <span>Cor primária</span>
-                <span>Cor secundária</span>
-              </div>
-              <input
-                ref={primaryColorInputRef}
-                type="color"
-                value={primaryColor}
-                onChange={(event) => { void applyPrimaryColor(event.target.value); }}
-                className="sr-only"
-              />
-              <input
-                ref={secondaryColorInputRef}
-                type="color"
-                value={secondaryColor}
-                onChange={(event) => { void applySecondaryColor(event.target.value); }}
-                className="sr-only"
-              />
+      {settingsOpen && (
+        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-end sm:items-center justify-center">
+          <div className="w-full sm:max-w-2xl bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl p-6 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-bold text-gray-900">Configurações</h2>
+              <button onClick={() => setSettingsOpen(false)} className="fl-btn-secondary rounded-lg px-3 py-1">Fechar</button>
+            </div>
 
-              <label className="block text-sm font-medium text-gray-700">Fonte do título</label>
-              <div className="grid grid-cols-2 gap-2">
-                {FONT_OPTIONS.map((fontOption) => (
-                  <button
-                    key={fontOption.value}
-                    type="button"
-                    onClick={() => { void applyFont(fontOption.value); }}
-                    className={`rounded-xl border px-3 py-2 text-left text-sm transition-colors ${customFont === fontOption.value ? "border-emerald-500 bg-emerald-50" : "border-gray-200 bg-white hover:border-emerald-200"}`}
-                    style={{ fontFamily: fontOption.family }}
+            <div className="space-y-4">
+              <div className="rounded-2xl border border-gray-200 p-4">
+                <h3 className="font-semibold text-gray-900 mb-3">Informações da conta</h3>
+                <p className="text-sm text-gray-700">Nome: {profile?.full_name ?? "-"}</p>
+                <p className="text-sm text-gray-700">Email: {user?.email ?? "-"}</p>
+                <p className="text-sm text-gray-700">Username: @{profile?.username ?? "-"}</p>
+              </div>
+
+              <div className="rounded-2xl border border-gray-200 p-4">
+                <h3 className="font-semibold text-gray-900 mb-3">Foco atual</h3>
+                <div className="grid grid-cols-2 gap-2">
+                  <button onClick={() => { void setSkillFocus("calistenia"); }} className={`rounded-xl py-2 ${profile?.active_skill_focus === "calistenia" ? "fl-btn-primary" : "fl-btn-secondary"}`}>Foco Calistenia</button>
+                  <button onClick={() => { void setSkillFocus("yoga"); }} className={`rounded-xl py-2 ${profile?.active_skill_focus === "yoga" ? "fl-btn-primary" : "fl-btn-secondary"}`}>Foco Yoga</button>
+                </div>
+              </div>
+
+              {isMobile ? (
+                <div className="rounded-2xl border border-gray-200 p-4 space-y-4">
+                  <h3 className="font-semibold text-gray-900">Personalização (mobile)</h3>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <button
+                      onClick={() => primaryColorInputRef.current?.click()}
+                      className="h-12 rounded-lg border-2 border-white/20 shadow-inner"
+                      style={{ backgroundColor: primaryColor }}
+                      type="button"
+                      aria-label="Selecionar cor primária"
+                    />
+                    <button
+                      onClick={() => secondaryColorInputRef.current?.click()}
+                      className="h-12 rounded-lg border-2 border-white/20 shadow-inner"
+                      style={{ backgroundColor: secondaryColor }}
+                      type="button"
+                      aria-label="Selecionar cor secundária"
+                    />
+                  </div>
+                  <div className="flex justify-between text-xs text-gray-500">
+                    <span>Cor primária</span>
+                    <span>Cor secundária</span>
+                  </div>
+                  <input
+                    ref={primaryColorInputRef}
+                    type="color"
+                    value={primaryColor}
+                    onChange={(event) => { void applyPrimaryColor(event.target.value); }}
+                    className="sr-only"
+                  />
+                  <input
+                    ref={secondaryColorInputRef}
+                    type="color"
+                    value={secondaryColor}
+                    onChange={(event) => { void applySecondaryColor(event.target.value); }}
+                    className="sr-only"
+                  />
+
+                  <label className="block text-sm font-medium text-gray-700">Fonte do título</label>
+                  <select
+                    value={customFont}
+                    onChange={(event) => { void applyFont(event.target.value); }}
+                    className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm"
+                    style={{ fontFamily: FONT_OPTIONS.find((font) => font.value === customFont)?.family ?? "inherit" }}
                   >
-                    {fontOption.label}
-                  </button>
-                ))}
-              </div>
+                    {FONT_OPTIONS.map((font) => (
+                      <option key={font.value} value={font.value} style={{ fontFamily: font.family }}>
+                        {font.label}
+                      </option>
+                    ))}
+                  </select>
 
-              <button onClick={() => saveCustomization({ custom_background_type: 'color', custom_background_value: '#0f172a' })} className="fl-btn-secondary rounded-xl py-2 w-full">Fundo sólido</button>
-              <label className="fl-btn-secondary rounded-xl py-2 text-center cursor-pointer block">
-                Escolher foto
-                <input type="file" accept="image/*" className="hidden" onChange={onPickBackgroundImage} />
-              </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button onClick={() => { void applySolidBackground(); }} className="fl-btn-secondary rounded-xl py-2 w-full">Fundo sólido</button>
+                    <label className="fl-btn-secondary rounded-xl py-2 text-center cursor-pointer block">
+                      Escolher foto
+                      <input type="file" accept="image/*" className="hidden" onChange={onPickBackgroundImage} />
+                    </label>
+                  </div>
+
+                  {bgPreview && <img src={bgPreview} alt="Prévia do fundo" className="w-full h-28 object-cover rounded-xl border border-gray-200" />}
+
+                  {customizationSaving && (
+                    <div className="text-xs text-gray-500 flex items-center gap-2">
+                      <LoadingBall size="sm" />
+                      Salvando personalização...
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="rounded-2xl border border-gray-200 p-4 text-sm text-gray-600">
+                  Personalização visual disponível apenas no mobile (largura até 768px).
+                </div>
+              )}
             </div>
-            <div className="grid grid-cols-2 gap-2">
-              <button onClick={() => setSkillFocus('calistenia')} className={`rounded-xl py-2 ${profile?.active_skill_focus === 'calistenia' ? 'fl-btn-primary' : 'fl-btn-secondary'}`}>Foco Calistenia</button>
-              <button onClick={() => setSkillFocus('yoga')} className={`rounded-xl py-2 ${profile?.active_skill_focus === 'yoga' ? 'fl-btn-primary' : 'fl-btn-secondary'}`}>Foco Yoga</button>
-            </div>
-            {bgPreview && <img src={bgPreview} alt="Prévia do fundo" className="w-full h-28 object-cover rounded-xl border border-gray-200" />}
-            {customizationSaving && <p className="text-xs text-gray-500">Salvando...</p>}
           </div>
         </div>
       )}
@@ -476,7 +514,7 @@ function SkillCard({ skill }: { skill: SkillWithProgress }) {
           <h3 className="font-semibold text-gray-900">{skill.name}</h3>
           <p className="text-sm text-gray-600">{skill.description}</p>
         </div>
-        <span className={`px-3 py-1 rounded-full text-xs font-medium ${difficultyColors[skill.difficulty as keyof typeof difficultyColors] || 'bg-gray-100'}`}>
+        <span className={`px-3 py-1 rounded-full text-xs font-medium ${difficultyColors[skill.difficulty as keyof typeof difficultyColors] || "bg-gray-100"}`}>
           {skill.difficulty}
         </span>
       </div>
@@ -501,7 +539,7 @@ function AchievementCard({ achievement }: { achievement: AchievementWithUnlock }
   return (
     <div className={`rounded-2xl p-4 shadow-lg text-center ${
       unlocked
-        ? `bg-gradient-to-br ${rarityColors[achievement.rarity as keyof typeof rarityColors] || 'from-gray-400 to-gray-500'} text-white`
+        ? `bg-gradient-to-br ${rarityColors[achievement.rarity as keyof typeof rarityColors] || "from-gray-400 to-gray-500"} text-white`
         : "bg-gray-200 text-gray-400"
     }`}>
       <div className="text-3xl mb-2">{unlocked ? "🏆" : "🔒"}</div>
@@ -529,12 +567,12 @@ function TitleCard({ title, onActivate }: { title: TitleWithUnlock; onActivate: 
 
   return (
     <div className={`bg-white/80 backdrop-blur-sm rounded-2xl p-4 shadow-lg border-2 ${
-      unlocked ? rarityColors[title.rarity as keyof typeof rarityColors] || 'border-gray-400' : 'border-gray-200'
-    } ${active ? 'ring-2 ring-emerald-500' : ''}`}>
+      unlocked ? rarityColors[title.rarity as keyof typeof rarityColors] || "border-gray-400" : "border-gray-200"
+    } ${active ? "ring-2 ring-emerald-500" : ""}`}>
       <div className="flex items-center justify-between">
         <div className="flex-1">
-          <h3 className={`font-bold ${unlocked ? 'text-gray-900' : 'text-gray-400'}`}>
-            {unlocked ? title.name : '🔒 Bloqueado'}
+          <h3 className={`font-bold ${unlocked ? "text-gray-900" : "text-gray-400"}`}>
+            {unlocked ? title.name : "🔒 Bloqueado"}
           </h3>
           <p className="text-xs text-gray-500">{title.rarity}</p>
         </div>
@@ -555,5 +593,3 @@ function TitleCard({ title, onActivate }: { title: TitleWithUnlock; onActivate: 
     </div>
   );
 }
-
-
