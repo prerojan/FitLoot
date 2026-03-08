@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { useAuth } from "@/react-app/App";
 import BottomNav from "@/react-app/components/BottomNav";
@@ -36,32 +36,49 @@ export default function Shop() {
   const [activeTab, setActiveTab] = useState<'shop' | 'orders'>('shop');
   const [loading, setLoading] = useState(true);
   const [purchaseSuccess, setPurchaseSuccess] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!user) {
-      navigate("/app");
-      return;
-    }
-    loadData();
-  }, [user, navigate]);
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     try {
+      setError(null);
       const [productsRes, ordersRes, progressionRes] = await Promise.all([
         api("/api/shop/products"),
         api("/api/shop/orders"),
         api("/api/progression"),
       ]);
 
-      setProducts(await productsRes.json());
-      setOrders(await ordersRes.json());
-      setProgression(await progressionRes.json());
-    } catch (error) {
-      console.error("Error loading shop data:", error);
+      if (productsRes.status === 401 || productsRes.status === 403 || ordersRes.status === 401 || ordersRes.status === 403 || progressionRes.status === 401 || progressionRes.status === 403) {
+        navigate("/app");
+        return;
+      }
+
+      if (!productsRes.ok || !ordersRes.ok || !progressionRes.ok) {
+        throw new Error("Falha ao carregar dados da loja.");
+      }
+
+      const productsData = await productsRes.json();
+      const ordersData = await ordersRes.json();
+      const progressionData = await progressionRes.json();
+
+      setProducts(Array.isArray(productsData) ? productsData : []);
+      setOrders(Array.isArray(ordersData) ? ordersData : []);
+      setProgression(progressionData);
+    } catch (loadError) {
+      console.error("Error loading shop data:", loadError);
+      setError("Não foi possível carregar a loja agora.");
     } finally {
       setLoading(false);
     }
-  };
+  }, [navigate]);
+
+  useEffect(() => {
+    if (!user) {
+      navigate("/app");
+      return;
+    }
+    void loadData();
+  }, [user, navigate, loadData]);
 
   const handlePurchase = async (productId: number) => {
     try {
@@ -69,17 +86,22 @@ export default function Shop() {
         method: "POST",
       });
 
+      if (response.status === 401 || response.status === 403) {
+        navigate("/app");
+        return;
+      }
+
       if (response.ok) {
         setPurchaseSuccess(true);
         setTimeout(() => setPurchaseSuccess(false), 3000);
         await loadData();
         setActiveTab('orders');
       } else {
-        const data = (await response.json()) as { error?: string | undefined };
-        alert(data.error || "Erro ao realizar compra");
+        const data = (await response.json().catch(() => null)) as { error?: string | undefined } | null;
+        alert(data?.error || "Erro ao realizar compra");
       }
-    } catch (error) {
-      console.error("Error purchasing:", error);
+    } catch (purchaseError) {
+      console.error("Error purchasing:", purchaseError);
       alert("Erro ao conectar com o servidor");
     }
   };
@@ -88,6 +110,20 @@ export default function Shop() {
     return (
       <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 flex items-center justify-center">
         <div className="text-emerald-600">Carregando...</div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 pb-24">
+        <div className="px-6 py-12 text-center">
+          <p className="text-red-600 mb-4">{error}</p>
+          <button onClick={() => { setLoading(true); void loadData(); }} className="fl-btn-primary rounded-xl px-4 py-2">
+            Tentar novamente
+          </button>
+        </div>
+        <BottomNav active="shop" />
       </div>
     );
   }
@@ -332,3 +368,5 @@ function OrderCard({ order }: { order: ShopOrderView }) {
     </div>
   );
 }
+
+

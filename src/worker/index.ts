@@ -81,6 +81,88 @@ async function ensureCatalogReady(db: D1Database) {
 }
 
 // Middleware de autenticação próprio
+function parseCookieHeader(cookieHeader: string | undefined) {
+  if (!cookieHeader) return new Map<string, string>();
+
+  const pairs = cookieHeader
+    .split(";")
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => {
+      const separatorIndex = part.indexOf("=");
+      if (separatorIndex <= 0) return null;
+      const key = part.slice(0, separatorIndex).trim();
+      const value = part.slice(separatorIndex + 1).trim();
+      if (!key) return null;
+      return [key, value] as const;
+    })
+    .filter((pair): pair is readonly [string, string] => pair !== null);
+
+  return new Map<string, string>(pairs);
+}
+
+function getSessionIdFromCookieHeader(cookieHeader: string | undefined) {
+  const sessionCookie = parseCookieHeader(cookieHeader).get("session_id");
+  if (!sessionCookie) return null;
+
+  try {
+    return decodeURIComponent(sessionCookie);
+  } catch {
+    return sessionCookie;
+  }
+}
+
+type UserAuthRecord = {
+  id: string;
+  email: string;
+  name: string;
+  avatar_url: string | null;
+  onboarding_completed: number;
+};
+
+function isMissingOnboardingCompletedColumnError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes("onboarding_completed") && message.includes("no such column");
+}
+
+async function getUserAuthRecordById(db: D1Database, userId: string): Promise<UserAuthRecord | null> {
+  try {
+    const userRecord = await db
+      .prepare("SELECT id, email, name, avatar_url, COALESCE(onboarding_completed, 0) as onboarding_completed FROM users WHERE id = ?")
+      .bind(userId)
+      .first<{ id: string; email: string; name: string; avatar_url: string | null; onboarding_completed: number }>();
+
+    if (!userRecord) return null;
+
+    return {
+      id: userRecord.id,
+      email: userRecord.email,
+      name: userRecord.name,
+      avatar_url: userRecord.avatar_url,
+      onboarding_completed: Number(userRecord.onboarding_completed) === 1 ? 1 : 0,
+    };
+  } catch (error) {
+    if (!isMissingOnboardingCompletedColumnError(error)) {
+      throw error;
+    }
+
+    const fallbackRecord = await db
+      .prepare("SELECT id, email, name, avatar_url FROM users WHERE id = ?")
+      .bind(userId)
+      .first<{ id: string; email: string; name: string; avatar_url: string | null }>();
+
+    if (!fallbackRecord) return null;
+
+    return {
+      id: fallbackRecord.id,
+      email: fallbackRecord.email,
+      name: fallbackRecord.name,
+      avatar_url: fallbackRecord.avatar_url,
+      onboarding_completed: 0,
+    };
+  }
+}
+
 async function authMiddleware(
   c: import("hono").Context<{ Bindings: Env; Variables: { user: AuthUser } }>,
   next: () => Promise<void>
@@ -99,7 +181,7 @@ async function authMiddleware(
   }
 
   try {
-    const sessionId = safeGet(c.req.header("Cookie")?.match(/session_id=([^;]+)/) ?? [], 1);
+    const sessionId = getSessionIdFromCookieHeader(c.req.header("Cookie"));
 
     if (!sessionId) {
       return c.json({ error: "Unauthorized", code: "SESSION_COOKIE_MISSING" }, 401);
@@ -114,10 +196,7 @@ async function authMiddleware(
       return c.json({ error: "Unauthorized", code: "SESSION_INVALID" }, 401);
     }
 
-    const userRecord = await c.env.fitloot_db
-      .prepare("SELECT id, email, name, avatar_url, COALESCE(onboarding_completed, 0) as onboarding_completed FROM users WHERE id = ?")
-      .bind(session.user_id)
-      .first<{ id: string; email: string; name: string; avatar_url: string | null; onboarding_completed: number }>();
+    const userRecord = await getUserAuthRecordById(c.env.fitloot_db, session.user_id);
 
     if (!userRecord) {
       return c.json({ error: "Usuário não encontrado", code: "USER_NOT_FOUND" }, 404);
@@ -128,11 +207,26 @@ async function authMiddleware(
       email: userRecord.email,
       name: userRecord.name,
       avatar_url: userRecord.avatar_url ?? undefined,
-      onboarding_completed: Number(userRecord.onboarding_completed) === 1 ? 1 : 0,
+      onboarding_completed: userRecord.onboarding_completed,
     });
 
-    await ensureUserCounterRow(c.env.fitloot_db, userRecord.id);
-    await expirePendingMissionsAndUpdateStreak(c.env.fitloot_db, userRecord.id);
+    try {
+      await ensureUserCounterRow(c.env.fitloot_db, userRecord.id);
+    } catch (counterError) {
+      console.error("[authMiddleware][ensureUserCounterRow]", {
+        message: counterError instanceof Error ? counterError.message : String(counterError),
+        userId: userRecord.id,
+      });
+    }
+
+    try {
+      await expirePendingMissionsAndUpdateStreak(c.env.fitloot_db, userRecord.id);
+    } catch (streakError) {
+      console.error("[authMiddleware][expirePendingMissionsAndUpdateStreak]", {
+        message: streakError instanceof Error ? streakError.message : String(streakError),
+        userId: userRecord.id,
+      });
+    }
 
     await next();
   } catch (error) {
@@ -164,8 +258,16 @@ export interface Env {
 
 const app = new Hono<AppContext>();
 
+app.onError((error, c) => {
+  console.error("[worker][unhandled]", {
+    path: c.req.path,
+    method: c.req.method,
+    message: error instanceof Error ? error.message : String(error),
+    stack: error instanceof Error ? error.stack : undefined,
+  });
 
-
+  return c.json({ error: "Erro interno", code: "INTERNAL_ERROR" }, 500);
+});
 type ExerciseRef = { name: string; muscle: string; equipment?: string | undefined; difficulty?: string | undefined; instructions?: string | undefined };
 
 type SkillSeed = {
@@ -1072,10 +1174,7 @@ app.get("/api/users/me", authMiddleware, async (c) => {
       return c.json({ error: "Usuário não encontrado", code: "USER_NOT_FOUND" }, 404);
     }
 
-    const userRecord = await c.env.fitloot_db
-      .prepare("SELECT id, email, name, avatar_url, COALESCE(onboarding_completed, 0) as onboarding_completed FROM users WHERE id = ?")
-      .bind(user.id)
-      .first<{ id: string; email: string; name: string; avatar_url: string | null; onboarding_completed: number }>();
+    const userRecord = await getUserAuthRecordById(c.env.fitloot_db, user.id);
 
     if (!userRecord) {
       return c.json({ error: "Usuário não encontrado", code: "USER_NOT_FOUND" }, 404);
@@ -1086,7 +1185,7 @@ app.get("/api/users/me", authMiddleware, async (c) => {
       email: userRecord.email,
       name: userRecord.name,
       avatar_url: userRecord.avatar_url ?? undefined,
-      onboarding_completed: Number(userRecord.onboarding_completed) === 1 ? 1 : 0,
+      onboarding_completed: userRecord.onboarding_completed,
     });
   } catch (err) {
     console.error("[/api/users/me] Erro interno:", {
@@ -1158,21 +1257,29 @@ app.post(
     if (!user) return c.json({ error: "Unauthorized" }, 401);
     const data = c.req.valid("json");
 
-    await c.env.fitloot_db
-      .prepare("UPDATE users SET plan_id = ?, plan_status = ?, onboarding_completed = 1 WHERE id = ?")
-      .bind(data.plan_id, data.status, user.id)
-      .run();
+    try {
+      await c.env.fitloot_db
+        .prepare("UPDATE users SET plan_id = ?, plan_status = ?, onboarding_completed = 1 WHERE id = ?")
+        .bind(data.plan_id, data.status, user.id)
+        .run();
+    } catch (error) {
+      if (!isMissingOnboardingCompletedColumnError(error)) {
+        throw error;
+      }
 
-    const updated = await c.env.fitloot_db
-      .prepare("SELECT id, email, name, avatar_url, COALESCE(onboarding_completed, 0) as onboarding_completed FROM users WHERE id = ?")
-      .bind(user.id)
-      .first();
+      await c.env.fitloot_db
+        .prepare("UPDATE users SET plan_id = ?, plan_status = ? WHERE id = ?")
+        .bind(data.plan_id, data.status, user.id)
+        .run();
+    }
+
+    const updated = await getUserAuthRecordById(c.env.fitloot_db, user.id);
     return c.json(updated ?? c.get("user"));
   }
 );
 
 app.get("/api/logout", async (c) => {
-  const sessionId = safeGet(c.req.header("Cookie")?.match(/session_id=([^;]+)/) ?? [], 1);
+  const sessionId = getSessionIdFromCookieHeader(c.req.header("Cookie"));
 
   if (sessionId) {
     await c.env.fitloot_db
@@ -1181,13 +1288,12 @@ app.get("/api/logout", async (c) => {
       .run();
   }
 
-  // Apaga o cookie corretamente
   c.header(
     "Set-Cookie",
     "session_id=; Path=/; HttpOnly; Max-Age=0; Secure; SameSite=None"
   );
 
-  return c.redirect("/");
+  return c.json({ success: true });
 });
 
 
@@ -1878,7 +1984,11 @@ app.get("/api/ranking/global", authMiddleware, async (c) => {
     if (position === 1) await unlockAchievementIfNeeded(c.env.fitloot_db, user.id, 'O Escolhido', 1, 1);
   }
 
-  return c.json(ranking.results.map((row) => { const { user_id, ...rest } = row as Record<string, unknown>; return rest; }));
+  return c.json(ranking.results.map((row) => {
+    const sanitized = { ...(row as Record<string, unknown>) };
+    delete sanitized.user_id;
+    return sanitized;
+  }));
 });
 
 // Friends endpoints
@@ -2040,6 +2150,39 @@ app.get("/api/friends/list", authMiddleware, async (c) => app.fetch(new Request(
 app.post("/api/friends/:id/accept", authMiddleware, async (c) => app.fetch(new Request(new URL('/api/friends/accept', c.req.url).toString(), { method: 'POST', headers: c.req.raw.headers, body: JSON.stringify({ request_id: Number(c.req.param('id')) }) }), c.env, c.executionCtx));
 app.post("/api/friends/:id/reject", authMiddleware, async (c) => app.fetch(new Request(new URL('/api/friends/reject', c.req.url).toString(), { method: 'POST', headers: c.req.raw.headers, body: JSON.stringify({ request_id: Number(c.req.param('id')) }) }), c.env, c.executionCtx));
 
+async function registerMiniGameResult(db: D1Database, userId: string, didWin: boolean) {
+  await ensureUserCounterRow(db, userId);
+
+  await db.prepare(
+    `UPDATE user_event_counters
+      SET minigames_played = COALESCE(minigames_played, 0) + 1,
+          minigames_won = COALESCE(minigames_won, 0) + ?,
+          minigame_win_streak = CASE
+            WHEN ? = 1 THEN COALESCE(minigame_win_streak, 0) + 1
+            ELSE 0
+          END,
+          updated_at = datetime('now')
+      WHERE user_id = ?`
+  ).bind(didWin ? 1 : 0, didWin ? 1 : 0, userId).run();
+
+  const counters = await db.prepare(
+    "SELECT minigames_played, minigames_won, minigame_win_streak FROM user_event_counters WHERE user_id = ?"
+  ).bind(userId).first<{ minigames_played: number; minigames_won: number; minigame_win_streak: number }>();
+
+  const played = Number(counters?.minigames_played ?? 0);
+  const won = Number(counters?.minigames_won ?? 0);
+  const winStreak = Number(counters?.minigame_win_streak ?? 0);
+
+  if (played >= 1) {
+    await unlockAchievementIfNeeded(db, userId, "Jogador", played, 1);
+  }
+  if (won >= 10) {
+    await unlockAchievementIfNeeded(db, userId, "Competidor", won, 10);
+  }
+  if (winStreak >= 50) {
+    await unlockAchievementIfNeeded(db, userId, "Imbat�vel", winStreak, 50);
+  }
+}
 // Mini-games endpoints
 app.post("/api/mini-games/challenge", authMiddleware, zValidator("json", MiniGameChallengeRequestSchema), async (c) => {
   const user = c.get("user");
@@ -2075,6 +2218,34 @@ app.post("/api/mini-games/challenge", authMiddleware, zValidator("json", MiniGam
 
   if (!challengedUserId) {
     return c.json({ error: "Opponent not specified" }, 400);
+  }
+
+  if (challengedUserId === user.id) {
+    return c.json({ error: "Cannot challenge yourself" }, 400);
+  }
+
+  const [targetUser, skill] = await Promise.all([
+    c.env.fitloot_db.prepare("SELECT user_id FROM user_profiles WHERE user_id = ?").bind(challengedUserId).first<{ user_id: string }>(),
+    c.env.fitloot_db.prepare("SELECT id FROM skills WHERE id = ?").bind(data.skill_id).first<{ id: number }>(),
+  ]);
+
+  if (!targetUser) {
+    return c.json({ error: "Opponent not found" }, 404);
+  }
+
+  if (!skill) {
+    return c.json({ error: "Skill not found" }, 404);
+  }
+
+  const existingGame = await c.env.fitloot_db.prepare(
+    `SELECT id FROM mini_games
+      WHERE skill_id = ?
+      AND status IN ('pending', 'active')
+      AND ((challenger_user_id = ? AND challenged_user_id = ?) OR (challenger_user_id = ? AND challenged_user_id = ?))`
+  ).bind(data.skill_id, user.id, challengedUserId, challengedUserId, user.id).first<{ id: number }>();
+
+  if (existingGame?.id) {
+    return c.json({ error: "Existing challenge in progress" }, 409);
   }
 
   // Calculate rewards based on difficulty
@@ -2120,13 +2291,21 @@ app.get("/api/mini-games/active", authMiddleware, async (c) => {
 app.post("/api/mini-games/:id/accept", authMiddleware, async (c) => {
   const user = c.get("user");
   if (!user) return c.json({ error: "Unauthorized" }, 401);
-  
-  const gameId = parseInt(c.req.param("id"));
 
-  await c.env.fitloot_db.prepare(
-  `UPDATE mini_games SET status = 'active', updated_at = datetime('now')
-    WHERE id = ? AND challenged_user_id = ? AND status = 'pending'`
+  const gameId = Number(c.req.param("id"));
+  if (!Number.isInteger(gameId) || gameId <= 0) {
+    return c.json({ error: "Invalid game id" }, 400);
+  }
+
+  const accepted = await c.env.fitloot_db.prepare(
+    `UPDATE mini_games SET status = 'active', updated_at = datetime('now')
+      WHERE id = ? AND challenged_user_id = ? AND status = 'pending'`
   ).bind(gameId, user.id).run();
+
+  const changes = Number((accepted as { meta?: { changes?: number } }).meta?.changes ?? 0);
+  if (changes === 0) {
+    return c.json({ error: "Game not found" }, 404);
+  }
 
   return c.json({ success: true });
 });
@@ -2134,54 +2313,89 @@ app.post("/api/mini-games/:id/accept", authMiddleware, async (c) => {
 app.post("/api/mini-games/:id/complete", authMiddleware, zValidator("json", MiniGameCompleteRequestSchema), async (c) => {
   const user = c.get("user");
   if (!user) return c.json({ error: "Unauthorized" }, 401);
-  
-  const gameId = parseInt(c.req.param("id"));
-  // Note: Request data validation ensures proper format, but current implementation doesn't use performance metrics
-  c.req.valid("json");
+
+  const gameId = Number(c.req.param("id"));
+  if (!Number.isInteger(gameId) || gameId <= 0) {
+    return c.json({ error: "Invalid game id" }, 400);
+  }
+
+  const data = c.req.valid("json");
 
   const game = await c.env.fitloot_db.prepare(
-    "SELECT * FROM mini_games WHERE id = ? AND status = 'active'"
-  ).bind(gameId).first();
+    `SELECT id, challenger_user_id, challenged_user_id, target_reps, xp_reward, points_reward
+      FROM mini_games
+      WHERE id = ? AND status = 'active'`
+  ).bind(gameId).first<{
+    id: number;
+    challenger_user_id: string;
+    challenged_user_id: string;
+    target_reps: number;
+    xp_reward: number;
+    points_reward: number;
+  }>();
 
   if (!game) {
     return c.json({ error: "Game not found" }, 404);
   }
 
-  // Simplified implementation - in production would compare both players' performance
-  const isChallenger = game.challenger_user_id === user.id;
+  const isParticipant = game.challenger_user_id === user.id || game.challenged_user_id === user.id;
+  if (!isParticipant) {
+    return c.json({ error: "Forbidden" }, 403);
+  }
 
-  // Determine winner (simplified - just based on who completed more reps faster)
-  // In real implementation, would wait for both players and compare
+  if (Number(data.reps_completed) < Number(game.target_reps ?? 0)) {
+    return c.json({ error: "Target reps not reached" }, 400);
+  }
+
   const winnerUserId = user.id;
-  const loserUserId = isChallenger ? game.challenged_user_id : game.challenger_user_id;
+  const loserUserId = winnerUserId === game.challenger_user_id ? game.challenged_user_id : game.challenger_user_id;
 
-  // Award XP and points
-  const winnerXp = Number(game.xp_reward || 0);
-  const winnerPoints = Number(game.points_reward || 0);
+  const completeUpdate = await c.env.fitloot_db.prepare(
+    `UPDATE mini_games
+      SET status = 'completed', winner_user_id = ?, updated_at = datetime('now')
+      WHERE id = ? AND status = 'active'`
+  ).bind(winnerUserId, gameId).run();
+
+  const completeChanges = Number((completeUpdate as { meta?: { changes?: number } }).meta?.changes ?? 0);
+  if (completeChanges === 0) {
+    return c.json({ error: "Game already completed" }, 409);
+  }
+
+  const winnerXp = Number(game.xp_reward ?? 0);
+  const winnerPoints = Number(game.points_reward ?? 0);
   const loserXp = Math.floor(winnerXp / 2);
   const loserPoints = Math.floor(winnerPoints / 2);
 
-  await c.env.fitloot_db.prepare(
-  `UPDATE user_progression SET xp = xp + ?, points = points + ?, updated_at = datetime('now')
-    WHERE user_id = ?`
-  ).bind(winnerXp, winnerPoints, winnerUserId).run();
+  await Promise.all([
+    c.env.fitloot_db.prepare(
+      `UPDATE user_progression SET xp = COALESCE(xp, 0) + ?, points = COALESCE(points, 0) + ?, updated_at = datetime('now')
+        WHERE user_id = ?`
+    ).bind(winnerXp, winnerPoints, winnerUserId).run(),
+    c.env.fitloot_db.prepare(
+      `UPDATE user_progression SET xp = COALESCE(xp, 0) + ?, points = COALESCE(points, 0) + ?, updated_at = datetime('now')
+        WHERE user_id = ?`
+    ).bind(loserXp, loserPoints, loserUserId).run(),
+    registerMiniGameResult(c.env.fitloot_db, winnerUserId, true),
+    registerMiniGameResult(c.env.fitloot_db, loserUserId, false),
+    logUserEvent(c.env.fitloot_db, winnerUserId, "onMiniGameComplete", {
+      gameId,
+      won: true,
+      reps_completed: data.reps_completed,
+      time_seconds: data.time_seconds,
+    }),
+    logUserEvent(c.env.fitloot_db, loserUserId, "onMiniGameComplete", {
+      gameId,
+      won: false,
+      reps_completed: data.reps_completed,
+      time_seconds: data.time_seconds,
+    }),
+  ]);
 
-  await c.env.fitloot_db.prepare(
-  `UPDATE user_progression SET xp = xp + ?, points = points + ?, updated_at = datetime('now')
-    WHERE user_id = ?`
-  ).bind(loserXp, loserPoints, loserUserId).run();
-
-  // Update game status
-  await c.env.fitloot_db.prepare(
-  `UPDATE mini_games SET status = 'completed', winner_user_id = ?, updated_at = datetime('now')
-    WHERE id = ?`
-  ).bind(winnerUserId, gameId).run();
-
-  return c.json({ 
-    success: true, 
+  return c.json({
+    success: true,
     winner: winnerUserId,
     xp_gained: winnerXp,
-    points_gained: winnerPoints
+    points_gained: winnerPoints,
   });
 });
 
@@ -2589,11 +2803,11 @@ function parseNutritionFromOcrLabel(text: string) {
   if (!text) return null;
 
   const normalize = (value?: string | undefined) => (value ? Number(value.replace(",", ".")) : null);
-  const kcal = normalize(safeGet(text.match(/(\d+[\.,]?\d*)\s*kcal/i) ?? [], 1));
-  const kJ = normalize(safeGet(text.match(/(\d+[\.,]?\d*)\s*kj/i) ?? [], 1));
-  const protein = normalize(safeGet(text.match(/prote[ií]n[aa]s?[^\d]*(\d+[\.,]?\d*)\s*g/i) ?? [], 1));
-  const carbs = normalize(safeGet(text.match(/carboidratos?[^\d]*(\d+[\.,]?\d*)\s*g/i) ?? [], 1));
-  const fats = normalize(safeGet(text.match(/gorduras?(?:\s+totais?)?[^\d]*(\d+[\.,]?\d*)\s*g/i) ?? [], 1));
+  const kcal = normalize(safeGet(text.match(/(\d+[.,]?\d*)\s*kcal/i) ?? [], 1));
+  const kJ = normalize(safeGet(text.match(/(\d+[.,]?\d*)\s*kj/i) ?? [], 1));
+  const protein = normalize(safeGet(text.match(/prote[ií]n[aa]s?[^\d]*(\d+[.,]?\d*)\s*g/i) ?? [], 1));
+  const carbs = normalize(safeGet(text.match(/carboidratos?[^\d]*(\d+[.,]?\d*)\s*g/i) ?? [], 1));
+  const fats = normalize(safeGet(text.match(/gorduras?(?:\s+totais?)?[^\d]*(\d+[.,]?\d*)\s*g/i) ?? [], 1));
 
   if ([kcal, kJ, protein, carbs, fats].every((item) => item === null)) {
     return null;
@@ -3221,7 +3435,7 @@ app.get("*", async (c, next) => {
   try {
     // c.req é um Request válido para passar ao binding ASSETS
     return await c.env.ASSETS.fetch(c.req.raw);
-  } catch (_err) {
+  } catch {
     // se falhar, passa para próximos handlers (ou 404)
     return next();
   }
@@ -3261,3 +3475,5 @@ function resolveCorsOrigin(requestOrigin: string | undefined, requestUrl: URL, e
 
   return allowedOrigins.has(requestOrigin) ? requestOrigin : null;
 }
+
+

@@ -123,10 +123,10 @@ function ScrollPicker({ value, onChange, min, max, unit, label }: ScrollPickerPr
     }
   };
 
-  const handleWheelChangeValue = (deltaY: number) => {
+  const handleWheelChangeValue = useCallback((deltaY: number) => {
     if (deltaY < 0 && clamped < max) onChange(clamped + 1);
     else if (deltaY > 0 && clamped > min) onChange(clamped - 1);
-  };
+  }, [clamped, max, min, onChange]);
 
   const getScrollParent = (el: HTMLElement | null): HTMLElement | null => {
     let cur: HTMLElement | null = el;
@@ -163,7 +163,7 @@ function ScrollPicker({ value, onChange, min, max, unit, label }: ScrollPickerPr
       root.removeEventListener("wheel", onWheelNative as EventListener);
       if (scrollParent) scrollParent.removeEventListener("wheel", onWheelNative as EventListener);
     };
-  }, [isEditing, clamped, max, min, onChange]);
+  }, [isEditing, handleWheelChangeValue]);
 
   const disableLock = () => {
     isPointerInsideRef.current = false;
@@ -321,7 +321,7 @@ export default function Onboarding() {
   const [credentials, setCredentials] = useState(INITIAL_CREDENTIALS);
   const [profile, setProfile] = useState(INITIAL_PROFILE);
 
-  const [selectedPlan, setSelectedPlan] = useState<"basic" | "pro" | "elite">("basic");
+  const [selectedPlan, setSelectedPlan] = useState<"free" | "pro" | "annual">("free");
   const [paymentTab, setPaymentTab] = useState<"card" | "pix">("card");
 
   const [stepError, setStepError] = useState<string | null>(null);
@@ -1028,7 +1028,7 @@ export default function Onboarding() {
               <div className="grid gap-3 sm:grid-cols-3">
                 {([
                   {
-                    id: "basic" as const,
+                    id: "free" as const,
                     name: "Básico",
                     price: "R$ 49/mês",
                     color: "from-gray-500 to-gray-600",
@@ -1043,7 +1043,7 @@ export default function Onboarding() {
                     popular: true,
                   },
                   {
-                    id: "elite" as const,
+                    id: "annual" as const,
                     name: "Elite",
                     price: "R$ 149/mês",
                     color: "from-purple-500 to-pink-600",
@@ -1231,3 +1231,4 @@ export default function Onboarding() {
     </div>
   );
 }
+
