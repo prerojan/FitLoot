@@ -1,9 +1,20 @@
 import { memo, useEffect, useMemo, useState } from "react";
-import { Clock3, Dumbbell, MapPinned, Play, Star, Trophy, X } from "lucide-react";
+import {
+  CheckCircle2,
+  Clock3,
+  Dumbbell,
+  MapPinned,
+  Play,
+  Sparkles,
+  Star,
+  Trophy,
+  X,
+} from "lucide-react";
 import { Card } from "@/react-app/components/ui/card";
 import { Button } from "@/react-app/components/ui/button";
 import { Badge } from "@/react-app/components/ui/badge";
-import type { Mission, MissionMetricType } from "@/shared/types";
+import { formatMissionGoal } from "@/constants/missionMetrics";
+import type { CircuitTask, Mission, MissionMetricType } from "@/shared/types";
 
 type MissionCardProps = {
   mission: Mission & { skill_name?: string | undefined };
@@ -17,6 +28,7 @@ type MissionExecutionState = {
   running: boolean;
   resting: boolean;
   repsDone: number;
+  totalRepsDone: number;
   inputValue: string;
   finished: boolean;
 };
@@ -28,6 +40,7 @@ const DEFAULT_EXECUTION_STATE: MissionExecutionState = {
   running: false,
   resting: false,
   repsDone: 0,
+  totalRepsDone: 0,
   inputValue: "",
   finished: false,
 };
@@ -39,15 +52,34 @@ function normalizeMetricType(mission: Mission): MissionMetricType {
     mission.metric_type === "sets_reps" ||
     mission.metric_type === "steps" ||
     mission.metric_type === "distance_meters" ||
-    mission.metric_type === "duration_minutes"
+    mission.metric_type === "duration_minutes" ||
+    mission.metric_type === "circuit_tasks"
   ) {
     return mission.metric_type;
   }
   if ((mission.target_time ?? 0) > 0) return "duration_seconds";
-  return "repetitions";
+  return "sets_reps";
+}
+
+function resolveCircuitTasks(mission: Mission): CircuitTask[] {
+  if (!Array.isArray(mission.circuit_tasks)) return [];
+  return mission.circuit_tasks.filter((task) =>
+    typeof task.id === "string" &&
+    typeof task.label === "string" &&
+    typeof task.mission_type === "string" &&
+    typeof task.required_count === "number" &&
+    typeof task.current_count === "number" &&
+    typeof task.completed === "boolean"
+  );
 }
 
 function missionTotalGoal(mission: Mission, metricType: MissionMetricType): number {
+  if (metricType === "circuit_tasks") {
+    const tasks = resolveCircuitTasks(mission);
+    return tasks.length > 0
+      ? tasks.length
+      : Math.max(1, Number(mission.metric_value ?? 1));
+  }
   if (typeof mission.metric_value === "number" && mission.metric_value > 0) {
     return mission.metric_value;
   }
@@ -59,23 +91,25 @@ function missionTotalGoal(mission: Mission, metricType: MissionMetricType): numb
 
 function formatGoal(mission: Mission, metricType: MissionMetricType): string {
   const goal = missionTotalGoal(mission, metricType);
-  const sets = mission.sets ?? null;
-  if (metricType === "duration_seconds") {
-    if (sets && sets > 1) {
-      const eachSet = Math.max(1, Math.floor(goal / sets));
-      return `${sets} series de ${eachSet} segundos`;
-    }
-    return `${goal} segundos`;
+  const sets = mission.sets ?? undefined;
+
+  if (metricType === "duration_seconds" && sets && sets > 0) {
+    const secondsPerSet = Math.max(1, Math.floor(goal / sets));
+    return formatMissionGoal(metricType, secondsPerSet, sets);
   }
-  if (metricType === "duration_minutes") return `${goal} minutos`;
-  if (metricType === "steps") return `${goal.toLocaleString("pt-BR")} passos`;
-  if (metricType === "distance_meters") return `${(goal / 1000).toFixed(goal >= 1000 ? 1 : 2)} km`;
-  if (metricType === "sets_reps") {
-    const safeSets = sets && sets > 0 ? sets : 3;
-    const eachSet = Math.max(1, Math.floor(goal / safeSets));
-    return `${safeSets}x${eachSet} repeticoes`;
+
+  if (metricType === "sets_reps" && sets && sets > 0) {
+    const repsPerSet = Math.max(1, Math.floor(goal / sets));
+    return formatMissionGoal(metricType, repsPerSet, sets);
   }
-  return `${goal} repeticoes`;
+
+  if (metricType === "circuit_tasks") {
+    const tasks = resolveCircuitTasks(mission);
+    const completedCount = tasks.filter((task) => task.completed).length;
+    return formatMissionGoal(metricType, completedCount);
+  }
+
+  return formatMissionGoal(metricType, goal, sets);
 }
 
 function bodyAreaLabel(bodyArea: Mission["body_area"]): string {
@@ -168,6 +202,7 @@ function MissionExecutionModal({
     if (!open) return;
     if (!state.resting) return;
     if (state.restSeconds <= 0) return;
+    if (metricType === "duration_seconds" || metricType === "duration_minutes") return;
 
     const restTimer = window.setInterval(() => {
       setState((current) => {
@@ -180,7 +215,7 @@ function MissionExecutionModal({
     }, 1000);
 
     return () => window.clearInterval(restTimer);
-  }, [open, state.restSeconds, state.resting]);
+  }, [metricType, open, state.restSeconds, state.resting]);
 
   const isTimeMission = metricType === "duration_seconds" || metricType === "duration_minutes";
   const isCounterMission = metricType === "repetitions" || metricType === "sets_reps";
@@ -188,38 +223,58 @@ function MissionExecutionModal({
 
   const incrementRep = () => {
     if (!isCounterMission) return;
+    setState((current) => ({ ...current, repsDone: current.repsDone + 1 }));
+  };
+
+  const decrementRep = () => {
+    if (!isCounterMission) return;
+    setState((current) => ({ ...current, repsDone: Math.max(0, current.repsDone - 1) }));
+  };
+
+  const completeCurrentSet = () => {
+    if (!isCounterMission) return;
     setState((current) => {
-      if (current.resting) return current;
-      const nextReps = current.repsDone + 1;
-      if (metricType === "sets_reps" && nextReps >= setGoal) {
-        if (current.currentSet < sets) {
-          return {
-            ...current,
-            repsDone: 0,
-            currentSet: current.currentSet + 1,
-            resting: restSecondsConfigured > 0,
-            restSeconds: restSecondsConfigured,
-          };
-        }
-        return { ...current, repsDone: nextReps, finished: true };
+      const validSetReps = Math.max(current.repsDone, 0);
+      if (metricType === "sets_reps" && validSetReps < setGoal) {
+        return current;
       }
-      if (metricType === "repetitions" && nextReps >= totalGoal) {
-        return { ...current, repsDone: nextReps, finished: true };
+      const accumulated = current.totalRepsDone + validSetReps;
+
+      if (current.currentSet < sets) {
+        return {
+          ...current,
+          totalRepsDone: accumulated,
+          repsDone: 0,
+          currentSet: current.currentSet + 1,
+          resting: restSecondsConfigured > 0,
+          restSeconds: restSecondsConfigured,
+        };
       }
-      return { ...current, repsDone: nextReps };
+
+      const targetReached = metricType === "sets_reps"
+        ? accumulated >= setGoal * sets
+        : accumulated >= totalGoal;
+
+      return {
+        ...current,
+        totalRepsDone: accumulated,
+        finished: targetReached,
+      };
     });
   };
 
   const canFinishInputMission = isDistanceMission && Number(state.inputValue) > 0;
-  const canFinishMission = isDistanceMission ? canFinishInputMission : state.finished;
-  const finishButtonLabel = isDistanceMission ? "Registrar e Concluir" : "Concluir Missao";
+  const totalCounterProgress = state.totalRepsDone + state.repsDone;
+  const canFinishCounterMission = isCounterMission && state.finished;
+  const canFinishMission = isDistanceMission ? canFinishInputMission : isTimeMission ? state.finished : canFinishCounterMission;
+  const finishButtonLabel = isDistanceMission ? "Registrar e Concluir" : "Concluir";
 
   const finishMission = async () => {
-    if (isDistanceMission && !canFinishInputMission) return;
+    if (!canFinishMission) return;
     const value = isDistanceMission
       ? Number(state.inputValue)
       : isCounterMission
-        ? Math.max(totalGoal, state.repsDone)
+        ? Math.max(totalGoal, totalCounterProgress)
         : totalGoal;
     await onFinish(value);
   };
@@ -258,29 +313,47 @@ function MissionExecutionModal({
         {isCounterMission && (
           <div className="space-y-3">
             <div className="rounded-2xl bg-emerald-50 border border-emerald-200 p-4 text-center">
-              <p className="text-xs text-emerald-700 mb-1">
-                {metricType === "sets_reps" ? `Serie ${state.currentSet} de ${sets}` : "Repeticoes"}
-              </p>
+              <p className="text-xs text-emerald-700 mb-1">{`Serie ${state.currentSet} de ${sets}`}</p>
               <p className="text-4xl font-bold text-emerald-700">{state.repsDone}</p>
               <p className="text-xs text-gray-500 mt-1">
-                Meta: {metricType === "sets_reps" ? setGoal : totalGoal}
+                Meta da serie: {setGoal} reps
               </p>
             </div>
-            <Button onClick={incrementRep} className="w-full text-lg py-6" disabled={state.resting}>
-              +1
+
+            <div className="grid grid-cols-2 gap-2">
+              <Button onClick={decrementRep} variant="secondary" className="w-full text-lg py-4" disabled={state.resting}>
+                -
+              </Button>
+              <Button onClick={incrementRep} className="w-full text-lg py-4" disabled={state.resting}>
+                +
+              </Button>
+            </div>
+
+            <Button
+              onClick={completeCurrentSet}
+              className="w-full"
+              variant="secondary"
+              disabled={state.resting || state.repsDone <= 0}
+            >
+              Serie Completa
             </Button>
+
             {state.resting ? (
               <p className="text-center text-xs text-emerald-700 font-medium">
                 Descanso: {state.restSeconds}s
               </p>
             ) : null}
+
+            <p className="text-center text-xs text-gray-600">
+              Progresso total: {totalCounterProgress}/{totalGoal}
+            </p>
           </div>
         )}
 
         {isDistanceMission && (
           <div className="space-y-3">
             <p className="text-sm text-gray-600">
-              Registre o valor atingido (app de saúde, relógio ou esteira).
+              Use seu app de saude/relogio e registre o valor atingido aqui.
             </p>
             <input
               type="number"
@@ -314,14 +387,23 @@ function MissionCardComponent({ mission, onComplete }: MissionCardProps) {
   const missionStatus = (mission as Mission & { status?: string | undefined }).status || (mission.is_completed === 1 ? "completed" : "pending");
   const isFailed = missionStatus === "failed";
   const isCompleted = mission.is_completed === 1 || missionStatus === "completed";
+  const isCircuitMission = metricType === "circuit_tasks";
+  const circuitTasks = useMemo(() => resolveCircuitTasks(mission), [mission]);
+  const completedCircuitTasks = circuitTasks.filter((task) => task.completed).length;
+  const circuitProgress = circuitTasks.length > 0 ? (completedCircuitTasks / circuitTasks.length) * 100 : 0;
+  const missionMediaUrl = mission.image_url ?? mission.thumbnail_url ?? null;
 
   const detailsInstructions = Array.isArray(mission.instructions) && mission.instructions.length > 0
     ? mission.instructions
     : [
-      "Aqueça por 3 a 5 minutos antes de iniciar.",
+      "Aqueca por 3 a 5 minutos antes de iniciar.",
       "Mantenha postura e amplitude seguras durante o movimento.",
-      "Respeite intervalos e hidratação durante a execução.",
+      "Respeite intervalos e hidratacao durante a execucao.",
     ];
+
+  const safetyTips = Array.isArray(mission.safety_tips) && mission.safety_tips.length > 0
+    ? mission.safety_tips
+    : ["Mantenha alinhamento postural e interrompa em caso de dor aguda."];
 
   const completeMission = async (value: number) => {
     setCompleting(true);
@@ -348,12 +430,20 @@ function MissionCardComponent({ mission, onComplete }: MissionCardProps) {
             {mission.description && (
               <p className="text-sm text-gray-600 mb-2">{mission.description}</p>
             )}
-            {mission.skill_name && (
-              <Badge className="w-fit gap-1">
-                <Dumbbell className="w-3 h-3" />
-                <span>{mission.skill_name}</span>
-              </Badge>
-            )}
+            <div className="flex flex-wrap items-center gap-2">
+              {mission.skill_name && (
+                <Badge className="w-fit gap-1">
+                  <Dumbbell className="w-3 h-3" />
+                  <span>{mission.skill_name}</span>
+                </Badge>
+              )}
+              {mission.mission_origin === "ai" && (
+                <Badge className="w-fit gap-1 bg-purple-100 text-purple-700 border border-purple-200">
+                  <Sparkles className="w-3 h-3" />
+                  <span>IA</span>
+                </Badge>
+              )}
+            </div>
           </div>
           <div className="flex flex-col items-end gap-1">
             <div className="text-emerald-600 font-bold text-lg">+{mission.xp_reward} XP</div>
@@ -397,8 +487,8 @@ function MissionCardComponent({ mission, onComplete }: MissionCardProps) {
             </div>
 
             <div className="space-y-3">
-              {mission.image_url ? (
-                <img src={mission.image_url} alt={mission.title} className="w-full h-48 object-cover rounded-2xl border border-gray-200" />
+              {missionMediaUrl ? (
+                <img src={missionMediaUrl} alt={mission.title} className="w-full h-48 object-cover rounded-2xl border border-gray-200" />
               ) : (
                 <div className="w-full h-48 rounded-2xl border border-emerald-100 bg-gradient-to-br from-emerald-100 to-teal-100 flex items-center justify-center">
                   <Dumbbell className="w-12 h-12 text-emerald-600" />
@@ -415,6 +505,14 @@ function MissionCardComponent({ mission, onComplete }: MissionCardProps) {
               <div className="rounded-xl border border-gray-200 p-3">
                 <p className="text-xs text-gray-500">Meta</p>
                 <p className="font-semibold text-gray-900">{formatGoal(mission, metricType)}</p>
+              </div>
+              <div className="rounded-xl border border-gray-200 p-3">
+                <p className="text-xs text-gray-500">Dificuldade</p>
+                <p className="font-semibold text-gray-900">{mission.difficulty_level ?? "iniciante"}</p>
+              </div>
+              <div className="rounded-xl border border-gray-200 p-3">
+                <p className="text-xs text-gray-500">Tempo estimado</p>
+                <p className="font-semibold text-gray-900">{mission.duration_estimate_minutes ?? 10} min</p>
               </div>
               <div className="rounded-xl border border-gray-200 p-3">
                 <p className="text-xs text-gray-500">XP</p>
@@ -438,6 +536,25 @@ function MissionCardComponent({ mission, onComplete }: MissionCardProps) {
               </div>
             </div>
 
+            {isCircuitMission && circuitTasks.length > 0 && (
+              <div className="space-y-3">
+                <p className="text-sm font-semibold text-gray-900">Progresso do circuito semanal</p>
+                <div className="h-2 rounded-full bg-gray-100 overflow-hidden">
+                  <div className="h-full bg-emerald-500" style={{ width: `${circuitProgress}%` }} />
+                </div>
+                <div className="space-y-2">
+                  {circuitTasks.map((task) => (
+                    <div key={task.id} className="rounded-xl border border-gray-200 p-3 text-sm flex items-center justify-between">
+                      <span>{task.label}</span>
+                      <span className="font-semibold text-emerald-700">
+                        {task.current_count}/{task.required_count} {task.completed ? "OK" : ""}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="space-y-2">
               <p className="text-sm font-semibold text-gray-900">Como executar</p>
               <ol className="space-y-2">
@@ -453,26 +570,42 @@ function MissionCardComponent({ mission, onComplete }: MissionCardProps) {
               ) : null}
             </div>
 
+            <div className="space-y-2">
+              <p className="text-sm font-semibold text-gray-900">Seguranca e forma</p>
+              <ul className="space-y-2">
+                {safetyTips.map((tip, index) => (
+                  <li key={`${tip}-${index}`} className="text-sm text-gray-700 flex gap-2">
+                    <CheckCircle2 className="w-4 h-4 mt-0.5 text-emerald-600" />
+                    <span>{tip}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+
             <div className="flex gap-3">
               <Button variant="secondary" className="flex-1" onClick={() => setShowDetails(false)}>
                 Fechar
               </Button>
-              <Button className="flex-1" onClick={() => setShowExecution(true)}>
-                <Play className="w-4 h-4" />
-                Iniciar Missao
-              </Button>
+              {!isCircuitMission && (
+                <Button className="flex-1" onClick={() => setShowExecution(true)}>
+                  <Play className="w-4 h-4" />
+                  Iniciar
+                </Button>
+              )}
             </div>
           </div>
         </div>
       )}
 
-      <MissionExecutionModal
-        mission={mission}
-        metricType={metricType}
-        open={showExecution}
-        onClose={() => setShowExecution(false)}
-        onFinish={completeMission}
-      />
+      {!isCircuitMission && (
+        <MissionExecutionModal
+          mission={mission}
+          metricType={metricType}
+          open={showExecution}
+          onClose={() => setShowExecution(false)}
+          onFinish={completeMission}
+        />
+      )}
 
       {showDetails && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 text-xs text-gray-500 flex items-center gap-2">

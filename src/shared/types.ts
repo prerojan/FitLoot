@@ -104,9 +104,21 @@ export const MissionMetricTypeSchema = z.enum([
   "steps",
   "distance_meters",
   "duration_minutes",
+  "circuit_tasks",
 ]);
 
 export type MissionMetricType = z.infer<typeof MissionMetricTypeSchema>;
+
+export const CircuitTaskSchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  mission_type: z.string(),
+  required_count: z.number(),
+  current_count: z.number(),
+  completed: z.boolean(),
+});
+
+export type CircuitTask = z.infer<typeof CircuitTaskSchema>;
 
 // Mission Schema
 export const MissionSchema = z.object({
@@ -131,6 +143,12 @@ export const MissionSchema = z.object({
   attributes_benefited: z.array(z.string()).optional(),
   duration_estimate_minutes: z.number().optional(),
   exercise_category: z.string().optional(),
+  mission_origin: z.enum(["regular", "ai"]).optional(),
+  circuit_tasks: z.array(CircuitTaskSchema).optional(),
+  safety_tips: z.array(z.string()).optional(),
+  difficulty_level: z.string().optional(),
+  video_url: z.string().nullable().optional(),
+  thumbnail_url: z.string().nullable().optional(),
   xp_reward: z.number(),
   points_reward: z.number(),
   deadline: z.string().nullable(),

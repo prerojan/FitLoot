@@ -14,10 +14,20 @@ import {
   UserPlanRequestSchema,
   UpdateMeRequestSchema,
   ConditioningLevel,
+  MissionMetricType,
+  CircuitTask,
 } from "../shared/types";
+import {
+  MISSION_LIMITS,
+  classifyMission,
+  formatMissionGoal,
+  getMissionMetricType,
+  metricUnitByType,
+} from "../constants/missionMetrics";
 import { assertString, safeGet } from "../utils/typeHelpers";
 import { toStatusCode } from "./httpHelpers";
 import { processDailyResetForAllUsers } from "./services/dailyReset";
+import { enrichExercise } from "./services/exerciseEnrichment";
 
 // Tipo do usuÃƒÂ¡rio autenticado
 interface AuthUser {
@@ -1702,6 +1712,41 @@ function parseMissionArrayField(rawValue: unknown): string[] {
   }
 }
 
+function parseCircuitTaskField(rawValue: unknown): CircuitTask[] {
+  const parseValue = (value: unknown): CircuitTask[] => {
+    if (!Array.isArray(value)) return [];
+    return value
+      .map((task): CircuitTask | null => {
+        if (typeof task !== "object" || task === null) return null;
+        const record = task as Record<string, unknown>;
+        if (typeof record.id !== "string" || typeof record.label !== "string" || typeof record.mission_type !== "string") {
+          return null;
+        }
+        const requiredCount = Number(record.required_count ?? 0);
+        const currentCount = Number(record.current_count ?? 0);
+        return {
+          id: record.id,
+          label: record.label,
+          mission_type: record.mission_type,
+          required_count: requiredCount > 0 ? requiredCount : 1,
+          current_count: currentCount >= 0 ? currentCount : 0,
+          completed: Boolean(record.completed),
+        };
+      })
+      .filter((task): task is CircuitTask => task !== null);
+  };
+
+  if (Array.isArray(rawValue)) {
+    return parseValue(rawValue);
+  }
+  if (typeof rawValue !== "string") return [];
+  try {
+    return parseValue(JSON.parse(rawValue) as unknown);
+  } catch {
+    return [];
+  }
+}
+
 function normalizeMissionMetricType(rawType: unknown, rawTargetTime: unknown): MissionMetricType {
   if (
     rawType === "repetitions" ||
@@ -1709,7 +1754,8 @@ function normalizeMissionMetricType(rawType: unknown, rawTargetTime: unknown): M
     rawType === "sets_reps" ||
     rawType === "steps" ||
     rawType === "distance_meters" ||
-    rawType === "duration_minutes"
+    rawType === "duration_minutes" ||
+    rawType === "circuit_tasks"
   ) {
     return rawType;
   }
@@ -1726,7 +1772,7 @@ function normalizeMissionRow(rawMission: Record<string, unknown>) {
   const metricValue = Number(rawMission.metric_value ?? (metricType === "duration_seconds" ? targetTime : targetReps));
   const metricUnit = typeof rawMission.metric_unit === "string" && rawMission.metric_unit.length > 0
     ? rawMission.metric_unit
-    : METRIC_UNIT_MAP[metricType];
+    : metricUnitByType(metricType);
 
   return {
     ...rawMission,
@@ -1738,13 +1784,100 @@ function normalizeMissionRow(rawMission: Record<string, unknown>) {
     instructions: parseMissionArrayField(rawMission.instructions_json),
     muscle_groups: parseMissionArrayField(rawMission.muscle_groups_json),
     attributes_benefited: parseMissionArrayField(rawMission.attributes_benefited_json),
+    safety_tips: parseMissionArrayField(rawMission.safety_tips_json),
+    circuit_tasks: parseCircuitTaskField(rawMission.circuit_tasks_json),
     exercise_type: typeof rawMission.exercise_type === "string" ? rawMission.exercise_type : "forca",
     body_area: rawMission.body_area === "upper" || rawMission.body_area === "lower" || rawMission.body_area === "core" || rawMission.body_area === "full_body"
       ? rawMission.body_area
       : "full_body",
     duration_estimate_minutes: Number(rawMission.duration_estimate_minutes ?? 10),
     exercise_category: typeof rawMission.exercise_category === "string" ? rawMission.exercise_category : "default",
+    difficulty_level: typeof rawMission.difficulty_level === "string" ? rawMission.difficulty_level : undefined,
+    video_url: typeof rawMission.video_url === "string" ? rawMission.video_url : null,
+    thumbnail_url: typeof rawMission.thumbnail_url === "string" ? rawMission.thumbnail_url : null,
+    mission_origin: rawMission.mission_origin === "ai" ? "ai" : "regular",
   };
+}
+
+function normalizeMatchText(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLowerCase();
+}
+
+function missionMatchesTask(completedMission: Record<string, unknown>, task: CircuitTask): boolean {
+  const taskKey = normalizeMatchText(task.mission_type);
+  const title = normalizeMatchText(String(completedMission.title ?? ""));
+  const description = normalizeMatchText(String(completedMission.description ?? ""));
+  const exerciseCategory = normalizeMatchText(String(completedMission.exercise_category ?? ""));
+  const metricType = normalizeMatchText(String(completedMission.metric_type ?? ""));
+  const muscleGroups = parseMissionArrayField(completedMission.muscle_groups_json).map((item) => normalizeMatchText(item));
+
+  const corpus = [title, description, exerciseCategory, metricType, ...muscleGroups].join(" ");
+  return corpus.includes(taskKey);
+}
+
+async function grantCircuitRewards(db: D1Database, userId: string, missionRow: Record<string, unknown>) {
+  const xpReward = Number(missionRow.xp_reward ?? 0);
+  const pointsReward = Number(missionRow.points_reward ?? 0);
+
+  if (xpReward <= 0 && pointsReward <= 0) return;
+
+  await db.prepare(
+    `UPDATE user_progression
+       SET xp = COALESCE(xp, 0) + ?, points = COALESCE(points, 0) + ?, updated_at = datetime('now')
+     WHERE user_id = ?`
+  ).bind(xpReward, pointsReward, userId).run();
+}
+
+async function updateCircuitProgress(userId: string, completedMission: Record<string, unknown>, db: D1Database) {
+  const circuits = await db.prepare(
+    `SELECT * FROM missions
+      WHERE user_id = ?
+        AND type = 'weekly'
+        AND metric_type = 'circuit_tasks'
+        AND is_completed = 0
+        AND (deadline IS NULL OR deadline > datetime('now'))`
+  ).bind(userId).all<Record<string, unknown>>();
+
+  for (const circuit of circuits.results) {
+    const tasks = parseCircuitTaskField(circuit.circuit_tasks_json);
+    if (tasks.length === 0) continue;
+
+    let changed = false;
+    for (const task of tasks) {
+      if (task.completed) continue;
+      if (!missionMatchesTask(completedMission, task)) continue;
+
+      task.current_count += 1;
+      if (task.current_count >= task.required_count) {
+        task.completed = true;
+      }
+      changed = true;
+    }
+
+    if (!changed) continue;
+
+    const allCompleted = tasks.every((task) => task.completed);
+
+    await db.prepare(
+      `UPDATE missions
+         SET circuit_tasks_json = ?, metric_value = ?, updated_at = datetime('now')
+       WHERE id = ?`
+    ).bind(JSON.stringify(tasks), tasks.filter((task) => task.completed).length, circuit.id).run();
+
+    if (allCompleted) {
+      await db.prepare(
+        `UPDATE missions
+           SET is_completed = 1, status = 'completed', completed_at = datetime('now'), updated_at = datetime('now')
+         WHERE id = ? AND is_completed = 0`
+      ).bind(circuit.id).run();
+
+      await grantCircuitRewards(db, userId, circuit);
+      await onMissionComplete(db, userId, Number(circuit.id));
+    }
+  }
 }
 
 app.get("/api/missions", authMiddleware, async (c) => {
@@ -1905,6 +2038,7 @@ app.post("/api/missions/complete", authMiddleware, zValidator("json", CompleteMi
   const completedToday = await c.env.fitloot_db.prepare("SELECT COUNT(*) as c FROM missions WHERE user_id = ? AND is_completed = 1 AND date(completed_at) = date('now')").bind(user.id).first<{ c: number }>();
   await onStreakContinued(c.env.fitloot_db, user.id, newStreak, Number(completedToday?.c ?? 1), new Date().toISOString());
   await onMissionComplete(c.env.fitloot_db, user.id, Number(mission.id));
+  await updateCircuitProgress(user.id, mission as Record<string, unknown>, c.env.fitloot_db);
   const relevance = await checkMissionRelevance(user.id, Number(mission.id), c.env.fitloot_db, 'completed');
   if (relevance.isGoalRelevant) {
     const gs = await c.env.fitloot_db.prepare("SELECT goal_completed_count FROM user_goal_stats WHERE user_id = ?").bind(user.id).first<{ goal_completed_count: number }>();
@@ -2634,13 +2768,6 @@ app.post("/api/mini-games/:id/complete", authMiddleware, zValidator("json", Mini
 });
 
 type MissionPeriod = "daily" | "weekly" | "monthly";
-type MissionMetricType =
-  | "repetitions"
-  | "duration_seconds"
-  | "sets_reps"
-  | "steps"
-  | "distance_meters"
-  | "duration_minutes";
 type MissionExerciseCategory =
   | "plank"
   | "isometric"
@@ -2673,6 +2800,12 @@ type MissionPayload = {
   points_reward: number;
   duration_estimate_minutes: number;
   exercise_category: MissionExerciseCategory;
+  mission_origin: "regular" | "ai";
+  circuit_tasks: CircuitTask[];
+  safety_tips: string[];
+  difficulty_level: string | null;
+  video_url: string | null;
+  thumbnail_url: string | null;
   target_reps: number | null;
   target_time: number | null;
 };
@@ -2696,17 +2829,8 @@ const METRIC_TYPE_MAP: Record<MissionExerciseCategory, MissionMetricType> = {
   stretching: "duration_minutes",
   mobility: "duration_minutes",
   strength: "sets_reps",
-  cardio_circuit: "duration_minutes",
-  default: "repetitions",
-};
-
-const METRIC_UNIT_MAP: Record<MissionMetricType, string> = {
-  repetitions: "repeticoes",
-  duration_seconds: "segundos",
-  sets_reps: "repeticoes",
-  steps: "passos",
-  distance_meters: "metros",
-  duration_minutes: "minutos",
+  cardio_circuit: "circuit_tasks",
+  default: "sets_reps",
 };
 
 function futureIsoForPeriod(period: MissionPeriod) {
@@ -2761,7 +2885,7 @@ function inferAttributes(category: MissionExerciseCategory): string[] {
 function missionConfigByPeriod(period: MissionPeriod) {
   if (period === "weekly") {
     return {
-      amount: 3,
+      amount: MISSION_LIMITS.weekly,
       xp: 170,
       points: 50,
       titlePrefix: "Missao Semanal",
@@ -2770,7 +2894,7 @@ function missionConfigByPeriod(period: MissionPeriod) {
 
   if (period === "monthly") {
     return {
-      amount: 2,
+      amount: MISSION_LIMITS.monthly,
       xp: 420,
       points: 130,
       titlePrefix: "Missao Mensal",
@@ -2778,7 +2902,7 @@ function missionConfigByPeriod(period: MissionPeriod) {
   }
 
   return {
-    amount: 3,
+    amount: MISSION_LIMITS.daily,
     xp: 65,
     points: 14,
     titlePrefix: "Missao Diaria",
@@ -2793,6 +2917,7 @@ function metricValueByPeriod(metricType: MissionMetricType, period: MissionPerio
     steps: { daily: 8000, weekly: 45000, monthly: 180000 },
     distance_meters: { daily: 2000, weekly: 12000, monthly: 50000 },
     duration_minutes: { daily: 15, weekly: 45, monthly: 180 },
+    circuit_tasks: { daily: 3, weekly: 4, monthly: 5 },
   };
   return table[metricType][period];
 }
@@ -2816,7 +2941,69 @@ function inferRestSeconds(metricType: MissionMetricType): number | null {
   return null;
 }
 
+function buildCircuitTasks(exerciseName: string, period: MissionPeriod): CircuitTask[] {
+  const lower = exerciseName.toLowerCase();
+  const baseRequired = period === "weekly" ? 5 : period === "monthly" ? 7 : 3;
+  const fullBodyRequired = period === "weekly" ? 3 : baseRequired;
+
+  const toTask = (missionType: string, label: string, requiredCount = baseRequired): CircuitTask => ({
+    id: crypto.randomUUID(),
+    label,
+    mission_type: missionType,
+    required_count: requiredCount,
+    current_count: 0,
+    completed: false,
+  });
+
+  if (lower.includes("upper body")) {
+    return [
+      toTask("push-up", "Completar 5 missoes de Flexao"),
+      toTask("pull-up", "Completar 5 missoes de Barra"),
+      toTask("abdominal", "Completar 5 missoes de Abdominal"),
+      toTask("plank", "Completar 5 missoes de Prancha"),
+    ];
+  }
+
+  if (lower.includes("lower body")) {
+    return [
+      toTask("squat", "Completar 5 missoes de Agachamento"),
+      toTask("lunge", "Completar 5 missoes de Avanco"),
+      toTask("glute", "Completar 5 missoes de Gluteo"),
+      toTask("run", "Completar 3 missoes de Corrida", 3),
+    ];
+  }
+
+  if (lower.includes("core")) {
+    return [
+      toTask("abdominal", "Completar 5 missoes de Abdominal"),
+      toTask("plank", "Completar 5 missoes de Prancha"),
+      toTask("hollow body", "Completar 5 missoes de Hollow Body"),
+      toTask("wall sit", "Completar 5 missoes de Wall Sit"),
+    ];
+  }
+
+  return [
+    toTask("push-up", "Completar 3 missoes de Flexao", fullBodyRequired),
+    toTask("squat", "Completar 3 missoes de Agachamento", fullBodyRequired),
+    toTask("abdominal", "Completar 3 missoes de Abdominal", fullBodyRequired),
+    toTask("plank", "Completar 3 missoes de Prancha", fullBodyRequired),
+    toTask("burpee", "Completar 3 missoes de Burpee", fullBodyRequired),
+  ];
+}
+
+function weeklyCircuitNameFromFocus(dayFocus: string, muscle: string): string {
+  const combined = `${dayFocus} ${muscle}`.toLowerCase();
+  if (combined.includes("upper")) return "Upper Body Circuit";
+  if (combined.includes("lower")) return "Lower Body Circuit";
+  if (combined.includes("core")) return "Core Circuit";
+  return "Full Body Circuit";
+}
+
 function buildMissionDescription(exerciseName: string, metricType: MissionMetricType, metricValue: number, sets: number | null): string {
+  const goalText = formatMissionGoal(metricType, metricValue, sets ?? undefined);
+  if (metricType === "circuit_tasks") {
+    return `Conclua o circuito semanal ${exerciseName}. O progresso das tarefas atualiza automaticamente ao completar missoes diarias.`;
+  }
   if (metricType === "duration_seconds" && sets) {
     const secondsPerSet = Math.max(10, Math.floor(metricValue / sets));
     return `Execute ${sets} series de ${exerciseName}, mantendo ${secondsPerSet} segundos por serie.`;
@@ -2835,13 +3022,22 @@ function buildMissionDescription(exerciseName: string, metricType: MissionMetric
   if (metricType === "duration_minutes") {
     return `Realize ${metricValue} minutos de ${exerciseName} mantendo respiracao e postura.`;
   }
-  return `Complete ${metricValue} repeticoes de ${exerciseName} com controle total do movimento.`;
+  return `Cumpra a meta de ${goalText} em ${exerciseName} com controle total do movimento.`;
 }
 
 function buildMissionInstructions(exerciseName: string, metricType: MissionMetricType, sets: number | null, restSeconds: number | null, apiInstruction?: string | undefined): string[] {
   const instructions: string[] = [
     `Prepare o corpo e ajuste a postura para ${exerciseName}.`,
   ];
+
+  if (metricType === "circuit_tasks") {
+    return [
+      "Conclua as tarefas listadas ao longo da semana.",
+      "Cada tarefa avanca automaticamente ao completar missoes diarias relacionadas.",
+      "Mantenha consistencia nos dias de treino para fechar 100% do circuito.",
+      "Ao completar todas as tarefas, a missao semanal libera recompensas automaticamente.",
+    ];
+  }
 
   if (apiInstruction) {
     instructions.push(apiInstruction.slice(0, 180));
@@ -2869,24 +3065,40 @@ function buildMissionPayload(params: {
   exerciseName: string;
   muscle: string;
   imageUrl?: string | undefined;
+  videoUrl?: string | undefined;
+  thumbnailUrl?: string | undefined;
   instruction?: string | undefined;
+  safetyTips?: string[] | undefined;
+  difficultyLevel?: string | undefined;
+  missionOrigin?: "regular" | "ai" | undefined;
   xp: number;
   points: number;
   forceCategory?: MissionExerciseCategory | undefined;
 }): MissionPayload {
-  const category = params.forceCategory ?? normalizeExerciseCategory(params.exerciseName, params.muscle);
-  const metricType = METRIC_TYPE_MAP[category];
+  let category = params.forceCategory ?? normalizeExerciseCategory(params.exerciseName, params.muscle);
+  let metricType = METRIC_TYPE_MAP[category] ?? getMissionMetricType(params.exerciseName);
+
+  if (params.period !== "weekly" && metricType === "circuit_tasks") {
+    metricType = "sets_reps";
+    category = "strength";
+  }
+
   const metricValue = metricValueByPeriod(metricType, params.period);
-  const metricUnit = METRIC_UNIT_MAP[metricType];
-  const sets = inferSets(metricType, params.period);
-  const restSeconds = inferRestSeconds(metricType);
+  const metricUnit = metricUnitByType(metricType);
+  const sets = metricType === "circuit_tasks" ? null : inferSets(metricType, params.period);
+  const restSeconds = metricType === "circuit_tasks" ? null : inferRestSeconds(metricType);
   const bodyArea = inferBodyArea(params.muscle);
   const exerciseType = inferExerciseType(category);
   const attributes = inferAttributes(category);
   const instructions = buildMissionInstructions(params.exerciseName, metricType, sets, restSeconds, params.instruction);
+  const circuitTasks = metricType === "circuit_tasks" ? buildCircuitTasks(params.exerciseName, params.period) : [];
 
-  const targetReps = metricType === "duration_seconds" || metricType === "duration_minutes" ? null : metricValue;
-  const targetTime = metricType === "duration_seconds" ? metricValue : metricType === "duration_minutes" ? metricValue * 60 : null;
+  const targetReps = metricType === "duration_seconds" || metricType === "duration_minutes" || metricType === "circuit_tasks" ? null : metricValue;
+  const targetTime = metricType === "duration_seconds"
+    ? metricValue
+    : metricType === "duration_minutes"
+      ? metricValue * 60
+      : null;
 
   return {
     title: `${params.titlePrefix}: ${params.exerciseName}`,
@@ -2904,8 +3116,20 @@ function buildMissionPayload(params: {
     attributes_benefited: attributes,
     xp_reward: params.xp,
     points_reward: params.points,
-    duration_estimate_minutes: metricType === "duration_seconds" ? Math.max(3, Math.ceil(metricValue / 60)) : metricType === "duration_minutes" ? metricValue : Math.max(8, Math.floor(metricValue / 4)),
+    duration_estimate_minutes: metricType === "duration_seconds"
+      ? Math.max(3, Math.ceil(metricValue / 60))
+      : metricType === "duration_minutes"
+        ? metricValue
+        : metricType === "circuit_tasks"
+          ? 45
+          : Math.max(8, Math.floor(metricValue / 4)),
     exercise_category: category,
+    mission_origin: params.missionOrigin ?? "regular",
+    circuit_tasks: circuitTasks,
+    safety_tips: Array.isArray(params.safetyTips) ? params.safetyTips : ["Mantenha postura segura e interrompa em caso de dor aguda."],
+    difficulty_level: params.difficultyLevel ?? null,
+    video_url: params.videoUrl ?? null,
+    thumbnail_url: params.thumbnailUrl ?? null,
     target_reps: targetReps,
     target_time: targetTime,
   };
@@ -2916,8 +3140,9 @@ async function insertMission(db: D1Database, userId: string, period: MissionPeri
     `INSERT INTO missions (
       user_id, type, title, description, skill_id, target_reps, target_time, xp_reward, points_reward, deadline,
       metric_type, metric_value, metric_unit, sets, rest_seconds, instructions_json, image_url, muscle_groups_json,
-      exercise_type, body_area, attributes_benefited_json, duration_estimate_minutes, exercise_category, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`
+      exercise_type, body_area, attributes_benefited_json, duration_estimate_minutes, exercise_category,
+      mission_origin, circuit_tasks_json, safety_tips_json, difficulty_level, video_url, thumbnail_url, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`
   ).bind(
     userId,
     period,
@@ -2941,7 +3166,13 @@ async function insertMission(db: D1Database, userId: string, period: MissionPeri
     mission.body_area,
     JSON.stringify(mission.attributes_benefited),
     mission.duration_estimate_minutes,
-    mission.exercise_category
+    mission.exercise_category,
+    mission.mission_origin,
+    JSON.stringify(mission.circuit_tasks),
+    JSON.stringify(mission.safety_tips),
+    mission.difficulty_level,
+    mission.video_url,
+    mission.thumbnail_url
   ).run();
 }
 
@@ -3131,9 +3362,98 @@ function fallbackMissionsForPeriod(period: MissionPeriod, titlePrefix: string, x
   ];
 }
 
-async function createMissionsForPeriod(env: Env, db: D1Database, userId: string, period: MissionPeriod) {
-  const profile = await db.prepare("SELECT active_skill_focus FROM user_profiles WHERE user_id = ?").bind(userId).first<{ active_skill_focus: string | null }>();
+type ExerciseInstructionPayload = {
+  instructions: string[];
+  musclesAffected: string[];
+  attributesBenefited: string[];
+  safetyTips: string[];
+  difficultyLevel: string;
+};
+
+async function getExerciseInstructionsFromAI(
+  exerciseName: string,
+  metricType: MissionMetricType,
+  conditioningLevel: string,
+  env: Env
+): Promise<ExerciseInstructionPayload> {
+  const fallback: ExerciseInstructionPayload = {
+    instructions: [
+      `Prepare-se para executar ${exerciseName} com postura segura.`,
+      "Mantenha ritmo constante e respiracao controlada durante toda a execucao.",
+      "Respeite a tecnica e interrompa em caso de dor aguda.",
+    ],
+    musclesAffected: [],
+    attributesBenefited: [],
+    safetyTips: ["Mantenha alinhamento corporal e evite compensacoes."],
+    difficultyLevel: "iniciante",
+  };
+
+  if (!env.HF_TOKEN) return fallback;
+
+  const prompt = [
+    `Exercicio: ${exerciseName}`,
+    `Nivel do usuario: ${conditioningLevel}`,
+    `Tipo de metrica: ${metricType}`,
+    "",
+    "Responda APENAS em JSON valido:",
+    "{",
+    '  "instructions": ["passo 1", "passo 2"],',
+    '  "musclesAffected": ["musculo"],',
+    '  "attributesBenefited": ["forca"],',
+    '  "safetyTips": ["dica"],',
+    '  "difficultyLevel": "iniciante|intermediario|avancado"',
+    "}",
+  ].join("\n");
+
+  try {
+    const completion = await fetchJsonWithTimeout<{ choices?: Array<{ message?: { content?: string | undefined } }> }>(
+      "https://router.huggingface.co/v1/chat/completions",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${env.HF_TOKEN}`,
+        },
+        body: JSON.stringify({
+          model: "openai/gpt-oss-120b:groq",
+          messages: [{ role: "user", content: prompt }],
+          max_tokens: 500,
+          response_format: { type: "json_object" },
+        }),
+      },
+      timeoutMsByService.huggingface
+    );
+
+    const rawContent = safeGet(completion.choices ?? [], 0)?.message?.content ?? "";
+    const parsed = JSON.parse(rawContent) as Partial<ExerciseInstructionPayload>;
+    return {
+      instructions: Array.isArray(parsed.instructions) && parsed.instructions.length > 0
+        ? parsed.instructions.map((item) => String(item)).slice(0, 6)
+        : fallback.instructions,
+      musclesAffected: Array.isArray(parsed.musclesAffected)
+        ? parsed.musclesAffected.map((item) => String(item)).slice(0, 6)
+        : fallback.musclesAffected,
+      attributesBenefited: Array.isArray(parsed.attributesBenefited)
+        ? parsed.attributesBenefited.map((item) => String(item)).slice(0, 6)
+        : fallback.attributesBenefited,
+      safetyTips: Array.isArray(parsed.safetyTips) && parsed.safetyTips.length > 0
+        ? parsed.safetyTips.map((item) => String(item)).slice(0, 4)
+        : fallback.safetyTips,
+      difficultyLevel: typeof parsed.difficultyLevel === "string" && parsed.difficultyLevel.length > 0
+        ? parsed.difficultyLevel
+        : fallback.difficultyLevel,
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+async function createMissionsForPeriod(env: Env, db: D1Database, userId: string, period: MissionPeriod, requestedAmount?: number) {
+  const profile = await db.prepare("SELECT active_skill_focus, initial_conditioning FROM user_profiles WHERE user_id = ?")
+    .bind(userId)
+    .first<{ active_skill_focus: string | null; initial_conditioning: string | null }>();
   const activeFocus = profile?.active_skill_focus === "yoga" ? "yoga" : "calistenia";
+  const conditioning = normalizeConditioning(profile?.initial_conditioning);
 
   const userSkillsResult = await db.prepare(
     "SELECT us.skill_id, us.current_stage, s.name, s.category, s.tier FROM user_skills us INNER JOIN skills s ON s.id = us.skill_id WHERE us.user_id = ? AND COALESCE(us.status,'unlocked') != 'locked'"
@@ -3145,11 +3465,12 @@ async function createMissionsForPeriod(env: Env, db: D1Database, userId: string,
   });
 
   const config = missionConfigByPeriod(period);
+  const targetAmount = Math.max(1, Math.min(requestedAmount ?? config.amount, MISSION_LIMITS[period]));
   const deadline = futureIsoForPeriod(period);
 
   if (userSkills.length === 0) {
     console.warn(`[missions] usuario ${userId} sem skills para gerar ${period}`);
-    const fallback = fallbackMissionsForPeriod(period, config.titlePrefix, config.xp, config.points).slice(0, config.amount);
+    const fallback = fallbackMissionsForPeriod(period, config.titlePrefix, config.xp, config.points).slice(0, targetAmount);
     for (const mission of fallback) {
       await insertMission(db, userId, period, deadline, mission, null);
     }
@@ -3167,25 +3488,76 @@ async function createMissionsForPeriod(env: Env, db: D1Database, userId: string,
   const muscle = isRestDay ? "mobility" : String(muscles[0] ?? "full body");
   const exerciseResult = await resolveExercisesWithFallback(env, muscle, planRow?.equipment ?? "bodyweight");
 
-  const plannedCount = Math.max(1, Math.ceil(config.amount * 0.7));
-  const variationCount = Math.max(0, config.amount - plannedCount);
+  const shouldIncludeWeeklyCircuit = period === "weekly";
+  const reservedCircuitSlots = shouldIncludeWeeklyCircuit ? 1 : 0;
+  const remainingSlots = Math.max(0, targetAmount - reservedCircuitSlots);
+  const plannedCount = remainingSlots > 0 ? Math.max(1, Math.ceil(remainingSlots * 0.7)) : 0;
+  const variationCount = Math.max(0, remainingSlots - plannedCount);
 
   const planned = exerciseResult.exercises.slice(0, plannedCount);
   const randomSkills = [...userSkills].sort(() => Math.random() - 0.5).slice(0, Math.max(variationCount, 1));
+  const missionsToInsert: Array<{ payload: MissionPayload; skillId: number | null }> = [];
 
-  for (const ex of planned) {
-    const payload = buildMissionPayload({
+  if (shouldIncludeWeeklyCircuit) {
+    const circuitPayload = buildMissionPayload({
       period,
       titlePrefix: config.titlePrefix,
-      exerciseName: ex.name,
-      muscle: ex.muscle,
-      imageUrl: ex.image_url,
-      instruction: ex.instructions,
-      xp: isRestDay ? Math.floor(config.xp * 0.7) : config.xp,
-      points: isRestDay ? Math.floor(config.points * 0.7) : config.points,
-      forceCategory: isRestDay ? "mobility" : undefined,
+      exerciseName: weeklyCircuitNameFromFocus(dayFocus, muscle),
+      muscle: "full body",
+      xp: config.xp,
+      points: config.points,
+      forceCategory: "cardio_circuit",
     });
-    await insertMission(db, userId, period, deadline, payload, null);
+    missionsToInsert.push({ payload: circuitPayload, skillId: null });
+  }
+
+  const plannedPayloads = await Promise.all(
+    planned.map(async (ex) => {
+      const enriched = await enrichExercise(ex.name, env).catch(() => null);
+      const metricHint = getMissionMetricType(enriched?.name ?? ex.name);
+      const aiContext = await getExerciseInstructionsFromAI(
+        enriched?.name ?? ex.name,
+        metricHint,
+        conditioning,
+        env
+      );
+      const primaryInstruction = safeGet(enriched?.instructions ?? [], 0) ?? ex.instructions ?? safeGet(aiContext.instructions, 0);
+      const imageUrl = enriched?.gifUrl ?? enriched?.imageUrl ?? enriched?.thumbnailUrl ?? ex.image_url;
+
+      const payload = buildMissionPayload({
+        period,
+        titlePrefix: config.titlePrefix,
+        exerciseName: enriched?.name ?? ex.name,
+        muscle: enriched?.target ?? ex.muscle,
+        imageUrl,
+        videoUrl: enriched?.videoUrl ?? undefined,
+        thumbnailUrl: enriched?.thumbnailUrl ?? undefined,
+        instruction: primaryInstruction,
+        safetyTips: aiContext.safetyTips,
+        difficultyLevel: aiContext.difficultyLevel,
+        xp: isRestDay ? Math.floor(config.xp * 0.7) : config.xp,
+        points: isRestDay ? Math.floor(config.points * 0.7) : config.points,
+        forceCategory: isRestDay ? "mobility" : undefined,
+      });
+
+      if (aiContext.instructions.length > 0) {
+        payload.instructions = aiContext.instructions.slice(0, 6);
+      }
+      if (aiContext.musclesAffected.length > 0) {
+        payload.muscle_groups = aiContext.musclesAffected.slice(0, 6);
+      } else if ((enriched?.secondaryMuscles?.length ?? 0) > 0) {
+        payload.muscle_groups = (enriched?.secondaryMuscles ?? []).slice(0, 6);
+      }
+      if (aiContext.attributesBenefited.length > 0) {
+        payload.attributes_benefited = aiContext.attributesBenefited.slice(0, 6);
+      }
+
+      return payload;
+    })
+  );
+
+  for (const payload of plannedPayloads) {
+    missionsToInsert.push({ payload, skillId: null });
   }
 
   for (const skill of randomSkills.slice(0, variationCount)) {
@@ -3197,7 +3569,11 @@ async function createMissionsForPeriod(env: Env, db: D1Database, userId: string,
       xp: config.xp,
       points: config.points,
     });
-    await insertMission(db, userId, period, deadline, payload, skill.skill_id);
+    missionsToInsert.push({ payload, skillId: skill.skill_id });
+  }
+
+  for (const entry of missionsToInsert.slice(0, targetAmount)) {
+    await insertMission(db, userId, period, deadline, entry.payload, entry.skillId);
   }
 }
 
@@ -3208,11 +3584,14 @@ async function ensurePeriodicMissions(env: Env, db: D1Database, userId: string) 
     const existing = await db.prepare(
       `SELECT COUNT(*) as count FROM missions
        WHERE user_id = ? AND type = ? AND is_completed = 0
+       AND COALESCE(mission_origin, 'regular') = 'regular'
        AND (deadline IS NULL OR deadline > datetime('now'))`
     ).bind(userId, period).first<{ count: number }>();
 
-    if (Number(existing?.count ?? 0) === 0) {
-      await createMissionsForPeriod(env, db, userId, period);
+    const existingCount = Number(existing?.count ?? 0);
+    const missingCount = Math.max(0, MISSION_LIMITS[period] - existingCount);
+    if (missingCount > 0) {
+      await createMissionsForPeriod(env, db, userId, period, missingCount);
     }
   }
 }
@@ -3473,6 +3852,7 @@ function sanitizeMissionDraft(raw: MissionDraft, conditioning: ConditioningLevel
     exerciseName,
     muscle,
     imageUrl: raw.image_url,
+    missionOrigin: "ai",
     xp: toPositiveInt(raw.xp_reward, xpByConditioning(conditioning)),
     points: toPositiveInt(raw.points_reward, pointsByConditioning(conditioning)),
     forceCategory: forcedCategory,
@@ -3505,7 +3885,8 @@ async function generateFallbackMissions(
   skills: Array<{ name: string; category?: string | undefined }> = []
 ): Promise<MissionPayload[]> {
   if (skills.length === 0) {
-    return fallbackMissionsForPeriod("daily", "Missao Diaria", xpByConditioning(conditioning), pointsByConditioning(conditioning));
+    return fallbackMissionsForPeriod("daily", "Missao Diaria", xpByConditioning(conditioning), pointsByConditioning(conditioning))
+      .map((mission) => ({ ...mission, mission_origin: "ai" }));
   }
 
   return skills.slice(0, 3).map((skill, index) =>
@@ -3573,9 +3954,24 @@ app.post("/api/ai/generate-missions", authMiddleware, async (c) => {
     }
 
     const totalMissions = [...baseMissions.slice(0, 3), ...aiMissions.slice(0, 2)].slice(0, 5);
+    const aiMissionEntries = totalMissions.map((mission) => {
+      const missionPeriod: MissionPeriod =
+        mission.metric_type === "circuit_tasks" ||
+        classifyMission(mission.title, mission.duration_estimate_minutes) === "weekly"
+          ? "weekly"
+          : "daily";
+      return {
+        period: missionPeriod,
+        deadline: futureIsoForPeriod(missionPeriod),
+        mission: {
+          ...mission,
+          mission_origin: "ai" as const,
+        },
+      };
+    });
 
-    const tomorrow = new Date(Date.now() + 86400000).toISOString();
-    for (const mission of totalMissions) {
+    for (const entry of aiMissionEntries) {
+      const mission = entry.mission;
       const missionSkillName = toSafeString(mission.title, "").toLowerCase();
       const skill = missionSkillName
         ? skillRows.find((skillRow) => skillRow.name.toLowerCase().includes(missionSkillName))
@@ -3584,14 +3980,19 @@ app.post("/api/ai/generate-missions", authMiddleware, async (c) => {
       await insertMission(
         c.env.fitloot_db,
         user.id,
-        "daily",
-        tomorrow,
-        mission,
+        entry.period,
+        entry.deadline,
+        entry.mission,
         skill?.id ?? null,
       );
     }
 
-    return c.json({ success: true, missions: totalMissions, fallback, error });
+    return c.json({
+      success: true,
+      missions: aiMissionEntries.map((entry) => ({ ...entry.mission, type: entry.period })),
+      fallback,
+      error,
+    });
   } catch (routeError) {
     console.error("[/api/ai/generate-missions]", {
       message: getErrorMessage(routeError),

@@ -7,15 +7,24 @@ import { useState } from "react";
 import { Wand2, CheckCircle, XCircle } from "lucide-react";
 import { api } from "@/react-app/utils/api";
 import LoadingBall from "@/react-app/components/LoadingBall";
+import { formatMissionGoal } from "@/constants/missionMetrics";
+import type { Mission, MissionMetricType } from "@/shared/types";
 
-interface GeneratedMission {
-  title: string;
-  description: string;
-  skill_name: string;
-  target_reps: number;
-  xp_reward: number;
-  points_reward: number;
-  difficulty: string;
+type GeneratedMission = Mission & { difficulty?: string | undefined };
+
+function resolveMetricType(mission: GeneratedMission): MissionMetricType {
+  if (
+    mission.metric_type === "repetitions" ||
+    mission.metric_type === "duration_seconds" ||
+    mission.metric_type === "duration_minutes" ||
+    mission.metric_type === "sets_reps" ||
+    mission.metric_type === "steps" ||
+    mission.metric_type === "distance_meters" ||
+    mission.metric_type === "circuit_tasks"
+  ) {
+    return mission.metric_type;
+  }
+  return "sets_reps";
 }
 
 export default function AIMissionGenerator({ onMissionsGenerated, conditioning }: { onMissionsGenerated?: () => void; conditioning?: string | undefined }) {
@@ -39,7 +48,8 @@ export default function AIMissionGenerator({ onMissionsGenerated, conditioning }
       if (!response.ok) {
         throw new Error(data?.error || "Failed to generate missions");
       }
-      setGeneratedMissions(data.missions);
+      const payloadMissions = Array.isArray(data.missions) ? data.missions as GeneratedMission[] : [];
+      setGeneratedMissions(payloadMissions);
       setSuccess(true);
 
       // Notify parent component to refresh missions list
@@ -58,7 +68,7 @@ export default function AIMissionGenerator({ onMissionsGenerated, conditioning }
     }
   };
 
-  const getDifficultyColor = (difficulty: string) => {
+  const getDifficultyColor = (difficulty?: string) => {
     switch (difficulty) {
       case "easy":
         return "text-green-600 bg-green-100";
@@ -71,7 +81,7 @@ export default function AIMissionGenerator({ onMissionsGenerated, conditioning }
     }
   };
 
-  const getDifficultyLabel = (difficulty: string) => {
+  const getDifficultyLabel = (difficulty?: string) => {
     switch (difficulty) {
       case "easy":
         return "Fácil";
@@ -80,7 +90,7 @@ export default function AIMissionGenerator({ onMissionsGenerated, conditioning }
       case "hard":
         return "Difícil";
       default:
-        return difficulty;
+        return difficulty ?? "Médio";
     }
   };
 
@@ -114,7 +124,11 @@ export default function AIMissionGenerator({ onMissionsGenerated, conditioning }
                   {mission.points_reward} pts
                 </span>
                 <span className="text-emerald-600 font-medium">
-                  {mission.target_reps} reps
+                  {formatMissionGoal(
+                    resolveMetricType(mission),
+                    Number(mission.metric_value ?? mission.target_reps ?? 1),
+                    mission.sets ?? undefined
+                  )}
                 </span>
               </div>
             </div>
