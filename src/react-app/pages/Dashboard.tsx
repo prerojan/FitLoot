@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { useAuth } from "@/react-app/App";
 import BottomNav from "@/react-app/components/BottomNav";
@@ -22,20 +22,14 @@ export default function Dashboard() {
   const [metrics, setMetrics] = useState<DailyMetrics | null>(null);
   const [activeTitle, setActiveTitle] = useState<Title | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [showLevelUp, setShowLevelUp] = useState(false);
   const [newLevel, setNewLevel] = useState(0);
 
-  useEffect(() => {
-    if (!user) {
-      navigate("/app");
-      return;
-    }
 
-    loadData();
-  }, [user, navigate]);
-
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     try {
+      setError(null);
       const [profileRes, progressionRes, missionsRes, metricsRes, titlesRes] = await Promise.all([
         api("/api/profile"),
         api("/api/progression"),
@@ -44,9 +38,18 @@ export default function Dashboard() {
         api("/api/titles"),
       ]);
 
-      if (!profileRes.ok) {
+      if (profileRes.status === 401 || profileRes.status === 403) {
+        navigate("/app");
+        return;
+      }
+
+      if (profileRes.status === 404) {
         navigate("/onboarding");
         return;
+      }
+
+      if (!profileRes.ok || !progressionRes.ok || !missionsRes.ok || !metricsRes.ok || !titlesRes.ok) {
+        throw new Error("Falha ao carregar dados do dashboard.");
       }
 
       const profileData = await profileRes.json();
@@ -57,17 +60,27 @@ export default function Dashboard() {
 
       setProfile(profileData);
       setProgression(progressionData);
-      setMissions(missionsData);
+      setMissions(Array.isArray(missionsData) ? missionsData : []);
       setMetrics(metricsData);
 
-      const active = titlesData.find((t: { is_active?: number | undefined }) => t.is_active === 1);
+      const active = (Array.isArray(titlesData) ? titlesData : []).find((t: { is_active?: number | undefined }) => t.is_active === 1);
       setActiveTitle(active || null);
-    } catch (error) {
-      console.error("Error loading data:", error);
+    } catch (loadError) {
+      console.error("Error loading data:", loadError);
+      setError("Não foi possível carregar o dashboard agora.");
     } finally {
       setLoading(false);
     }
-  };
+  }, [navigate]);
+
+  useEffect(() => {
+    if (!user) {
+      navigate("/app");
+      return;
+    }
+
+    void loadData();
+  }, [user, navigate, loadData]);
 
   const handleMissionComplete = async (missionId: number, reps: number, verified: boolean) => {
     try {
@@ -81,24 +94,51 @@ export default function Dashboard() {
         }),
       });
 
-      if (response.ok) {
-        const result = await response.json();
-        
-        if (result.leveledUp) {
-          const updatedProgression = await api("/api/progression").then(r => r.json());
-          setNewLevel(updatedProgression.level);
+      if (response.status === 401 || response.status === 403) {
+        navigate("/app");
+        return;
+      }
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as { error?: string | undefined } | null;
+        setError(payload?.error ?? "Não foi possível concluir a missão.");
+        return;
+      }
+
+      const result = await response.json();
+
+      if (result.leveledUp) {
+        const progressionResponse = await api("/api/progression");
+        if (progressionResponse.ok) {
+          const updatedProgression = await progressionResponse.json();
+          setNewLevel(Number(updatedProgression.level ?? 0));
           setShowLevelUp(true);
         }
-
-        await loadData();
       }
-    } catch (error) {
-      console.error("Error completing mission:", error);
+
+      await loadData();
+    } catch (completeError) {
+      console.error("Error completing mission:", completeError);
+      setError("Não foi possível concluir a missão agora.");
     }
   };
 
   if (loading) {
     return <PageLoader />;
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 pb-24">
+        <div className="px-6 py-12 text-center">
+          <p className="text-red-600 mb-4">{error}</p>
+          <button onClick={() => { setLoading(true); void loadData(); }} className="fl-btn-primary rounded-xl px-4 py-2">
+            Tentar novamente
+          </button>
+        </div>
+        <BottomNav active="missions" />
+      </div>
+    );
   }
 
   const dailyMissions = missions.filter(m => m.type === 'daily' && m.is_completed !== 1);
@@ -252,3 +292,6 @@ function MissionSection({
     </div>
   );
 }
+
+
+

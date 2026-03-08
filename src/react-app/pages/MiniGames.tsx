@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useAuth } from "@/react-app/App";
 import { useNavigate, useSearchParams } from "react-router";
 import BottomNav from "@/react-app/components/BottomNav";
@@ -39,47 +39,69 @@ export default function MiniGames() {
   const [skills, setSkills] = useState<MiniGameSkill[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreateForm, setShowCreateForm] = useState(!!challengeUserId);
+  const [error, setError] = useState<string | null>(null);
   
   // Create challenge form
   const [selectedSkill, setSelectedSkill] = useState<number | null>(null);
   const [targetReps, setTargetReps] = useState(20);
   const [opponentType, setOpponentType] = useState<'friend' | 'random'>(challengeUserId ? 'friend' : 'random');
 
+
+  const loadGames = useCallback(async () => {
+    try {
+      setError(null);
+      const response = await api("/api/mini-games/active");
+
+      if (response.status === 401 || response.status === 403) {
+        navigate("/app");
+        return;
+      }
+
+      if (!response.ok) {
+        throw new Error("Falha ao carregar mini-games.");
+      }
+
+      const data = (await response.json()) as MiniGame[];
+      const list = Array.isArray(data) ? data : [];
+      setActiveGames(list.filter((g: MiniGame) => g.status !== 'completed'));
+      setCompletedGames(list.filter((g: MiniGame) => g.status === 'completed').slice(0, 10));
+    } catch (loadError) {
+      console.error("Error loading games:", loadError);
+      setError("Não foi possível carregar os mini-games agora.");
+    } finally {
+      setLoading(false);
+    }
+  }, [navigate]);
+
+  const loadSkills = useCallback(async () => {
+    try {
+      const response = await api("/api/skills");
+
+      if (response.status === 401 || response.status === 403) {
+        navigate("/app");
+        return;
+      }
+
+      if (!response.ok) {
+        throw new Error("Falha ao carregar habilidades.");
+      }
+
+      const data = (await response.json()) as MiniGameSkill[];
+      setSkills(Array.isArray(data) ? data : []);
+    } catch (loadError) {
+      console.error("Error loading skills:", loadError);
+      setError("Não foi possível carregar habilidades para desafio.");
+    }
+  }, [navigate]);
+
   useEffect(() => {
     if (!user) {
       navigate("/app");
       return;
     }
-    loadGames();
-    loadSkills();
-  }, [user, navigate]);
-
-  const loadGames = async () => {
-    try {
-      const response = await api("/api/mini-games/active");
-      if (response.ok) {
-        const data = await response.json();
-        setActiveGames(data.filter((g: MiniGame) => g.status !== 'completed'));
-        setCompletedGames(data.filter((g: MiniGame) => g.status === 'completed').slice(0, 10));
-      }
-    } catch (error) {
-      console.error("Error loading games:", error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const loadSkills = async () => {
-    try {
-      const response = await api("/api/skills");
-      if (response.ok) {
-        const data = await response.json();
-        setSkills(data);
-      }
-    } catch (error) {
-      console.error("Error loading skills:", error);
-    }
-  };
+    void loadGames();
+    void loadSkills();
+  }, [user, navigate, loadGames, loadSkills]);
 
   const createChallenge = async () => {
     if (!selectedSkill) {
@@ -99,13 +121,18 @@ export default function MiniGames() {
         })
       });
 
+      if (response.status === 401 || response.status === 403) {
+        navigate("/app");
+        return;
+      }
+
       if (response.ok) {
         alert("Desafio criado com sucesso!");
         setShowCreateForm(false);
-        loadGames();
+        void loadGames();
       } else {
-        const error = await response.json();
-        alert(error.error || "Erro ao criar desafio");
+        const responseError = (await response.json().catch(() => null)) as { error?: string | undefined } | null;
+        alert(responseError?.error || "Erro ao criar desafio");
       }
     } catch (error) {
       console.error("Error creating challenge:", error);
@@ -119,11 +146,19 @@ export default function MiniGames() {
         method: "POST"
       });
 
-      if (response.ok) {
-        loadGames();
+      if (response.status === 401 || response.status === 403) {
+        navigate("/app");
+        return;
       }
-    } catch (error) {
-      console.error("Error accepting challenge:", error);
+
+      if (response.ok) {
+        void loadGames();
+      } else {
+        const responseError = (await response.json().catch(() => null)) as { error?: string | undefined } | null;
+        setError(responseError?.error || "Não foi possível aceitar o desafio.");
+      }
+    } catch (acceptError) {
+      console.error("Error accepting challenge:", acceptError);
     }
   };
 
@@ -138,12 +173,20 @@ export default function MiniGames() {
         })
       });
 
+      if (response.status === 401 || response.status === 403) {
+        navigate("/app");
+        return;
+      }
+
       if (response.ok) {
         const result = await response.json();
         if (result.winner) {
-          alert(result.winner === user?.id ? "ðŸŽ‰ VocÃª venceu!" : "VocÃª perdeu, mas ganhou metade dos pontos!");
+          alert(result.winner === user?.id ? "Você venceu!" : "Desafio finalizado.");
         }
-        loadGames();
+        void loadGames();
+      } else {
+        const responseError = (await response.json().catch(() => null)) as { error?: string | undefined } | null;
+        setError(responseError?.error || "Não foi possível concluir o desafio.");
       }
     } catch (error) {
       console.error("Error completing challenge:", error);
@@ -154,6 +197,20 @@ export default function MiniGames() {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-purple-50 via-pink-50 to-red-50">
         <Loader2 className="w-10 h-10 text-purple-600 animate-spin" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-purple-50 via-pink-50 to-red-50 pb-24">
+        <div className="px-6 py-12 text-center">
+          <p className="text-red-600 mb-4">{error}</p>
+          <button onClick={() => { setLoading(true); void loadSkills(); void loadGames(); }} className="fl-btn-primary rounded-xl px-4 py-2">
+            Tentar novamente
+          </button>
+        </div>
+        <BottomNav active="friends" />
       </div>
     );
   }
@@ -409,3 +466,5 @@ export default function MiniGames() {
     </div>
   );
 }
+
+

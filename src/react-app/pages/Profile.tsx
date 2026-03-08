@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ChangeEventHandler } from "react";
+import { useCallback, useEffect, useRef, useState, type ChangeEventHandler } from "react";
 import { useNavigate } from "react-router";
 import { useAuth } from "@/react-app/App";
 import BottomNav from "@/react-app/components/BottomNav";
@@ -43,6 +43,7 @@ export default function Profile() {
   const [titles, setTitles] = useState<TitleWithUnlock[]>([]);
   const [activeTab, setActiveTab] = useState<'attributes' | 'skills' | 'achievements' | 'titles'>('attributes');
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [isMobile, setIsMobile] = useState(false);
   const [customizationSaving, setCustomizationSaving] = useState(false);
   const [bgPreview, setBgPreview] = useState<string | null>(null);
@@ -52,17 +53,22 @@ export default function Profile() {
   const primaryColorInputRef = useRef<HTMLInputElement>(null);
   const secondaryColorInputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    if (!user) {
-      navigate("/app");
-      return;
-    }
-    setIsMobile(window.innerWidth <= 768);
-    loadData();
-  }, [user, navigate]);
 
-  const loadData = async () => {
+  useEffect(() => {
+    const updateViewport = () => {
+      setIsMobile(window.innerWidth <= 768);
+    };
+
+    updateViewport();
+    window.addEventListener("resize", updateViewport);
+    return () => {
+      window.removeEventListener("resize", updateViewport);
+    };
+  }, []);
+
+  const loadData = useCallback(async () => {
     try {
+      setError(null);
       const [profileRes, attrsRes, progRes, skillsRes, achievementsRes, titlesRes] = await Promise.all([
         api("/api/profile"),
         api("/api/attributes"),
@@ -71,6 +77,15 @@ export default function Profile() {
         api("/api/achievements"),
         api("/api/titles"),
       ]);
+
+      if (profileRes.status === 401 || profileRes.status === 403) {
+        navigate("/app");
+        return;
+      }
+
+      if (!profileRes.ok || !attrsRes.ok || !progRes.ok || !skillsRes.ok || !achievementsRes.ok || !titlesRes.ok) {
+        throw new Error("Falha ao carregar perfil.");
+      }
 
       const profileData = await profileRes.json();
       setProfile(profileData);
@@ -83,12 +98,21 @@ export default function Profile() {
       setSkills(await skillsRes.json());
       setAchievements(await achievementsRes.json());
       setTitles(await titlesRes.json());
-    } catch (error) {
-      console.error("Error loading profile:", error);
+    } catch (loadError) {
+      console.error("Error loading profile:", loadError);
+      setError("Não foi possível carregar o perfil agora.");
     } finally {
       setLoading(false);
     }
-  };
+  }, [navigate]);
+
+  useEffect(() => {
+    if (!user) {
+      navigate("/app");
+      return;
+    }
+    void loadData();
+  }, [user, navigate, loadData]);
 
   const handleLogout = () => {
     logout();
@@ -182,6 +206,20 @@ export default function Profile() {
     return (
       <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 flex items-center justify-center">
         <div className="text-emerald-600">Carregando...</div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 pb-24">
+        <div className="px-6 py-12 text-center">
+          <p className="text-red-600 mb-4">{error}</p>
+          <button onClick={() => { setLoading(true); void loadData(); }} className="fl-btn-primary rounded-xl px-4 py-2">
+            Tentar novamente
+          </button>
+        </div>
+        <BottomNav active="profile" />
       </div>
     );
   }
@@ -517,3 +555,5 @@ function TitleCard({ title, onActivate }: { title: TitleWithUnlock; onActivate: 
     </div>
   );
 }
+
+

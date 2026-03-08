@@ -203,9 +203,14 @@ export default function FoodAnalysis() {
         }),
       });
 
-      const data = await response.json();
+      if (response.status === 401 || response.status === 403) {
+        navigate("/app");
+        return;
+      }
+
+      const data = (await response.json().catch(() => null)) as { error?: string | undefined } | AnalysisResult | null;
       if (!response.ok) {
-        throw new Error(data.error || "Falha ao analisar alimento");
+        throw new Error((data as { error?: string | undefined } | null)?.error || "Falha ao analisar alimento");
       }
       setResult(data as AnalysisResult);
     } catch (err) {
@@ -265,6 +270,11 @@ export default function FoodAnalysis() {
         method: "POST",
         body: JSON.stringify({ food_name: foodName, calories: result.totals.calories, meal_type: "lanche" }),
       });
+
+      if (response.status === 401 || response.status === 403) {
+        navigate("/app");
+        return;
+      }
 
       if (!response.ok) throw new Error("Não foi possível salvar o registro");
       navigate("/dashboard");

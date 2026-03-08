@@ -117,8 +117,15 @@ export default function AIChat() {
         }),
       });
 
+      if (response.status === 401 || response.status === 403) {
+        navigate("/app");
+        return;
+      }
 
-      if (!response.ok) throw new Error("Failed to get response");
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as { error?: string | undefined } | null;
+        throw new Error(payload?.error || "Failed to get response");
+      }
 
       const data = await response.json();
 

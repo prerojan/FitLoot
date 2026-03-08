@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { useAuth } from "@/react-app/App";
 import BottomNav from "@/react-app/components/BottomNav";
@@ -14,31 +14,60 @@ export default function Ranking() {
   const navigate = useNavigate();
   const [ranking, setRanking] = useState<RankingPlayer[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+
+  const loadRanking = useCallback(async () => {
+    try {
+      setError(null);
+      const response = await api("/api/ranking/global");
+
+      if (response.status === 401 || response.status === 403) {
+        navigate("/app");
+        return;
+      }
+
+      if (!response.ok) {
+        throw new Error("Falha ao carregar ranking.");
+      }
+
+      const data = (await response.json()) as RankingPlayer[];
+      setRanking(Array.isArray(data) ? data : []);
+    } catch (loadError) {
+      console.error("Error loading ranking:", loadError);
+      setError("Não foi possível carregar o ranking agora.");
+      setRanking([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [navigate]);
 
   useEffect(() => {
     if (!user) {
       navigate("/app");
       return;
     }
-    loadRanking();
-  }, [user, navigate]);
-
-  const loadRanking = async () => {
-    try {
-      const response = await api("/api/ranking/global");
-      const data = await response.json();
-      setRanking(data);
-    } catch (error) {
-      console.error("Error loading ranking:", error);
-    } finally {
-      setLoading(false);
-    }
-  };
+    void loadRanking();
+  }, [user, navigate, loadRanking]);
 
   if (loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 flex items-center justify-center">
         <div className="text-emerald-600">Carregando...</div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 pb-24">
+        <div className="px-6 py-12 text-center">
+          <p className="text-red-600 mb-4">{error}</p>
+          <button onClick={loadRanking} className="fl-btn-primary rounded-xl px-4 py-2">
+            Tentar novamente
+          </button>
+        </div>
+        <BottomNav active="ranking" />
       </div>
     );
   }
@@ -150,3 +179,5 @@ function RankingCard({ position, player }: { position: number; player: RankingPl
     </Card>
   );
 }
+
+
