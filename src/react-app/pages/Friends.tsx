@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useAuth } from "@/react-app/App";
 import { useNavigate } from "react-router";
 import BottomNav from "@/react-app/components/BottomNav";
@@ -38,37 +38,45 @@ export default function Friends() {
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [loading, setLoading] = useState(true);
   const [searching, setSearching] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+
+  const loadFriends = useCallback(async () => {
+    try {
+      setError(null);
+      const [friendsRes, requestsRes] = await Promise.all([
+        api("/api/friends"),
+        api("/api/friends/requests")
+      ]);
+
+      if (friendsRes.status === 401 || friendsRes.status === 403 || requestsRes.status === 401 || requestsRes.status === 403) {
+        navigate("/app");
+        return;
+      }
+
+      if (!friendsRes.ok || !requestsRes.ok) {
+        throw new Error("Falha ao carregar amigos.");
+      }
+
+      const friendsData = await friendsRes.json();
+      const requestsData = await requestsRes.json();
+      setFriends(Array.isArray(friendsData) ? friendsData : []);
+      setPendingRequests(Array.isArray(requestsData) ? requestsData : []);
+    } catch (loadError) {
+      console.error("Error loading friends:", loadError);
+      setError("Não foi possível carregar a lista de amigos agora.");
+    } finally {
+      setLoading(false);
+    }
+  }, [navigate]);
 
   useEffect(() => {
     if (!user) {
       navigate("/app");
       return;
     }
-    loadFriends();
-  }, [user, navigate]);
-
-  const loadFriends = async () => {
-    try {
-      const [friendsRes, requestsRes] = await Promise.all([
-        api("/api/friends"),
-        api("/api/friends/requests")
-      ]);
-
-      if (friendsRes.ok) {
-        const data = await friendsRes.json();
-        setFriends(data);
-      }
-
-      if (requestsRes.ok) {
-        const data = await requestsRes.json();
-        setPendingRequests(data);
-      }
-    } catch (error) {
-      console.error("Error loading friends:", error);
-    } finally {
-      setLoading(false);
-    }
-  };
+    void loadFriends();
+  }, [user, navigate, loadFriends]);
 
   const searchUsers = async () => {
     if (!searchQuery.trim()) {
@@ -79,12 +87,18 @@ export default function Friends() {
     setSearching(true);
     try {
       const response = await api(`/api/friends/search?username=${encodeURIComponent(searchQuery)}`);
-      if (response.ok) {
-        const data = await response.json();
-        setSearchResults(data);
+      if (response.status === 401 || response.status === 403) {
+        navigate("/app");
+        return;
       }
-    } catch (error) {
-      console.error("Error searching users:", error);
+      if (!response.ok) {
+        throw new Error("Falha na busca de usuários.");
+      }
+      const data = await response.json();
+      setSearchResults(Array.isArray(data) ? data : []);
+    } catch (searchError) {
+      console.error("Error searching users:", searchError);
+      setError("Não foi possível buscar usuários agora.");
     } finally {
       setSearching(false);
     }
@@ -98,11 +112,19 @@ export default function Friends() {
         body: JSON.stringify({ friend_user_id: friendUserId })
       });
 
-      if (response.ok) {
-        
-        setSearchQuery("");
-        setSearchResults([]);
+      if (response.status === 401 || response.status === 403) {
+        navigate("/app");
+        return;
       }
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as { error?: string | undefined } | null;
+        setError(payload?.error || "Não foi possível enviar solicitação de amizade.");
+        return;
+      }
+
+      setSearchQuery("");
+      setSearchResults([]);
     } catch (error) {
       console.error("Error sending friend request:", error);
     }
@@ -116,9 +138,18 @@ export default function Friends() {
         body: JSON.stringify({ request_id: requestId }),
       });
 
-      if (response.ok) {
-        loadFriends();
+      if (response.status === 401 || response.status === 403) {
+        navigate("/app");
+        return;
       }
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as { error?: string | undefined } | null;
+        setError(payload?.error || "Não foi possível aceitar a solicitação.");
+        return;
+      }
+
+      void loadFriends();
     } catch (error) {
       console.error("Error accepting request:", error);
     }
@@ -132,9 +163,18 @@ export default function Friends() {
         body: JSON.stringify({ request_id: requestId }),
       });
 
-      if (response.ok) {
-        loadFriends();
+      if (response.status === 401 || response.status === 403) {
+        navigate("/app");
+        return;
       }
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as { error?: string | undefined } | null;
+        setError(payload?.error || "Não foi possível recusar a solicitação.");
+        return;
+      }
+
+      void loadFriends();
     } catch (error) {
       console.error("Error rejecting request:", error);
     }
@@ -146,6 +186,20 @@ export default function Friends() {
 
   if (loading) {
     return <PageLoader />;
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 pb-24">
+        <div className="px-6 py-12 text-center">
+          <p className="text-red-600 mb-4">{error}</p>
+          <button onClick={() => { setLoading(true); void loadFriends(); }} className="fl-btn-primary rounded-xl px-4 py-2">
+            Tentar novamente
+          </button>
+        </div>
+        <BottomNav active="friends" />
+      </div>
+    );
   }
 
   return (
@@ -289,3 +343,8 @@ export default function Friends() {
     </div>
   );
 }
+
+
+
+
+
