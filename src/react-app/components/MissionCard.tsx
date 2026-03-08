@@ -388,10 +388,28 @@ function MissionCardComponent({ mission, onComplete }: MissionCardProps) {
   const isFailed = missionStatus === "failed";
   const isCompleted = mission.is_completed === 1 || missionStatus === "completed";
   const isCircuitMission = metricType === "circuit_tasks";
+  const isWeeklyMission = mission.type === "weekly";
+  const isMonthlyMission = mission.type === "monthly";
+  const isAIMission = mission.mission_origin === "ai";
   const circuitTasks = useMemo(() => resolveCircuitTasks(mission), [mission]);
   const completedCircuitTasks = circuitTasks.filter((task) => task.completed).length;
   const circuitProgress = circuitTasks.length > 0 ? (completedCircuitTasks / circuitTasks.length) * 100 : 0;
   const missionMediaUrl = mission.image_url ?? mission.thumbnail_url ?? null;
+  const primaryMuscle = mission.muscle_groups?.[0] ?? bodyAreaLabel(mission.body_area);
+  const hasCircuitProgress = circuitTasks.some((task) => task.current_count > 0);
+  const isInProgress = !isFailed && !isCompleted && (missionStatus === "in_progress" || hasCircuitProgress);
+  const visualState = isFailed ? "failed" : isCompleted ? "completed" : isInProgress ? "in_progress" : "available";
+  const stateLabel = visualState === "failed"
+    ? "Falhou"
+    : visualState === "completed"
+      ? "Concluida"
+      : visualState === "in_progress"
+        ? "Em progresso"
+        : "Disponivel";
+  const missionTypeLabel = mission.type === "daily" ? "Diaria" : mission.type === "weekly" ? "Semanal" : "Mensal";
+  const monthlyTarget = Math.max(1, missionTotalGoal(mission, metricType));
+  const monthlyCurrent = isCompleted ? monthlyTarget : 0;
+  const monthlyProgress = Math.min(100, Math.round((monthlyCurrent / monthlyTarget) * 100));
 
   const detailsInstructions = Array.isArray(mission.instructions) && mission.instructions.length > 0
     ? mission.instructions
@@ -420,38 +438,124 @@ function MissionCardComponent({ mission, onComplete }: MissionCardProps) {
     <>
       <Card
         tone="soft"
-        className={`p-5 transition-all ${
-          isFailed ? "border-2 border-red-200 bg-red-50 opacity-90" : "hover:shadow-xl"
-        } ${isCompleted ? "border-2 border-emerald-200 bg-emerald-50" : ""}`}
+        className={`p-5 transition-all min-h-[280px] ${
+          visualState === "failed"
+            ? "border-2 border-red-200 bg-red-50 opacity-90"
+            : visualState === "completed"
+              ? "border-2 border-emerald-200 bg-emerald-50"
+              : visualState === "in_progress"
+                ? "border-2 border-teal-200 bg-teal-50/80"
+                : "hover:shadow-xl"
+        }`}
       >
-        <div className="flex items-start justify-between mb-3">
-          <div className="flex-1">
-            <h3 className="font-semibold text-gray-900 mb-1">{mission.title}</h3>
-            {mission.description && (
-              <p className="text-sm text-gray-600 mb-2">{mission.description}</p>
+        <div className="flex items-start justify-between gap-2 mb-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge className={`w-fit ${
+              mission.type === "daily"
+                ? "bg-emerald-100 text-emerald-700 border border-emerald-200"
+                : mission.type === "weekly"
+                  ? "bg-teal-100 text-teal-700 border border-teal-200"
+                  : "bg-cyan-100 text-cyan-700 border border-cyan-200"
+            }`}>
+              {missionTypeLabel}
+            </Badge>
+            <Badge className="w-fit bg-gray-100 text-gray-700 border border-gray-200">
+              {primaryMuscle}
+            </Badge>
+            {isAIMission && (
+              <Badge className="w-fit gap-1 bg-purple-100 text-purple-700 border border-purple-200">
+                <Sparkles className="w-3 h-3" />
+                IA
+              </Badge>
             )}
-            <div className="flex flex-wrap items-center gap-2">
-              {mission.skill_name && (
-                <Badge className="w-fit gap-1">
-                  <Dumbbell className="w-3 h-3" />
-                  <span>{mission.skill_name}</span>
-                </Badge>
-              )}
-              {mission.mission_origin === "ai" && (
-                <Badge className="w-fit gap-1 bg-purple-100 text-purple-700 border border-purple-200">
-                  <Sparkles className="w-3 h-3" />
-                  <span>IA</span>
-                </Badge>
-              )}
-            </div>
           </div>
-          <div className="flex flex-col items-end gap-1">
-            <div className="text-emerald-600 font-bold text-lg">+{mission.xp_reward} XP</div>
-            <div className="text-teal-600 text-sm">+{mission.points_reward} pts</div>
-          </div>
+          <Badge className={`w-fit ${
+            visualState === "failed"
+              ? "bg-red-100 text-red-700 border border-red-200"
+              : visualState === "completed"
+                ? "bg-emerald-100 text-emerald-700 border border-emerald-200"
+                : visualState === "in_progress"
+                  ? "bg-teal-100 text-teal-700 border border-teal-200"
+                  : "bg-gray-100 text-gray-700 border border-gray-200"
+          }`}>
+            {stateLabel}
+          </Badge>
         </div>
 
-        <div className="text-sm text-gray-600 mb-3">Meta: {formatGoal(mission, metricType)}</div>
+        {!isWeeklyMission && missionMediaUrl && (
+          <div className="hidden sm:block w-full mb-3">
+            <img src={missionMediaUrl} alt={mission.title} className="w-full h-36 object-cover rounded-2xl border border-gray-200" />
+          </div>
+        )}
+
+        <h3 className="font-semibold text-gray-900 mb-1">{mission.title}</h3>
+        <p className="text-sm text-gray-500 mb-2">{primaryMuscle}</p>
+        {mission.description && (
+          <p className="text-sm text-gray-600 mb-3 line-clamp-2">{mission.description}</p>
+        )}
+
+        {isWeeklyMission ? (
+          <div className="space-y-3 mb-3">
+            <div className="flex items-center justify-between text-xs text-gray-600">
+              <span>Progresso geral</span>
+              <span>{completedCircuitTasks}/{circuitTasks.length || 1}</span>
+            </div>
+            <div className="h-2 rounded-full bg-gray-100 overflow-hidden">
+              <div className="h-full bg-emerald-500" style={{ width: `${circuitProgress}%` }} />
+            </div>
+            <div className="space-y-2">
+              {circuitTasks.map((task) => {
+                const progress = task.required_count > 0
+                  ? Math.min(100, Math.round((task.current_count / task.required_count) * 100))
+                  : 0;
+                return (
+                  <div key={task.id} className="rounded-xl border border-gray-200 p-2">
+                    <div className="flex items-center justify-between text-xs text-gray-700 mb-1">
+                      <span className="line-clamp-1">{task.label}</span>
+                      <span className="font-semibold">{task.current_count}/{task.required_count}</span>
+                    </div>
+                    <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden">
+                      <div className="h-full bg-teal-500" style={{ width: `${progress}%` }} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ) : isMonthlyMission ? (
+          <div className="space-y-2 mb-3">
+            <div className="flex items-center justify-between text-xs text-gray-600">
+              <span>Progresso mensal</span>
+              <span>{monthlyCurrent}/{monthlyTarget}</span>
+            </div>
+            <div className="h-2 rounded-full bg-gray-100 overflow-hidden">
+              <div className="h-full bg-cyan-500" style={{ width: `${monthlyProgress}%` }} />
+            </div>
+            <p className="text-sm text-gray-600">Meta: {formatGoal(mission, metricType)}</p>
+          </div>
+        ) : (
+          <div className="space-y-1 mb-3">
+            <p className="text-sm text-gray-600">Meta: {formatGoal(mission, metricType)}</p>
+            {mission.rest_seconds ? (
+              <p className="text-xs text-gray-500">Descanso entre series: {mission.rest_seconds}s</p>
+            ) : null}
+          </div>
+        )}
+
+        <div className="grid grid-cols-3 gap-2 mb-3">
+          <div className="rounded-xl border border-emerald-100 bg-emerald-50 p-2 text-center">
+            <p className="text-[10px] text-emerald-700 uppercase tracking-wide">XP</p>
+            <p className="text-sm font-bold text-emerald-700">+{mission.xp_reward}</p>
+          </div>
+          <div className="rounded-xl border border-teal-100 bg-teal-50 p-2 text-center">
+            <p className="text-[10px] text-teal-700 uppercase tracking-wide">Pontos</p>
+            <p className="text-sm font-bold text-teal-700">+{mission.points_reward}</p>
+          </div>
+          <div className="rounded-xl border border-cyan-100 bg-cyan-50 p-2 text-center">
+            <p className="text-[10px] text-cyan-700 uppercase tracking-wide">Tempo</p>
+            <p className="text-sm font-bold text-cyan-700">{mission.duration_estimate_minutes ?? 10} min</p>
+          </div>
+        </div>
 
         {mission.deadline && (
           <div className={`flex items-center gap-1 text-xs mb-3 ${isFailed ? "text-red-600" : "text-gray-500"}`}>
@@ -463,7 +567,9 @@ function MissionCardComponent({ mission, onComplete }: MissionCardProps) {
         {isFailed ? (
           <div className="w-full py-3 text-center rounded-xl bg-red-100 text-red-700 font-medium">Missao falhou por expiracao</div>
         ) : isCompleted ? (
-          <div className="w-full py-3 text-center rounded-xl bg-emerald-100 text-emerald-700 font-medium">Missao concluida</div>
+          <div className="w-full py-3 text-center rounded-xl bg-emerald-100 text-emerald-700 font-medium">
+            Missao concluida (+{mission.xp_reward} XP)
+          </div>
         ) : (
           <Button
             onClick={() => setShowDetails(true)}
