@@ -9,7 +9,7 @@ import AIMissionGenerator from "@/react-app/components/AIMissionGenerator";
 import LoadingBall from "@/react-app/components/LoadingBall";
 import { Flame, Footprints, Target, Zap, Bot, Camera } from "lucide-react";
 import type { Mission, UserProgression, DailyMetrics, UserProfile, Title } from "@/shared/types";
-import { api } from "@/react-app/utils/api";
+import { ApiRequestError, api, clearJsonCache, fetchAndCacheJson, prefetchJson, readCachedJson } from "@/react-app/utils/api";
 
 type DashboardLoadingState = {
   profile: boolean;
@@ -19,15 +19,6 @@ type DashboardLoadingState = {
   titles: boolean;
 };
 
-type DashboardSnapshot = {
-  profile: UserProfile | null;
-  progression: UserProgression | null;
-  missions: Mission[];
-  metrics: DailyMetrics | null;
-  activeTitle: Title | null;
-};
-
-const DASHBOARD_CACHE_TTL_MS = 60_000;
 const DEFAULT_LOADING_STATE: DashboardLoadingState = {
   profile: true,
   progression: true,
@@ -35,8 +26,6 @@ const DEFAULT_LOADING_STATE: DashboardLoadingState = {
   metrics: true,
   titles: true,
 };
-
-let dashboardCache: { cachedAt: number; data: DashboardSnapshot } | null = null;
 
 export default function Dashboard() {
   const { user } = useAuth();
@@ -56,38 +45,32 @@ export default function Dashboard() {
     setLoadingState((current) => ({ ...current, [section]: value }));
   }, []);
 
-  const applySnapshot = useCallback((snapshot: DashboardSnapshot) => {
-    setProfile(snapshot.profile);
-    setProgression(snapshot.progression);
-    setMissions(snapshot.missions);
-    setMetrics(snapshot.metrics);
-    setActiveTitle(snapshot.activeTitle);
-  }, []);
-
   const loadData = useCallback(async (options?: { forceRefresh?: boolean | undefined }) => {
     const forceRefresh = options?.forceRefresh === true;
 
     setError(null);
+    const cacheProfile = readCachedJson<UserProfile>("/api/profile");
+    const cacheProgression = readCachedJson<UserProgression>("/api/progression");
+    const cacheMissions = readCachedJson<Mission[]>("/api/missions");
+    const cacheMetrics = readCachedJson<DailyMetrics>("/api/metrics/today");
+    const cacheTitles = readCachedJson<Array<Title & { is_active?: number | undefined }>>("/api/titles");
 
-    if (!forceRefresh && dashboardCache) {
-      applySnapshot(dashboardCache.data);
-      setLoadingState({ profile: false, progression: false, missions: false, metrics: false, titles: false });
-      if (Date.now() - dashboardCache.cachedAt < DASHBOARD_CACHE_TTL_MS) {
-        return;
-      }
+    if (cacheProfile) setProfile(cacheProfile.data);
+    if (cacheProgression) setProgression(cacheProgression.data);
+    if (cacheMissions) setMissions(Array.isArray(cacheMissions.data) ? cacheMissions.data : []);
+    if (cacheMetrics) setMetrics(cacheMetrics.data);
+    if (cacheTitles) {
+      const active = cacheTitles.data.find((title) => title.is_active === 1) ?? null;
+      setActiveTitle(active);
     }
 
-    if (!dashboardCache || forceRefresh) {
-      setLoadingState(DEFAULT_LOADING_STATE);
-    }
-
-    const nextSnapshot: DashboardSnapshot = {
-      profile: profile ?? null,
-      progression: progression ?? null,
-      missions: missions ?? [],
-      metrics: metrics ?? null,
-      activeTitle: activeTitle ?? null,
-    };
+    setLoadingState({
+      profile: forceRefresh || !cacheProfile,
+      progression: forceRefresh || !cacheProgression,
+      missions: forceRefresh || !cacheMissions,
+      metrics: forceRefresh || !cacheMetrics,
+      titles: forceRefresh || !cacheTitles,
+    });
 
     let shouldRedirectToApp = false;
     let shouldRedirectToOnboarding = false;
@@ -96,63 +79,84 @@ export default function Dashboard() {
     const runRequest = async <T,>(
       section: keyof DashboardLoadingState,
       path: string,
+      hasCachedEntry: boolean,
+      stale: boolean,
       onSuccess: (payload: T) => void,
       onNotFound?: (() => void) | undefined,
     ) => {
+      const mustFetch = forceRefresh || !hasCachedEntry || stale;
+      if (!mustFetch) {
+        setSectionLoading(section, false);
+        return;
+      }
+
       try {
-        const response = await api(path);
-
-        if (response.status === 401 || response.status === 403) {
-          shouldRedirectToApp = true;
-          return;
-        }
-
-        if (response.status === 404 && onNotFound) {
-          onNotFound();
-          return;
-        }
-
-        if (!response.ok) {
-          hasRequestError = true;
-          throw new Error(`Falha em ${path}`);
-        }
-
-        const payload = (await response.json()) as T;
+        const payload = await fetchAndCacheJson<T>(path);
         onSuccess(payload);
-      } catch {
-        hasRequestError = true;
-        setError("Não foi possível carregar todos os dados do dashboard agora.");
+      } catch (requestError) {
+        if (requestError instanceof ApiRequestError) {
+          if (requestError.status === 401 || requestError.status === 403) {
+            shouldRedirectToApp = true;
+            return;
+          }
+
+          if (requestError.status === 404 && onNotFound) {
+            onNotFound();
+            return;
+          }
+        }
+
+        if (!hasCachedEntry) {
+          hasRequestError = true;
+          setError("Não foi possível carregar todos os dados do dashboard agora.");
+        }
       } finally {
         setSectionLoading(section, false);
       }
     };
 
     await Promise.all([
-      runRequest<UserProfile>("profile", "/api/profile", (payload) => {
-        setProfile(payload);
-        nextSnapshot.profile = payload;
-      }, () => {
-        shouldRedirectToOnboarding = true;
-      }),
-      runRequest<UserProgression>("progression", "/api/progression", (payload) => {
-        setProgression(payload);
-        nextSnapshot.progression = payload;
-      }),
-      runRequest<Mission[]>("missions", "/api/missions", (payload) => {
-        const missionList = Array.isArray(payload) ? payload : [];
-        setMissions(missionList);
-        nextSnapshot.missions = missionList;
-      }),
-      runRequest<DailyMetrics>("metrics", "/api/metrics/today", (payload) => {
-        setMetrics(payload);
-        nextSnapshot.metrics = payload;
-      }),
-      runRequest<Array<Title & { is_active?: number | undefined }>>("titles", "/api/titles", (payload) => {
-        const titleList = Array.isArray(payload) ? payload : [];
-        const active = titleList.find((title) => title.is_active === 1) ?? null;
-        setActiveTitle(active);
-        nextSnapshot.activeTitle = active;
-      }),
+      runRequest<UserProfile>(
+        "profile",
+        "/api/profile",
+        Boolean(cacheProfile),
+        Boolean(cacheProfile?.stale),
+        (payload) => setProfile(payload),
+        () => {
+          shouldRedirectToOnboarding = true;
+        }
+      ),
+      runRequest<UserProgression>(
+        "progression",
+        "/api/progression",
+        Boolean(cacheProgression),
+        Boolean(cacheProgression?.stale),
+        (payload) => setProgression(payload)
+      ),
+      runRequest<Mission[]>(
+        "missions",
+        "/api/missions",
+        Boolean(cacheMissions),
+        Boolean(cacheMissions?.stale),
+        (payload) => setMissions(Array.isArray(payload) ? payload : [])
+      ),
+      runRequest<DailyMetrics>(
+        "metrics",
+        "/api/metrics/today",
+        Boolean(cacheMetrics),
+        Boolean(cacheMetrics?.stale),
+        (payload) => setMetrics(payload)
+      ),
+      runRequest<Array<Title & { is_active?: number | undefined }>>(
+        "titles",
+        "/api/titles",
+        Boolean(cacheTitles),
+        Boolean(cacheTitles?.stale),
+        (payload) => {
+          const active = (Array.isArray(payload) ? payload : []).find((title) => title.is_active === 1) ?? null;
+          setActiveTitle(active);
+        }
+      ),
     ]);
 
     if (shouldRedirectToApp) {
@@ -165,13 +169,10 @@ export default function Dashboard() {
       return;
     }
 
-    if (!hasRequestError) {
-      dashboardCache = {
-        cachedAt: Date.now(),
-        data: nextSnapshot,
-      };
+    if (hasRequestError) {
+      return;
     }
-  }, [activeTitle, applySnapshot, metrics, missions, navigate, profile, progression, setSectionLoading]);
+  }, [navigate, setSectionLoading]);
 
   useEffect(() => {
     if (!user) {
@@ -189,10 +190,19 @@ export default function Dashboard() {
     void import("@/react-app/pages/Ranking");
     void import("@/react-app/pages/AIChat");
     void import("@/react-app/pages/FoodAnalysis");
+    void prefetchJson("/api/profile");
+    void prefetchJson("/api/progression");
+    void prefetchJson("/api/missions");
+    void prefetchJson("/api/metrics/today");
+    void prefetchJson("/api/titles");
   }, []);
 
   const refreshData = useCallback(async () => {
-    dashboardCache = null;
+    clearJsonCache("/api/profile");
+    clearJsonCache("/api/progression");
+    clearJsonCache("/api/missions");
+    clearJsonCache("/api/metrics/today");
+    clearJsonCache("/api/titles");
     await loadData({ forceRefresh: true });
   }, [loadData]);
 
@@ -223,11 +233,13 @@ export default function Dashboard() {
       const result = (await response.json()) as { leveledUp?: boolean | undefined };
 
       if (result.leveledUp) {
-        const progressionResponse = await api("/api/progression");
-        if (progressionResponse.ok) {
-          const updatedProgression = (await progressionResponse.json()) as UserProgression;
+        clearJsonCache("/api/progression");
+        try {
+          const updatedProgression = await fetchAndCacheJson<UserProgression>("/api/progression");
           setNewLevel(Number(updatedProgression.level ?? 0));
           setShowLevelUp(true);
+        } catch {
+          // Non-blocking: dashboard refresh below will reconcile progression state.
         }
       }
 

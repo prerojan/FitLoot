@@ -3,7 +3,6 @@ import { useNavigate } from "react-router";
 import { useAuth } from "@/react-app/App";
 import BottomNav from "@/react-app/components/BottomNav";
 import ProfileFriendsPanel from "@/react-app/components/ProfileFriendsPanel";
-import PageLoader from "@/react-app/components/PageLoader";
 import LoadingBall from "@/react-app/components/LoadingBall";
 import { LogOut, Trophy, Award, Dumbbell, Target, Settings } from "lucide-react";
 import type {
@@ -14,7 +13,7 @@ import type {
   AchievementWithUnlock,
   TitleWithUnlock,
 } from "@/shared/types";
-import { api } from "@/react-app/utils/api";
+import { ApiRequestError, api, clearJsonCache, fetchAndCacheJson, readCachedJson } from "@/react-app/utils/api";
 import { applyProfileTheme } from "@/react-app/utils/theme";
 
 const FONT_OPTIONS = [
@@ -57,6 +56,10 @@ export default function Profile() {
   const [primaryColor, setPrimaryColor] = useState(DEFAULT_PRIMARY_COLOR);
   const [secondaryColor, setSecondaryColor] = useState(DEFAULT_SECONDARY_COLOR);
   const [customFont, setCustomFont] = useState<string>("rajdhani");
+  const [feedbackType, setFeedbackType] = useState<"Sugestao" | "Bug" | "Elogio" | "Outro">("Sugestao");
+  const [feedbackMessage, setFeedbackMessage] = useState("");
+  const [feedbackSending, setFeedbackSending] = useState(false);
+  const [feedbackStatus, setFeedbackStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
   const primaryColorInputRef = useRef<HTMLInputElement>(null);
   const secondaryColorInputRef = useRef<HTMLInputElement>(null);
@@ -74,41 +77,70 @@ export default function Profile() {
   }, []);
 
   const loadData = useCallback(async () => {
-    try {
-      setError(null);
-      const [profileRes, attrsRes, progRes, skillsRes, achievementsRes, titlesRes] = await Promise.all([
-        api("/api/profile"),
-        api("/api/attributes"),
-        api("/api/progression"),
-        api("/api/skills"),
-        api("/api/achievements"),
-        api("/api/titles"),
-      ]);
+    setError(null);
 
-      if (profileRes.status === 401 || profileRes.status === 403) {
-        navigate("/app");
-        return;
-      }
+    const cacheProfile = readCachedJson<UserProfile>("/api/profile");
+    const cacheAttributes = readCachedJson<UserAttributes>("/api/attributes");
+    const cacheProgression = readCachedJson<UserProgression>("/api/progression");
+    const cacheSkills = readCachedJson<SkillWithProgress[]>("/api/skills");
+    const cacheAchievements = readCachedJson<AchievementWithUnlock[]>("/api/achievements");
+    const cacheTitles = readCachedJson<TitleWithUnlock[]>("/api/titles");
 
-      if (!profileRes.ok || !attrsRes.ok || !progRes.ok || !skillsRes.ok || !achievementsRes.ok || !titlesRes.ok) {
-        throw new Error("Falha ao carregar perfil.");
-      }
-
-      const profileData = (await profileRes.json()) as UserProfile;
+    if (cacheProfile) {
+      const profileData = cacheProfile.data;
       setProfile(profileData);
       setBgPreview(profileData?.custom_background_type === "image" ? profileData?.custom_background_value ?? null : null);
       setPrimaryColor(profileData?.custom_primary_color ?? DEFAULT_PRIMARY_COLOR);
       setSecondaryColor(profileData?.custom_secondary_color ?? DEFAULT_SECONDARY_COLOR);
       setCustomFont(profileData?.custom_font ?? "rajdhani");
       applyProfileTheme(profileData);
+    }
+    if (cacheAttributes) setAttributes(cacheAttributes.data);
+    if (cacheProgression) setProgression(cacheProgression.data);
+    if (cacheSkills) setSkills(Array.isArray(cacheSkills.data) ? cacheSkills.data : []);
+    if (cacheAchievements) setAchievements(Array.isArray(cacheAchievements.data) ? cacheAchievements.data : []);
+    if (cacheTitles) setTitles(Array.isArray(cacheTitles.data) ? cacheTitles.data : []);
 
-      setAttributes((await attrsRes.json()) as UserAttributes);
-      setProgression((await progRes.json()) as UserProgression);
-      setSkills((await skillsRes.json()) as SkillWithProgress[]);
-      setAchievements((await achievementsRes.json()) as AchievementWithUnlock[]);
-      setTitles((await titlesRes.json()) as TitleWithUnlock[]);
-    } catch {
-      setError("Não foi possível carregar o perfil agora.");
+    const hasAnyCache = Boolean(cacheProfile || cacheAttributes || cacheProgression || cacheSkills || cacheAchievements || cacheTitles);
+    if (hasAnyCache) {
+      setLoading(false);
+    }
+
+    const runSection = async <T,>(
+      path: string,
+      cacheState: { stale: boolean } | null,
+      onSuccess: (value: T) => void,
+    ) => {
+      const shouldFetch = !cacheState || cacheState.stale;
+      if (!shouldFetch) return;
+      const payload = await fetchAndCacheJson<T>(path);
+      onSuccess(payload);
+    };
+
+    try {
+      await Promise.all([
+        runSection<UserProfile>("/api/profile", cacheProfile, (profileData) => {
+          setProfile(profileData);
+          setBgPreview(profileData?.custom_background_type === "image" ? profileData?.custom_background_value ?? null : null);
+          setPrimaryColor(profileData?.custom_primary_color ?? DEFAULT_PRIMARY_COLOR);
+          setSecondaryColor(profileData?.custom_secondary_color ?? DEFAULT_SECONDARY_COLOR);
+          setCustomFont(profileData?.custom_font ?? "rajdhani");
+          applyProfileTheme(profileData);
+        }),
+        runSection<UserAttributes>("/api/attributes", cacheAttributes, (payload) => setAttributes(payload)),
+        runSection<UserProgression>("/api/progression", cacheProgression, (payload) => setProgression(payload)),
+        runSection<SkillWithProgress[]>("/api/skills", cacheSkills, (payload) => setSkills(Array.isArray(payload) ? payload : [])),
+        runSection<AchievementWithUnlock[]>("/api/achievements", cacheAchievements, (payload) => setAchievements(Array.isArray(payload) ? payload : [])),
+        runSection<TitleWithUnlock[]>("/api/titles", cacheTitles, (payload) => setTitles(Array.isArray(payload) ? payload : [])),
+      ]);
+    } catch (loadError) {
+      if (loadError instanceof ApiRequestError && (loadError.status === 401 || loadError.status === 403)) {
+        navigate("/app");
+        return;
+      }
+      if (!hasAnyCache) {
+        setError("Não foi possível carregar o perfil agora.");
+      }
     } finally {
       setLoading(false);
     }
@@ -125,6 +157,7 @@ export default function Profile() {
 
   const handleLogout = () => {
     logout();
+    clearJsonCache();
     navigate("/app", { replace: true });
     api("/api/logout", { credentials: "include" }).catch(() => undefined);
   };
@@ -132,6 +165,7 @@ export default function Profile() {
   const handleActivateTitle = async (titleId: number) => {
     try {
       await api(`/api/titles/${titleId}/activate`, { method: "POST" });
+      clearJsonCache("/api/titles");
       await loadData();
     } catch {
       setError("Não foi possível ativar o título agora.");
@@ -230,8 +264,61 @@ export default function Profile() {
     await saveCustomization({ custom_background_type: "color", custom_background_value: "#0f172a" });
   };
 
-  if (loading) {
-    return <PageLoader />;
+  const sendFeedback = async () => {
+    if (feedbackMessage.trim().length < 5) {
+      setFeedbackStatus({ type: "error", message: "Escreva pelo menos 5 caracteres." });
+      return;
+    }
+
+    try {
+      setFeedbackSending(true);
+      setFeedbackStatus(null);
+      const response = await api("/api/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: feedbackType,
+          message: feedbackMessage.trim(),
+        }),
+      });
+
+      if (response.status === 401 || response.status === 403) {
+        navigate("/app");
+        return;
+      }
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as { error?: string | undefined } | null;
+        throw new Error(payload?.error ?? "Falha ao enviar feedback.");
+      }
+
+      setFeedbackMessage("");
+      setFeedbackType("Sugestao");
+      setFeedbackStatus({ type: "success", message: "Feedback enviado! Obrigado." });
+    } catch (submitError) {
+      setFeedbackStatus({
+        type: "error",
+        message: submitError instanceof Error ? submitError.message : "Nao foi possivel enviar feedback agora.",
+      });
+    } finally {
+      setFeedbackSending(false);
+    }
+  };
+
+  if (loading && !profile && !attributes && !progression) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 pb-24">
+        <div className="px-6 py-10 space-y-4">
+          <div className="fl-card p-6 flex items-center justify-center">
+            <LoadingBall size="md" />
+          </div>
+          <div className="fl-card p-6 flex items-center justify-center">
+            <LoadingBall size="sm" />
+          </div>
+        </div>
+        <BottomNav active="profile" />
+      </div>
+    );
   }
 
   if (error) {
@@ -469,6 +556,43 @@ export default function Profile() {
                   Personalização visual disponível apenas no mobile (largura até 768px).
                 </div>
               )}
+
+              <div className="rounded-2xl border border-gray-200 p-4 space-y-3">
+                <h3 className="font-semibold text-gray-900">Enviar Feedback</h3>
+                <select
+                  value={feedbackType}
+                  onChange={(event) => setFeedbackType(event.target.value as "Sugestao" | "Bug" | "Elogio" | "Outro")}
+                  className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm"
+                >
+                  <option value="Sugestao">Sugestao</option>
+                  <option value="Bug">Bug</option>
+                  <option value="Elogio">Elogio</option>
+                  <option value="Outro">Outro</option>
+                </select>
+                <textarea
+                  value={feedbackMessage}
+                  onChange={(event) => setFeedbackMessage(event.target.value)}
+                  className="w-full min-h-[110px] rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm resize-y"
+                  placeholder="Escreva seu feedback aqui..."
+                />
+                {feedbackStatus && (
+                  <p
+                    className={`text-sm ${
+                      feedbackStatus.type === "success" ? "text-emerald-700" : "text-red-600"
+                    }`}
+                  >
+                    {feedbackStatus.message}
+                  </p>
+                )}
+                <button
+                  onClick={() => { void sendFeedback(); }}
+                  disabled={feedbackSending}
+                  className="fl-btn-primary rounded-xl px-4 py-2 min-w-[120px] inline-flex items-center justify-center gap-2 disabled:opacity-70"
+                >
+                  {feedbackSending ? <LoadingBall size="sm" /> : null}
+                  {feedbackSending ? "Enviando..." : "Enviar"}
+                </button>
+              </div>
             </div>
           </div>
         </div>
