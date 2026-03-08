@@ -3,18 +3,18 @@ import { useState, useEffect, createContext, useContext, lazy, Suspense } from "
 import PageLoader from "@/react-app/components/PageLoader";
 import { ROUTE_PATHS, AUTHENTICATED_HINT_KEY } from "@/react-app/constants/auth";
 import { useAuthBootstrap } from "@/react-app/hooks/useAuthBootstrap";
-import HomePage from "@/react-app/pages/Home";
-import LandingPage from "@/react-app/pages/Landing";
-import Onboarding from "@/react-app/pages/Onboarding";
 import { prefetchCoreRoutes, resolveAuthenticatedStartRoute } from "@/react-app/services/authService";
 import type { AuthContextType, User } from "@/react-app/types/auth";
 import { applyProfileTheme } from "@/react-app/utils/theme";
 
+const HomePage = lazy(() => import("@/react-app/pages/Home"));
+const LandingPage = lazy(() => import("@/react-app/pages/Landing"));
+const Onboarding = lazy(() => import("@/react-app/pages/Onboarding"));
 const Dashboard = lazy(() => import("@/react-app/pages/Dashboard"));
 const Profile = lazy(() => import("@/react-app/pages/Profile"));
 const Shop = lazy(() => import("@/react-app/pages/Shop"));
 const Ranking = lazy(() => import("@/react-app/pages/Ranking"));
-const Friends = lazy(() => import("@/react-app/pages/Friends"));
+const Arena = lazy(() => import("@/react-app/pages/Arena"));
 const MiniGames = lazy(() => import("@/react-app/pages/MiniGames"));
 const AIChat = lazy(() => import("@/react-app/pages/AIChat"));
 const FoodAnalysis = lazy(() => import("@/react-app/pages/FoodAnalysis"));
@@ -83,7 +83,7 @@ export default function App() {
             <Route path={ROUTE_PATHS.profile} element={<ProtectedRoute><Profile /></ProtectedRoute>} />
             <Route path={ROUTE_PATHS.shop} element={<ProtectedRoute><Shop /></ProtectedRoute>} />
             <Route path={ROUTE_PATHS.ranking} element={<ProtectedRoute><Ranking /></ProtectedRoute>} />
-            <Route path={ROUTE_PATHS.friends} element={<ProtectedRoute><Friends /></ProtectedRoute>} />
+            <Route path={ROUTE_PATHS.friends} element={<ProtectedRoute><Arena /></ProtectedRoute>} />
             <Route path={ROUTE_PATHS.minigames} element={<ProtectedRoute><MiniGames /></ProtectedRoute>} />
             <Route path={ROUTE_PATHS.aiChat} element={<ProtectedRoute><AIChat /></ProtectedRoute>} />
             <Route path={ROUTE_PATHS.foodAnalysis} element={<ProtectedRoute><FoodAnalysis /></ProtectedRoute>} />

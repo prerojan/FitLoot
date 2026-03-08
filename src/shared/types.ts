@@ -97,6 +97,17 @@ export const UserSkillSchema = z.object({
 
 export type UserSkill = z.infer<typeof UserSkillSchema>;
 
+export const MissionMetricTypeSchema = z.enum([
+  "repetitions",
+  "duration_seconds",
+  "sets_reps",
+  "steps",
+  "distance_meters",
+  "duration_minutes",
+]);
+
+export type MissionMetricType = z.infer<typeof MissionMetricTypeSchema>;
+
 // Mission Schema
 export const MissionSchema = z.object({
   id: z.number(),
@@ -107,6 +118,19 @@ export const MissionSchema = z.object({
   skill_id: z.number().nullable(),
   target_reps: z.number().nullable(),
   target_time: z.number().nullable(),
+  metric_type: MissionMetricTypeSchema.optional(),
+  metric_value: z.number().optional(),
+  metric_unit: z.string().optional(),
+  sets: z.number().nullable().optional(),
+  rest_seconds: z.number().nullable().optional(),
+  instructions: z.array(z.string()).optional(),
+  image_url: z.string().nullable().optional(),
+  muscle_groups: z.array(z.string()).optional(),
+  exercise_type: z.string().optional(),
+  body_area: z.enum(["upper", "lower", "core", "full_body"]).optional(),
+  attributes_benefited: z.array(z.string()).optional(),
+  duration_estimate_minutes: z.number().optional(),
+  exercise_category: z.string().optional(),
   xp_reward: z.number(),
   points_reward: z.number(),
   deadline: z.string().nullable(),
@@ -234,6 +258,7 @@ export const CompleteMissionRequestSchema = z.object({
   mission_id: z.number(),
   reps_completed: z.number().min(0).optional(),
   time_completed: z.number().min(0).optional(),
+  metric_completed: z.number().min(0).optional(),
   sensor_verified: z.boolean(),
 });
 

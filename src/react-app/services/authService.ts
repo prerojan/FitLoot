@@ -15,7 +15,11 @@ export async function notifyAppOpen(): Promise<void> {
 export function prefetchCoreRoutes(): void {
   void import(`@/react-app/pages/Dashboard`);
   void import(`@/react-app/pages/Profile`);
-  void import(`@/react-app/pages/Friends`);
+  void import(`@/react-app/pages/Arena`);
+  void import(`@/react-app/pages/Shop`);
+  void import(`@/react-app/pages/Ranking`);
+  void import(`@/react-app/pages/AIChat`);
+  void import(`@/react-app/pages/FoodAnalysis`);
 }
 
 export function resolveAuthenticatedStartRoute(user: User): string {

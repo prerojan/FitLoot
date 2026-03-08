@@ -1,8 +1,8 @@
 import { useNavigate } from "react-router";
-import { Target, ShoppingBag, Users, TrendingUp, User } from "lucide-react";
+import { Target, ShoppingBag, Swords, TrendingUp, User } from "lucide-react";
 
 interface BottomNavProps {
-  active: 'missions' | 'shop' | 'friends' | 'ranking' | 'profile';
+  active: "missions" | "shop" | "arena" | "ranking" | "profile";
 }
 
 export default function BottomNav({ active }: BottomNavProps) {
@@ -25,10 +25,10 @@ export default function BottomNav({ active }: BottomNavProps) {
             onClick={() => navigate('/shop')}
           />
           <NavButton
-            icon={<Users className="w-6 h-6" />}
-            label="Amigos"
-            active={active === 'friends'}
-            onClick={() => navigate('/friends')}
+            icon={<Swords className="w-6 h-6" />}
+            label="Arena"
+            active={active === "arena"}
+            onClick={() => navigate("/friends")}
           />
           <NavButton
             icon={<TrendingUp className="w-6 h-6" />}
@@ -64,8 +64,8 @@ function NavButton({
       onClick={onClick}
       className={`flex flex-col items-center gap-1 px-3 py-2 rounded-xl transition-all ${
         active
-          ? "text-emerald-600 bg-emerald-50"
-          : "text-gray-500 hover:text-gray-700 hover:bg-gray-50"
+          ? "text-emerald-600 bg-emerald-50 shadow-[0_0_16px_rgba(16,185,129,0.35)]"
+          : "text-gray-500/80 hover:text-gray-700 hover:bg-gray-50"
       }`}
     >
       {icon}

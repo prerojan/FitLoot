@@ -27,7 +27,7 @@ type DashboardSnapshot = {
   activeTitle: Title | null;
 };
 
-const DASHBOARD_CACHE_TTL_MS = 30_000;
+const DASHBOARD_CACHE_TTL_MS = 60_000;
 const DEFAULT_LOADING_STATE: DashboardLoadingState = {
   profile: true,
   progression: true,
@@ -69,13 +69,17 @@ export default function Dashboard() {
 
     setError(null);
 
-    if (!forceRefresh && dashboardCache && Date.now() - dashboardCache.cachedAt < DASHBOARD_CACHE_TTL_MS) {
+    if (!forceRefresh && dashboardCache) {
       applySnapshot(dashboardCache.data);
       setLoadingState({ profile: false, progression: false, missions: false, metrics: false, titles: false });
-      return;
+      if (Date.now() - dashboardCache.cachedAt < DASHBOARD_CACHE_TTL_MS) {
+        return;
+      }
     }
 
-    setLoadingState(DEFAULT_LOADING_STATE);
+    if (!dashboardCache || forceRefresh) {
+      setLoadingState(DEFAULT_LOADING_STATE);
+    }
 
     const nextSnapshot: DashboardSnapshot = {
       profile: profile ?? null,
@@ -180,6 +184,9 @@ export default function Dashboard() {
 
   useEffect(() => {
     void import("@/react-app/pages/Profile");
+    void import("@/react-app/pages/Arena");
+    void import("@/react-app/pages/Shop");
+    void import("@/react-app/pages/Ranking");
     void import("@/react-app/pages/AIChat");
     void import("@/react-app/pages/FoodAnalysis");
   }, []);
@@ -189,14 +196,15 @@ export default function Dashboard() {
     await loadData({ forceRefresh: true });
   }, [loadData]);
 
-  const handleMissionComplete = async (missionId: number, reps: number, verified: boolean) => {
+  const handleMissionComplete = async (missionId: number, metricValue: number, verified: boolean) => {
     try {
       const response = await api("/api/missions/complete", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           mission_id: missionId,
-          reps_completed: reps,
+          reps_completed: metricValue,
+          metric_completed: metricValue,
           sensor_verified: verified,
         }),
       });
@@ -414,7 +422,7 @@ function MissionSection({
   title: string;
   icon: React.ReactNode;
   missions: Mission[];
-  onComplete: (id: number, reps: number, verified: boolean) => void;
+  onComplete: (id: number, reps: number, verified: boolean) => Promise<void> | void;
 }) {
   if (missions.length === 0) return null;
 
