@@ -82,6 +82,8 @@ export default function FoodAnalysis() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const classifierRef = useRef<MediaPipeClassifier | null>(null);
   const classifierInitRef = useRef<Promise<void> | null>(null);
+  const mountedRef = useRef(true);
+  const classifierClosingRef = useRef(false);
 
   const [streamActive, setStreamActive] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
@@ -95,29 +97,42 @@ export default function FoodAnalysis() {
   const [mediaPipeLoading, setMediaPipeLoading] = useState(true);
   const [mediaPipeError, setMediaPipeError] = useState<string | null>(null);
 
-  const stopCamera = () => {
+  const stopCamera = (updateState = true) => {
     const stream = videoRef.current?.srcObject as MediaStream | null;
     stream?.getTracks().forEach((track) => track.stop());
     if (videoRef.current) {
       videoRef.current.srcObject = null;
     }
-    setStreamActive(false);
+    if (updateState && mountedRef.current) {
+      setStreamActive(false);
+    }
   };
 
   const destroyMediaPipe = () => {
+    if (classifierClosingRef.current) return;
+    classifierClosingRef.current = true;
     const classifier = classifierRef.current;
     if (classifier) {
-      classifier.close();
+      try {
+        classifier.close();
+      } catch {
+        // no-op: evita crash em desmontagem concorrente
+      }
       classifierRef.current = null;
     }
-    setMediaPipeReady(false);
+    if (mountedRef.current) {
+      setMediaPipeReady(false);
+    }
+    classifierClosingRef.current = false;
   };
 
   const initializeMediaPipe = async () => {
     if (classifierRef.current) {
-      setMediaPipeReady(true);
-      setMediaPipeError(null);
-      setMediaPipeLoading(false);
+      if (mountedRef.current) {
+        setMediaPipeReady(true);
+        setMediaPipeError(null);
+        setMediaPipeLoading(false);
+      }
       return;
     }
 
@@ -126,7 +141,9 @@ export default function FoodAnalysis() {
       return;
     }
 
-    setMediaPipeLoading(true);
+    if (mountedRef.current) {
+      setMediaPipeLoading(true);
+    }
     const initPromise = (async () => {
       try {
         const visionModule = await loadVisionModule();
@@ -143,13 +160,19 @@ export default function FoodAnalysis() {
           runningMode: "IMAGE",
         });
 
-        setMediaPipeReady(true);
-        setMediaPipeError(null);
+        if (mountedRef.current) {
+          setMediaPipeReady(true);
+          setMediaPipeError(null);
+        }
       } catch {
-        setMediaPipeReady(false);
-        setMediaPipeError("Não foi possível inicializar o MediaPipe. Verifique sua conexão e tente novamente.");
+        if (mountedRef.current) {
+          setMediaPipeReady(false);
+          setMediaPipeError("Não foi possível inicializar o MediaPipe. Verifique sua conexão e tente novamente.");
+        }
       } finally {
-        setMediaPipeLoading(false);
+        if (mountedRef.current) {
+          setMediaPipeLoading(false);
+        }
       }
     })();
 
@@ -159,11 +182,14 @@ export default function FoodAnalysis() {
   };
 
   useEffect(() => {
+    mountedRef.current = true;
     void initializeMediaPipe();
 
     return () => {
-      stopCamera();
+      mountedRef.current = false;
+      stopCamera(false);
       destroyMediaPipe();
+      classifierInitRef.current = null;
     };
   }, []);
 

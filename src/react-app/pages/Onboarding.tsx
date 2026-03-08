@@ -10,6 +10,7 @@
 import { useNavigate } from "react-router";
 import { useAuth } from "@/react-app/App";
 import PageLoader from "@/react-app/components/PageLoader";
+import LoadingBall from "@/react-app/components/LoadingBall";
 import { api } from "@/react-app/utils/api";
 import { safeGet } from "@/utils/typeHelpers";
 import { Button } from "@/react-app/components/ui/button";
@@ -1218,8 +1219,17 @@ export default function Onboarding() {
                 size="lg"
                 className="w-full rounded-xl disabled:opacity-50"
               >
-                {stepLoading ? "Criando conta..." : "Criar conta e finalizar"}
-                {!stepLoading && <ArrowRight className="ml-2 h-4 w-4" />}
+                {stepLoading ? (
+                  <span className="inline-flex items-center gap-2">
+                    <LoadingBall size="sm" />
+                    Criando conta
+                  </span>
+                ) : (
+                  <>
+                    Criar conta e finalizar
+                    <ArrowRight className="ml-2 h-4 w-4" />
+                  </>
+                )}
               </Button>
             </form>
           )}

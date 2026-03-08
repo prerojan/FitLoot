@@ -16,6 +16,7 @@ import {
 import { api } from "@/react-app/utils/api";
 import { Button } from "@/react-app/components/ui/button";
 import { Input } from "@/react-app/components/ui/input";
+import LoadingBall from "@/react-app/components/LoadingBall";
 
 type LoginForm = {
   email: string;
@@ -276,8 +277,17 @@ const Home: FC = () => {
                 disabled={isLoading || !form.email || !form.password}
                 className="fl-btn-primary w-full py-4 rounded-2xl text-base shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
               >
-                {isLoading ? "Entrando..." : "Entrar"}
-                {!isLoading && <ArrowRight className="ml-2 w-5 h-5" />}
+                {isLoading ? (
+                  <span className="inline-flex items-center gap-2">
+                    <LoadingBall size="sm" />
+                    Entrando
+                  </span>
+                ) : (
+                  <>
+                    Entrar
+                    <ArrowRight className="ml-2 w-5 h-5" />
+                  </>
+                )}
               </Button>
             </form>
 

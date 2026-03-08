@@ -238,19 +238,23 @@ export default function Dashboard() {
   };
 
   const dailyMissions = useMemo(
-    () => missions.filter((mission) => mission.type === "daily" && mission.is_completed !== 1),
+    () => missions.filter((mission) => mission.type === "daily" && mission.is_completed !== 1 && mission.mission_origin !== "ai"),
     [missions],
   );
   const failedMissions = useMemo(
-    () => missions.filter((mission) => mission.status === "failed" && mission.is_completed !== 1),
+    () => missions.filter((mission) => mission.status === "failed" && mission.is_completed !== 1 && mission.mission_origin !== "ai"),
     [missions],
   );
   const weeklyMissions = useMemo(
-    () => missions.filter((mission) => mission.type === "weekly" && mission.is_completed !== 1 && mission.status !== "failed"),
+    () => missions.filter((mission) => mission.type === "weekly" && mission.is_completed !== 1 && mission.status !== "failed" && mission.mission_origin !== "ai"),
     [missions],
   );
   const monthlyMissions = useMemo(
-    () => missions.filter((mission) => mission.type === "monthly" && mission.is_completed !== 1 && mission.status !== "failed"),
+    () => missions.filter((mission) => mission.type === "monthly" && mission.is_completed !== 1 && mission.status !== "failed" && mission.mission_origin !== "ai"),
+    [missions],
+  );
+  const aiSpecialMissions = useMemo(
+    () => missions.filter((mission) => mission.mission_origin === "ai" && mission.is_completed !== 1),
     [missions],
   );
 
@@ -334,6 +338,15 @@ export default function Dashboard() {
               missions={dailyMissions}
               onComplete={handleMissionComplete}
             />
+
+            {aiSpecialMissions.length > 0 && (
+              <MissionSection
+                title="Missões Especiais IA"
+                icon={<Bot className="w-5 h-5" />}
+                missions={aiSpecialMissions}
+                onComplete={handleMissionComplete}
+              />
+            )}
 
             {failedMissions.length > 0 && (
               <MissionSection
