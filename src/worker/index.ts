@@ -19,7 +19,7 @@ import { assertString, safeGet } from "../utils/typeHelpers";
 import { toStatusCode } from "./httpHelpers";
 import { processDailyResetForAllUsers } from "./services/dailyReset";
 
-// Tipo do usuário autenticado
+// Tipo do usuÃ¡rio autenticado
 interface AuthUser {
   id: string;
   email: string;
@@ -66,7 +66,7 @@ async function hasCoreSchema(db: D1Database) {
 function databaseNotInitializedResponse(c: import("hono").Context<AppContext>) {
   return c.json(
     {
-      error: 'Banco local não inicializado. Execute as migrations D1 antes de usar a API.',
+      error: 'Banco local nÃ£o inicializado. Execute as migrations D1 antes de usar a API.',
       code: 'DB_NOT_INITIALIZED',
     },
     503
@@ -80,7 +80,7 @@ async function ensureCatalogReady(db: D1Database) {
   catalogInitCheckedAt = now;
 }
 
-// Middleware de autenticação próprio
+// Middleware de autenticaÃ§Ã£o prÃ³prio
 function parseCookieHeader(cookieHeader: string | undefined) {
   if (!cookieHeader) return new Map<string, string>();
 
@@ -198,7 +198,7 @@ async function authMiddleware(
   try {
     await ensureCatalogReady(c.env.fitloot_db);
   } catch (error) {
-    console.error("[authMiddleware][ensureCatalogReady] Falha ao inicializar catálogo de gamificação", {
+    console.error("[authMiddleware][ensureCatalogReady] Falha ao inicializar catÃ¡logo de gamificaÃ§Ã£o", {
       message: error instanceof Error ? error.message : String(error),
     });
   }
@@ -222,7 +222,7 @@ async function authMiddleware(
     const userRecord = await getUserAuthRecordById(c.env.fitloot_db, session.user_id);
 
     if (!userRecord) {
-      return c.json({ error: "Usuário não encontrado", code: "USER_NOT_FOUND" }, 404);
+      return c.json({ error: "UsuÃ¡rio nÃ£o encontrado", code: "USER_NOT_FOUND" }, 404);
     }
 
     (c as import("hono").Context<AppContext>).set("user", {
@@ -326,27 +326,27 @@ const localExercisePool: ExerciseRef[] = [
 ];
 
 const coreSkillSeeds: SkillSeed[] = [
-  { name: "Flexão", category: "peito", difficulty: "basico", tier: "iniciante", requiredLevel: 1, description: "Empurrar horizontal com peso corporal", unlockMessage: "Flexão desbloqueada." },
-  { name: "Agachamento", category: "pernas", difficulty: "basico", tier: "iniciante", requiredLevel: 1, description: "Base para força de membros inferiores", unlockMessage: "Agachamento desbloqueado." },
+  { name: "FlexÃ£o", category: "peito", difficulty: "basico", tier: "iniciante", requiredLevel: 1, description: "Empurrar horizontal com peso corporal", unlockMessage: "FlexÃ£o desbloqueada." },
+  { name: "Agachamento", category: "pernas", difficulty: "basico", tier: "iniciante", requiredLevel: 1, description: "Base para forÃ§a de membros inferiores", unlockMessage: "Agachamento desbloqueado." },
   { name: "Abdominal", category: "core", difficulty: "basico", tier: "iniciante", requiredLevel: 1, description: "Fortalecimento de core", unlockMessage: "Abdominal desbloqueado." },
   { name: "Prancha", category: "core", difficulty: "basico", tier: "iniciante", requiredLevel: 1, description: "Isometria de core", unlockMessage: "Prancha desbloqueada." },
-  { name: "Barra Fixa", category: "costas", difficulty: "intermediario", tier: "intermediario", requiredLevel: 5, description: "Puxada vertical", unlockMessage: "Barra fixa disponível." },
+  { name: "Barra Fixa", category: "costas", difficulty: "intermediario", tier: "intermediario", requiredLevel: 5, description: "Puxada vertical", unlockMessage: "Barra fixa disponÃ­vel." },
   { name: "Dips", category: "triceps", difficulty: "intermediario", tier: "intermediario", requiredLevel: 7, description: "Empurrar em barras paralelas", unlockMessage: "Dips desbloqueado." },
-  { name: "Handstand", category: "calistenia", difficulty: "calistenia", tier: "calistenico", requiredLevel: 6, description: "Progressão de equilíbrio invertido", unlockMessage: "Inicie sua jornada no handstand.", prerequisites: ["Prancha"], attributeRequirements: { strength: 20, dexterity: 20 } },
+  { name: "Handstand", category: "calistenia", difficulty: "calistenia", tier: "calistenico", requiredLevel: 6, description: "ProgressÃ£o de equilÃ­brio invertido", unlockMessage: "Inicie sua jornada no handstand.", prerequisites: ["Prancha"], attributeRequirements: { strength: 20, dexterity: 20 } },
   { name: "Front Lever", category: "calistenia", difficulty: "calistenia", tier: "calistenico", requiredLevel: 10, description: "Alavanca frontal", unlockMessage: "Front Lever desbloqueado.", prerequisites: ["Barra Fixa"], attributeRequirements: { strength: 30 } },
   { name: "Back Lever", category: "calistenia", difficulty: "calistenia", tier: "calistenico", requiredLevel: 10, description: "Alavanca posterior", unlockMessage: "Back Lever desbloqueado.", prerequisites: ["Barra Fixa"], attributeRequirements: { strength: 30 } },
-  { name: "Planche", category: "calistenia", difficulty: "calistenia", tier: "calistenico", requiredLevel: 12, description: "Sustentação horizontal", unlockMessage: "Planche desbloqueada.", prerequisites: ["Dips"], attributeRequirements: { strength: 38 } },
+  { name: "Planche", category: "calistenia", difficulty: "calistenia", tier: "calistenico", requiredLevel: 12, description: "SustentaÃ§Ã£o horizontal", unlockMessage: "Planche desbloqueada.", prerequisites: ["Dips"], attributeRequirements: { strength: 38 } },
   { name: "Human Flag", category: "calistenia", difficulty: "calistenia", tier: "calistenico", requiredLevel: 14, description: "Bandeira humana", unlockMessage: "Human Flag desbloqueada.", attributeRequirements: { strength: 42, dexterity: 30 } },
-  { name: "Muscle Up", category: "calistenia", difficulty: "calistenia", tier: "calistenico", requiredLevel: 11, description: "Transição de barra", unlockMessage: "Muscle Up desbloqueado.", prerequisites: ["Barra Fixa", "Dips"], attributeRequirements: { strength: 36 } },
+  { name: "Muscle Up", category: "calistenia", difficulty: "calistenia", tier: "calistenico", requiredLevel: 11, description: "TransiÃ§Ã£o de barra", unlockMessage: "Muscle Up desbloqueado.", prerequisites: ["Barra Fixa", "Dips"], attributeRequirements: { strength: 36 } },
   { name: "Pistol Squat", category: "calistenia", difficulty: "calistenia", tier: "calistenico", requiredLevel: 9, description: "Agachamento unilateral", unlockMessage: "Pistol Squat desbloqueado.", prerequisites: ["Agachamento"], attributeRequirements: { vitality: 28 } },
-  { name: "Dragon Flag", category: "calistenia", difficulty: "calistenia", tier: "calistenico", requiredLevel: 13, description: "Core avançado", unlockMessage: "Dragon Flag desbloqueada.", prerequisites: ["Abdominal"], attributeRequirements: { strength: 34, focus: 24 } },
-  { name: "L-Sit", category: "calistenia", difficulty: "calistenia", tier: "calistenico", requiredLevel: 8, description: "Sustentação em L", unlockMessage: "L-Sit desbloqueado.", prerequisites: ["Prancha"], attributeRequirements: { strength: 24, focus: 18 } },
-  { name: "Crow Pose", category: "yoga", difficulty: "calistenia", tier: "calistenico", requiredLevel: 6, description: "Equilíbrio em braços", unlockMessage: "Crow Pose desbloqueada.", attributeRequirements: { focus: 18, dexterity: 18 } },
-  { name: "Headstand", category: "yoga", difficulty: "calistenia", tier: "calistenico", requiredLevel: 8, description: "Invertida na cabeça", unlockMessage: "Headstand desbloqueada.", attributeRequirements: { strength: 22, focus: 22 } },
-  { name: "Wheel Pose", category: "yoga", difficulty: "calistenia", tier: "calistenico", requiredLevel: 9, description: "Ponte avançada", unlockMessage: "Wheel Pose desbloqueada.", attributeRequirements: { vitality: 20 } },
-  { name: "Firefly Pose", category: "yoga", difficulty: "calistenia", tier: "calistenico", requiredLevel: 11, description: "Equilíbrio avançado", unlockMessage: "Firefly Pose desbloqueada.", attributeRequirements: { strength: 28, focus: 22 } },
-  { name: "Eight Angle Pose", category: "yoga", difficulty: "calistenia", tier: "calistenico", requiredLevel: 12, description: "Torção com braços", unlockMessage: "Eight Angle Pose desbloqueada.", attributeRequirements: { dexterity: 30, focus: 24 } },
-  { name: "Scorpion Pose", category: "yoga", difficulty: "calistenia", tier: "calistenico", requiredLevel: 15, description: "Invertida avançada", unlockMessage: "Scorpion Pose desbloqueada.", attributeRequirements: { strength: 35, dexterity: 32 } },
+  { name: "Dragon Flag", category: "calistenia", difficulty: "calistenia", tier: "calistenico", requiredLevel: 13, description: "Core avanÃ§ado", unlockMessage: "Dragon Flag desbloqueada.", prerequisites: ["Abdominal"], attributeRequirements: { strength: 34, focus: 24 } },
+  { name: "L-Sit", category: "calistenia", difficulty: "calistenia", tier: "calistenico", requiredLevel: 8, description: "SustentaÃ§Ã£o em L", unlockMessage: "L-Sit desbloqueado.", prerequisites: ["Prancha"], attributeRequirements: { strength: 24, focus: 18 } },
+  { name: "Crow Pose", category: "yoga", difficulty: "calistenia", tier: "calistenico", requiredLevel: 6, description: "EquilÃ­brio em braÃ§os", unlockMessage: "Crow Pose desbloqueada.", attributeRequirements: { focus: 18, dexterity: 18 } },
+  { name: "Headstand", category: "yoga", difficulty: "calistenia", tier: "calistenico", requiredLevel: 8, description: "Invertida na cabeÃ§a", unlockMessage: "Headstand desbloqueada.", attributeRequirements: { strength: 22, focus: 22 } },
+  { name: "Wheel Pose", category: "yoga", difficulty: "calistenia", tier: "calistenico", requiredLevel: 9, description: "Ponte avanÃ§ada", unlockMessage: "Wheel Pose desbloqueada.", attributeRequirements: { vitality: 20 } },
+  { name: "Firefly Pose", category: "yoga", difficulty: "calistenia", tier: "calistenico", requiredLevel: 11, description: "EquilÃ­brio avanÃ§ado", unlockMessage: "Firefly Pose desbloqueada.", attributeRequirements: { strength: 28, focus: 22 } },
+  { name: "Eight Angle Pose", category: "yoga", difficulty: "calistenia", tier: "calistenico", requiredLevel: 12, description: "TorÃ§Ã£o com braÃ§os", unlockMessage: "Eight Angle Pose desbloqueada.", attributeRequirements: { dexterity: 30, focus: 24 } },
+  { name: "Scorpion Pose", category: "yoga", difficulty: "calistenia", tier: "calistenico", requiredLevel: 15, description: "Invertida avanÃ§ada", unlockMessage: "Scorpion Pose desbloqueada.", attributeRequirements: { strength: 35, dexterity: 32 } },
 ];
 
 const stageProgressionSeed: SkillStageSeed[] = [
@@ -370,112 +370,112 @@ const stageProgressionSeed: SkillStageSeed[] = [
     skillName: String(skillName),
     stageNumber: idx + 1,
     name,
-    description: `Progressão ${idx + 1} de ${skillName}`,
+    description: `ProgressÃ£o ${idx + 1} de ${skillName}`,
     levelRequired: 4 + idx * 2 + idxSkill % 2,
     exerciseReference: name,
   })));
 
 const titleSeeds = [
   { name: "Recruta", description: "Primeiros passos", reference: "RPG", unlock_condition: "level:1", rarity: "Comum" },
-  { name: "Guerreiro do Core", description: "Nível 5", reference: "Calistenia", unlock_condition: "level:5", rarity: "Comum" },
-  { name: "Veterano de Ferro", description: "Nível 10", reference: "Musculação", unlock_condition: "level:10", rarity: "Incomum" },
-  { name: "Lâmina Afiada", description: "Nível 15", reference: "Ação", unlock_condition: "level:15", rarity: "Raro" },
-  { name: "Mestre do Peso Corporal", description: "Nível 20", reference: "Calistenia", unlock_condition: "level:20", rarity: "Raro" },
-  { name: "O Último de Nós", description: "Nível 30", reference: "TLOU", unlock_condition: "level:30", rarity: "Mítico" },
-  { name: "Lendário", description: "Nível 50", reference: "RPG", unlock_condition: "level:50", rarity: "Mítico" },
+  { name: "Guerreiro do Core", description: "NÃ­vel 5", reference: "Calistenia", unlock_condition: "level:5", rarity: "Comum" },
+  { name: "Veterano de Ferro", description: "NÃ­vel 10", reference: "MusculaÃ§Ã£o", unlock_condition: "level:10", rarity: "Incomum" },
+  { name: "LÃ¢mina Afiada", description: "NÃ­vel 15", reference: "AÃ§Ã£o", unlock_condition: "level:15", rarity: "Raro" },
+  { name: "Mestre do Peso Corporal", description: "NÃ­vel 20", reference: "Calistenia", unlock_condition: "level:20", rarity: "Raro" },
+  { name: "O Ãltimo de NÃ³s", description: "NÃ­vel 30", reference: "TLOU", unlock_condition: "level:30", rarity: "MÃ­tico" },
+  { name: "LendÃ¡rio", description: "NÃ­vel 50", reference: "RPG", unlock_condition: "level:50", rarity: "MÃ­tico" },
   { name: "O Equilibrista", description: "Handstand completo", reference: "Calistenia", unlock_condition: "skill:Handstand:6", rarity: "Raro" },
   { name: "Acima de Todos", description: "Muscle Up completo", reference: "Calistenia", unlock_condition: "skill:Muscle Up:6", rarity: "Raro" },
-  { name: "Força Gravitacional", description: "Planche completa", reference: "Calistenia", unlock_condition: "skill:Planche:6", rarity: "Mítico" },
-  { name: "Bandeira Humana", description: "Human Flag completa", reference: "Calistenia", unlock_condition: "skill:Human Flag:6", rarity: "Mítico" },
+  { name: "ForÃ§a Gravitacional", description: "Planche completa", reference: "Calistenia", unlock_condition: "skill:Planche:6", rarity: "MÃ­tico" },
+  { name: "Bandeira Humana", description: "Human Flag completa", reference: "Calistenia", unlock_condition: "skill:Human Flag:6", rarity: "MÃ­tico" },
   { name: "Suspenso no Tempo", description: "Front Lever completo", reference: "Calistenia", unlock_condition: "skill:Front Lever:6", rarity: "Raro" },
-  { name: "Shoto Style", description: "Referência Street Fighter", reference: "Street Fighter", unlock_condition: "missions:120", rarity: "Incomum" },
-  { name: "Iron Fist", description: "Referência Tekken", reference: "Tekken", unlock_condition: "strength:80", rarity: "Raro" },
-  { name: "King of Iron Body", description: "Referência jogos de luta", reference: "Fighting Games", unlock_condition: "level:35", rarity: "Mítico" },
-  { name: "300", description: "300 treinos completados", reference: "Filme 300", unlock_condition: "missions:300", rarity: "Mítico" },
+  { name: "Shoto Style", description: "ReferÃªncia Street Fighter", reference: "Street Fighter", unlock_condition: "missions:120", rarity: "Incomum" },
+  { name: "Iron Fist", description: "ReferÃªncia Tekken", reference: "Tekken", unlock_condition: "strength:80", rarity: "Raro" },
+  { name: "King of Iron Body", description: "ReferÃªncia jogos de luta", reference: "Fighting Games", unlock_condition: "level:35", rarity: "MÃ­tico" },
+  { name: "300", description: "300 treinos completados", reference: "Filme 300", unlock_condition: "missions:300", rarity: "MÃ­tico" },
   { name: "Rocky", description: "30 dias de streak", reference: "Rocky", unlock_condition: "streak:30", rarity: "Raro" },
-  { name: "Predador", description: "Caça semanal concluída", reference: "Predador", unlock_condition: "weekly:1", rarity: "Incomum" },
+  { name: "Predador", description: "CaÃ§a semanal concluÃ­da", reference: "Predador", unlock_condition: "weekly:1", rarity: "Incomum" },
   { name: "Chosen Undead", description: "Falhou e insistiu", reference: "Dark Souls", unlock_condition: "failures:10", rarity: "Secreto" },
   { name: "The Witcher", description: "Contrato semanal", reference: "The Witcher", unlock_condition: "weekly:5", rarity: "Raro" },
   { name: "Demon Slayer", description: "5 habilidades desbloqueadas", reference: "Anime", unlock_condition: "skills:5", rarity: "Raro" },
-  { name: "Hollow", description: "Perdeu sequência 3x", reference: "Hollow Knight", unlock_condition: "streak_loss:3", rarity: "Secreto" },
+  { name: "Hollow", description: "Perdeu sequÃªncia 3x", reference: "Hollow Knight", unlock_condition: "streak_loss:3", rarity: "Secreto" },
 ];
 
 const achievementSeeds = [
-  { name: "Primeiro Passo", description: "Completar a primeira missão", category: "missoes", rarity: "Comum", color: "#D1D5DB", secret: 0, condition: "missions_completed>=1", icon: "👣", reference: "" },
-  { name: "Aquecendo", description: "Completar 7 missões", category: "missoes", rarity: "Comum", color: "#D1D5DB", secret: 0, condition: "missions_completed>=7", icon: "🔥", reference: "" },
-  { name: "Rotina Formada", description: "Completar 30 missões", category: "missoes", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "missions_completed>=30", icon: "📅", reference: "" },
-  { name: "Sem Desculpas", description: "5 dias seguidos", category: "missoes", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "streak>=5", icon: "✅", reference: "" },
-  { name: "Máquina", description: "Completar 100 missões", category: "missoes", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "missions_completed>=100", icon: "⚙️", reference: "" },
-  { name: "Imparável", description: "30 dias consecutivos", category: "missoes", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "streak>=30", icon: "🏃", reference: "" },
-  { name: "Lenda Viva", description: "365 missões", category: "missoes", rarity: "Mítico", color: "#EF4444", secret: 0, condition: "missions_completed>=365", icon: "👑", reference: "" },
-  { name: "Primeira Conversa", description: "Primeira mensagem no FitBot", category: "chat", rarity: "Comum", color: "#D1D5DB", secret: 0, condition: "chat_messages>=1", icon: "💬", reference: "" },
-  { name: "Curioso", description: "50 perguntas ao FitBot", category: "chat", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "chat_messages>=50", icon: "🤔", reference: "" },
-  { name: "Aprendiz Dedicado", description: "200 interações no chat", category: "chat", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "chat_messages>=200", icon: "🧠", reference: "" },
-  { name: "Eco", description: "Condição secreta", category: "chat", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "repeat_message_streak>=5", icon: "🌀", reference: "" },
-  { name: "Na Disputa", description: "Entrar no top 100", category: "ranking", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "ranking<=100", icon: "🥉", reference: "" },
-  { name: "Elite", description: "Entrar no top 10", category: "ranking", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "ranking<=10", icon: "🥈", reference: "" },
-  { name: "O Escolhido", description: "Alcançar #1", category: "ranking", rarity: "Mítico", color: "#EF4444", secret: 0, condition: "ranking==1", icon: "🥇", reference: "" },
-  { name: "Ghost", description: "Condição secreta", category: "ranking", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "top10_no_friends", icon: "👤", reference: "" },
-  { name: "Primeiros Voos", description: "Primeira etapa do Handstand", category: "habilidades", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "skill_stage:Handstand>=1", icon: "🕊️", reference: "" },
-  { name: "Mestre do Equilíbrio", description: "Handstand completo", category: "habilidades", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "skill_stage:Handstand>=6", icon: "🤸", reference: "" },
-  { name: "Kalista", description: "Todas as skills calistênicas", category: "habilidades", rarity: "Mítico", color: "#EF4444", secret: 0, condition: "all_calisthenics", icon: "⚔️", reference: "" },
-  { name: "Jogador", description: "Primeiro minigame", category: "minigames", rarity: "Comum", color: "#D1D5DB", secret: 0, condition: "minigames_played>=1", icon: "🎮", reference: "" },
-  { name: "Competidor", description: "Vencer 10 minigames", category: "minigames", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "minigames_won>=10", icon: "🏅", reference: "" },
-  { name: "Imbatível", description: "50 vitórias seguidas", category: "minigames", rarity: "Mítico", color: "#EF4444", secret: 0, condition: "minigame_win_streak>=50", icon: "🔥", reference: "" },
-  { name: "Mestre Artesão", description: "Condição secreta", category: "secreta", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "craft_master", icon: "🛠️", reference: "Hollow Knight" },
-  { name: "Insônia", description: "Condição secreta", category: "secreta", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "mission_2am_4am", icon: "🌙", reference: "" },
-  { name: "Fantasma", description: "Condição secreta", category: "secreta", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "open_gap6_complete_day7", icon: "👻", reference: "" },
-  { name: "Conversa de Louco", description: "Condição secreta", category: "secreta", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "chat_session_100", icon: "🤯", reference: "" },
-  { name: "Glitch", description: "Condição secreta", category: "secreta", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "report_bug_chat", icon: "🐞", reference: "" },
-  { name: "Aquecendo o Motor", description: "3 dias seguidos", category: "streak", rarity: "Comum", color: "#D1D5DB", secret: 0, condition: "streak>=3", icon: "🔥", reference: "" },
-  { name: "Semana Completa", description: "7 dias seguidos", category: "streak", rarity: "Comum", color: "#D1D5DB", secret: 0, condition: "streak>=7", icon: "📆", reference: "" },
-  { name: "Ritmo Certo", description: "14 dias seguidos", category: "streak", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "streak>=14", icon: "🟢", reference: "" },
-  { name: "Sem Parar", description: "21 dias seguidos", category: "streak", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "streak>=21", icon: "🏃", reference: "" },
-  { name: "Mês de Ferro", description: "30 dias seguidos", category: "streak", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "streak>=30", icon: "💪", reference: "" },
-  { name: "Disciplina Absurda", description: "60 dias seguidos", category: "streak", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "streak>=60", icon: "🧱", reference: "" },
-  { name: "Inabalável", description: "100 dias seguidos", category: "streak", rarity: "Mítico", color: "#EF4444", secret: 0, condition: "streak>=100", icon: "🛡️", reference: "" },
-  { name: "Um Ano de Dor", description: "365 dias seguidos", category: "streak", rarity: "Mítico", color: "#EF4444", secret: 0, condition: "streak>=365", icon: "📛", reference: "" },
-  { name: "Acontece", description: "Quebrar streak pela primeira vez", category: "streak_break", rarity: "Comum", color: "#D1D5DB", secret: 0, condition: "streak_break>=1", icon: "💥", reference: "" },
-  { name: "Voltar é Difícil", description: "Quebrar streak de 30+", category: "streak_break", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "streak_break>=30", icon: "↩️", reference: "" },
-  { name: "Tudo Ruiu", description: "Quebrar streak de 100+", category: "streak_break", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "streak_break>=100", icon: "🌪️", reference: "" },
-  { name: "A Queda Épica", description: "Quebrar streak de 365+", category: "streak_break", rarity: "Mítico", color: "#EF4444", secret: 0, condition: "streak_break>=365", icon: "🕳️", reference: "" },
-  { name: "Tudo pela Streak", description: "Manter streak com 1 missão em 7 dias", category: "streak_minimal", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "minimal_streak>=7", icon: "1️⃣", reference: "" },
-  { name: "O Minimalista", description: "Manter streak com 1 missão em 30 dias", category: "streak_minimal", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "minimal_streak>=30", icon: "🧩", reference: "" },
-  { name: "Engenharia de Streak", description: "Manter streak com 1 missão em 100 dias", category: "streak_minimal", rarity: "Mítico", color: "#EF4444", secret: 0, condition: "minimal_streak>=100", icon: "⚙️", reference: "" },
-  { name: "A Arte da Preguiça", description: "Condição secreta", category: "streak_minimal", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "single_mission_30", icon: "😴", reference: "" },
-  { name: "De Volta ao Jogo", description: "Reconstruir para 7 dias", category: "streak_rebuild", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "rebuild>=7", icon: "🔁", reference: "" },
-  { name: "Fênix", description: "Quebrar 30+ e reconstruir 30+", category: "streak_rebuild", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "rebuild_from30", icon: "🦅", reference: "" },
-  { name: "Lenda Resiliente", description: "Quebrar 100+ e reconstruir 100+", category: "streak_rebuild", rarity: "Mítico", color: "#EF4444", secret: 0, condition: "rebuild_from100", icon: "🧬", reference: "" },
-  { name: "Por um Fio", description: "Últimos 5 minutos 5x", category: "timing", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "timing_last5m>=5", icon: "⏳", reference: "" },
-  { name: "Especialista em Timing", description: "Últimos 5 minutos 20x", category: "timing", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "timing_last5m>=20", icon: "🎯", reference: "" },
-  { name: "Missão às 23:59", description: "Condição secreta", category: "timing", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "timing_2355_streak>=7", icon: "🕛", reference: "" },
-  { name: "404 Not Found", description: "Condição secreta", category: "secreta", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "route_not_found", icon: "❓", reference: "" },
-  { name: "Hoje Não", description: "Falhar 1 missão da meta", category: "meta_fail", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "goal_fail>=1", icon: "🙃", reference: "" },
-  { name: "Amanhã Eu Começo", description: "Falhar 3 missões da meta em dias diferentes", category: "meta_fail", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "goal_fail_days>=3", icon: "📆", reference: "" },
-  { name: "Meta? Que Meta?", description: "Falhar 5 missões da meta", category: "meta_fail", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "goal_fail>=5", icon: "🎯", reference: "" },
-  { name: "Plano de Mentira", description: "Falhar 15 missões da meta", category: "meta_fail", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "goal_fail>=15", icon: "🧾", reference: "" },
-  { name: "Autobiotagem", description: "Falhar 30 missões da meta", category: "meta_fail", rarity: "Mítico", color: "#EF4444", secret: 0, condition: "goal_fail>=30", icon: "🧨", reference: "" },
-  { name: "Speedrun do Fracasso", description: "Condição secreta", category: "meta_fail", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "goal_fail_7d", icon: "🏴", reference: "" },
-  { name: "No Caminho Certo", description: "7 missões da meta concluídas", category: "meta_done", rarity: "Comum", color: "#D1D5DB", secret: 0, condition: "goal_done>=7", icon: "➡️", reference: "" },
-  { name: "Focado", description: "30 missões da meta concluídas", category: "meta_done", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "goal_done>=30", icon: "🎯", reference: "" },
-  { name: "Sem Desvios", description: "7 dias sem falhar missão da meta", category: "meta_done", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "goal_nofail>=7", icon: "🧭", reference: "" },
-  { name: "Comprometido", description: "100 missões da meta concluídas", category: "meta_done", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "goal_done>=100", icon: "📌", reference: "" },
-  { name: "Olho no Alvo", description: "30 dias sem falhar missão da meta", category: "meta_done", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "goal_nofail>=30", icon: "👁️", reference: "" },
-  { name: "Obsessão Saudável", description: "365 missões da meta", category: "meta_done", rarity: "Mítico", color: "#EF4444", secret: 0, condition: "goal_done>=365", icon: "🧠", reference: "" },
-  { name: "Inabalável no Propósito", description: "100 dias sem falhar missão da meta", category: "meta_done", rarity: "Mítico", color: "#EF4444", secret: 0, condition: "goal_nofail>=100", icon: "🛡️", reference: "" },
-  { name: "A Meta era Essa?", description: "Condição secreta", category: "meta_change", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "goal_return_30", icon: "🔄", reference: "" },
-  { name: "Primeiro Resultado", description: "10% da meta", category: "meta_progress", rarity: "Comum", color: "#D1D5DB", secret: 0, condition: "goal_progress>=10", icon: "🔟", reference: "" },
-  { name: "Meio Caminho", description: "50% da meta", category: "meta_progress", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "goal_progress>=50", icon: "5️⃣0️⃣", reference: "" },
-  { name: "Quase Lá", description: "90% da meta", category: "meta_progress", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "goal_progress>=90", icon: "9️⃣0️⃣", reference: "" },
-  { name: "Meta Batida", description: "100% da meta", category: "meta_progress", rarity: "Mítico", color: "#EF4444", secret: 0, condition: "goal_progress>=100", icon: "💯", reference: "" },
-  { name: "Além da Meta", description: "120% da meta", category: "meta_progress", rarity: "Mítico", color: "#EF4444", secret: 0, condition: "goal_progress>=120", icon: "🚀", reference: "" },
-  { name: "Overachiever", description: "Condição secreta", category: "meta_progress", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "goal_half_time", icon: "⚡", reference: "" },
-  { name: "Novo Capítulo", description: "Primeira troca de meta", category: "meta_change", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "goal_change>=1", icon: "📖", reference: "" },
-  { name: "Indefinido", description: "3 trocas de meta", category: "meta_change", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "goal_change>=3", icon: "🧭", reference: "" },
-  { name: "A Jornada é o Destino", description: "Condição secreta", category: "meta_change", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "all_goals_done", icon: "🗺️", reference: "" },
-  { name: "Dupla Ameaça", description: "Streak 30 + meta perfeita", category: "meta_combo", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "combo30", icon: "⚔️", reference: "" },
-  { name: "Máquina de Resultados", description: "Streak 100 + meta perfeita", category: "meta_combo", rarity: "Mítico", color: "#EF4444", secret: 0, condition: "combo100", icon: "🏭", reference: "" },
-  { name: "Perfeição", description: "Condição secreta", category: "meta_combo", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "combo30_all", icon: "✨", reference: "" },
+  { name: "Primeiro Passo", description: "Completar a primeira missÃ£o", category: "missoes", rarity: "Comum", color: "#D1D5DB", secret: 0, condition: "missions_completed>=1", icon: "ð£", reference: "" },
+  { name: "Aquecendo", description: "Completar 7 missÃµes", category: "missoes", rarity: "Comum", color: "#D1D5DB", secret: 0, condition: "missions_completed>=7", icon: "ð¥", reference: "" },
+  { name: "Rotina Formada", description: "Completar 30 missÃµes", category: "missoes", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "missions_completed>=30", icon: "ð", reference: "" },
+  { name: "Sem Desculpas", description: "5 dias seguidos", category: "missoes", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "streak>=5", icon: "â", reference: "" },
+  { name: "MÃ¡quina", description: "Completar 100 missÃµes", category: "missoes", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "missions_completed>=100", icon: "âï¸", reference: "" },
+  { name: "ImparÃ¡vel", description: "30 dias consecutivos", category: "missoes", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "streak>=30", icon: "ð", reference: "" },
+  { name: "Lenda Viva", description: "365 missÃµes", category: "missoes", rarity: "MÃ­tico", color: "#EF4444", secret: 0, condition: "missions_completed>=365", icon: "ð", reference: "" },
+  { name: "Primeira Conversa", description: "Primeira mensagem no FitBot", category: "chat", rarity: "Comum", color: "#D1D5DB", secret: 0, condition: "chat_messages>=1", icon: "ð¬", reference: "" },
+  { name: "Curioso", description: "50 perguntas ao FitBot", category: "chat", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "chat_messages>=50", icon: "ð¤", reference: "" },
+  { name: "Aprendiz Dedicado", description: "200 interaÃ§Ãµes no chat", category: "chat", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "chat_messages>=200", icon: "ð§ ", reference: "" },
+  { name: "Eco", description: "CondiÃ§Ã£o secreta", category: "chat", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "repeat_message_streak>=5", icon: "ð", reference: "" },
+  { name: "Na Disputa", description: "Entrar no top 100", category: "ranking", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "ranking<=100", icon: "ð¥", reference: "" },
+  { name: "Elite", description: "Entrar no top 10", category: "ranking", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "ranking<=10", icon: "ð¥", reference: "" },
+  { name: "O Escolhido", description: "AlcanÃ§ar #1", category: "ranking", rarity: "MÃ­tico", color: "#EF4444", secret: 0, condition: "ranking==1", icon: "ð¥", reference: "" },
+  { name: "Ghost", description: "CondiÃ§Ã£o secreta", category: "ranking", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "top10_no_friends", icon: "ð¤", reference: "" },
+  { name: "Primeiros Voos", description: "Primeira etapa do Handstand", category: "habilidades", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "skill_stage:Handstand>=1", icon: "ðï¸", reference: "" },
+  { name: "Mestre do EquilÃ­brio", description: "Handstand completo", category: "habilidades", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "skill_stage:Handstand>=6", icon: "ð¤¸", reference: "" },
+  { name: "Kalista", description: "Todas as skills calistÃªnicas", category: "habilidades", rarity: "MÃ­tico", color: "#EF4444", secret: 0, condition: "all_calisthenics", icon: "âï¸", reference: "" },
+  { name: "Jogador", description: "Primeiro minigame", category: "minigames", rarity: "Comum", color: "#D1D5DB", secret: 0, condition: "minigames_played>=1", icon: "ð®", reference: "" },
+  { name: "Competidor", description: "Vencer 10 minigames", category: "minigames", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "minigames_won>=10", icon: "ð", reference: "" },
+  { name: "ImbatÃ­vel", description: "50 vitÃ³rias seguidas", category: "minigames", rarity: "MÃ­tico", color: "#EF4444", secret: 0, condition: "minigame_win_streak>=50", icon: "ð¥", reference: "" },
+  { name: "Mestre ArtesÃ£o", description: "CondiÃ§Ã£o secreta", category: "secreta", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "craft_master", icon: "ð ï¸", reference: "Hollow Knight" },
+  { name: "InsÃ´nia", description: "CondiÃ§Ã£o secreta", category: "secreta", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "mission_2am_4am", icon: "ð", reference: "" },
+  { name: "Fantasma", description: "CondiÃ§Ã£o secreta", category: "secreta", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "open_gap6_complete_day7", icon: "ð»", reference: "" },
+  { name: "Conversa de Louco", description: "CondiÃ§Ã£o secreta", category: "secreta", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "chat_session_100", icon: "ð¤¯", reference: "" },
+  { name: "Glitch", description: "CondiÃ§Ã£o secreta", category: "secreta", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "report_bug_chat", icon: "ð", reference: "" },
+  { name: "Aquecendo o Motor", description: "3 dias seguidos", category: "streak", rarity: "Comum", color: "#D1D5DB", secret: 0, condition: "streak>=3", icon: "ð¥", reference: "" },
+  { name: "Semana Completa", description: "7 dias seguidos", category: "streak", rarity: "Comum", color: "#D1D5DB", secret: 0, condition: "streak>=7", icon: "ð", reference: "" },
+  { name: "Ritmo Certo", description: "14 dias seguidos", category: "streak", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "streak>=14", icon: "ð¢", reference: "" },
+  { name: "Sem Parar", description: "21 dias seguidos", category: "streak", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "streak>=21", icon: "ð", reference: "" },
+  { name: "MÃªs de Ferro", description: "30 dias seguidos", category: "streak", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "streak>=30", icon: "ðª", reference: "" },
+  { name: "Disciplina Absurda", description: "60 dias seguidos", category: "streak", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "streak>=60", icon: "ð§±", reference: "" },
+  { name: "InabalÃ¡vel", description: "100 dias seguidos", category: "streak", rarity: "MÃ­tico", color: "#EF4444", secret: 0, condition: "streak>=100", icon: "ð¡ï¸", reference: "" },
+  { name: "Um Ano de Dor", description: "365 dias seguidos", category: "streak", rarity: "MÃ­tico", color: "#EF4444", secret: 0, condition: "streak>=365", icon: "ð", reference: "" },
+  { name: "Acontece", description: "Quebrar streak pela primeira vez", category: "streak_break", rarity: "Comum", color: "#D1D5DB", secret: 0, condition: "streak_break>=1", icon: "ð¥", reference: "" },
+  { name: "Voltar Ã© DifÃ­cil", description: "Quebrar streak de 30+", category: "streak_break", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "streak_break>=30", icon: "â©ï¸", reference: "" },
+  { name: "Tudo Ruiu", description: "Quebrar streak de 100+", category: "streak_break", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "streak_break>=100", icon: "ðªï¸", reference: "" },
+  { name: "A Queda Ãpica", description: "Quebrar streak de 365+", category: "streak_break", rarity: "MÃ­tico", color: "#EF4444", secret: 0, condition: "streak_break>=365", icon: "ð³ï¸", reference: "" },
+  { name: "Tudo pela Streak", description: "Manter streak com 1 missÃ£o em 7 dias", category: "streak_minimal", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "minimal_streak>=7", icon: "1ï¸â£", reference: "" },
+  { name: "O Minimalista", description: "Manter streak com 1 missÃ£o em 30 dias", category: "streak_minimal", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "minimal_streak>=30", icon: "ð§©", reference: "" },
+  { name: "Engenharia de Streak", description: "Manter streak com 1 missÃ£o em 100 dias", category: "streak_minimal", rarity: "MÃ­tico", color: "#EF4444", secret: 0, condition: "minimal_streak>=100", icon: "âï¸", reference: "" },
+  { name: "A Arte da PreguiÃ§a", description: "CondiÃ§Ã£o secreta", category: "streak_minimal", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "single_mission_30", icon: "ð´", reference: "" },
+  { name: "De Volta ao Jogo", description: "Reconstruir para 7 dias", category: "streak_rebuild", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "rebuild>=7", icon: "ð", reference: "" },
+  { name: "FÃªnix", description: "Quebrar 30+ e reconstruir 30+", category: "streak_rebuild", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "rebuild_from30", icon: "ð¦", reference: "" },
+  { name: "Lenda Resiliente", description: "Quebrar 100+ e reconstruir 100+", category: "streak_rebuild", rarity: "MÃ­tico", color: "#EF4444", secret: 0, condition: "rebuild_from100", icon: "ð§¬", reference: "" },
+  { name: "Por um Fio", description: "Ãltimos 5 minutos 5x", category: "timing", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "timing_last5m>=5", icon: "â³", reference: "" },
+  { name: "Especialista em Timing", description: "Ãltimos 5 minutos 20x", category: "timing", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "timing_last5m>=20", icon: "ð¯", reference: "" },
+  { name: "MissÃ£o Ã s 23:59", description: "CondiÃ§Ã£o secreta", category: "timing", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "timing_2355_streak>=7", icon: "ð", reference: "" },
+  { name: "404 Not Found", description: "CondiÃ§Ã£o secreta", category: "secreta", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "route_not_found", icon: "â", reference: "" },
+  { name: "Hoje NÃ£o", description: "Falhar 1 missÃ£o da meta", category: "meta_fail", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "goal_fail>=1", icon: "ð", reference: "" },
+  { name: "AmanhÃ£ Eu ComeÃ§o", description: "Falhar 3 missÃµes da meta em dias diferentes", category: "meta_fail", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "goal_fail_days>=3", icon: "ð", reference: "" },
+  { name: "Meta? Que Meta?", description: "Falhar 5 missÃµes da meta", category: "meta_fail", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "goal_fail>=5", icon: "ð¯", reference: "" },
+  { name: "Plano de Mentira", description: "Falhar 15 missÃµes da meta", category: "meta_fail", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "goal_fail>=15", icon: "ð§¾", reference: "" },
+  { name: "Autobiotagem", description: "Falhar 30 missÃµes da meta", category: "meta_fail", rarity: "MÃ­tico", color: "#EF4444", secret: 0, condition: "goal_fail>=30", icon: "ð§¨", reference: "" },
+  { name: "Speedrun do Fracasso", description: "CondiÃ§Ã£o secreta", category: "meta_fail", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "goal_fail_7d", icon: "ð´", reference: "" },
+  { name: "No Caminho Certo", description: "7 missÃµes da meta concluÃ­das", category: "meta_done", rarity: "Comum", color: "#D1D5DB", secret: 0, condition: "goal_done>=7", icon: "â¡ï¸", reference: "" },
+  { name: "Focado", description: "30 missÃµes da meta concluÃ­das", category: "meta_done", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "goal_done>=30", icon: "ð¯", reference: "" },
+  { name: "Sem Desvios", description: "7 dias sem falhar missÃ£o da meta", category: "meta_done", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "goal_nofail>=7", icon: "ð§­", reference: "" },
+  { name: "Comprometido", description: "100 missÃµes da meta concluÃ­das", category: "meta_done", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "goal_done>=100", icon: "ð", reference: "" },
+  { name: "Olho no Alvo", description: "30 dias sem falhar missÃ£o da meta", category: "meta_done", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "goal_nofail>=30", icon: "ðï¸", reference: "" },
+  { name: "ObsessÃ£o SaudÃ¡vel", description: "365 missÃµes da meta", category: "meta_done", rarity: "MÃ­tico", color: "#EF4444", secret: 0, condition: "goal_done>=365", icon: "ð§ ", reference: "" },
+  { name: "InabalÃ¡vel no PropÃ³sito", description: "100 dias sem falhar missÃ£o da meta", category: "meta_done", rarity: "MÃ­tico", color: "#EF4444", secret: 0, condition: "goal_nofail>=100", icon: "ð¡ï¸", reference: "" },
+  { name: "A Meta era Essa?", description: "CondiÃ§Ã£o secreta", category: "meta_change", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "goal_return_30", icon: "ð", reference: "" },
+  { name: "Primeiro Resultado", description: "10% da meta", category: "meta_progress", rarity: "Comum", color: "#D1D5DB", secret: 0, condition: "goal_progress>=10", icon: "ð", reference: "" },
+  { name: "Meio Caminho", description: "50% da meta", category: "meta_progress", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "goal_progress>=50", icon: "5ï¸â£0ï¸â£", reference: "" },
+  { name: "Quase LÃ¡", description: "90% da meta", category: "meta_progress", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "goal_progress>=90", icon: "9ï¸â£0ï¸â£", reference: "" },
+  { name: "Meta Batida", description: "100% da meta", category: "meta_progress", rarity: "MÃ­tico", color: "#EF4444", secret: 0, condition: "goal_progress>=100", icon: "ð¯", reference: "" },
+  { name: "AlÃ©m da Meta", description: "120% da meta", category: "meta_progress", rarity: "MÃ­tico", color: "#EF4444", secret: 0, condition: "goal_progress>=120", icon: "ð", reference: "" },
+  { name: "Overachiever", description: "CondiÃ§Ã£o secreta", category: "meta_progress", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "goal_half_time", icon: "â¡", reference: "" },
+  { name: "Novo CapÃ­tulo", description: "Primeira troca de meta", category: "meta_change", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "goal_change>=1", icon: "ð", reference: "" },
+  { name: "Indefinido", description: "3 trocas de meta", category: "meta_change", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "goal_change>=3", icon: "ð§­", reference: "" },
+  { name: "A Jornada Ã© o Destino", description: "CondiÃ§Ã£o secreta", category: "meta_change", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "all_goals_done", icon: "ðºï¸", reference: "" },
+  { name: "Dupla AmeaÃ§a", description: "Streak 30 + meta perfeita", category: "meta_combo", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "combo30", icon: "âï¸", reference: "" },
+  { name: "MÃ¡quina de Resultados", description: "Streak 100 + meta perfeita", category: "meta_combo", rarity: "MÃ­tico", color: "#EF4444", secret: 0, condition: "combo100", icon: "ð­", reference: "" },
+  { name: "PerfeiÃ§Ã£o", description: "CondiÃ§Ã£o secreta", category: "meta_combo", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "combo30_all", icon: "â¨", reference: "" },
 ];
 
 function conditioningOrder(level: ConditioningLevel): number {
@@ -607,11 +607,11 @@ async function evaluateMissionAchievementsAndTitles(db: D1Database, userId: stri
   if (missionsCompleted >= 1) await unlockAchievementIfNeeded(db, userId, "Primeiro Passo", missionsCompleted, 1);
   if (missionsCompleted >= 7) await unlockAchievementIfNeeded(db, userId, "Aquecendo", missionsCompleted, 7);
   if (missionsCompleted >= 30) await unlockAchievementIfNeeded(db, userId, "Rotina Formada", missionsCompleted, 30);
-  if (missionsCompleted >= 100) await unlockAchievementIfNeeded(db, userId, "Máquina", missionsCompleted, 100);
+  if (missionsCompleted >= 100) await unlockAchievementIfNeeded(db, userId, "MÃ¡quina", missionsCompleted, 100);
   if (missionsCompleted >= 365) await unlockAchievementIfNeeded(db, userId, "Lenda Viva", missionsCompleted, 365);
   if (consecutiveDays >= 5) await unlockAchievementIfNeeded(db, userId, "Sem Desculpas", consecutiveDays, 5);
   if (consecutiveDays >= 30) {
-    await unlockAchievementIfNeeded(db, userId, "Imparável", consecutiveDays, 30);
+    await unlockAchievementIfNeeded(db, userId, "ImparÃ¡vel", consecutiveDays, 30);
     await unlockTitleIfNeeded(db, userId, "Rocky");
   }
   if (missionsCompleted >= 300) await unlockTitleIfNeeded(db, userId, "300");
@@ -632,8 +632,8 @@ async function evaluateChatAchievements(db: D1Database, userId: string) {
 
 async function evaluateLevelTitles(db: D1Database, userId: string, level: number) {
   const byLevel: Array<[number, string]> = [
-    [1, "Recruta"], [5, "Guerreiro do Core"], [10, "Veterano de Ferro"], [15, "Lâmina Afiada"],
-    [20, "Mestre do Peso Corporal"], [30, "O Último de Nós"], [50, "Lendário"],
+    [1, "Recruta"], [5, "Guerreiro do Core"], [10, "Veterano de Ferro"], [15, "LÃ¢mina Afiada"],
+    [20, "Mestre do Peso Corporal"], [30, "O Ãltimo de NÃ³s"], [50, "LendÃ¡rio"],
   ];
   for (const [threshold, name] of byLevel) {
     if (level >= threshold) await unlockTitleIfNeeded(db, userId, name);
@@ -645,7 +645,7 @@ async function onStreakContinued(db: D1Database, userId: string, streakDays: num
 
   const milestones: Array<[number, string]> = [
     [3, "Aquecendo o Motor"], [7, "Semana Completa"], [14, "Ritmo Certo"], [21, "Sem Parar"],
-    [30, "Mês de Ferro"], [60, "Disciplina Absurda"], [100, "Inabalável"], [365, "Um Ano de Dor"],
+    [30, "MÃªs de Ferro"], [60, "Disciplina Absurda"], [100, "InabalÃ¡vel"], [365, "Um Ano de Dor"],
   ];
   for (const [value, name] of milestones) {
     if (streakDays >= value) await unlockAchievementIfNeeded(db, userId, name, streakDays, value);
@@ -671,7 +671,7 @@ async function onStreakContinued(db: D1Database, userId: string, streakDays: num
   if (minimal >= 7) await unlockAchievementIfNeeded(db, userId, "Tudo pela Streak", minimal, 7);
   if (minimal >= 30) await unlockAchievementIfNeeded(db, userId, "O Minimalista", minimal, 30);
   if (minimal >= 100) await unlockAchievementIfNeeded(db, userId, "Engenharia de Streak", minimal, 100);
-  if (singleStreak >= 30) await unlockAchievementIfNeeded(db, userId, "A Arte da Preguiça", singleStreak, 30);
+  if (singleStreak >= 30) await unlockAchievementIfNeeded(db, userId, "A Arte da PreguiÃ§a", singleStreak, 30);
 
   if (lastMissionDate) {
     const d = new Date(lastMissionDate);
@@ -683,7 +683,7 @@ async function onStreakContinued(db: D1Database, userId: string, streakDays: num
       const t = await db.prepare(`SELECT timing_last5m_count, timing_2355_streak FROM user_event_counters WHERE user_id = ?`).bind(userId).first<{ timing_last5m_count: number; timing_2355_streak: number }>();
       if (Number(t?.timing_last5m_count ?? 0) >= 5) await unlockAchievementIfNeeded(db, userId, "Por um Fio", Number(t?.timing_last5m_count ?? 0), 5);
       if (Number(t?.timing_last5m_count ?? 0) >= 20) await unlockAchievementIfNeeded(db, userId, "Especialista em Timing", Number(t?.timing_last5m_count ?? 0), 20);
-      if (Number(t?.timing_2355_streak ?? 0) >= 7) await unlockAchievementIfNeeded(db, userId, "Missão às 23:59", Number(t?.timing_2355_streak ?? 0), 7);
+      if (Number(t?.timing_2355_streak ?? 0) >= 7) await unlockAchievementIfNeeded(db, userId, "MissÃ£o Ã s 23:59", Number(t?.timing_2355_streak ?? 0), 7);
     } else {
       await db.prepare(`UPDATE user_event_counters SET timing_2355_streak = 0, updated_at=datetime('now') WHERE user_id = ?`).bind(userId).run();
     }
@@ -700,15 +700,15 @@ async function onStreakBroken(db: D1Database, userId: string, streakDaysBefore: 
     WHERE user_id = ?`).bind(streakDaysBefore, userId).run();
 
   if (streakDaysBefore >= 1) await unlockAchievementIfNeeded(db, userId, "Acontece", streakDaysBefore, 1);
-  if (streakDaysBefore >= 30) await unlockAchievementIfNeeded(db, userId, "Voltar é Difícil", streakDaysBefore, 30);
+  if (streakDaysBefore >= 30) await unlockAchievementIfNeeded(db, userId, "Voltar Ã© DifÃ­cil", streakDaysBefore, 30);
   if (streakDaysBefore >= 100) await unlockAchievementIfNeeded(db, userId, "Tudo Ruiu", streakDaysBefore, 100);
-  if (streakDaysBefore >= 365) await unlockAchievementIfNeeded(db, userId, "A Queda Épica", streakDaysBefore, 365);
+  if (streakDaysBefore >= 365) await unlockAchievementIfNeeded(db, userId, "A Queda Ãpica", streakDaysBefore, 365);
 }
 
 async function onStreakRebuilt(db: D1Database, userId: string, newStreakDays: number, previousBestStreak: number) {
   await logUserEvent(db, userId, "onStreakRebuilt", { newStreakDays, previousBestStreak });
   if (newStreakDays >= 7) await unlockAchievementIfNeeded(db, userId, "De Volta ao Jogo", newStreakDays, 7);
-  if (previousBestStreak >= 30 && newStreakDays >= 30) await unlockAchievementIfNeeded(db, userId, "Fênix", newStreakDays, 30);
+  if (previousBestStreak >= 30 && newStreakDays >= 30) await unlockAchievementIfNeeded(db, userId, "FÃªnix", newStreakDays, 30);
   if (previousBestStreak >= 100 && newStreakDays >= 100) await unlockAchievementIfNeeded(db, userId, "Lenda Resiliente", newStreakDays, 100);
 }
 
@@ -795,8 +795,8 @@ async function checkMissionRelevance(userId: string, missionId: number, db: D1Da
 
 async function onGoalMissionFailed(db: D1Database, userId: string, failCount: number, distinctDays: number, consecutiveFailDays: number) {
   await logUserEvent(db, userId, 'onGoalMissionFailed', { failCount, distinctDays, consecutiveFailDays });
-  if (failCount >= 1) await unlockAchievementIfNeeded(db, userId, 'Hoje Não', failCount, 1);
-  if (distinctDays >= 3) await unlockAchievementIfNeeded(db, userId, 'Amanhã Eu Começo', distinctDays, 3);
+  if (failCount >= 1) await unlockAchievementIfNeeded(db, userId, 'Hoje NÃ£o', failCount, 1);
+  if (distinctDays >= 3) await unlockAchievementIfNeeded(db, userId, 'AmanhÃ£ Eu ComeÃ§o', distinctDays, 3);
   if (failCount >= 5) await unlockAchievementIfNeeded(db, userId, 'Meta? Que Meta?', failCount, 5);
   if (failCount >= 15) await unlockAchievementIfNeeded(db, userId, 'Plano de Mentira', failCount, 15);
   if (failCount >= 30) await unlockAchievementIfNeeded(db, userId, 'Autobiotagem', failCount, 30);
@@ -808,28 +808,28 @@ async function onGoalMissionCompleted(db: D1Database, userId: string, completedC
   if (completedCount >= 7) await unlockAchievementIfNeeded(db, userId, 'No Caminho Certo', completedCount, 7);
   if (completedCount >= 30) await unlockAchievementIfNeeded(db, userId, 'Focado', completedCount, 30);
   if (completedCount >= 100) await unlockAchievementIfNeeded(db, userId, 'Comprometido', completedCount, 100);
-  if (completedCount >= 365) await unlockAchievementIfNeeded(db, userId, 'Obsessão Saudável', completedCount, 365);
+  if (completedCount >= 365) await unlockAchievementIfNeeded(db, userId, 'ObsessÃ£o SaudÃ¡vel', completedCount, 365);
   if (consecutiveDays >= 7) await unlockAchievementIfNeeded(db, userId, 'Sem Desvios', consecutiveDays, 7);
   if (consecutiveDays >= 30) await unlockAchievementIfNeeded(db, userId, 'Olho no Alvo', consecutiveDays, 30);
-  if (noFailStreak >= 100) await unlockAchievementIfNeeded(db, userId, 'Inabalável no Propósito', noFailStreak, 100);
+  if (noFailStreak >= 100) await unlockAchievementIfNeeded(db, userId, 'InabalÃ¡vel no PropÃ³sito', noFailStreak, 100);
 
   const streak = await db.prepare("SELECT current_streak FROM user_progression WHERE user_id = ?").bind(userId).first<{ current_streak: number }>();
-  if (Number(streak?.current_streak ?? 0) >= 30 && noFailStreak >= 30) await unlockAchievementIfNeeded(db, userId, 'Dupla Ameaça', 30, 30);
-  if (Number(streak?.current_streak ?? 0) >= 100 && noFailStreak >= 100) await unlockAchievementIfNeeded(db, userId, 'Máquina de Resultados', 100, 100);
+  if (Number(streak?.current_streak ?? 0) >= 30 && noFailStreak >= 30) await unlockAchievementIfNeeded(db, userId, 'Dupla AmeaÃ§a', 30, 30);
+  if (Number(streak?.current_streak ?? 0) >= 100 && noFailStreak >= 100) await unlockAchievementIfNeeded(db, userId, 'MÃ¡quina de Resultados', 100, 100);
 }
 
 async function onGoalProgress(db: D1Database, userId: string, progressPercent: number) {
   await logUserEvent(db, userId, 'onGoalProgress', { progressPercent });
   if (progressPercent >= 10) await unlockAchievementIfNeeded(db, userId, 'Primeiro Resultado', progressPercent, 10);
   if (progressPercent >= 50) await unlockAchievementIfNeeded(db, userId, 'Meio Caminho', progressPercent, 50);
-  if (progressPercent >= 90) await unlockAchievementIfNeeded(db, userId, 'Quase Lá', progressPercent, 90);
+  if (progressPercent >= 90) await unlockAchievementIfNeeded(db, userId, 'Quase LÃ¡', progressPercent, 90);
   if (progressPercent >= 100) await unlockAchievementIfNeeded(db, userId, 'Meta Batida', progressPercent, 100);
-  if (progressPercent >= 120) await unlockAchievementIfNeeded(db, userId, 'Além da Meta', progressPercent, 120);
+  if (progressPercent >= 120) await unlockAchievementIfNeeded(db, userId, 'AlÃ©m da Meta', progressPercent, 120);
 }
 
 async function onGoalChanged(db: D1Database, userId: string, oldGoal: string, newGoal: string, changeCount: number) {
   await logUserEvent(db, userId, 'onGoalChanged', { oldGoal, newGoal, changeCount });
-  if (changeCount >= 1) await unlockAchievementIfNeeded(db, userId, 'Novo Capítulo', changeCount, 1);
+  if (changeCount >= 1) await unlockAchievementIfNeeded(db, userId, 'Novo CapÃ­tulo', changeCount, 1);
   if (changeCount >= 3) await unlockAchievementIfNeeded(db, userId, 'Indefinido', changeCount, 3);
 }
 
@@ -899,7 +899,7 @@ async function onAppOpen(db: D1Database, userId: string, timestamp: string) {
 
   const hour = new Date(timestamp).getHours();
   if (hour >= 2 && hour < 4) {
-    await unlockAchievementIfNeeded(db, userId, "Insônia", 1, 1);
+    await unlockAchievementIfNeeded(db, userId, "InsÃ´nia", 1, 1);
   }
 
   if (gapDays >= 6) {
@@ -929,7 +929,7 @@ async function buildInitialTrainingPlan(mainGoal: string | null | undefined, con
     injuries: injuries ?? "",
     rest_days: [restDay],
     weekly,
-    progression: "Primeiras 4 semanas com progressão linear de volume e técnica.",
+    progression: "Primeiras 4 semanas com progressÃ£o linear de volume e tÃ©cnica.",
   };
 }
 
@@ -944,7 +944,7 @@ async function upsertTrainingPlan(db: D1Database, userId: string, plan: Record<s
       weekly_plan_json=excluded.weekly_plan_json,
       progression_notes=excluded.progression_notes,
       updated_at=datetime('now')`)
-    .bind(userId, mainGoal, conditioning, equipment ?? "", injuries ?? "", JSON.stringify(plan), "progressão de base")
+    .bind(userId, mainGoal, conditioning, equipment ?? "", injuries ?? "", JSON.stringify(plan), "progressÃ£o de base")
     .run();
 }
 
@@ -1018,7 +1018,7 @@ app.use("*", async (c, next) => {
   await next();
 });
 
-// Helper: Gera cookie com configurações corretas
+// Helper: Gera cookie com configuraÃ§Ãµes corretas
 export function generateCookie(sessionId: string) {
   return `session_id=${sessionId}; Path=/; HttpOnly; Secure; SameSite=None; Max-Age=2592000`;
 }
@@ -1077,7 +1077,7 @@ app.post(
         .first();
 
       if (existing) {
-        return c.json({ error: "E-mail já cadastrado" }, 409);
+        return c.json({ error: "E-mail jÃ¡ cadastrado" }, 409);
       }
 
       const userId = crypto.randomUUID();
@@ -1095,7 +1095,7 @@ app.post(
     } catch (error) {
       console.error("[register]", error);
       return c.json(
-        { error: "Erro interno ao criar usuário", code: "INTERNAL_ERROR" },
+        { error: "Erro interno ao criar usuÃ¡rio", code: "INTERNAL_ERROR" },
         500
       );
     }
@@ -1110,7 +1110,7 @@ app.get("/api/auth/check-availability", async (c) => {
     return c.json({
       emailAvailable: null,
       usernameAvailable: null,
-      message: "Informe email e/ou username para validação.",
+      message: "Informe email e/ou username para validaÃ§Ã£o.",
     }, 400);
   }
 
@@ -1162,12 +1162,12 @@ app.post(
     }
 
     if (!userRow.password_hash || !userRow.password_salt) {
-      return c.json({ error: "Credenciais inválidas" }, 401);
+      return c.json({ error: "Credenciais invÃ¡lidas" }, 401);
     }
 
     const computed = await hashPassword(data.password, userRow.password_salt);
     if (computed !== userRow.password_hash) {
-      return c.json({ error: "Credenciais inválidas" }, 401);
+      return c.json({ error: "Credenciais invÃ¡lidas" }, 401);
     }
 
     const sessionId = crypto.randomUUID();
@@ -1194,13 +1194,13 @@ app.get("/api/users/me", authMiddleware, async (c) => {
 
   try {
     if (!user?.id) {
-      return c.json({ error: "Usuário não encontrado", code: "USER_NOT_FOUND" }, 404);
+      return c.json({ error: "UsuÃ¡rio nÃ£o encontrado", code: "USER_NOT_FOUND" }, 404);
     }
 
     const userRecord = await getUserAuthRecordById(c.env.fitloot_db, user.id);
 
     if (!userRecord) {
-      return c.json({ error: "Usuário não encontrado", code: "USER_NOT_FOUND" }, 404);
+      return c.json({ error: "UsuÃ¡rio nÃ£o encontrado", code: "USER_NOT_FOUND" }, 404);
     }
 
     return c.json({
@@ -1421,7 +1421,7 @@ app.post("/api/profile/customization", authMiddleware, async (c) => {
   const done = [customPrimaryColor, customSecondaryColor, customBackgroundType, customBackgroundValue, customFont, customTitleId, showcasedAchievements]
     .every((v) => v !== null && v !== undefined && v !== "");
   if (done) {
-    await unlockAchievementIfNeeded(c.env.fitloot_db, user.id, "Mestre Artesão", 1, 1);
+    await unlockAchievementIfNeeded(c.env.fitloot_db, user.id, "Mestre ArtesÃ£o", 1, 1);
   }
 
   const profile = await c.env.fitloot_db.prepare("SELECT * FROM user_profiles WHERE user_id = ?").bind(user.id).first();
@@ -1446,7 +1446,7 @@ app.post("/api/profile/goal", authMiddleware, async (c) => {
 
   const body = await c.req.json().catch(() => ({})) as { main_goal?: string | undefined };
   const newGoal = String(body.main_goal ?? '').trim();
-  if (!newGoal) return c.json({ error: 'main_goal obrigatório' }, 400);
+  if (!newGoal) return c.json({ error: 'main_goal obrigatÃ³rio' }, 400);
 
   const current = await c.env.fitloot_db.prepare("SELECT main_goal FROM user_profiles WHERE user_id = ?").bind(user.id).first<{ main_goal: string | null }>();
   const oldGoal = current?.main_goal ?? 'saude_geral';
@@ -1468,7 +1468,7 @@ app.post("/api/profile/goal", authMiddleware, async (c) => {
     .bind(newGoal, changeCount, JSON.stringify(Array.from(completedGoals)), returned, returned, user.id).run();
 
   await onGoalChanged(c.env.fitloot_db, user.id, oldGoal, newGoal, changeCount);
-  if (completedGoals.size >= 5) await unlockAchievementIfNeeded(c.env.fitloot_db, user.id, 'A Jornada é o Destino', completedGoals.size, 5);
+  if (completedGoals.size >= 5) await unlockAchievementIfNeeded(c.env.fitloot_db, user.id, 'A Jornada Ã© o Destino', completedGoals.size, 5);
 
   return c.json({ success: true, old_goal: oldGoal, new_goal: newGoal, change_count: changeCount });
 });
@@ -1658,7 +1658,7 @@ app.post("/api/skills/:id/stage/complete", authMiddleware, async (c) => {
 
   if (!stageData) return c.json({ error: "No next stage" }, 400);
   if (Number(progression?.level ?? 1) < Number(stageData.level_required ?? 1)) {
-    return c.json({ error: "Nível insuficiente para esta etapa" }, 400);
+    return c.json({ error: "NÃ­vel insuficiente para esta etapa" }, 400);
   }
 
   await c.env.fitloot_db.prepare(
@@ -1674,7 +1674,7 @@ app.post("/api/skills/:id/stage/complete", authMiddleware, async (c) => {
     const titleBySkill: Record<string, string> = {
       Handstand: "O Equilibrista",
       "Muscle Up": "Acima de Todos",
-      Planche: "Força Gravitacional",
+      Planche: "ForÃ§a Gravitacional",
       "Human Flag": "Bandeira Humana",
       "Front Lever": "Suspenso no Tempo",
     };
@@ -1682,7 +1682,7 @@ app.post("/api/skills/:id/stage/complete", authMiddleware, async (c) => {
     if (title) await unlockTitleIfNeeded(c.env.fitloot_db, user.id, title);
 
     if (skill?.name === "Handstand") {
-      await unlockAchievementIfNeeded(c.env.fitloot_db, user.id, "Mestre do Equilíbrio", 6, 6);
+      await unlockAchievementIfNeeded(c.env.fitloot_db, user.id, "Mestre do EquilÃ­brio", 6, 6);
     }
   }
 
@@ -1853,7 +1853,7 @@ app.post("/api/missions/complete", authMiddleware, zValidator("json", CompleteMi
     await onGoalProgress(c.env.fitloot_db, user.id, progressPercent);
   }
   if (currentHour >= 2 && currentHour < 4) {
-    await unlockAchievementIfNeeded(c.env.fitloot_db, user.id, 'Insônia', 1, 1);
+    await unlockAchievementIfNeeded(c.env.fitloot_db, user.id, 'InsÃ´nia', 1, 1);
   }
 
   // Update skill stats if applicable
@@ -1914,7 +1914,7 @@ app.get("/api/achievements", authMiddleware, async (c) => {
         name: "?",
         description: "Conquista secreta",
         condition: null,
-        icon: "❓",
+        icon: "â",
       };
     }
     return achievement;
@@ -2194,23 +2194,23 @@ app.post("/api/friends/request", authMiddleware, async (c) => {
   let targetUserId = String(body.friend_user_id ?? "").trim();
 
   if (!targetUserId) {
-    if (!username) return c.json({ error: "username é obrigatório" }, 400);
+    if (!username) return c.json({ error: "username Ã© obrigatÃ³rio" }, 400);
     const target = await c.env.fitloot_db.prepare("SELECT user_id FROM user_profiles WHERE username = ?").bind(username).first<{ user_id: string }>();
-    if (!target?.user_id) return c.json({ error: "Usuário não encontrado" }, 404);
+    if (!target?.user_id) return c.json({ error: "UsuÃ¡rio nÃ£o encontrado" }, 404);
     targetUserId = target.user_id;
   }
 
-  if (targetUserId === user.id) return c.json({ error: "Não é possível adicionar a si mesmo" }, 400);
+  if (targetUserId === user.id) return c.json({ error: "NÃ£o Ã© possÃ­vel adicionar a si mesmo" }, 400);
 
   const existingFriend = await c.env.fitloot_db.prepare(
     `SELECT id FROM friendships WHERE (user_id = ? AND friend_id = ?) OR (user_id = ? AND friend_id = ?)`
   ).bind(user.id, targetUserId, targetUserId, user.id).first();
-  if (existingFriend) return c.json({ error: "Já são amigos" }, 400);
+  if (existingFriend) return c.json({ error: "JÃ¡ sÃ£o amigos" }, 400);
 
   const existingReq = await c.env.fitloot_db.prepare(
     `SELECT id FROM friend_requests WHERE ((from_user_id = ? AND to_user_id = ?) OR (from_user_id = ? AND to_user_id = ?)) AND status = 'pending'`
   ).bind(user.id, targetUserId, targetUserId, user.id).first();
-  if (existingReq) return c.json({ error: "Solicitação pendente" }, 400);
+  if (existingReq) return c.json({ error: "SolicitaÃ§Ã£o pendente" }, 400);
 
   await c.env.fitloot_db.prepare(
     `INSERT INTO friend_requests (from_user_id, to_user_id, status, updated_at) VALUES (?, ?, 'pending', datetime('now'))`
@@ -2225,12 +2225,12 @@ app.post("/api/friends/accept", authMiddleware, async (c) => {
 
   const body = await c.req.json().catch(() => ({})) as { request_id?: number | undefined };
   const requestId = Number(body.request_id);
-  if (!requestId) return c.json({ error: "request_id obrigatório" }, 400);
+  if (!requestId) return c.json({ error: "request_id obrigatÃ³rio" }, 400);
 
   const request = await c.env.fitloot_db.prepare(
     `SELECT * FROM friend_requests WHERE id = ? AND to_user_id = ? AND status = 'pending'`
   ).bind(requestId, user.id).first<{ id: number; from_user_id: string; to_user_id: string }>();
-  if (!request) return c.json({ error: "Solicitação não encontrada" }, 404);
+  if (!request) return c.json({ error: "SolicitaÃ§Ã£o nÃ£o encontrada" }, 404);
 
   await c.env.fitloot_db.prepare("UPDATE friend_requests SET status = 'accepted', updated_at = datetime('now') WHERE id = ?").bind(requestId).run();
   await c.env.fitloot_db.prepare("INSERT OR IGNORE INTO friendships (user_id, friend_id, created_at, updated_at) VALUES (?, ?, datetime('now'), datetime('now'))")
@@ -2250,7 +2250,7 @@ app.post("/api/friends/reject", authMiddleware, async (c) => {
 
   const body = await c.req.json().catch(() => ({})) as { request_id?: number | undefined };
   const requestId = Number(body.request_id);
-  if (!requestId) return c.json({ error: "request_id obrigatório" }, 400);
+  if (!requestId) return c.json({ error: "request_id obrigatÃ³rio" }, 400);
 
   await c.env.fitloot_db.prepare(
     `UPDATE friend_requests SET status = 'rejected', updated_at = datetime('now') WHERE id = ? AND to_user_id = ?`
@@ -2340,7 +2340,7 @@ async function registerMiniGameResult(db: D1Database, userId: string, didWin: bo
     await unlockAchievementIfNeeded(db, userId, "Competidor", won, 10);
   }
   if (winStreak >= 50) {
-    await unlockAchievementIfNeeded(db, userId, "Imbat�vel", winStreak, 50);
+    await unlockAchievementIfNeeded(db, userId, "Imbatível", winStreak, 50);
   }
 }
 // Mini-games endpoints
@@ -2585,7 +2585,7 @@ async function fetchExerciseDbExercises(env: Env, muscle: string, equipment: str
     8000
   );
   return data.map((item) => ({
-    name: String(item.name ?? "Exercício"),
+    name: String(item.name ?? "ExercÃ­cio"),
     muscle: String(item.target ?? muscle),
     equipment: String(item.equipment ?? (equipment || "bodyweight")),
     difficulty: "intermediate",
@@ -2606,7 +2606,7 @@ async function fetchApiNinjasExercises(env: Env, muscle: string): Promise<Exerci
     8000
   );
   return data.slice(0, 8).map((item) => ({
-    name: String(item.name ?? "Exercício"),
+    name: String(item.name ?? "ExercÃ­cio"),
     muscle: String(item.muscle ?? muscle),
     equipment: String(item.equipment ?? "bodyweight"),
     difficulty: String(item.difficulty ?? "beginner"),
@@ -2627,7 +2627,7 @@ async function fetchGymFitExercises(env: Env, muscle: string): Promise<ExerciseR
     8000
   );
   return (data.exercises ?? []).slice(0, 8).map((item) => ({
-    name: String(item.name ?? "Exercício"),
+    name: String(item.name ?? "ExercÃ­cio"),
     muscle: String(item.muscle ?? muscle),
     equipment: String(item.equipment ?? "bodyweight"),
     difficulty: String(item.level ?? "beginner"),
@@ -2675,7 +2675,7 @@ function missionConfigByPeriod(period: MissionPeriod) {
       reps: 120,
       xp: 180,
       points: 55,
-      titlePrefix: "Missão Semanal",
+      titlePrefix: "MissÃ£o Semanal",
     };
   }
 
@@ -2685,7 +2685,7 @@ function missionConfigByPeriod(period: MissionPeriod) {
       reps: 450,
       xp: 480,
       points: 150,
-      titlePrefix: "Missão Mensal",
+      titlePrefix: "MissÃ£o Mensal",
     };
   }
 
@@ -2694,7 +2694,7 @@ function missionConfigByPeriod(period: MissionPeriod) {
     reps: 20,
     xp: 50,
     points: 10,
-    titlePrefix: "Missão Diária",
+    titlePrefix: "MissÃ£o DiÃ¡ria",
   };
 }
 
@@ -2717,12 +2717,12 @@ async function createMissionsForPeriod(env: Env, db: D1Database, userId: string,
   const deadline = futureIsoForPeriod(period);
 
   if (userSkills.results.length === 0) {
-    console.warn(`[missions] usuário ${userId} sem skills para gerar ${period}`);
+    console.warn(`[missions] usuÃ¡rio ${userId} sem skills para gerar ${period}`);
     const fallback = ["Mobilidade de quadril", "Caminhada leve", "Alongamento de coluna"].slice(0, config.amount);
     for (const label of fallback) {
       await db.prepare(`INSERT INTO missions (user_id, type, title, description, target_reps, xp_reward, points_reward, deadline, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`)
-        .bind(userId, period, `${config.titlePrefix}: ${label}`, `Missão de fallback para manter consistência: ${label}.`, config.reps, config.xp, config.points, deadline)
+        .bind(userId, period, `${config.titlePrefix}: ${label}`, `MissÃ£o de fallback para manter consistÃªncia: ${label}.`, config.reps, config.xp, config.points, deadline)
         .run();
     }
     return;
@@ -2753,7 +2753,7 @@ async function createMissionsForPeriod(env: Env, db: D1Database, userId: string,
         period,
         `${config.titlePrefix}: ${ex.name}`,
         isRestDay
-          ? `Dia de recuperação: execute ${ex.name} com foco em mobilidade e técnica.`
+          ? `Dia de recuperaÃ§Ã£o: execute ${ex.name} com foco em mobilidade e tÃ©cnica.`
           : `Treino do dia (${muscle}) usando ${exerciseResult.source}: ${ex.name}.`,
         isRestDay ? Math.max(8, Math.floor(config.reps * 0.4)) : config.reps,
         isRestDay ? Math.floor(config.xp * 0.6) : config.xp,
@@ -2769,7 +2769,7 @@ async function createMissionsForPeriod(env: Env, db: D1Database, userId: string,
         userId,
         period,
         `${config.titlePrefix}: ${skill.name}`,
-        `Variação inteligente (30%): complemente com ${skill.name}, respeitando seu plano principal.`,
+        `VariaÃ§Ã£o inteligente (30%): complemente com ${skill.name}, respeitando seu plano principal.`,
         skill.skill_id,
         config.reps,
         config.xp,
@@ -2831,7 +2831,7 @@ function enforceRateLimit(key: string) {
   const hits = requestRateMap.get(key) ?? [];
   const validHits = hits.filter((ts) => now - ts < RATE_LIMIT_WINDOW_MS);
   if (validHits.length >= RATE_LIMIT_MAX_CALLS) {
-    throw new ApiIntegrationError("RATE_LIMITED", 429, "Muitas requisições externas. Tente novamente em instantes.");
+    throw new ApiIntegrationError("RATE_LIMITED", 429, "Muitas requisiÃ§Ãµes externas. Tente novamente em instantes.");
   }
   validHits.push(now);
   requestRateMap.set(key, validHits);
@@ -2850,7 +2850,7 @@ function toFriendlyErrorResponse(error: unknown) {
   return {
     status: 500,
     payload: {
-      error: "Serviço temporariamente indisponível. Tente novamente em alguns instantes.",
+      error: "ServiÃ§o temporariamente indisponÃ­vel. Tente novamente em alguns instantes.",
       code: "UPSTREAM_ERROR" satisfies ApiErrorCode,
     },
   };
@@ -2866,18 +2866,18 @@ async function fetchJsonWithTimeout<T>(
   try {
     const response = await fetch(url, { ...init, signal: controller.signal });
     if (response.status === 401 || response.status === 403) {
-      throw new ApiIntegrationError("AUTH_FAILED", 502, "Falha de autenticação com serviço externo.");
+      throw new ApiIntegrationError("AUTH_FAILED", 502, "Falha de autenticaÃ§Ã£o com serviÃ§o externo.");
     }
     if (!response.ok) {
-      throw new ApiIntegrationError("UPSTREAM_ERROR", 502, "Falha ao consultar serviço externo.");
+      throw new ApiIntegrationError("UPSTREAM_ERROR", 502, "Falha ao consultar serviÃ§o externo.");
     }
     return (await response.json()) as T;
   } catch (error) {
     if (error instanceof ApiIntegrationError) throw error;
     if ((error as Error).name === "AbortError") {
-      throw new ApiIntegrationError("TIMEOUT", 504, "Tempo de resposta excedido em serviço externo.");
+      throw new ApiIntegrationError("TIMEOUT", 504, "Tempo de resposta excedido em serviÃ§o externo.");
     }
-    throw new ApiIntegrationError("UPSTREAM_ERROR", 502, "Falha ao consultar serviço externo.");
+    throw new ApiIntegrationError("UPSTREAM_ERROR", 502, "Falha ao consultar serviÃ§o externo.");
   } finally {
     clearTimeout(timeout);
   }
@@ -2890,7 +2890,7 @@ async function callOpenAIChat(
   jsonMode = false
 ) {
   if (!c.env.HF_TOKEN) {
-    throw new ApiIntegrationError("SERVICE_NOT_CONFIGURED", 503, "Hugging Face não configurada.");
+    throw new ApiIntegrationError("SERVICE_NOT_CONFIGURED", 503, "Hugging Face nÃ£o configurada.");
   }
   enforceRateLimit(`huggingface:${c.get("user")?.id ?? "anon"}`);
   return fetchJsonWithTimeout<OpenAIChatCompletionResponse>(
@@ -2929,7 +2929,7 @@ type RapidApiNutritionResponse = Array<{
 
 async function searchFoodOnUSDA(c: import("hono").Context<AppContext>, query: string) {
   if (!c.env.USDA_API_KEY) {
-    throw new ApiIntegrationError("SERVICE_NOT_CONFIGURED", 503, "USDA não configurada.");
+    throw new ApiIntegrationError("SERVICE_NOT_CONFIGURED", 503, "USDA nÃ£o configurada.");
   }
   enforceRateLimit(`usda:${c.get("user")?.id ?? "anon"}`);
   const url = new URL("https://api.nal.usda.gov/fdc/v1/foods/search");
@@ -2941,7 +2941,7 @@ async function searchFoodOnUSDA(c: import("hono").Context<AppContext>, query: st
 
 async function searchFoodOnRapidApi(c: import("hono").Context<AppContext>, query: string) {
   if (!c.env.RAPID_API_KEY) {
-    throw new ApiIntegrationError("SERVICE_NOT_CONFIGURED", 503, "RapidAPI não configurada.");
+    throw new ApiIntegrationError("SERVICE_NOT_CONFIGURED", 503, "RapidAPI nÃ£o configurada.");
   }
   const host = c.env.RAPID_API_HOST || "nutrition-by-api-ninjas.p.rapidapi.com";
   enforceRateLimit(`rapidapi:${c.get("user")?.id ?? "anon"}`);
@@ -2965,7 +2965,7 @@ function parseNutritionFromOcrLabel(text: string) {
   const normalize = (value?: string | undefined) => (value ? Number(value.replace(",", ".")) : null);
   const kcal = normalize(safeGet(text.match(/(\d+[.,]?\d*)\s*kcal/i) ?? [], 1));
   const kJ = normalize(safeGet(text.match(/(\d+[.,]?\d*)\s*kj/i) ?? [], 1));
-  const protein = normalize(safeGet(text.match(/prote[ií]n[aa]s?[^\d]*(\d+[.,]?\d*)\s*g/i) ?? [], 1));
+  const protein = normalize(safeGet(text.match(/prote[iÃ­]n[aa]s?[^\d]*(\d+[.,]?\d*)\s*g/i) ?? [], 1));
   const carbs = normalize(safeGet(text.match(/carboidratos?[^\d]*(\d+[.,]?\d*)\s*g/i) ?? [], 1));
   const fats = normalize(safeGet(text.match(/gorduras?(?:\s+totais?)?[^\d]*(\d+[.,]?\d*)\s*g/i) ?? [], 1));
 
@@ -3038,7 +3038,7 @@ function sanitizeMissionDraft(raw: Partial<MissionDraft>, conditioning: Conditio
   };
 }
 
-// Fallback generator para missões baseadas em condicionamento
+// Fallback generator para missÃµes baseadas em condicionamento
 async function generateFallbackMissions(
   conditioning: ConditioningLevel = "iniciante",
   skills: Array<{ name: string }> = []
@@ -3070,11 +3070,11 @@ async function generateFallbackMissions(
 
   const fallbackSkills = skills.length > 0
     ? skills
-    : [{ name: "Flexão" }, { name: "Agachamento" }, { name: "Prancha" }];
+    : [{ name: "FlexÃ£o" }, { name: "Agachamento" }, { name: "Prancha" }];
 
   return fallbackSkills.slice(0, 3).map((skill) => ({
-    title: `Missão ${skill.name}`,
-    description: `Complete ${volumeMap[conditioning]} repetições de ${skill.name}`,
+    title: `MissÃ£o ${skill.name}`,
+    description: `Complete ${volumeMap[conditioning]} repetiÃ§Ãµes de ${skill.name}`,
     skill_name: skill.name,
     target_reps: volumeMap[conditioning],
     xp_reward: xpMap[conditioning],
@@ -3214,87 +3214,87 @@ app.post("/api/ai/chat", authMiddleware, async (c) => {
       c.env.fitloot_db.prepare("SELECT * FROM user_attributes WHERE user_id = ?").bind(user.id).first(),
     ]);
 
-    const systemPrompt = `Você é o assistente oficial do app FitBot.
-Sua função é responder de forma útil, natural, objetiva e agradável, ajudando o usuário com treino, evolução física, hábitos, alimentação e uso do app.
+    const systemPrompt = `VocÃª Ã© o assistente oficial do app FitBot.
+Sua funÃ§Ã£o Ã© responder de forma Ãºtil, natural, objetiva e agradÃ¡vel, ajudando o usuÃ¡rio com treino, evoluÃ§Ã£o fÃ­sica, hÃ¡bitos, alimentaÃ§Ã£o e uso do app.
 
 REGRAS DE COMPORTAMENTO
 
 1. TOM DE VOZ
-- Fale de forma humana, natural, clara e amigável.
+- Fale de forma humana, natural, clara e amigÃ¡vel.
 - Seja acolhedor, mas sem exagero.
-- Evite linguagem robótica.
+- Evite linguagem robÃ³tica.
 - Evite parecer um coach caricato ou motivacional demais.
 - Evite excesso de entusiasmo, emojis e frases decoradas.
 
 2. OBJETIVIDADE
-- Responda exatamente o que o usuário pediu.
-- Não acrescente explicações longas sem necessidade.
-- Não desvie do assunto.
-- Não invente contexto extra.
+- Responda exatamente o que o usuÃ¡rio pediu.
+- NÃ£o acrescente explicaÃ§Ãµes longas sem necessidade.
+- NÃ£o desvie do assunto.
+- NÃ£o invente contexto extra.
 - Se a pergunta for simples, responda de forma simples.
 
-3. PERSONALIZAÇÃO
+3. PERSONALIZAÃÃO
 - Personalize a resposta quando isso realmente agregar valor.
-- Use o nome do usuário com moderação.
-- Nunca repita o nome do usuário em toda mensagem.
-- Só use o nome em momentos específicos: primeira saudação, incentivo pontual, contexto em que a personalização melhora a experiência.
+- Use o nome do usuÃ¡rio com moderaÃ§Ã£o.
+- Nunca repita o nome do usuÃ¡rio em toda mensagem.
+- SÃ³ use o nome em momentos especÃ­ficos: primeira saudaÃ§Ã£o, incentivo pontual, contexto em que a personalizaÃ§Ã£o melhora a experiÃªncia.
 - Na maior parte do tempo, responda sem citar o nome.
 
 4. ESTILO DE RESPOSTA
-- Prefira respostas curtas ou médias.
-- Só faça respostas longas quando o usuário pedir detalhes.
-- Evite introduções desnecessárias.
-- Vá direto ao ponto.
+- Prefira respostas curtas ou mÃ©dias.
+- SÃ³ faÃ§a respostas longas quando o usuÃ¡rio pedir detalhes.
+- Evite introduÃ§Ãµes desnecessÃ¡rias.
+- VÃ¡ direto ao ponto.
 - Organize a resposta com clareza.
-- Quando útil, divida em etapas simples.
+- Quando Ãºtil, divida em etapas simples.
 
-5. PROIBIÇÕES DE ESTILO
-- Não use frases como "Estou aqui pronto para ajudar você a evoluir", "Vamos nessa rumo ao seu objetivo", "bora ganhar XP", "estou aqui para te acompanhar nessa jornada".
-- Não transforme toda resposta em mensagem motivacional.
-- Não tente ser engraçado o tempo todo.
-- Não use o nome do usuário repetidamente.
-- Não enfeite respostas com texto desnecessário.
+5. PROIBIÃÃES DE ESTILO
+- NÃ£o use frases como "Estou aqui pronto para ajudar vocÃª a evoluir", "Vamos nessa rumo ao seu objetivo", "bora ganhar XP", "estou aqui para te acompanhar nessa jornada".
+- NÃ£o transforme toda resposta em mensagem motivacional.
+- NÃ£o tente ser engraÃ§ado o tempo todo.
+- NÃ£o use o nome do usuÃ¡rio repetidamente.
+- NÃ£o enfeite respostas com texto desnecessÃ¡rio.
 
-6. QUANDO O USUÁRIO MANDAR MENSAGEM CONFUSA
-- Peça esclarecimento de forma curta e natural.
-- Tom: "Não entendi muito bem. Me explica de outro jeito?" ou "Pode reformular? Quero te responder certo."
-- Não faça textos longos para dizer que não entendeu.
+6. QUANDO O USUÃRIO MANDAR MENSAGEM CONFUSA
+- PeÃ§a esclarecimento de forma curta e natural.
+- Tom: "NÃ£o entendi muito bem. Me explica de outro jeito?" ou "Pode reformular? Quero te responder certo."
+- NÃ£o faÃ§a textos longos para dizer que nÃ£o entendeu.
 
-7. QUANDO O USUÁRIO FIZER PERGUNTA DIRETA
-- Responda diretamente, sem introdução.
+7. QUANDO O USUÃRIO FIZER PERGUNTA DIRETA
+- Responda diretamente, sem introduÃ§Ã£o.
 
-8. QUANDO O USUÁRIO PEDIR AJUDA PRÁTICA
-- Entregue ação concreta: treino, ajuste de rotina, sugestão alimentar, explicação objetiva.
+8. QUANDO O USUÃRIO PEDIR AJUDA PRÃTICA
+- Entregue aÃ§Ã£o concreta: treino, ajuste de rotina, sugestÃ£o alimentar, explicaÃ§Ã£o objetiva.
 - Menos fala inspiracional, mais utilidade.
 
-9. QUANDO NÃO SOUBER OU FALTAR CONTEXTO
-- Admita de forma simples e peça apenas a informação necessária.
-- Não invente.
+9. QUANDO NÃO SOUBER OU FALTAR CONTEXTO
+- Admita de forma simples e peÃ§a apenas a informaÃ§Ã£o necessÃ¡ria.
+- NÃ£o invente.
 
 10. FORMATO IDEAL
-- Pergunta simples → resposta curta
-- Pergunta prática → resposta objetiva com passos
-- Pergunta complexa → resposta clara, sem enrolação
-- Dúvida emocional → resposta acolhedora, mas sóbria
+- Pergunta simples â resposta curta
+- Pergunta prÃ¡tica â resposta objetiva com passos
+- Pergunta complexa â resposta clara, sem enrolaÃ§Ã£o
+- DÃºvida emocional â resposta acolhedora, mas sÃ³bria
 
 11. REGRA FINAL
 Antes de responder, avalie: Estou respondendo exatamente o que foi pedido? Estou sendo mais longo do que preciso? Estou usando o nome sem necessidade? Estou parecendo natural ou teatral? Se estiver teatral ou motivacional demais, simplifique.
 
-INSTRUÇÕES EXTRAS DE ESTILO
-- Não use mais de 1 emoji por resposta, e apenas quando combinar naturalmente.
-- Responda primeiro, explique depois se necessário.
-- Se a pergunta for curta, a resposta também deve ser curta.
-- Se o usuário estiver irritado ou impaciente, seja ainda mais direto.
-- NUNCA use markdown na resposta. Não use **, *, |, #, ---, tabelas ou qualquer símbolo de formatação. Escreva em texto puro e natural.
+INSTRUÃÃES EXTRAS DE ESTILO
+- NÃ£o use mais de 1 emoji por resposta, e apenas quando combinar naturalmente.
+- Responda primeiro, explique depois se necessÃ¡rio.
+- Se a pergunta for curta, a resposta tambÃ©m deve ser curta.
+- Se o usuÃ¡rio estiver irritado ou impaciente, seja ainda mais direto.
+- NUNCA use markdown na resposta. NÃ£o use **, *, |, #, ---, tabelas ou qualquer sÃ­mbolo de formataÃ§Ã£o. Escreva em texto puro e natural.
 
-Contexto do usuário:
+Contexto do usuÃ¡rio:
 - Nome: ${profile?.full_name}
-- Nível: ${progression?.level}
+- NÃ­vel: ${progression?.level}
 - XP: ${progression?.xp}
 - Streak: ${progression?.current_streak} dias
 - Objetivo: ${profile?.main_goal}
 - Condicionamento: ${profile?.initial_conditioning}
-- Força: ${attributes?.strength}
+- ForÃ§a: ${attributes?.strength}
 - Modo: ${mode}`;
 
     const openaiData = await callOpenAIChat(c, [
@@ -3336,13 +3336,13 @@ app.get("/api/ai/recommendations", authMiddleware, async (c) => {
       `).bind(user.id).first(),
     ]);
 
-    const prompt = `Analise este perfil fitness gamificado e gere recomendações personalizadas em JSON.
-Nível: ${progression?.level}
+    const prompt = `Analise este perfil fitness gamificado e gere recomendaÃ§Ãµes personalizadas em JSON.
+NÃ­vel: ${progression?.level}
 XP: ${progression?.xp}
-Missões completas: ${completedMissions?.count}
+MissÃµes completas: ${completedMissions?.count}
 Streak: ${progression?.current_streak}
 Objetivo: ${profile?.main_goal}
-Atributos: força ${attributes?.strength}, constituição ${attributes?.constitution}, vitalidade ${attributes?.vitality}, destreza ${attributes?.dexterity}, foco ${attributes?.focus}
+Atributos: forÃ§a ${attributes?.strength}, constituiÃ§Ã£o ${attributes?.constitution}, vitalidade ${attributes?.vitality}, destreza ${attributes?.dexterity}, foco ${attributes?.focus}
 Skills: ${(skills.results as Array<{ name: string; total_reps: number }>).slice(0, 5).map((s) => `${s.name}:${s.total_reps}`).join(",")}`;
 
     const openaiData = await callOpenAIChat(c, [{ role: "user", content: prompt }], 1000, true);
@@ -3376,7 +3376,7 @@ app.get("/api/ai/workout-suggestions", authMiddleware, async (c) => {
       c.env.fitloot_db.prepare("SELECT * FROM daily_metrics WHERE user_id = ? ORDER BY date DESC LIMIT 1").bind(user.id).first(),
     ]);
 
-    const prompt = `Sugira treino em JSON com workout_type, duration_minutes, intensity, exercises e motivation. Contexto: nível ${progression?.level}, objetivo ${profile?.main_goal}, passos ${metrics?.steps || 0}, calorias ${metrics?.calories_burned || 0}.`;
+    const prompt = `Sugira treino em JSON com workout_type, duration_minutes, intensity, exercises e motivation. Contexto: nÃ­vel ${progression?.level}, objetivo ${profile?.main_goal}, passos ${metrics?.steps || 0}, calorias ${metrics?.calories_burned || 0}.`;
 
     const openaiData = await callOpenAIChat(c, [{ role: "user", content: prompt }], 900, true);
     const content = safeGet(openaiData.choices ?? [], 0)?.message?.content ?? "{}";
@@ -3420,9 +3420,9 @@ app.post("/api/ai/analyze-food", authMiddleware, async (c) => {
     let items: IdentifiedFoodItem[] = identified_items.filter(isIdentifiedFoodItem);
 
     if (items.length === 0 && food_description) {
-      const identifyPrompt = `Analise a refeição e responda APENAS em JSON no formato {"items":[{"food_name":"","portion_description":"","portion_multiplier":1}]}.
-Contexto textual: ${food_description || "não informado"}
-Texto OCR do rótulo: ${ocr_text || "não identificado"}.`;
+      const identifyPrompt = `Analise a refeiÃ§Ã£o e responda APENAS em JSON no formato {"items":[{"food_name":"","portion_description":"","portion_multiplier":1}]}.
+Contexto textual: ${food_description || "nÃ£o informado"}
+Texto OCR do rÃ³tulo: ${ocr_text || "nÃ£o identificado"}.`;
       const aiData = await callOpenAIChat(c, [{ role: "user", content: identifyPrompt }], 700, true);
       const aiContent = safeGet(aiData.choices ?? [], 0)?.message?.content ?? "{}";
       const identified = JSON.parse(aiContent) as {
@@ -3434,7 +3434,7 @@ Texto OCR do rótulo: ${ocr_text || "não identificado"}.`;
     const ocrNutrition = parseNutritionFromOcrLabel(ocr_text ?? "");
 
     if (items.length === 0 && !ocrNutrition) {
-      throw new ApiIntegrationError("INVALID_RESPONSE", 422, "Não foi possível identificar alimentos na imagem. Tente novamente com outra foto.");
+      throw new ApiIntegrationError("INVALID_RESPONSE", 422, "NÃ£o foi possÃ­vel identificar alimentos na imagem. Tente novamente com outra foto.");
     }
 
     const analyzedItems: Array<{
@@ -3470,7 +3470,7 @@ Texto OCR do rótulo: ${ocr_text || "não identificado"}.`;
 
         analyzedItems.push({
           food_name: query,
-          portion_description: item.portion_description || "porção estimada",
+          portion_description: item.portion_description || "porÃ§Ã£o estimada",
           calories: calories !== null ? Math.round(calories * multiplier) : null,
           energy_kj: calories !== null ? Math.round(calories * 4.184 * multiplier) : null,
           protein: protein !== null ? Number((protein * multiplier).toFixed(1)) : null,
@@ -3494,18 +3494,18 @@ Texto OCR do rótulo: ${ocr_text || "não identificado"}.`;
 
           analyzedItems.push({
             food_name: query,
-            portion_description: item.portion_description || "porção estimada",
+            portion_description: item.portion_description || "porÃ§Ã£o estimada",
             calories: Number.isFinite(rapidCalories) ? Math.round(rapidCalories * multiplier) : null,
             energy_kj: Number.isFinite(rapidCalories) ? Math.round(rapidCalories * 4.184 * multiplier) : null,
             protein: Number.isFinite(rapidProtein) ? Number((rapidProtein * multiplier).toFixed(1)) : null,
             carbs: Number.isFinite(rapidCarbs) ? Number((rapidCarbs * multiplier).toFixed(1)) : null,
             fats: Number.isFinite(rapidFats) ? Number((rapidFats * multiplier).toFixed(1)) : null,
             source: "rapidapi",
-            warning: "Alimento não encontrado no USDA. Valores retornados pela RapidAPI.",
+            warning: "Alimento nÃ£o encontrado no USDA. Valores retornados pela RapidAPI.",
           });
         } catch (rapidError) {
           console.warn(`[analyze-food][rapidapi-fallback] ${query}`, rapidError);
-          const estimatePrompt = `Estime APENAS JSON com calories, protein, carbs, fats para ${query} (${item.portion_description || "porção média"}).`;
+          const estimatePrompt = `Estime APENAS JSON com calories, protein, carbs, fats para ${query} (${item.portion_description || "porÃ§Ã£o mÃ©dia"}).`;
           const fallbackData = await callOpenAIChat(c, [{ role: "user", content: estimatePrompt }], 350, true);
           const estimate = JSON.parse(safeGet(fallbackData.choices ?? [], 0)?.message?.content ?? "{}") as {
             calories?: number | undefined;
@@ -3516,14 +3516,14 @@ Texto OCR do rótulo: ${ocr_text || "não identificado"}.`;
 
           analyzedItems.push({
             food_name: query,
-            portion_description: item.portion_description || "porção estimada",
+            portion_description: item.portion_description || "porÃ§Ã£o estimada",
             calories: estimate.calories ?? null,
             energy_kj: estimate.calories ? Math.round(estimate.calories * 4.184) : null,
             protein: estimate.protein ?? null,
             carbs: estimate.carbs ?? null,
             fats: estimate.fats ?? null,
             source: "estimate",
-            warning: "Alimento não encontrado no USDA/RapidAPI. Valores estimados por IA.",
+            warning: "Alimento nÃ£o encontrado no USDA/RapidAPI. Valores estimados por IA.",
           });
         }
       }
@@ -3531,8 +3531,8 @@ Texto OCR do rótulo: ${ocr_text || "não identificado"}.`;
 
     if (ocrNutrition) {
       analyzedItems.push({
-        food_name: "Rótulo identificado",
-        portion_description: "dados extraídos do rótulo",
+        food_name: "RÃ³tulo identificado",
+        portion_description: "dados extraÃ­dos do rÃ³tulo",
         calories: ocrNutrition.calories,
         energy_kj: ocrNutrition.energy_kj,
         protein: ocrNutrition.protein,
@@ -3575,7 +3575,7 @@ Texto OCR do rótulo: ${ocr_text || "não identificado"}.`;
       },
       has_estimates: analyzedItems.some((item) => item.source !== "usda"),
       estimation_warning: analyzedItems.some((item) => item.source === "estimate")
-        ? "Alguns alimentos não foram encontrados no USDA/RapidAPI e foram estimados por IA."
+        ? "Alguns alimentos nÃ£o foram encontrados no USDA/RapidAPI e foram estimados por IA."
         : undefined,
     });
   } catch (error) {
@@ -3634,7 +3634,7 @@ app.get("/api/health/rapidapi", authMiddleware, async (c) => c.json({ ok: Boolea
 app.get("/api/health/vision", authMiddleware, async (c) => c.json({ ok: false, deprecated: true }));
 
 // -----------------------------
-// SPA fallback (APENAS após todas as rotas /api/* definidas)
+// SPA fallback (APENAS apÃ³s todas as rotas /api/* definidas)
 // -----------------------------
 app.get("*", async (c, next) => {
   // Se for rota API, passa adiante para as rotas definidas
@@ -3643,10 +3643,10 @@ app.get("*", async (c, next) => {
   }
 
   try {
-    // c.req é um Request válido para passar ao binding ASSETS
+    // c.req Ã© um Request vÃ¡lido para passar ao binding ASSETS
     return await c.env.ASSETS.fetch(c.req.raw);
   } catch {
-    // se falhar, passa para próximos handlers (ou 404)
+    // se falhar, passa para prÃ³ximos handlers (ou 404)
     return next();
   }
 });

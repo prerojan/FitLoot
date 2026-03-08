@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useState } from "react";
+ï»¿import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { useAuth } from "@/react-app/App";
 import BottomNav from "@/react-app/components/BottomNav";
@@ -36,7 +36,7 @@ export default function Ranking() {
       setRanking(Array.isArray(data) ? data : []);
     } catch (loadError) {
       console.error("Error loading ranking:", loadError);
-      setError("Nï¿½o foi possï¿½vel carregar o ranking agora.");
+      setError("NÃ¯Â¿Â½o foi possÃ¯Â¿Â½vel carregar o ranking agora.");
       setRanking([]);
     } finally {
       setLoading(false);
@@ -53,6 +53,20 @@ export default function Ranking() {
 
   if (loading) {
     return <PageLoader />;
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 pb-24">
+        <div className="px-6 py-12 text-center">
+          <p className="text-red-600 mb-4">{error}</p>
+          <button onClick={loadRanking} className="fl-btn-primary rounded-xl px-4 py-2">
+            Tentar novamente
+          </button>
+        </div>
+        <BottomNav active="ranking" />
+      </div>
+    );
   }
 
   if (error) {

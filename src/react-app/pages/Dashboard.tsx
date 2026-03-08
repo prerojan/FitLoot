@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useState } from "react";
+ï»¿import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
 import { useAuth } from "@/react-app/App";
 import BottomNav from "@/react-app/components/BottomNav";
@@ -117,7 +117,7 @@ export default function Dashboard() {
         onSuccess(payload);
       } catch {
         hasRequestError = true;
-        setError("Não foi possível carregar todos os dados do dashboard agora.");
+        setError("NÃ£o foi possÃ­vel carregar todos os dados do dashboard agora.");
       } finally {
         setSectionLoading(section, false);
       }
@@ -208,7 +208,7 @@ export default function Dashboard() {
 
       if (!response.ok) {
         const payload = (await response.json().catch(() => null)) as { error?: string | undefined } | null;
-        setError(payload?.error ?? "Não foi possível concluir a missão.");
+        setError(payload?.error ?? "NÃ£o foi possÃ­vel concluir a missÃ£o.");
         return;
       }
 
@@ -225,7 +225,7 @@ export default function Dashboard() {
 
       await refreshData();
     } catch {
-      setError("Não foi possível concluir a missão agora.");
+      setError("NÃ£o foi possÃ­vel concluir a missÃ£o agora.");
     }
   };
 
@@ -321,7 +321,7 @@ export default function Dashboard() {
         ) : (
           <>
             <MissionSection
-              title="Missões Diárias"
+              title="MissÃµes DiÃ¡rias"
               icon={<Target className="w-5 h-5" />}
               missions={dailyMissions}
               onComplete={handleMissionComplete}
@@ -329,7 +329,7 @@ export default function Dashboard() {
 
             {failedMissions.length > 0 && (
               <MissionSection
-                title="Missões Expiradas"
+                title="MissÃµes Expiradas"
                 icon={<Target className="w-5 h-5" />}
                 missions={failedMissions}
                 onComplete={handleMissionComplete}
@@ -338,7 +338,7 @@ export default function Dashboard() {
 
             {weeklyMissions.length > 0 && (
               <MissionSection
-                title="Missões Semanais"
+                title="MissÃµes Semanais"
                 icon={<Target className="w-5 h-5" />}
                 missions={weeklyMissions}
                 onComplete={handleMissionComplete}
@@ -347,7 +347,7 @@ export default function Dashboard() {
 
             {monthlyMissions.length > 0 && (
               <MissionSection
-                title="Missões Mensais"
+                title="MissÃµes Mensais"
                 icon={<Target className="w-5 h-5" />}
                 missions={monthlyMissions}
                 onComplete={handleMissionComplete}

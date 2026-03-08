@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useRef, useState, type ChangeEventHandler } from "react";
+ï»¿import { useCallback, useEffect, useRef, useState, type ChangeEventHandler } from "react";
 import { useNavigate } from "react-router";
 import { useAuth } from "@/react-app/App";
 import BottomNav from "@/react-app/components/BottomNav";
@@ -59,6 +59,7 @@ export default function Profile() {
   const primaryColorInputRef = useRef<HTMLInputElement>(null);
   const secondaryColorInputRef = useRef<HTMLInputElement>(null);
 
+
   useEffect(() => {
     const updateViewport = () => {
       setIsMobile(window.innerWidth <= 768);
@@ -106,7 +107,7 @@ export default function Profile() {
       setAchievements((await achievementsRes.json()) as AchievementWithUnlock[]);
       setTitles((await titlesRes.json()) as TitleWithUnlock[]);
     } catch {
-      setError("Não foi possível carregar o perfil agora.");
+      setError("NÃ£o foi possÃ­vel carregar o perfil agora.");
     } finally {
       setLoading(false);
     }
@@ -132,7 +133,7 @@ export default function Profile() {
       await api(`/api/titles/${titleId}/activate`, { method: "POST" });
       await loadData();
     } catch {
-      setError("Não foi possível ativar o título agora.");
+      setError("NÃ£o foi possÃ­vel ativar o tÃ­tulo agora.");
     }
   };
 
@@ -162,7 +163,7 @@ export default function Profile() {
       });
 
       if (!response.ok) {
-        throw new Error("Falha ao salvar personalização.");
+        throw new Error("Falha ao salvar personalizaÃ§Ã£o.");
       }
 
       const responseData = (await response.json()) as { profile?: UserProfile | undefined };
@@ -171,7 +172,7 @@ export default function Profile() {
         applyProfileTheme(responseData.profile);
       }
     } catch {
-      setError("Não foi possível salvar personalização agora.");
+      setError("NÃ£o foi possÃ­vel salvar personalizaÃ§Ã£o agora.");
     } finally {
       setCustomizationSaving(false);
     }
@@ -186,7 +187,7 @@ export default function Profile() {
       });
       setProfile((currentProfile) => currentProfile ? { ...currentProfile, active_skill_focus: focus } : currentProfile);
     } catch {
-      setError("Não foi possível alterar o foco agora.");
+      setError("NÃ£o foi possÃ­vel alterar o foco agora.");
     }
   };
 
@@ -265,7 +266,7 @@ export default function Profile() {
             <button
               onClick={() => setSettingsOpen(true)}
               className="text-white/80 hover:text-white transition-colors"
-              aria-label="Abrir configurações"
+              aria-label="Abrir configuraÃ§Ãµes"
             >
               <Settings className="w-6 h-6" />
             </button>
@@ -280,7 +281,7 @@ export default function Profile() {
         </div>
 
         <div className="grid grid-cols-3 gap-4 mt-6">
-          <StatBox label="Nível" value={progression?.level || 1} />
+          <StatBox label="NÃ­vel" value={progression?.level || 1} />
           <StatBox label="XP Total" value={(progression?.level || 1) * 100 + (progression?.xp || 0)} />
           <StatBox label="Pontos" value={progression?.points || 0} />
         </div>
@@ -291,15 +292,15 @@ export default function Profile() {
           <TabButton icon={<Target className="w-4 h-4" />} label="Atributos" active={activeTab === "attributes"} onClick={() => setActiveTab("attributes")} />
           <TabButton icon={<Dumbbell className="w-4 h-4" />} label="Habilidades" active={activeTab === "skills"} onClick={() => setActiveTab("skills")} />
           <TabButton icon={<Trophy className="w-4 h-4" />} label="Conquistas" active={activeTab === "achievements"} onClick={() => setActiveTab("achievements")} />
-          <TabButton icon={<Award className="w-4 h-4" />} label="Títulos" active={activeTab === "titles"} onClick={() => setActiveTab("titles")} />
+          <TabButton icon={<Award className="w-4 h-4" />} label="TÃ­tulos" active={activeTab === "titles"} onClick={() => setActiveTab("titles")} />
         </div>
       </div>
 
       <div className="px-6 mt-6 pb-6">
         {activeTab === "attributes" && attributes && (
           <div className="space-y-4">
-            <AttributeBar label="FOR (Força)" value={attributes.strength} color="from-red-500 to-orange-500" />
-            <AttributeBar label="CON (Constituição)" value={attributes.constitution} color="from-blue-500 to-cyan-500" />
+            <AttributeBar label="FOR (ForÃ§a)" value={attributes.strength} color="from-red-500 to-orange-500" />
+            <AttributeBar label="CON (ConstituiÃ§Ã£o)" value={attributes.constitution} color="from-blue-500 to-cyan-500" />
             <AttributeBar label="VIT (Vitalidade)" value={attributes.vitality} color="from-green-500 to-emerald-500" />
             <AttributeBar label="DES (Destreza)" value={attributes.dexterity} color="from-purple-500 to-pink-500" />
             <AttributeBar label="FOCO" value={attributes.focus} color="from-yellow-500 to-amber-500" />
@@ -339,13 +340,13 @@ export default function Profile() {
         <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-end sm:items-center justify-center">
           <div className="w-full sm:max-w-2xl bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl p-6 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-bold text-gray-900">Configurações</h2>
+              <h2 className="text-xl font-bold text-gray-900">ConfiguraÃ§Ãµes</h2>
               <button onClick={() => setSettingsOpen(false)} className="fl-btn-secondary rounded-lg px-3 py-1">Fechar</button>
             </div>
 
             <div className="space-y-4">
               <div className="rounded-2xl border border-gray-200 p-4">
-                <h3 className="font-semibold text-gray-900 mb-3">Informações da conta</h3>
+                <h3 className="font-semibold text-gray-900 mb-3">InformaÃ§Ãµes da conta</h3>
                 <p className="text-sm text-gray-700">Nome: {profile?.full_name ?? "-"}</p>
                 <p className="text-sm text-gray-700">Email: {user?.email ?? "-"}</p>
                 <p className="text-sm text-gray-700">Username: @{profile?.username ?? "-"}</p>
@@ -361,7 +362,7 @@ export default function Profile() {
 
               {isMobile ? (
                 <div className="rounded-2xl border border-gray-200 p-4 space-y-4">
-                  <h3 className="font-semibold text-gray-900">Personalização (mobile)</h3>
+                  <h3 className="font-semibold text-gray-900">PersonalizaÃ§Ã£o (mobile)</h3>
 
                   <div className="grid grid-cols-2 gap-3">
                     <button
@@ -369,19 +370,19 @@ export default function Profile() {
                       className="h-12 rounded-lg border-2 border-white/20 shadow-inner"
                       style={{ backgroundColor: primaryColor }}
                       type="button"
-                      aria-label="Selecionar cor primária"
+                      aria-label="Selecionar cor primÃ¡ria"
                     />
                     <button
                       onClick={() => secondaryColorInputRef.current?.click()}
                       className="h-12 rounded-lg border-2 border-white/20 shadow-inner"
                       style={{ backgroundColor: secondaryColor }}
                       type="button"
-                      aria-label="Selecionar cor secundária"
+                      aria-label="Selecionar cor secundÃ¡ria"
                     />
                   </div>
                   <div className="flex justify-between text-xs text-gray-500">
-                    <span>Cor primária</span>
-                    <span>Cor secundária</span>
+                    <span>Cor primÃ¡ria</span>
+                    <span>Cor secundÃ¡ria</span>
                   </div>
                   <input
                     ref={primaryColorInputRef}
@@ -398,7 +399,7 @@ export default function Profile() {
                     className="sr-only"
                   />
 
-                  <label className="block text-sm font-medium text-gray-700">Fonte do título</label>
+                  <label className="block text-sm font-medium text-gray-700">Fonte do tÃ­tulo</label>
                   <select
                     value={customFont}
                     onChange={(event) => { void applyFont(event.target.value); }}
@@ -413,25 +414,25 @@ export default function Profile() {
                   </select>
 
                   <div className="grid grid-cols-2 gap-2">
-                    <button onClick={() => { void applySolidBackground(); }} className="fl-btn-secondary rounded-xl py-2 w-full">Fundo sólido</button>
+                    <button onClick={() => { void applySolidBackground(); }} className="fl-btn-secondary rounded-xl py-2 w-full">Fundo sÃ³lido</button>
                     <label className="fl-btn-secondary rounded-xl py-2 text-center cursor-pointer block">
                       Escolher foto
                       <input type="file" accept="image/*" className="hidden" onChange={onPickBackgroundImage} />
                     </label>
                   </div>
 
-                  {bgPreview && <img src={bgPreview} alt="Prévia do fundo" className="w-full h-28 object-cover rounded-xl border border-gray-200" />}
+                  {bgPreview && <img src={bgPreview} alt="PrÃ©via do fundo" className="w-full h-28 object-cover rounded-xl border border-gray-200" />}
 
                   {customizationSaving && (
                     <div className="text-xs text-gray-500 flex items-center gap-2">
                       <LoadingBall size="sm" />
-                      Salvando personalização...
+                      Salvando personalizaÃ§Ã£o...
                     </div>
                   )}
                 </div>
               ) : (
                 <div className="rounded-2xl border border-gray-200 p-4 text-sm text-gray-600">
-                  Personalização visual disponível apenas no mobile (largura até 768px).
+                  PersonalizaÃ§Ã£o visual disponÃ­vel apenas no mobile (largura atÃ© 768px).
                 </div>
               )}
             </div>
@@ -530,8 +531,8 @@ function AchievementCard({ achievement }: { achievement: AchievementWithUnlock }
   const rarityColors = {
     Comum: "from-gray-400 to-gray-500",
     Raro: "from-blue-400 to-blue-600",
-    Épico: "from-purple-400 to-purple-600",
-    Lendário: "from-yellow-400 to-orange-500",
+    Ãpico: "from-purple-400 to-purple-600",
+    LendÃ¡rio: "from-yellow-400 to-orange-500",
   };
 
   const unlocked = achievement.unlocked === 1;
@@ -542,7 +543,7 @@ function AchievementCard({ achievement }: { achievement: AchievementWithUnlock }
         ? `bg-gradient-to-br ${rarityColors[achievement.rarity as keyof typeof rarityColors] || "from-gray-400 to-gray-500"} text-white`
         : "bg-gray-200 text-gray-400"
     }`}>
-      <div className="text-3xl mb-2">{unlocked ? "🏆" : "🔒"}</div>
+      <div className="text-3xl mb-2">{unlocked ? "ð" : "ð"}</div>
       <h3 className="font-bold text-sm mb-1">{achievement.name}</h3>
       <p className="text-xs opacity-90">{achievement.description}</p>
       {unlocked && achievement.unlocked_at && (
@@ -558,8 +559,8 @@ function TitleCard({ title, onActivate }: { title: TitleWithUnlock; onActivate: 
   const rarityColors = {
     Comum: "border-gray-400",
     Raro: "border-blue-500",
-    Épico: "border-purple-500",
-    Lendário: "border-yellow-500",
+    Ãpico: "border-purple-500",
+    LendÃ¡rio: "border-yellow-500",
   };
 
   const unlocked = title.unlocked === 1;
@@ -572,7 +573,7 @@ function TitleCard({ title, onActivate }: { title: TitleWithUnlock; onActivate: 
       <div className="flex items-center justify-between">
         <div className="flex-1">
           <h3 className={`font-bold ${unlocked ? "text-gray-900" : "text-gray-400"}`}>
-            {unlocked ? title.name : "🔒 Bloqueado"}
+            {unlocked ? title.name : "ð Bloqueado"}
           </h3>
           <p className="text-xs text-gray-500">{title.rarity}</p>
         </div>
@@ -593,3 +594,5 @@ function TitleCard({ title, onActivate }: { title: TitleWithUnlock; onActivate: 
     </div>
   );
 }
+
+
