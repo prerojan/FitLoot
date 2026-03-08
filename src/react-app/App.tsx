@@ -1,11 +1,13 @@
-﻿import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router";
+import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router";
 import { useState, useEffect, createContext, useContext, lazy, Suspense } from "react";
 import PageLoader from "@/react-app/components/PageLoader";
+import LoadingBall from "@/react-app/components/LoadingBall";
 import { ROUTE_PATHS, AUTHENTICATED_HINT_KEY } from "@/react-app/constants/auth";
 import { useAuthBootstrap } from "@/react-app/hooks/useAuthBootstrap";
 import { prefetchCoreRoutes, resolveAuthenticatedStartRoute } from "@/react-app/services/authService";
 import type { AuthContextType, User } from "@/react-app/types/auth";
 import { applyProfileTheme } from "@/react-app/utils/theme";
+import { clearJsonCache } from "@/react-app/utils/api";
 
 const HomePage = lazy(() => import("@/react-app/pages/Home"));
 const LandingPage = lazy(() => import("@/react-app/pages/Landing"));
@@ -36,7 +38,15 @@ export const useAuth = () => useContext(AuthContext);
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
 
-  if (loading) return <PageLoader />;
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 px-6 pt-20">
+        <div className="fl-card p-6 flex items-center justify-center">
+          <LoadingBall size="md" />
+        </div>
+      </div>
+    );
+  }
   if (!user) return <Navigate to={ROUTE_PATHS.app} replace />;
   if (user.onboarding_completed !== 1) return <Navigate to={ROUTE_PATHS.onboarding} replace />;
   return <>{children}</>;
@@ -50,6 +60,7 @@ export default function App() {
 
   const logout = () => {
     localStorage.removeItem(AUTHENTICATED_HINT_KEY);
+    clearJsonCache();
     applyProfileTheme(null);
     setUser(null);
   };
@@ -62,9 +73,7 @@ export default function App() {
     prefetchCoreRoutes();
   }, []);
 
-  const appRouteElement = loading ? (
-    <PageLoader />
-  ) : user ? (
+  const appRouteElement = user ? (
     <Navigate to={resolveAuthenticatedStartRoute(user)} replace />
   ) : (
     <HomePage />

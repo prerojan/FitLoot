@@ -285,6 +285,8 @@ export interface Env {
   GYMFIT_API_KEY?: string | undefined;
   FRONTEND_ORIGIN?: string | undefined;
   FRONTEND_ORIGINS?: string | undefined;
+  RESEND_API_KEY?: string | undefined;
+  FEEDBACK_FROM_EMAIL?: string | undefined;
 }
 // --------------------------------
 
@@ -1479,6 +1481,169 @@ app.post("/api/profile/goal", authMiddleware, async (c) => {
   if (completedGoals.size >= 5) await unlockAchievementIfNeeded(c.env.fitloot_db, user.id, 'A Jornada ÃƒÂ© o Destino', completedGoals.size, 5);
 
   return c.json({ success: true, old_goal: oldGoal, new_goal: newGoal, change_count: changeCount });
+});
+
+type FeedbackKind = "Sugestao" | "Bug" | "Elogio" | "Outro";
+
+type FeedbackEmailPayload = {
+  kind: FeedbackKind;
+  message: string;
+  userName: string;
+  userUsername: string;
+  userEmail: string;
+  userLevel: number;
+  timestamp: string;
+};
+
+function normalizeFeedbackKind(raw: unknown): FeedbackKind {
+  const value = String(raw ?? "").trim().toLowerCase();
+  if (value === "sugestao" || value === "sugestão" || value === "suggestion") return "Sugestao";
+  if (value === "bug") return "Bug";
+  if (value === "elogio" || value === "praise") return "Elogio";
+  return "Outro";
+}
+
+function buildFeedbackEmailText(payload: FeedbackEmailPayload): string {
+  return [
+    `Tipo: ${payload.kind}`,
+    `Usuario: ${payload.userName} (@${payload.userUsername})`,
+    `Email: ${payload.userEmail}`,
+    `Nivel: ${payload.userLevel}`,
+    `Data: ${payload.timestamp}`,
+    "",
+    "Mensagem:",
+    payload.message,
+  ].join("\n");
+}
+
+async function sendFeedbackViaResend(env: Env, subject: string, textBody: string, replyTo: string): Promise<boolean> {
+  if (!env.RESEND_API_KEY) {
+    return false;
+  }
+
+  const fromAddress = env.FEEDBACK_FROM_EMAIL ?? "FitLoot <feedback@fitloot.app>";
+  const response = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${env.RESEND_API_KEY}`,
+    },
+    body: JSON.stringify({
+      from: fromAddress,
+      to: ["suportefitloot@gmail.com"],
+      subject,
+      text: textBody,
+      reply_to: replyTo,
+    }),
+  });
+
+  if (!response.ok) {
+    const reason = await response.text();
+    throw new Error(`resend-failed:${response.status}:${reason}`);
+  }
+
+  return true;
+}
+
+async function sendFeedbackViaMailChannels(subject: string, textBody: string, payload: FeedbackEmailPayload, env: Env): Promise<void> {
+  const fromAddress = env.FEEDBACK_FROM_EMAIL ?? "feedback@fitloot.app";
+  const response = await fetch("https://api.mailchannels.net/tx/v1/send", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      personalizations: [
+        {
+          to: [{ email: "suportefitloot@gmail.com", name: "FitLoot Suporte" }],
+        },
+      ],
+      from: {
+        email: fromAddress,
+        name: "FitLoot Feedback",
+      },
+      reply_to: {
+        email: payload.userEmail,
+        name: payload.userName,
+      },
+      subject,
+      content: [
+        {
+          type: "text/plain",
+          value: textBody,
+        },
+      ],
+    }),
+  });
+
+  if (!response.ok) {
+    const reason = await response.text();
+    throw new Error(`mailchannels-failed:${response.status}:${reason}`);
+  }
+}
+
+app.post("/api/feedback", authMiddleware, async (c) => {
+  const user = c.get("user");
+  if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+  try {
+    const body = await c.req.json().catch(() => ({})) as { type?: unknown; message?: unknown };
+    const kind = normalizeFeedbackKind(body.type);
+    const message = String(body.message ?? "").trim();
+
+    if (message.length < 5) {
+      return c.json({ error: "Escreva uma mensagem com pelo menos 5 caracteres." }, 400);
+    }
+
+    const [profile, progression] = await Promise.all([
+      c.env.fitloot_db
+        .prepare("SELECT full_name, username FROM user_profiles WHERE user_id = ?")
+        .bind(user.id)
+        .first<{ full_name: string | null; username: string | null }>(),
+      c.env.fitloot_db
+        .prepare("SELECT level FROM user_progression WHERE user_id = ?")
+        .bind(user.id)
+        .first<{ level: number | null }>(),
+    ]);
+
+    const feedbackPayload: FeedbackEmailPayload = {
+      kind,
+      message,
+      userName: profile?.full_name ?? user.name,
+      userUsername: profile?.username ?? user.email.split("@")[0],
+      userEmail: user.email,
+      userLevel: Number(progression?.level ?? 1),
+      timestamp: new Date().toISOString(),
+    };
+
+    const subject = `[FitLoot Feedback] ${feedbackPayload.kind} - ${feedbackPayload.userName}`;
+    const textBody = buildFeedbackEmailText(feedbackPayload);
+
+    let provider: "resend" | "mailchannels" = "mailchannels";
+
+    try {
+      const sentByResend = await sendFeedbackViaResend(c.env, subject, textBody, feedbackPayload.userEmail);
+      if (sentByResend) {
+        provider = "resend";
+      } else {
+        await sendFeedbackViaMailChannels(subject, textBody, feedbackPayload, c.env);
+      }
+    } catch (primaryError) {
+      console.warn("[/api/feedback][primary-provider-failed]", {
+        message: getErrorMessage(primaryError),
+      });
+      await sendFeedbackViaMailChannels(subject, textBody, feedbackPayload, c.env);
+      provider = "mailchannels";
+    }
+
+    return c.json({ success: true, provider });
+  } catch (error) {
+    console.error("[/api/feedback]", {
+      message: getErrorMessage(error),
+      userId: user.id,
+    });
+    return c.json({ error: "Nao foi possivel enviar o feedback agora." }, 500);
+  }
 });
 
 app.post("/api/onboarding", authMiddleware, zValidator("json", OnboardingRequestSchema), async (c) => {
@@ -2941,6 +3106,80 @@ function inferRestSeconds(metricType: MissionMetricType): number | null {
   return null;
 }
 
+function isMissionMetricType(value: unknown): value is MissionMetricType {
+  return (
+    value === "repetitions" ||
+    value === "duration_seconds" ||
+    value === "sets_reps" ||
+    value === "steps" ||
+    value === "distance_meters" ||
+    value === "duration_minutes" ||
+    value === "circuit_tasks"
+  );
+}
+
+function estimateMissionDuration(metricType: MissionMetricType, metricValue: number): number {
+  if (metricType === "duration_seconds") {
+    return Math.max(3, Math.ceil(metricValue / 60));
+  }
+
+  if (metricType === "duration_minutes") {
+    return Math.max(1, metricValue);
+  }
+
+  if (metricType === "circuit_tasks") {
+    return 45;
+  }
+
+  return Math.max(8, Math.floor(metricValue / 4));
+}
+
+function applyMissionMetricContext(
+  payload: MissionPayload,
+  period: MissionPeriod,
+  exerciseName: string,
+  desiredMetricType: MissionMetricType,
+  desiredMetricValue: number
+): MissionPayload {
+  const normalizedMetricType = period !== "weekly" && desiredMetricType === "circuit_tasks"
+    ? "sets_reps"
+    : desiredMetricType;
+  const baselineMetricValue = metricValueByPeriod(normalizedMetricType, period);
+  const minValue = Math.max(1, Math.round(baselineMetricValue * 0.4));
+  const maxValue = Math.max(minValue, Math.round(baselineMetricValue * 1.8));
+  const normalizedMetricValue = Math.min(maxValue, Math.max(minValue, Math.round(desiredMetricValue)));
+
+  const sets = normalizedMetricType === "circuit_tasks" ? null : inferSets(normalizedMetricType, period);
+  const restSeconds = normalizedMetricType === "circuit_tasks" ? null : inferRestSeconds(normalizedMetricType);
+  const targetReps =
+    normalizedMetricType === "duration_seconds" ||
+    normalizedMetricType === "duration_minutes" ||
+    normalizedMetricType === "circuit_tasks"
+      ? null
+      : normalizedMetricValue;
+  const targetTime =
+    normalizedMetricType === "duration_seconds"
+      ? normalizedMetricValue
+      : normalizedMetricType === "duration_minutes"
+        ? normalizedMetricValue * 60
+        : null;
+
+  return {
+    ...payload,
+    metric_type: normalizedMetricType,
+    metric_value: normalizedMetricValue,
+    metric_unit: metricUnitByType(normalizedMetricType),
+    sets,
+    rest_seconds: restSeconds,
+    description: buildMissionDescription(exerciseName, normalizedMetricType, normalizedMetricValue, sets),
+    duration_estimate_minutes: estimateMissionDuration(normalizedMetricType, normalizedMetricValue),
+    circuit_tasks: normalizedMetricType === "circuit_tasks" ? buildCircuitTasks(exerciseName, period) : [],
+    target_reps: targetReps,
+    target_time: targetTime,
+    exercise_category: normalizedMetricType === "circuit_tasks" ? "cardio_circuit" : payload.exercise_category,
+  };
+}
+
 function buildCircuitTasks(exerciseName: string, period: MissionPeriod): CircuitTask[] {
   const lower = exerciseName.toLowerCase();
   const baseRequired = period === "weekly" ? 5 : period === "monthly" ? 7 : 3;
@@ -3116,13 +3355,7 @@ function buildMissionPayload(params: {
     attributes_benefited: attributes,
     xp_reward: params.xp,
     points_reward: params.points,
-    duration_estimate_minutes: metricType === "duration_seconds"
-      ? Math.max(3, Math.ceil(metricValue / 60))
-      : metricType === "duration_minutes"
-        ? metricValue
-        : metricType === "circuit_tasks"
-          ? 45
-          : Math.max(8, Math.floor(metricValue / 4)),
+    duration_estimate_minutes: estimateMissionDuration(metricType, metricValue),
     exercise_category: category,
     mission_origin: params.missionOrigin ?? "regular",
     circuit_tasks: circuitTasks,
@@ -3178,17 +3411,12 @@ async function insertMission(db: D1Database, userId: string, period: MissionPeri
 
 async function fetchExerciseDbExercises(env: Env, muscle: string, equipment: string): Promise<ExerciseRef[]> {
   if (!env.RAPID_API_KEY) throw new Error("rapidapi-key-missing");
-  const data = await fetchJsonWithTimeout<Array<Record<string, unknown>>>(
-    `https://exercisedb.p.rapidapi.com/exercises/target/${encodeURIComponent(muscle)}?limit=8`,
-    {
-      headers: {
-        "X-RapidAPI-Key": env.RAPID_API_KEY,
-        "X-RapidAPI-Host": "exercisedb.p.rapidapi.com",
-      },
-    },
-    8000
-  );
-  return data.map((item) => ({
+  const baseHeaders = {
+    "X-RapidAPI-Key": env.RAPID_API_KEY,
+    "X-RapidAPI-Host": "exercisedb.p.rapidapi.com",
+  };
+
+  const mapExercise = (item: Record<string, unknown>): ExerciseRef => ({
     name: String(item.name ?? "Exercicio funcional"),
     muscle: String(item.target ?? muscle),
     equipment: String(item.equipment ?? (equipment || "bodyweight")),
@@ -3196,50 +3424,25 @@ async function fetchExerciseDbExercises(env: Env, muscle: string, equipment: str
     instructions: Array.isArray(item.instructions) ? String(item.instructions[0] ?? "") : "",
     image_url: typeof item.gifUrl === "string" ? item.gifUrl : undefined,
     body_part: typeof item.bodyPart === "string" ? item.bodyPart : undefined,
-  }));
-}
+  });
 
-async function fetchApiNinjasExercises(env: Env, muscle: string): Promise<ExerciseRef[]> {
-  if (!env.RAPID_API_KEY) throw new Error("rapidapi-key-missing");
-  const data = await fetchJsonWithTimeout<Array<Record<string, unknown>>>(
-    `https://exercises-by-api-ninjas.p.rapidapi.com/v1/exercises?muscle=${encodeURIComponent(muscle)}`,
-    {
-      headers: {
-        "X-RapidAPI-Key": env.RAPID_API_KEY,
-        "X-RapidAPI-Host": "exercises-by-api-ninjas.p.rapidapi.com",
-      },
-    },
+  const targetMatches = await fetchJsonWithTimeout<Array<Record<string, unknown>>>(
+    `https://exercisedb.p.rapidapi.com/exercises/target/${encodeURIComponent(muscle)}?limit=12`,
+    { headers: baseHeaders },
     8000
   );
-  return data.slice(0, 8).map((item) => ({
-    name: String(item.name ?? "Exercicio funcional"),
-    muscle: String(item.muscle ?? muscle),
-    equipment: String(item.equipment ?? "bodyweight"),
-    difficulty: String(item.difficulty ?? "beginner"),
-    instructions: String(item.instructions ?? ""),
-  }));
-}
 
-async function fetchGymFitExercises(env: Env, muscle: string): Promise<ExerciseRef[]> {
-  if (!env.RAPID_API_KEY) throw new Error("rapidapi-key-missing");
-  const data = await fetchJsonWithTimeout<{ exercises?: Array<Record<string, unknown>> }>(
-    `https://gym-fit.p.rapidapi.com/exercises?muscle=${encodeURIComponent(muscle)}`,
-    {
-      headers: {
-        "X-RapidAPI-Key": env.RAPID_API_KEY,
-        "X-RapidAPI-Host": "gym-fit.p.rapidapi.com",
-      },
-    },
+  if (targetMatches.length > 0) {
+    return targetMatches.slice(0, 8).map(mapExercise);
+  }
+
+  const bodyPartMatches = await fetchJsonWithTimeout<Array<Record<string, unknown>>>(
+    `https://exercisedb.p.rapidapi.com/exercises/bodyPart/${encodeURIComponent(muscle)}?limit=12`,
+    { headers: baseHeaders },
     8000
   );
-  return (data.exercises ?? []).slice(0, 8).map((item) => ({
-    name: String(item.name ?? "Exercicio funcional"),
-    muscle: String(item.muscle ?? muscle),
-    equipment: String(item.equipment ?? "bodyweight"),
-    difficulty: String(item.level ?? "beginner"),
-    instructions: String(item.instructions ?? ""),
-    image_url: typeof item.image_url === "string" ? item.image_url : undefined,
-  }));
+
+  return bodyPartMatches.slice(0, 8).map(mapExercise);
 }
 
 function pickLocalExercises(muscle: string): ExerciseRef[] {
@@ -3252,20 +3455,6 @@ async function resolveExercisesWithFallback(env: Env, muscle: string, equipment:
     if (ex.length > 0) return { source: "exercise_db", exercises: ex };
   } catch (error) {
     console.warn("[exercise-db]", error);
-  }
-
-  try {
-    const ex = await fetchApiNinjasExercises(env, muscle);
-    if (ex.length > 0) return { source: "api_ninjas", exercises: ex };
-  } catch (error) {
-    console.warn("[api-ninjas]", error);
-  }
-
-  try {
-    const ex = await fetchGymFitExercises(env, muscle);
-    if (ex.length > 0) return { source: "gym_fit", exercises: ex };
-  } catch (error) {
-    console.warn("[gym-fit]", error);
   }
 
   return { source: "local_pool", exercises: pickLocalExercises(muscle) };
@@ -3368,13 +3557,16 @@ type ExerciseInstructionPayload = {
   attributesBenefited: string[];
   safetyTips: string[];
   difficultyLevel: string;
+  metricType: MissionMetricType;
+  metricValue: number;
 };
 
 async function getExerciseInstructionsFromAI(
   exerciseName: string,
   metricType: MissionMetricType,
   conditioningLevel: string,
-  env: Env
+  env: Env,
+  period: MissionPeriod = "daily"
 ): Promise<ExerciseInstructionPayload> {
   const fallback: ExerciseInstructionPayload = {
     instructions: [
@@ -3386,6 +3578,8 @@ async function getExerciseInstructionsFromAI(
     attributesBenefited: [],
     safetyTips: ["Mantenha alinhamento corporal e evite compensacoes."],
     difficultyLevel: "iniciante",
+    metricType: metricType === "circuit_tasks" && period !== "weekly" ? "sets_reps" : metricType,
+    metricValue: metricValueByPeriod(metricType === "circuit_tasks" && period !== "weekly" ? "sets_reps" : metricType, period),
   };
 
   if (!env.HF_TOKEN) return fallback;
@@ -3394,6 +3588,7 @@ async function getExerciseInstructionsFromAI(
     `Exercicio: ${exerciseName}`,
     `Nivel do usuario: ${conditioningLevel}`,
     `Tipo de metrica: ${metricType}`,
+    `Periodo da missao: ${period}`,
     "",
     "Responda APENAS em JSON valido:",
     "{",
@@ -3401,7 +3596,9 @@ async function getExerciseInstructionsFromAI(
     '  "musclesAffected": ["musculo"],',
     '  "attributesBenefited": ["forca"],',
     '  "safetyTips": ["dica"],',
-    '  "difficultyLevel": "iniciante|intermediario|avancado"',
+    '  "difficultyLevel": "iniciante|intermediario|avancado",',
+    '  "metricType": "repetitions|duration_seconds|sets_reps|steps|distance_meters|duration_minutes|circuit_tasks",',
+    '  "metricValue": 1',
     "}",
   ].join("\n");
 
@@ -3442,6 +3639,8 @@ async function getExerciseInstructionsFromAI(
       difficultyLevel: typeof parsed.difficultyLevel === "string" && parsed.difficultyLevel.length > 0
         ? parsed.difficultyLevel
         : fallback.difficultyLevel,
+      metricType: isMissionMetricType(parsed.metricType) ? parsed.metricType : fallback.metricType,
+      metricValue: toPositiveInt(parsed.metricValue, fallback.metricValue),
     };
   } catch {
     return fallback;
@@ -3471,7 +3670,36 @@ async function createMissionsForPeriod(env: Env, db: D1Database, userId: string,
   if (userSkills.length === 0) {
     console.warn(`[missions] usuario ${userId} sem skills para gerar ${period}`);
     const fallback = fallbackMissionsForPeriod(period, config.titlePrefix, config.xp, config.points).slice(0, targetAmount);
-    for (const mission of fallback) {
+    const enrichedFallback = await Promise.all(
+      fallback.map(async (mission) => {
+        const exerciseName = extractExerciseName(mission.title);
+        const aiContext = await getExerciseInstructionsFromAI(
+          exerciseName,
+          mission.metric_type,
+          conditioning,
+          env,
+          period
+        );
+        const withMetric = applyMissionMetricContext(
+          mission,
+          period,
+          exerciseName,
+          aiContext.metricType,
+          aiContext.metricValue
+        );
+
+        return {
+          ...withMetric,
+          instructions: aiContext.instructions.length > 0 ? aiContext.instructions.slice(0, 6) : mission.instructions,
+          safety_tips: aiContext.safetyTips.length > 0 ? aiContext.safetyTips.slice(0, 4) : mission.safety_tips,
+          difficulty_level: aiContext.difficultyLevel,
+          muscle_groups: aiContext.musclesAffected.length > 0 ? aiContext.musclesAffected.slice(0, 6) : mission.muscle_groups,
+          attributes_benefited: aiContext.attributesBenefited.length > 0 ? aiContext.attributesBenefited.slice(0, 6) : mission.attributes_benefited,
+        };
+      })
+    );
+
+    for (const mission of enrichedFallback) {
       await insertMission(db, userId, period, deadline, mission, null);
     }
     return;
@@ -3499,15 +3727,44 @@ async function createMissionsForPeriod(env: Env, db: D1Database, userId: string,
   const missionsToInsert: Array<{ payload: MissionPayload; skillId: number | null }> = [];
 
   if (shouldIncludeWeeklyCircuit) {
-    const circuitPayload = buildMissionPayload({
+    const circuitName = weeklyCircuitNameFromFocus(dayFocus, muscle);
+    const baseCircuitPayload = buildMissionPayload({
       period,
       titlePrefix: config.titlePrefix,
-      exerciseName: weeklyCircuitNameFromFocus(dayFocus, muscle),
+      exerciseName: circuitName,
       muscle: "full body",
       xp: config.xp,
       points: config.points,
       forceCategory: "cardio_circuit",
     });
+    const circuitAiContext = await getExerciseInstructionsFromAI(
+      circuitName,
+      baseCircuitPayload.metric_type,
+      conditioning,
+      env,
+      period
+    );
+    const circuitPayload = applyMissionMetricContext(
+      baseCircuitPayload,
+      period,
+      circuitName,
+      "circuit_tasks",
+      circuitAiContext.metricValue
+    );
+    if (circuitAiContext.instructions.length > 0) {
+      circuitPayload.instructions = circuitAiContext.instructions.slice(0, 6);
+    }
+    if (circuitAiContext.safetyTips.length > 0) {
+      circuitPayload.safety_tips = circuitAiContext.safetyTips.slice(0, 4);
+    }
+    if (circuitAiContext.attributesBenefited.length > 0) {
+      circuitPayload.attributes_benefited = circuitAiContext.attributesBenefited.slice(0, 6);
+    }
+    if (circuitAiContext.musclesAffected.length > 0) {
+      circuitPayload.muscle_groups = circuitAiContext.musclesAffected.slice(0, 6);
+    }
+    circuitPayload.difficulty_level = circuitAiContext.difficultyLevel;
+
     missionsToInsert.push({ payload: circuitPayload, skillId: null });
   }
 
@@ -3519,12 +3776,13 @@ async function createMissionsForPeriod(env: Env, db: D1Database, userId: string,
         enriched?.name ?? ex.name,
         metricHint,
         conditioning,
-        env
+        env,
+        period
       );
       const primaryInstruction = safeGet(enriched?.instructions ?? [], 0) ?? ex.instructions ?? safeGet(aiContext.instructions, 0);
-      const imageUrl = enriched?.gifUrl ?? enriched?.imageUrl ?? enriched?.thumbnailUrl ?? ex.image_url;
+      const imageUrl = enriched?.gifUrl ?? enriched?.thumbnailUrl ?? enriched?.imageUrl ?? ex.image_url;
 
-      const payload = buildMissionPayload({
+      const basePayload = buildMissionPayload({
         period,
         titlePrefix: config.titlePrefix,
         exerciseName: enriched?.name ?? ex.name,
@@ -3539,6 +3797,13 @@ async function createMissionsForPeriod(env: Env, db: D1Database, userId: string,
         points: isRestDay ? Math.floor(config.points * 0.7) : config.points,
         forceCategory: isRestDay ? "mobility" : undefined,
       });
+      const payload = applyMissionMetricContext(
+        basePayload,
+        period,
+        enriched?.name ?? ex.name,
+        aiContext.metricType,
+        aiContext.metricValue
+      );
 
       if (aiContext.instructions.length > 0) {
         payload.instructions = aiContext.instructions.slice(0, 6);
@@ -3560,16 +3825,50 @@ async function createMissionsForPeriod(env: Env, db: D1Database, userId: string,
     missionsToInsert.push({ payload, skillId: null });
   }
 
-  for (const skill of randomSkills.slice(0, variationCount)) {
-    const payload = buildMissionPayload({
-      period,
-      titlePrefix: config.titlePrefix,
-      exerciseName: skill.name,
-      muscle: skill.category,
-      xp: config.xp,
-      points: config.points,
-    });
-    missionsToInsert.push({ payload, skillId: skill.skill_id });
+  const variationPayloads = await Promise.all(
+    randomSkills.slice(0, variationCount).map(async (skill) => {
+      const basePayload = buildMissionPayload({
+        period,
+        titlePrefix: config.titlePrefix,
+        exerciseName: skill.name,
+        muscle: skill.category,
+        xp: config.xp,
+        points: config.points,
+      });
+      const aiContext = await getExerciseInstructionsFromAI(
+        skill.name,
+        basePayload.metric_type,
+        conditioning,
+        env,
+        period
+      );
+      const payload = applyMissionMetricContext(
+        basePayload,
+        period,
+        skill.name,
+        aiContext.metricType,
+        aiContext.metricValue
+      );
+      if (aiContext.instructions.length > 0) {
+        payload.instructions = aiContext.instructions.slice(0, 6);
+      }
+      if (aiContext.safetyTips.length > 0) {
+        payload.safety_tips = aiContext.safetyTips.slice(0, 4);
+      }
+      if (aiContext.musclesAffected.length > 0) {
+        payload.muscle_groups = aiContext.musclesAffected.slice(0, 6);
+      }
+      if (aiContext.attributesBenefited.length > 0) {
+        payload.attributes_benefited = aiContext.attributesBenefited.slice(0, 6);
+      }
+      payload.difficulty_level = aiContext.difficultyLevel;
+
+      return { payload, skillId: skill.skill_id };
+    })
+  );
+
+  for (const entry of variationPayloads) {
+    missionsToInsert.push(entry);
   }
 
   for (const entry of missionsToInsert.slice(0, targetAmount)) {
@@ -3826,6 +4125,16 @@ function toPositiveInt(value: unknown, fallback: number) {
   return rounded > 0 ? rounded : fallback;
 }
 
+function extractExerciseName(title: string): string {
+  const normalized = title.trim();
+  if (!normalized.includes(":")) {
+    return normalized;
+  }
+  const pieces = normalized.split(":");
+  const suffix = pieces.slice(1).join(":").trim();
+  return suffix.length > 0 ? suffix : normalized;
+}
+
 function xpByConditioning(conditioning: ConditioningLevel): number {
   if (conditioning === "avancado") return 95;
   if (conditioning === "intermediario") return 75;
@@ -3954,21 +4263,60 @@ app.post("/api/ai/generate-missions", authMiddleware, async (c) => {
     }
 
     const totalMissions = [...baseMissions.slice(0, 3), ...aiMissions.slice(0, 2)].slice(0, 5);
-    const aiMissionEntries = totalMissions.map((mission) => {
-      const missionPeriod: MissionPeriod =
-        mission.metric_type === "circuit_tasks" ||
-        classifyMission(mission.title, mission.duration_estimate_minutes) === "weekly"
-          ? "weekly"
-          : "daily";
-      return {
-        period: missionPeriod,
-        deadline: futureIsoForPeriod(missionPeriod),
-        mission: {
-          ...mission,
-          mission_origin: "ai" as const,
-        },
-      };
-    });
+    const aiMissionEntries = await Promise.all(
+      totalMissions.map(async (mission) => {
+        const missionPeriod: MissionPeriod =
+          mission.metric_type === "circuit_tasks" ||
+          classifyMission(mission.title, mission.duration_estimate_minutes) === "weekly"
+            ? "weekly"
+            : "daily";
+
+        const exerciseName = extractExerciseName(mission.title);
+        const enrichedMedia = await enrichExercise(exerciseName, c.env).catch(() => null);
+        const aiContext = await getExerciseInstructionsFromAI(
+          exerciseName,
+          mission.metric_type,
+          conditioning,
+          c.env,
+          missionPeriod
+        );
+
+        const withMetric = applyMissionMetricContext(
+          {
+            ...mission,
+            image_url: mission.image_url ?? enrichedMedia?.gifUrl ?? enrichedMedia?.thumbnailUrl ?? enrichedMedia?.imageUrl ?? null,
+            video_url: mission.video_url ?? enrichedMedia?.videoUrl ?? null,
+            thumbnail_url: mission.thumbnail_url ?? enrichedMedia?.thumbnailUrl ?? null,
+          },
+          missionPeriod,
+          exerciseName,
+          aiContext.metricType,
+          aiContext.metricValue
+        );
+
+        const withDetails: MissionPayload = {
+          ...withMetric,
+          mission_origin: "ai",
+          instructions: aiContext.instructions.length > 0 ? aiContext.instructions.slice(0, 6) : withMetric.instructions,
+          safety_tips: aiContext.safetyTips.length > 0 ? aiContext.safetyTips.slice(0, 4) : withMetric.safety_tips,
+          difficulty_level: aiContext.difficultyLevel,
+          muscle_groups: aiContext.musclesAffected.length > 0
+            ? aiContext.musclesAffected.slice(0, 6)
+            : enrichedMedia?.secondaryMuscles?.length
+              ? enrichedMedia.secondaryMuscles.slice(0, 6)
+              : withMetric.muscle_groups,
+          attributes_benefited: aiContext.attributesBenefited.length > 0
+            ? aiContext.attributesBenefited.slice(0, 6)
+            : withMetric.attributes_benefited,
+        };
+
+        return {
+          period: missionPeriod,
+          deadline: futureIsoForPeriod(missionPeriod),
+          mission: withDetails,
+        };
+      })
+    );
 
     for (const entry of aiMissionEntries) {
       const mission = entry.mission;
@@ -4440,8 +4788,15 @@ async function processDailyReset(env: Env) {
   await processDailyResetForAllUsers({
     db: env.fitloot_db,
     processUser: async (userId) => {
-      await ensureUserCounterRow(env.fitloot_db, userId);
-      await expirePendingMissionsAndUpdateStreak(env.fitloot_db, userId);
+      try {
+        await ensureUserCounterRow(env.fitloot_db, userId);
+        await expirePendingMissionsAndUpdateStreak(env.fitloot_db, userId);
+      } catch (error) {
+        console.error("[processDailyReset][user]", {
+          userId,
+          message: getErrorMessage(error),
+        });
+      }
     },
   });
 }
@@ -4482,13 +4837,6 @@ app.get("*", async (c, next) => {
   }
 });
 
-
-export default {
-  fetch: app.fetch,
-  async scheduled(_event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
-    ctx.waitUntil(processDailyReset(env));
-  },
-};
 const DEFAULT_ALLOWED_ORIGINS = [
   "http://localhost:5173",
   "http://127.0.0.1:5173",
@@ -4516,5 +4864,58 @@ function resolveCorsOrigin(requestOrigin: string | undefined, requestUrl: URL, e
 
   return allowedOrigins.has(requestOrigin) ? requestOrigin : null;
 }
+
+async function handleFetchWithGuard(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  try {
+    return await app.fetch(request, env, ctx);
+  } catch (error) {
+    console.error("[worker][fetch-guard]", {
+      method: request.method,
+      url: request.url,
+      message: getErrorMessage(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    });
+
+    return new Response(
+      JSON.stringify({
+        error: "Erro interno",
+        code: "INTERNAL_ERROR",
+      }),
+      {
+        status: 500,
+        headers: {
+          "Content-Type": "application/json",
+        },
+      }
+    );
+  }
+}
+
+async function runScheduledWithGuard(event: ScheduledEvent, env: Env): Promise<void> {
+  try {
+    await processDailyReset(env);
+  } catch (error) {
+    console.error("[worker][scheduled-guard]", {
+      cron: event.cron,
+      scheduledTime: event.scheduledTime,
+      message: getErrorMessage(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    });
+    throw error;
+  }
+}
+
+export default {
+  fetch: handleFetchWithGuard,
+  async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
+    ctx.waitUntil(
+      runScheduledWithGuard(event, env).catch((error) => {
+        console.error("[worker][scheduled][unhandled]", {
+          message: getErrorMessage(error),
+        });
+      })
+    );
+  },
+};
 
 
