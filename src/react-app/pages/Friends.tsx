@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+﻿import { useCallback, useEffect, useState } from "react";
 import { useAuth } from "@/react-app/App";
 import { useNavigate } from "react-router";
 import BottomNav from "@/react-app/components/BottomNav";
@@ -64,7 +64,7 @@ export default function Friends() {
       setPendingRequests(Array.isArray(requestsData) ? requestsData : []);
     } catch (loadError) {
       console.error("Error loading friends:", loadError);
-      setError("N�o foi poss�vel carregar a lista de amigos agora.");
+      setError("Não foi possível carregar a lista de amigos agora.");
     } finally {
       setLoading(false);
     }
@@ -92,13 +92,13 @@ export default function Friends() {
         return;
       }
       if (!response.ok) {
-        throw new Error("Falha na busca de usu�rios.");
+        throw new Error("Falha na busca de usuários.");
       }
       const data = await response.json();
       setSearchResults(Array.isArray(data) ? data : []);
     } catch (searchError) {
       console.error("Error searching users:", searchError);
-      setError("N�o foi poss�vel buscar usu�rios agora.");
+      setError("Não foi possível buscar usuários agora.");
     } finally {
       setSearching(false);
     }
@@ -119,7 +119,7 @@ export default function Friends() {
 
       if (!response.ok) {
         const payload = (await response.json().catch(() => null)) as { error?: string | undefined } | null;
-        setError(payload?.error || "N�o foi poss�vel enviar solicita��o de amizade.");
+        setError(payload?.error || "Não foi possível enviar solicitação de amizade.");
         return;
       }
 
@@ -145,7 +145,7 @@ export default function Friends() {
 
       if (!response.ok) {
         const payload = (await response.json().catch(() => null)) as { error?: string | undefined } | null;
-        setError(payload?.error || "N�o foi poss�vel aceitar a solicita��o.");
+        setError(payload?.error || "Não foi possível aceitar a solicitação.");
         return;
       }
 
@@ -170,7 +170,7 @@ export default function Friends() {
 
       if (!response.ok) {
         const payload = (await response.json().catch(() => null)) as { error?: string | undefined } | null;
-        setError(payload?.error || "N�o foi poss�vel recusar a solicita��o.");
+        setError(payload?.error || "Não foi possível recusar a solicitação.");
         return;
       }
 
@@ -197,7 +197,7 @@ export default function Friends() {
             Tentar novamente
           </button>
         </div>
-        <BottomNav active="friends" />
+        <BottomNav active="arena" />
       </div>
     );
   }
@@ -217,7 +217,7 @@ export default function Friends() {
             <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
             <input
               type="text"
-              placeholder="Buscar usuários por username..."
+              placeholder="Buscar usuÃ¡rios por username..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               onKeyPress={(e) => e.key === 'Enter' && searchUsers()}
@@ -243,7 +243,7 @@ export default function Friends() {
                     <div>
                       <div className="font-bold text-gray-900">{result.username}</div>
                       <div className="text-sm text-gray-500">{result.full_name}</div>
-                      <Badge className="mt-1">Nível {result.level}</Badge>
+                      <Badge className="mt-1">NÃ­vel {result.level}</Badge>
                     </div>
                   </div>
                   <Button
@@ -265,7 +265,7 @@ export default function Friends() {
         {/* Pending Requests */}
         {pendingRequests.length > 0 && (
           <div className="mb-6">
-            <h2 className="fl-title-card mb-4">Solicitações Pendentes ({pendingRequests.length})</h2>
+            <h2 className="fl-title-card mb-4">SolicitaÃ§Ãµes Pendentes ({pendingRequests.length})</h2>
             <div className="space-y-3">
               {pendingRequests.map((request) => (
                 <div key={request.id} className="fl-card p-4 flex items-center justify-between">
@@ -299,8 +299,8 @@ export default function Friends() {
         {friends.length === 0 ? (
           <div className="text-center py-12">
             <Users className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-            <p className="text-gray-500">Você ainda não tem amigos adicionados</p>
-            <p className="text-gray-400 text-sm">Use a busca acima para encontrar usuários</p>
+            <p className="text-gray-500">VocÃª ainda nÃ£o tem amigos adicionados</p>
+            <p className="text-gray-400 text-sm">Use a busca acima para encontrar usuÃ¡rios</p>
           </div>
         ) : (
           <div className="grid md:grid-cols-2 gap-4">
@@ -339,7 +339,7 @@ export default function Friends() {
         )}
       </div>
 
-      <BottomNav active="friends" />
+      <BottomNav active="arena" />
     </div>
   );
 }

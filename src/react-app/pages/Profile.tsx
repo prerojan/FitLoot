@@ -2,6 +2,7 @@
 import { useNavigate } from "react-router";
 import { useAuth } from "@/react-app/App";
 import BottomNav from "@/react-app/components/BottomNav";
+import ProfileFriendsPanel from "@/react-app/components/ProfileFriendsPanel";
 import PageLoader from "@/react-app/components/PageLoader";
 import LoadingBall from "@/react-app/components/LoadingBall";
 import { LogOut, Trophy, Award, Dumbbell, Target, Settings } from "lucide-react";
@@ -42,6 +43,7 @@ export default function Profile() {
   const [skills, setSkills] = useState<SkillWithProgress[]>([]);
   const [achievements, setAchievements] = useState<AchievementWithUnlock[]>([]);
   const [titles, setTitles] = useState<TitleWithUnlock[]>([]);
+  const [profileSection, setProfileSection] = useState<"profile" | "friends">("profile");
   const [activeTab, setActiveTab] = useState<"attributes" | "skills" | "achievements" | "titles">("attributes");
 
   const [loading, setLoading] = useState(true);
@@ -288,52 +290,85 @@ export default function Profile() {
 
       <div className="px-6 mt-6">
         <div className="bg-white/80 backdrop-blur-sm rounded-2xl p-1 shadow-lg flex gap-1">
-          <TabButton icon={<Target className="w-4 h-4" />} label="Atributos" active={activeTab === "attributes"} onClick={() => setActiveTab("attributes")} />
-          <TabButton icon={<Dumbbell className="w-4 h-4" />} label="Habilidades" active={activeTab === "skills"} onClick={() => setActiveTab("skills")} />
-          <TabButton icon={<Trophy className="w-4 h-4" />} label="Conquistas" active={activeTab === "achievements"} onClick={() => setActiveTab("achievements")} />
-          <TabButton icon={<Award className="w-4 h-4" />} label="Títulos" active={activeTab === "titles"} onClick={() => setActiveTab("titles")} />
+          <button
+            onClick={() => setProfileSection("profile")}
+            className={`flex-1 py-3 rounded-xl font-medium transition-all text-sm ${
+              profileSection === "profile"
+                ? "bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-md"
+                : "text-gray-600 hover:bg-gray-50"
+            }`}
+          >
+            Perfil
+          </button>
+          <button
+            onClick={() => setProfileSection("friends")}
+            className={`flex-1 py-3 rounded-xl font-medium transition-all text-sm ${
+              profileSection === "friends"
+                ? "bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-md"
+                : "text-gray-600 hover:bg-gray-50"
+            }`}
+          >
+            Amigos
+          </button>
         </div>
       </div>
 
-      <div className="px-6 mt-6 pb-6">
-        {activeTab === "attributes" && attributes && (
-          <div className="space-y-4">
-            <AttributeBar label="FOR (Força)" value={attributes.strength} color="from-red-500 to-orange-500" />
-            <AttributeBar label="CON (Constituição)" value={attributes.constitution} color="from-blue-500 to-cyan-500" />
-            <AttributeBar label="VIT (Vitalidade)" value={attributes.vitality} color="from-green-500 to-emerald-500" />
-            <AttributeBar label="DES (Destreza)" value={attributes.dexterity} color="from-purple-500 to-pink-500" />
-            <AttributeBar label="FOCO" value={attributes.focus} color="from-yellow-500 to-amber-500" />
+      {profileSection === "profile" ? (
+        <>
+          <div className="px-6 mt-4">
+            <div className="bg-white/80 backdrop-blur-sm rounded-2xl p-1 shadow-lg flex gap-1">
+              <TabButton icon={<Target className="w-4 h-4" />} label="Atributos" active={activeTab === "attributes"} onClick={() => setActiveTab("attributes")} />
+              <TabButton icon={<Dumbbell className="w-4 h-4" />} label="Habilidades" active={activeTab === "skills"} onClick={() => setActiveTab("skills")} />
+              <TabButton icon={<Trophy className="w-4 h-4" />} label="Conquistas" active={activeTab === "achievements"} onClick={() => setActiveTab("achievements")} />
+              <TabButton icon={<Award className="w-4 h-4" />} label="Títulos" active={activeTab === "titles"} onClick={() => setActiveTab("titles")} />
+            </div>
           </div>
-        )}
 
-        {activeTab === "skills" && (
-          <div className="space-y-3">
-            {skills.length === 0 ? (
-              <p className="text-center text-gray-500 py-8">Nenhuma habilidade desbloqueada ainda</p>
-            ) : (
-              skills.map((skill) => (
-                <SkillCard key={skill.id} skill={skill} />
-              ))
+          <div className="px-6 mt-6 pb-6">
+            {activeTab === "attributes" && attributes && (
+              <div className="space-y-4">
+                <AttributeBar label="FOR (Força)" value={attributes.strength} color="from-red-500 to-orange-500" />
+                <AttributeBar label="CON (Constituição)" value={attributes.constitution} color="from-blue-500 to-cyan-500" />
+                <AttributeBar label="VIT (Vitalidade)" value={attributes.vitality} color="from-green-500 to-emerald-500" />
+                <AttributeBar label="DES (Destreza)" value={attributes.dexterity} color="from-purple-500 to-pink-500" />
+                <AttributeBar label="FOCO" value={attributes.focus} color="from-yellow-500 to-amber-500" />
+              </div>
+            )}
+
+            {activeTab === "skills" && (
+              <div className="space-y-3">
+                {skills.length === 0 ? (
+                  <p className="text-center text-gray-500 py-8">Nenhuma habilidade desbloqueada ainda</p>
+                ) : (
+                  skills.map((skill) => (
+                    <SkillCard key={skill.id} skill={skill} />
+                  ))
+                )}
+              </div>
+            )}
+
+            {activeTab === "achievements" && (
+              <div className="grid grid-cols-2 gap-3">
+                {achievements.map((achievement) => (
+                  <AchievementCard key={achievement.id} achievement={achievement} />
+                ))}
+              </div>
+            )}
+
+            {activeTab === "titles" && (
+              <div className="space-y-3">
+                {titles.map((title) => (
+                  <TitleCard key={title.id} title={title} onActivate={handleActivateTitle} />
+                ))}
+              </div>
             )}
           </div>
-        )}
-
-        {activeTab === "achievements" && (
-          <div className="grid grid-cols-2 gap-3">
-            {achievements.map((achievement) => (
-              <AchievementCard key={achievement.id} achievement={achievement} />
-            ))}
-          </div>
-        )}
-
-        {activeTab === "titles" && (
-          <div className="space-y-3">
-            {titles.map((title) => (
-              <TitleCard key={title.id} title={title} onActivate={handleActivateTitle} />
-            ))}
-          </div>
-        )}
-      </div>
+        </>
+      ) : (
+        <div className="px-6 mt-6 pb-6">
+          <ProfileFriendsPanel />
+        </div>
+      )}
 
       {settingsOpen && (
         <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-end sm:items-center justify-center">
