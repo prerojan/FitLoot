@@ -125,6 +125,29 @@ function isMissingOnboardingCompletedColumnError(error: unknown) {
   return message.includes("onboarding_completed") && message.includes("no such column");
 }
 
+function getErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function isMissingSchemaError(error: unknown) {
+  const message = getErrorMessage(error).toLowerCase();
+  return message.includes("no such table") || message.includes("no such column");
+}
+
+function schemaMismatchResponse(c: import("hono").Context<AppContext>) {
+  return c.json(
+    {
+      error: "Banco local desatualizado para esta funcionalidade.",
+      code: "DB_SCHEMA_MISMATCH",
+    },
+    503
+  );
+}
+
+function internalErrorResponse(c: import("hono").Context<AppContext>) {
+  return c.json({ error: "Erro interno", code: "INTERNAL_ERROR" }, 500);
+}
+
 async function getUserAuthRecordById(db: D1Database, userId: string): Promise<UserAuthRecord | null> {
   try {
     const userRecord = await db
@@ -1193,24 +1216,57 @@ app.get("/api/users/me", authMiddleware, async (c) => {
       stack: err instanceof Error ? err.stack : undefined,
       userId: user?.id,
     });
-    return c.json({ error: "Erro interno", code: "INTERNAL_ERROR" }, 500);
+
+    if (isMissingSchemaError(err)) {
+      return schemaMismatchResponse(c);
+    }
+
+    return internalErrorResponse(c);
   }
 });
 
 app.post("/api/app/open", authMiddleware, async (c) => {
   const user = c.get("user");
   if (!user) return c.json({ error: "Unauthorized" }, 401);
-  const timestamp = new Date().toISOString();
-  await onAppOpen(c.env.fitloot_db, user.id, timestamp);
-  return c.json({ success: true });
+
+  try {
+    const timestamp = new Date().toISOString();
+    await onAppOpen(c.env.fitloot_db, user.id, timestamp);
+    return c.json({ success: true });
+  } catch (error) {
+    console.error("[/api/app/open]", {
+      message: getErrorMessage(error),
+      userId: user.id,
+    });
+
+    if (isMissingSchemaError(error)) {
+      return c.json({ success: true, degraded: true }, 200);
+    }
+
+    return internalErrorResponse(c);
+  }
 });
 
 app.post('/api/events/route-not-found', authMiddleware, async (c) => {
   const user = c.get('user');
   if (!user) return c.json({ error: 'Unauthorized' }, 401);
-  await logUserEvent(c.env.fitloot_db, user.id, 'onRouteNotFound', {});
-  await unlockAchievementIfNeeded(c.env.fitloot_db, user.id, '404 Not Found', 1, 1);
-  return c.json({ success: true });
+
+  try {
+    await logUserEvent(c.env.fitloot_db, user.id, 'onRouteNotFound', {});
+    await unlockAchievementIfNeeded(c.env.fitloot_db, user.id, '404 Not Found', 1, 1);
+    return c.json({ success: true });
+  } catch (error) {
+    console.error("[/api/events/route-not-found]", {
+      message: getErrorMessage(error),
+      userId: user.id,
+    });
+
+    if (isMissingSchemaError(error)) {
+      return c.json({ success: true, degraded: true }, 200);
+    }
+
+    return internalErrorResponse(c);
+  }
 });
 
 app.patch(
@@ -1302,11 +1358,28 @@ app.get("/api/profile", authMiddleware, async (c) => {
   const user = c.get("user");
   if (!user) return c.json({ error: "Unauthorized" }, 401);
 
-  const profile = await c.env.fitloot_db.prepare(
-    "SELECT * FROM user_profiles WHERE user_id = ?"
-  ).bind(user.id).first();
+  try {
+    const profile = await c.env.fitloot_db.prepare(
+      "SELECT * FROM user_profiles WHERE user_id = ?"
+    ).bind(user.id).first();
 
-  return c.json(profile);
+    if (!profile) {
+      return c.json({ error: "Perfil n?o encontrado", code: "PROFILE_NOT_FOUND" }, 404);
+    }
+
+    return c.json(profile);
+  } catch (error) {
+    console.error("[/api/profile]", {
+      message: getErrorMessage(error),
+      userId: user.id,
+    });
+
+    if (isMissingSchemaError(error)) {
+      return schemaMismatchResponse(c);
+    }
+
+    return internalErrorResponse(c);
+  }
 });
 
 app.post("/api/profile/customization", authMiddleware, async (c) => {
@@ -1482,12 +1555,40 @@ app.post("/api/onboarding", authMiddleware, zValidator("json", OnboardingRequest
 app.get("/api/progression", authMiddleware, async (c) => {
   const user = c.get("user");
   if (!user) return c.json({ error: "Unauthorized" }, 401);
-  
-  const progression = await c.env.fitloot_db.prepare(
-    "SELECT * FROM user_progression WHERE user_id = ?"
-  ).bind(user.id).first();
 
-  return c.json(progression);
+  try {
+    let progression = await c.env.fitloot_db.prepare(
+      "SELECT * FROM user_progression WHERE user_id = ?"
+    ).bind(user.id).first<Record<string, unknown>>();
+
+    if (!progression) {
+      await c.env.fitloot_db.prepare(
+        `INSERT INTO user_progression (user_id, xp, level, points, current_streak, best_streak, updated_at)
+        VALUES (?, 0, 1, 0, 0, 0, datetime('now'))`
+      ).bind(user.id).run();
+
+      progression = await c.env.fitloot_db.prepare(
+        "SELECT * FROM user_progression WHERE user_id = ?"
+      ).bind(user.id).first<Record<string, unknown>>();
+    }
+
+    if (!progression) {
+      return c.json({ error: "Progress?o n?o encontrada", code: "PROGRESSION_NOT_FOUND" }, 404);
+    }
+
+    return c.json(progression);
+  } catch (error) {
+    console.error("[/api/progression]", {
+      message: getErrorMessage(error),
+      userId: user.id,
+    });
+
+    if (isMissingSchemaError(error)) {
+      return schemaMismatchResponse(c);
+    }
+
+    return internalErrorResponse(c);
+  }
 });
 
 app.get("/api/attributes", authMiddleware, async (c) => {
@@ -1592,22 +1693,55 @@ app.post("/api/skills/:id/stage/complete", authMiddleware, async (c) => {
 app.get("/api/missions", authMiddleware, async (c) => {
   const user = c.get("user");
   if (!user) return c.json({ error: "Unauthorized" }, 401);
-  
-  await ensurePeriodicMissions(c.env, c.env.fitloot_db, user.id);
 
-  const missions = await c.env.fitloot_db.prepare(
-    `SELECT m.*, s.name as skill_name FROM missions m
-    LEFT JOIN skills s ON m.skill_id = s.id
-    WHERE m.user_id = ?
-    AND (
-      m.is_completed = 1
-      OR (m.is_completed = 0 AND (m.deadline IS NULL OR m.deadline > datetime('now')))
-      OR (COALESCE(m.status,'pending') = 'failed' AND date(m.updated_at) >= date('now', '-3 day'))
-    )
-    ORDER BY CASE m.type WHEN 'daily' THEN 1 WHEN 'weekly' THEN 2 WHEN 'monthly' THEN 3 ELSE 4 END, m.created_at DESC`
-  ).bind(user.id).all();
+  try {
+    await ensurePeriodicMissions(c.env, c.env.fitloot_db, user.id);
 
-  return c.json(missions.results);
+    let missions;
+    try {
+      missions = await c.env.fitloot_db.prepare(
+        `SELECT m.*, s.name as skill_name FROM missions m
+        LEFT JOIN skills s ON m.skill_id = s.id
+        WHERE m.user_id = ?
+        AND (
+          m.is_completed = 1
+          OR (m.is_completed = 0 AND (m.deadline IS NULL OR m.deadline > datetime('now')))
+          OR (COALESCE(m.status,'pending') = 'failed' AND date(m.updated_at) >= date('now', '-3 day'))
+        )
+        ORDER BY CASE m.type WHEN 'daily' THEN 1 WHEN 'weekly' THEN 2 WHEN 'monthly' THEN 3 ELSE 4 END, m.created_at DESC`
+      ).bind(user.id).all();
+    } catch (statusQueryError) {
+      const message = getErrorMessage(statusQueryError).toLowerCase();
+      const missingStatusColumn = message.includes("no such column") && message.includes("status");
+      if (!missingStatusColumn) {
+        throw statusQueryError;
+      }
+
+      missions = await c.env.fitloot_db.prepare(
+        `SELECT m.*, s.name as skill_name FROM missions m
+        LEFT JOIN skills s ON m.skill_id = s.id
+        WHERE m.user_id = ?
+        AND (
+          m.is_completed = 1
+          OR (m.is_completed = 0 AND (m.deadline IS NULL OR m.deadline > datetime('now')))
+        )
+        ORDER BY CASE m.type WHEN 'daily' THEN 1 WHEN 'weekly' THEN 2 WHEN 'monthly' THEN 3 ELSE 4 END, m.created_at DESC`
+      ).bind(user.id).all();
+    }
+
+    return c.json(Array.isArray(missions.results) ? missions.results : []);
+  } catch (error) {
+    console.error("[/api/missions]", {
+      message: getErrorMessage(error),
+      userId: user.id,
+    });
+
+    if (isMissingSchemaError(error)) {
+      return schemaMismatchResponse(c);
+    }
+
+    return internalErrorResponse(c);
+  }
 });
 
 app.post("/api/missions/complete", authMiddleware, zValidator("json", CompleteMissionRequestSchema), async (c) => {
@@ -1792,16 +1926,29 @@ app.get("/api/achievements", authMiddleware, async (c) => {
 app.get("/api/titles", authMiddleware, async (c) => {
   const user = c.get("user");
   if (!user) return c.json({ error: "Unauthorized" }, 401);
-  
-  const titles = await c.env.fitloot_db.prepare(
-    `SELECT t.*, ut.is_active, ut.unlocked_at,
-    CASE WHEN ut.id IS NOT NULL THEN 1 ELSE 0 END as unlocked
-    FROM titles t
-    LEFT JOIN user_titles ut ON t.id = ut.title_id AND ut.user_id = ?
-    ORDER BY t.rarity, t.id`
-  ).bind(user.id).all();
 
-  return c.json(titles.results);
+  try {
+    const titles = await c.env.fitloot_db.prepare(
+      `SELECT t.*, ut.is_active, ut.unlocked_at,
+      CASE WHEN ut.id IS NOT NULL THEN 1 ELSE 0 END as unlocked
+      FROM titles t
+      LEFT JOIN user_titles ut ON t.id = ut.title_id AND ut.user_id = ?
+      ORDER BY t.rarity, t.id`
+    ).bind(user.id).all();
+
+    return c.json(Array.isArray(titles.results) ? titles.results : []);
+  } catch (error) {
+    console.error("[/api/titles]", {
+      message: getErrorMessage(error),
+      userId: user.id,
+    });
+
+    if (isMissingSchemaError(error)) {
+      return schemaMismatchResponse(c);
+    }
+
+    return internalErrorResponse(c);
+  }
 });
 
 app.post("/api/titles/:id/activate", authMiddleware, async (c) => {
@@ -1894,25 +2041,38 @@ app.get("/api/shop/orders", authMiddleware, async (c) => {
 app.get("/api/metrics/today", authMiddleware, async (c) => {
   const user = c.get("user");
   if (!user) return c.json({ error: "Unauthorized" }, 401);
-  
-  const today = assertString(safeGet(new Date().toISOString().split('T'), 0));
-  
-  let metrics = await c.env.fitloot_db.prepare(
-    "SELECT * FROM daily_metrics WHERE user_id = ? AND date = ?"
-  ).bind(user.id, today).first();
 
-  if (!metrics) {
-    await c.env.fitloot_db.prepare(
-      `INSERT INTO daily_metrics (user_id, date, steps, calories_burned, updated_at)
-      VALUES (?, ?, 0, 0, datetime('now'))`
-    ).bind(user.id, today).run();
-    
-    metrics = await c.env.fitloot_db.prepare(
+  try {
+    const today = assertString(safeGet(new Date().toISOString().split('T'), 0));
+
+    let metrics = await c.env.fitloot_db.prepare(
       "SELECT * FROM daily_metrics WHERE user_id = ? AND date = ?"
     ).bind(user.id, today).first();
-  }
 
-  return c.json(metrics);
+    if (!metrics) {
+      await c.env.fitloot_db.prepare(
+        `INSERT INTO daily_metrics (user_id, date, steps, calories_burned, updated_at)
+        VALUES (?, ?, 0, 0, datetime('now'))`
+      ).bind(user.id, today).run();
+
+      metrics = await c.env.fitloot_db.prepare(
+        "SELECT * FROM daily_metrics WHERE user_id = ? AND date = ?"
+      ).bind(user.id, today).first();
+    }
+
+    return c.json(metrics ?? { user_id: user.id, date: today, steps: 0, calories_burned: 0 });
+  } catch (error) {
+    console.error("[/api/metrics/today]", {
+      message: getErrorMessage(error),
+      userId: user.id,
+    });
+
+    if (isMissingSchemaError(error)) {
+      return schemaMismatchResponse(c);
+    }
+
+    return internalErrorResponse(c);
+  }
 });
 
 app.post("/api/metrics/update", authMiddleware, zValidator("json", UpdateDailyMetricsRequestSchema), async (c) => {
@@ -2849,6 +3009,35 @@ function normalizeConditioning(value: unknown): ConditioningLevel {
   return "iniciante";
 }
 
+function toSafeString(value: unknown, fallback: string) {
+  if (typeof value !== "string") return fallback;
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : fallback;
+}
+
+function toPositiveInt(value: unknown, fallback: number) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return fallback;
+  const rounded = Math.round(numeric);
+  return rounded > 0 ? rounded : fallback;
+}
+
+function sanitizeMissionDraft(raw: Partial<MissionDraft>, conditioning: ConditioningLevel, index: number): MissionDraft {
+  const baseTitle = `Missao ${index + 1}`;
+
+  return {
+    title: toSafeString(raw.title, baseTitle),
+    description: toSafeString(raw.description, "Conclua a missao proposta para evoluir hoje."),
+    skill_name: toSafeString(raw.skill_name ?? raw.skill, "Treino funcional"),
+    target_reps: toPositiveInt(raw.target_reps, conditioning === "avancado" ? 35 : conditioning === "intermediario" ? 25 : conditioning === "sedentario" ? 10 : 20),
+    xp_reward: toPositiveInt(raw.xp_reward, conditioning === "avancado" ? 90 : conditioning === "intermediario" ? 60 : 40),
+    points_reward: toPositiveInt(raw.points_reward, conditioning === "avancado" ? 20 : conditioning === "intermediario" ? 15 : 10),
+    difficulty: toSafeString(raw.difficulty, conditioning === "avancado" ? "hard" : conditioning === "intermediario" ? "medium" : "easy"),
+    type: "diaria",
+    skill: toSafeString(raw.skill ?? raw.skill_name, "Treino funcional"),
+  };
+}
+
 // Fallback generator para missões baseadas em condicionamento
 async function generateFallbackMissions(
   conditioning: ConditioningLevel = "iniciante",
@@ -2900,70 +3089,91 @@ app.post("/api/ai/generate-missions", authMiddleware, async (c) => {
   const user = c.get("user");
   if (!user) return c.json({ error: "Unauthorized" }, 401);
 
-  const requestBody = await c.req.json().catch(() => ({})) as { conditioning?: unknown };
-
-  const [profile, skills] = await Promise.all([
-    c.env.fitloot_db.prepare("SELECT * FROM user_profiles WHERE user_id = ?").bind(user.id).first(),
-    c.env.fitloot_db.prepare(`
-      SELECT s.* FROM skills s
-      INNER JOIN user_skills us ON s.id = us.skill_id
-      WHERE us.user_id = ?
-    `).bind(user.id).all(),
-  ]);
-
-  const conditioning = normalizeConditioning(requestBody.conditioning ?? profile?.initial_conditioning);
-  const skillRows = skills.results as Array<{ id: number; name: string }>;
-
-  const baseMissions = await generateFallbackMissions(conditioning, skillRows);
-
-  let aiMissions: MissionDraft[] = [];
-  let fallback = false;
-  let error: string | null = null;
-
   try {
-    const openaiData = await callOpenAIChat(c, [{
-      role: "user",
-      content: `Gere duas missões fitness para o perfil abaixo e responda JSON com a chave missions (array).
-Condicionamento: ${conditioning}
-Objetivo: ${profile?.main_goal}
-Lesões: ${profile?.injuries || "nenhuma"}
-Equipamentos: ${profile?.equipment || "nenhum"}`,
-    }], 800, true);
+    const requestBody = await c.req.json().catch(() => ({})) as { conditioning?: unknown };
 
-    const content = safeGet(openaiData.choices ?? [], 0)?.message?.content ?? "{}";
-    const parsed = JSON.parse(content) as { missions?: MissionDraft[] };
-    aiMissions = parsed.missions ?? [];
-  } catch (err) {
-    error = "Falha na IA";
-    fallback = true;
-    console.error("[generate-missions]", err);
+    const [profile, skills] = await Promise.all([
+      c.env.fitloot_db.prepare("SELECT * FROM user_profiles WHERE user_id = ?").bind(user.id).first<Record<string, unknown>>(),
+      c.env.fitloot_db.prepare(
+        "SELECT s.* FROM skills s\n        INNER JOIN user_skills us ON s.id = us.skill_id\n        WHERE us.user_id = ?"
+      ).bind(user.id).all<{ id: number; name: string }>(),
+    ]);
+
+    const conditioning = normalizeConditioning(requestBody.conditioning ?? profile?.initial_conditioning);
+    const skillRows = skills.results as Array<{ id: number; name: string }>;
+
+    const baseMissions = (await generateFallbackMissions(conditioning, skillRows)).map((mission, index) =>
+      sanitizeMissionDraft(mission, conditioning, index)
+    );
+
+    let aiMissions: MissionDraft[] = [];
+    let fallback = false;
+    let error: string | null = null;
+
+    try {
+      const aiPrompt = [
+        "Gere duas miss?es fitness para o perfil abaixo e responda JSON com a chave missions (array).",
+        "Condicionamento: " + conditioning,
+        "Objetivo: " + String(profile?.main_goal ?? "saude_geral"),
+        "Les?es: " + String(profile?.injuries ?? "nenhuma"),
+        "Equipamentos: " + String(profile?.equipment ?? "nenhum"),
+      ].join("\n");
+
+      const openaiData = await callOpenAIChat(c, [{ role: "user", content: aiPrompt }], 800, true);
+
+      const content = safeGet(openaiData.choices ?? [], 0)?.message?.content ?? "{}";
+      const parsed = JSON.parse(content) as { missions?: Array<Partial<MissionDraft>> };
+      const parsedMissions = Array.isArray(parsed.missions) ? parsed.missions : [];
+      aiMissions = parsedMissions.slice(0, 2).map((mission, index) =>
+        sanitizeMissionDraft(mission, conditioning, index + 3)
+      );
+    } catch (aiError) {
+      error = "Falha na IA";
+      fallback = true;
+      console.error("[/api/ai/generate-missions][ai]", {
+        message: getErrorMessage(aiError),
+        userId: user.id,
+      });
+    }
+
+    const totalMissions = [...baseMissions.slice(0, 3), ...aiMissions.slice(0, 2)].slice(0, 5);
+
+    const tomorrow = new Date(Date.now() + 86400000).toISOString();
+    for (const mission of totalMissions) {
+      const missionSkillName = toSafeString(mission.skill_name || mission.skill, "").toLowerCase();
+      const skill = missionSkillName
+        ? skillRows.find((skillRow) => skillRow.name.toLowerCase().includes(missionSkillName))
+        : null;
+
+      const safeMission = sanitizeMissionDraft(mission, conditioning, 0);
+
+      await c.env.fitloot_db.prepare(
+        "INSERT INTO missions (user_id, type, title, description, skill_id, target_reps, xp_reward, points_reward, deadline, updated_at)\n          VALUES (?, 'daily', ?, ?, ?, ?, ?, ?, ?, datetime('now'))"
+      ).bind(
+        user.id,
+        safeMission.title,
+        safeMission.description,
+        skill?.id ?? null,
+        safeMission.target_reps,
+        safeMission.xp_reward,
+        safeMission.points_reward,
+        tomorrow
+      ).run();
+    }
+
+    return c.json({ success: true, missions: totalMissions, fallback, error });
+  } catch (routeError) {
+    console.error("[/api/ai/generate-missions]", {
+      message: getErrorMessage(routeError),
+      userId: user.id,
+    });
+
+    if (isMissingSchemaError(routeError)) {
+      return schemaMismatchResponse(c);
+    }
+
+    return internalErrorResponse(c);
   }
-
-  const totalMissions = [...baseMissions.slice(0, 3), ...aiMissions.slice(0, 2)];
-
-  const tomorrow = new Date(Date.now() + 86400000).toISOString();
-  for (const mission of totalMissions) {
-    const missionSkillName = (mission.skill_name || mission.skill || "").trim().toLowerCase();
-    const skill = missionSkillName
-      ? skillRows.find((s) => s.name.toLowerCase().includes(missionSkillName))
-      : null;
-
-    await c.env.fitloot_db.prepare(
-      `INSERT INTO missions (user_id, type, title, description, skill_id, target_reps, xp_reward, points_reward, deadline, updated_at)
-        VALUES (?, 'daily', ?, ?, ?, ?, ?, ?, ?, datetime('now'))`
-    ).bind(
-      user.id,
-      mission.title,
-      mission.description,
-      skill?.id || null,
-      mission.target_reps,
-      mission.xp_reward,
-      mission.points_reward,
-      tomorrow
-    ).run();
-  }
-
-  return c.json({ success: true, missions: totalMissions, fallback, error });
 });
 
 // 2. AI Fitness Chatbot

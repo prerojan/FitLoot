@@ -1,11 +1,12 @@
-// ====================================
+﻿// ====================================
 // src/react-app/components/AIMissionGenerator.tsx
 // Botão para gerar missões personalizadas com IA
 // ====================================
 
 import { useState } from "react";
-import { Wand2, Loader2, CheckCircle, XCircle } from "lucide-react";
+import { Wand2, CheckCircle, XCircle } from "lucide-react";
 import { api } from "@/react-app/utils/api";
+import LoadingBall from "@/react-app/components/LoadingBall";
 
 interface GeneratedMission {
   title: string;
@@ -161,7 +162,7 @@ export default function AIMissionGenerator({ onMissionsGenerated, conditioning }
       >
         {loading ? (
           <div className="flex items-center justify-center gap-2">
-            <Loader2 className="w-4 h-4 animate-spin" />
+            <LoadingBall size="sm" />
             <span>Gerando missões...</span>
           </div>
         ) : (
