@@ -132,6 +132,7 @@ export const MissionSchema = z.object({
   target_time: z.number().nullable(),
   metric_type: MissionMetricTypeSchema.optional(),
   metric_value: z.number().optional(),
+  progress_value: z.number().optional(),
   metric_unit: z.string().optional(),
   sets: z.number().nullable().optional(),
   rest_seconds: z.number().nullable().optional(),

@@ -408,7 +408,8 @@ function MissionCardComponent({ mission, onComplete }: MissionCardProps) {
         : "Disponivel";
   const missionTypeLabel = mission.type === "daily" ? "Diaria" : mission.type === "weekly" ? "Semanal" : "Mensal";
   const monthlyTarget = Math.max(1, missionTotalGoal(mission, metricType));
-  const monthlyCurrent = isCompleted ? monthlyTarget : 0;
+  const monthlyProgressValue = Number((mission as Mission & { progress_value?: number | undefined }).progress_value ?? 0);
+  const monthlyCurrent = isCompleted ? monthlyTarget : Math.max(0, Math.min(monthlyTarget, monthlyProgressValue));
   const monthlyProgress = Math.min(100, Math.round((monthlyCurrent / monthlyTarget) * 100));
 
   const detailsInstructions = Array.isArray(mission.instructions) && mission.instructions.length > 0

@@ -1982,7 +1982,182 @@ function normalizeMissionRow(rawMission: Record<string, unknown>) {
     video_url: typeof rawMission.video_url === "string" ? rawMission.video_url : null,
     thumbnail_url: typeof rawMission.thumbnail_url === "string" ? rawMission.thumbnail_url : null,
     mission_origin: rawMission.mission_origin === "ai" ? "ai" : "regular",
+    progress_value: rawMission.progress_value === null || rawMission.progress_value === undefined
+      ? undefined
+      : Number(rawMission.progress_value),
   };
+}
+
+type MonthlyCounterSnapshot = {
+  month_key: string;
+  missions_completed: number;
+  distance_meters: number;
+  streak_days: number;
+  weekly_circuits_completed: number;
+};
+
+let monthlyCounterSchemaCheckedAt = 0;
+const MONTHLY_COUNTER_SCHEMA_TTL_MS = 60_000;
+
+async function ensureMonthlyCounterSchema(db: D1Database): Promise<void> {
+  const now = Date.now();
+  if (now - monthlyCounterSchemaCheckedAt < MONTHLY_COUNTER_SCHEMA_TTL_MS) return;
+  await db.prepare(
+    `CREATE TABLE IF NOT EXISTS user_monthly_counters (
+      user_id TEXT NOT NULL,
+      month_key TEXT NOT NULL,
+      missions_completed INTEGER DEFAULT 0,
+      distance_meters INTEGER DEFAULT 0,
+      streak_days INTEGER DEFAULT 0,
+      weekly_circuits_completed INTEGER DEFAULT 0,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (user_id, month_key)
+    )`
+  ).run();
+  monthlyCounterSchemaCheckedAt = now;
+}
+
+function currentMonthKey(reference = new Date()): string {
+  const year = reference.getUTCFullYear();
+  const month = String(reference.getUTCMonth() + 1).padStart(2, "0");
+  return `${year}-${month}`;
+}
+
+function monthStartIso(reference = new Date()): string {
+  const year = reference.getUTCFullYear();
+  const month = reference.getUTCMonth();
+  return new Date(Date.UTC(year, month, 1, 0, 0, 0, 0)).toISOString();
+}
+
+function monthlyCounterValueByMission(mission: Record<string, unknown>, counters: MonthlyCounterSnapshot): number {
+  const title = normalizeMatchText(String(mission.title ?? ""));
+  if (title.includes("distancia")) return counters.distance_meters;
+  if (title.includes("streak")) return counters.streak_days;
+  if (title.includes("semana") || title.includes("circuit")) return counters.weekly_circuits_completed;
+  return counters.missions_completed;
+}
+
+function monthlyMissionProgressValue(mission: Record<string, unknown>, counters: MonthlyCounterSnapshot): number {
+  const target = Math.max(1, Number(mission.metric_value ?? mission.target_reps ?? 1));
+  const value = Math.max(0, monthlyCounterValueByMission(mission, counters));
+  return Math.min(target, value);
+}
+
+async function recomputeMonthlyCounters(db: D1Database, userId: string, reference = new Date()): Promise<MonthlyCounterSnapshot> {
+  await ensureMonthlyCounterSchema(db);
+  const monthKey = currentMonthKey(reference);
+  const monthStart = monthStartIso(reference);
+  const aggregate = await db.prepare(
+    `SELECT
+       COALESCE(SUM(CASE WHEN is_completed = 1 AND type != 'monthly' THEN 1 ELSE 0 END), 0) as missions_completed,
+       COALESCE(SUM(
+         CASE
+           WHEN is_completed = 1 AND metric_type = 'distance_meters' THEN COALESCE(metric_value, 0)
+           WHEN is_completed = 1 AND metric_type = 'steps' THEN CAST(COALESCE(metric_value, 0) * 0.75 AS INTEGER)
+           ELSE 0
+         END
+       ), 0) as distance_meters,
+       COALESCE(COUNT(DISTINCT CASE WHEN is_completed = 1 AND type != 'monthly' THEN date(completed_at) END), 0) as streak_days,
+       COALESCE(SUM(CASE WHEN is_completed = 1 AND type = 'weekly' AND metric_type = 'circuit_tasks' THEN 1 ELSE 0 END), 0) as weekly_circuits_completed
+     FROM missions
+     WHERE user_id = ?
+       AND completed_at IS NOT NULL
+       AND date(completed_at) >= date(?)`
+  ).bind(userId, monthStart).first<{
+    missions_completed: number;
+    distance_meters: number;
+    streak_days: number;
+    weekly_circuits_completed: number;
+  }>();
+
+  const snapshot: MonthlyCounterSnapshot = {
+    month_key: monthKey,
+    missions_completed: Number(aggregate?.missions_completed ?? 0),
+    distance_meters: Number(aggregate?.distance_meters ?? 0),
+    streak_days: Number(aggregate?.streak_days ?? 0),
+    weekly_circuits_completed: Number(aggregate?.weekly_circuits_completed ?? 0),
+  };
+
+  await db.prepare(
+    `INSERT INTO user_monthly_counters (
+       user_id, month_key, missions_completed, distance_meters, streak_days, weekly_circuits_completed, updated_at
+     ) VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+     ON CONFLICT(user_id, month_key) DO UPDATE SET
+       missions_completed = excluded.missions_completed,
+       distance_meters = excluded.distance_meters,
+       streak_days = excluded.streak_days,
+       weekly_circuits_completed = excluded.weekly_circuits_completed,
+       updated_at = datetime('now')`
+  ).bind(
+    userId,
+    snapshot.month_key,
+    snapshot.missions_completed,
+    snapshot.distance_meters,
+    snapshot.streak_days,
+    snapshot.weekly_circuits_completed,
+  ).run();
+
+  return snapshot;
+}
+
+async function getMonthlyCounters(db: D1Database, userId: string): Promise<MonthlyCounterSnapshot> {
+  await ensureMonthlyCounterSchema(db);
+  const monthKey = currentMonthKey();
+  const row = await db.prepare(
+    `SELECT month_key, missions_completed, distance_meters, streak_days, weekly_circuits_completed
+     FROM user_monthly_counters
+     WHERE user_id = ? AND month_key = ?`
+  ).bind(userId, monthKey).first<{
+    month_key: string;
+    missions_completed: number;
+    distance_meters: number;
+    streak_days: number;
+    weekly_circuits_completed: number;
+  }>();
+  if (row) {
+    return {
+      month_key: row.month_key,
+      missions_completed: Number(row.missions_completed ?? 0),
+      distance_meters: Number(row.distance_meters ?? 0),
+      streak_days: Number(row.streak_days ?? 0),
+      weekly_circuits_completed: Number(row.weekly_circuits_completed ?? 0),
+    };
+  }
+  return recomputeMonthlyCounters(db, userId);
+}
+
+async function updateMonthlyMissionProgress(userId: string, db: D1Database): Promise<void> {
+  const counters = await recomputeMonthlyCounters(db, userId);
+  const monthlyMissions = await db.prepare(
+    `SELECT * FROM missions
+     WHERE user_id = ?
+       AND type = 'monthly'
+       AND is_completed = 0
+       AND (deadline IS NULL OR deadline > datetime('now'))`
+  ).bind(userId).all<Record<string, unknown>>();
+
+  for (const mission of monthlyMissions.results) {
+    const progress = monthlyMissionProgressValue(mission, counters);
+    const target = Math.max(1, Number(mission.metric_value ?? mission.target_reps ?? 1));
+    if (progress < target) continue;
+
+    await db.prepare(
+      `UPDATE missions
+         SET is_completed = 1, status = 'completed', completed_at = datetime('now'), updated_at = datetime('now')
+       WHERE id = ? AND is_completed = 0`
+    ).bind(mission.id).run();
+
+    const xpReward = Number(mission.xp_reward ?? 0);
+    const pointsReward = Number(mission.points_reward ?? 0);
+    if (xpReward > 0 || pointsReward > 0) {
+      await db.prepare(
+        `UPDATE user_progression
+           SET xp = COALESCE(xp, 0) + ?, points = COALESCE(points, 0) + ?, updated_at = datetime('now')
+         WHERE user_id = ?`
+      ).bind(xpReward, pointsReward, userId).run();
+    }
+    await onMissionComplete(db, userId, Number(mission.id));
+  }
 }
 
 function normalizeMatchText(value: string): string {
@@ -2072,6 +2247,7 @@ app.get("/api/missions", authMiddleware, async (c) => {
 
   try {
     await ensurePeriodicMissions(c.env, c.env.fitloot_db, user.id);
+    await updateMonthlyMissionProgress(user.id, c.env.fitloot_db);
 
     let missions;
     try {
@@ -2106,8 +2282,22 @@ app.get("/api/missions", authMiddleware, async (c) => {
     }
 
     const missionList = Array.isArray(missions.results) ? missions.results : [];
-    const normalized = missionList.map((row) => normalizeMissionRow(row as Record<string, unknown>));
-    return c.json(normalized);
+    const monthlyCounters = await getMonthlyCounters(c.env.fitloot_db, user.id);
+    const withProgress = missionList.map((row) => {
+      const rawMission = row as Record<string, unknown>;
+      const normalizedMission = normalizeMissionRow(rawMission);
+      const isMonthly = rawMission.type === "monthly";
+      if (!isMonthly) return normalizedMission;
+
+      const isCompleted = Number(rawMission.is_completed ?? 0) === 1;
+      return {
+        ...normalizedMission,
+        progress_value: isCompleted
+          ? Number(normalizedMission.metric_value ?? 1)
+          : monthlyMissionProgressValue(rawMission, monthlyCounters),
+      };
+    });
+    return c.json(withProgress);
   } catch (error) {
     console.error("[/api/missions]", {
       message: getErrorMessage(error),
@@ -2225,6 +2415,7 @@ app.post("/api/missions/complete", authMiddleware, zValidator("json", CompleteMi
   await onStreakContinued(c.env.fitloot_db, user.id, newStreak, Number(completedToday?.c ?? 1), new Date().toISOString());
   await onMissionComplete(c.env.fitloot_db, user.id, Number(mission.id));
   await updateCircuitProgress(user.id, mission as Record<string, unknown>, c.env.fitloot_db);
+  await updateMonthlyMissionProgress(user.id, c.env.fitloot_db);
   const relevance = await checkMissionRelevance(user.id, Number(mission.id), c.env.fitloot_db, 'completed');
   if (relevance.isGoalRelevant) {
     const gs = await c.env.fitloot_db.prepare("SELECT goal_completed_count FROM user_goal_stats WHERE user_id = ?").bind(user.id).first<{ goal_completed_count: number }>();
