@@ -112,6 +112,57 @@ function getSessionIdFromCookieHeader(cookieHeader: string | undefined) {
   }
 }
 
+type UserAuthRecord = {
+  id: string;
+  email: string;
+  name: string;
+  avatar_url: string | null;
+  onboarding_completed: number;
+};
+
+function isMissingOnboardingCompletedColumnError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes("onboarding_completed") && message.includes("no such column");
+}
+
+async function getUserAuthRecordById(db: D1Database, userId: string): Promise<UserAuthRecord | null> {
+  try {
+    const userRecord = await db
+      .prepare("SELECT id, email, name, avatar_url, COALESCE(onboarding_completed, 0) as onboarding_completed FROM users WHERE id = ?")
+      .bind(userId)
+      .first<{ id: string; email: string; name: string; avatar_url: string | null; onboarding_completed: number }>();
+
+    if (!userRecord) return null;
+
+    return {
+      id: userRecord.id,
+      email: userRecord.email,
+      name: userRecord.name,
+      avatar_url: userRecord.avatar_url,
+      onboarding_completed: Number(userRecord.onboarding_completed) === 1 ? 1 : 0,
+    };
+  } catch (error) {
+    if (!isMissingOnboardingCompletedColumnError(error)) {
+      throw error;
+    }
+
+    const fallbackRecord = await db
+      .prepare("SELECT id, email, name, avatar_url FROM users WHERE id = ?")
+      .bind(userId)
+      .first<{ id: string; email: string; name: string; avatar_url: string | null }>();
+
+    if (!fallbackRecord) return null;
+
+    return {
+      id: fallbackRecord.id,
+      email: fallbackRecord.email,
+      name: fallbackRecord.name,
+      avatar_url: fallbackRecord.avatar_url,
+      onboarding_completed: 0,
+    };
+  }
+}
+
 async function authMiddleware(
   c: import("hono").Context<{ Bindings: Env; Variables: { user: AuthUser } }>,
   next: () => Promise<void>
@@ -145,10 +196,7 @@ async function authMiddleware(
       return c.json({ error: "Unauthorized", code: "SESSION_INVALID" }, 401);
     }
 
-    const userRecord = await c.env.fitloot_db
-      .prepare("SELECT id, email, name, avatar_url, COALESCE(onboarding_completed, 0) as onboarding_completed FROM users WHERE id = ?")
-      .bind(session.user_id)
-      .first<{ id: string; email: string; name: string; avatar_url: string | null; onboarding_completed: number }>();
+    const userRecord = await getUserAuthRecordById(c.env.fitloot_db, session.user_id);
 
     if (!userRecord) {
       return c.json({ error: "Usuário não encontrado", code: "USER_NOT_FOUND" }, 404);
@@ -159,11 +207,26 @@ async function authMiddleware(
       email: userRecord.email,
       name: userRecord.name,
       avatar_url: userRecord.avatar_url ?? undefined,
-      onboarding_completed: Number(userRecord.onboarding_completed) === 1 ? 1 : 0,
+      onboarding_completed: userRecord.onboarding_completed,
     });
 
-    await ensureUserCounterRow(c.env.fitloot_db, userRecord.id);
-    await expirePendingMissionsAndUpdateStreak(c.env.fitloot_db, userRecord.id);
+    try {
+      await ensureUserCounterRow(c.env.fitloot_db, userRecord.id);
+    } catch (counterError) {
+      console.error("[authMiddleware][ensureUserCounterRow]", {
+        message: counterError instanceof Error ? counterError.message : String(counterError),
+        userId: userRecord.id,
+      });
+    }
+
+    try {
+      await expirePendingMissionsAndUpdateStreak(c.env.fitloot_db, userRecord.id);
+    } catch (streakError) {
+      console.error("[authMiddleware][expirePendingMissionsAndUpdateStreak]", {
+        message: streakError instanceof Error ? streakError.message : String(streakError),
+        userId: userRecord.id,
+      });
+    }
 
     await next();
   } catch (error) {
@@ -1111,10 +1174,7 @@ app.get("/api/users/me", authMiddleware, async (c) => {
       return c.json({ error: "Usuário não encontrado", code: "USER_NOT_FOUND" }, 404);
     }
 
-    const userRecord = await c.env.fitloot_db
-      .prepare("SELECT id, email, name, avatar_url, COALESCE(onboarding_completed, 0) as onboarding_completed FROM users WHERE id = ?")
-      .bind(user.id)
-      .first<{ id: string; email: string; name: string; avatar_url: string | null; onboarding_completed: number }>();
+    const userRecord = await getUserAuthRecordById(c.env.fitloot_db, user.id);
 
     if (!userRecord) {
       return c.json({ error: "Usuário não encontrado", code: "USER_NOT_FOUND" }, 404);
@@ -1125,7 +1185,7 @@ app.get("/api/users/me", authMiddleware, async (c) => {
       email: userRecord.email,
       name: userRecord.name,
       avatar_url: userRecord.avatar_url ?? undefined,
-      onboarding_completed: Number(userRecord.onboarding_completed) === 1 ? 1 : 0,
+      onboarding_completed: userRecord.onboarding_completed,
     });
   } catch (err) {
     console.error("[/api/users/me] Erro interno:", {
@@ -1197,15 +1257,23 @@ app.post(
     if (!user) return c.json({ error: "Unauthorized" }, 401);
     const data = c.req.valid("json");
 
-    await c.env.fitloot_db
-      .prepare("UPDATE users SET plan_id = ?, plan_status = ?, onboarding_completed = 1 WHERE id = ?")
-      .bind(data.plan_id, data.status, user.id)
-      .run();
+    try {
+      await c.env.fitloot_db
+        .prepare("UPDATE users SET plan_id = ?, plan_status = ?, onboarding_completed = 1 WHERE id = ?")
+        .bind(data.plan_id, data.status, user.id)
+        .run();
+    } catch (error) {
+      if (!isMissingOnboardingCompletedColumnError(error)) {
+        throw error;
+      }
 
-    const updated = await c.env.fitloot_db
-      .prepare("SELECT id, email, name, avatar_url, COALESCE(onboarding_completed, 0) as onboarding_completed FROM users WHERE id = ?")
-      .bind(user.id)
-      .first();
+      await c.env.fitloot_db
+        .prepare("UPDATE users SET plan_id = ?, plan_status = ? WHERE id = ?")
+        .bind(data.plan_id, data.status, user.id)
+        .run();
+    }
+
+    const updated = await getUserAuthRecordById(c.env.fitloot_db, user.id);
     return c.json(updated ?? c.get("user"));
   }
 );
@@ -3407,4 +3475,5 @@ function resolveCorsOrigin(requestOrigin: string | undefined, requestUrl: URL, e
 
   return allowedOrigins.has(requestOrigin) ? requestOrigin : null;
 }
+
 
