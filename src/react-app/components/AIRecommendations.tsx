@@ -1,6 +1,7 @@
-import { useState, useEffect } from "react";
-import { Sparkles, TrendingUp, Target, Lightbulb, Loader2 } from "lucide-react";
+﻿import { useState, useEffect } from "react";
+import { Sparkles, TrendingUp, Target, Lightbulb } from "lucide-react";
 import { api } from "@/react-app/utils/api";
+import LoadingBall from "@/react-app/components/LoadingBall";
 
 type Recommendations = {
   next_skill_recommendation: {
@@ -28,21 +29,21 @@ function parseRecommendations(raw: unknown): Recommendations | null {
 
   const parsed: Recommendations = {
     next_skill_recommendation: {
-      name: typeof nextSkill.name === "string" && nextSkill.name.trim() ? nextSkill.name : "Sugestão indisponível",
+      name: typeof nextSkill.name === "string" && nextSkill.name.trim() ? nextSkill.name : "SugestÃ£o indisponÃ­vel",
       reason:
         typeof nextSkill.reason === "string" && nextSkill.reason.trim()
           ? nextSkill.reason
-          : "A IA não retornou justificativa para a próxima skill.",
+          : "A IA nÃ£o retornou justificativa para a prÃ³xima skill.",
     },
     weak_attribute: {
       name:
         typeof weakAttribute.name === "string" && weakAttribute.name.trim()
           ? weakAttribute.name
-          : "Atributo não identificado",
+          : "Atributo nÃ£o identificado",
       suggestion:
         typeof weakAttribute.suggestion === "string" && weakAttribute.suggestion.trim()
           ? weakAttribute.suggestion
-          : "Sem sugestão detalhada no momento.",
+          : "Sem sugestÃ£o detalhada no momento.",
     },
     training_focus: {
       type:
@@ -57,7 +58,7 @@ function parseRecommendations(raw: unknown): Recommendations | null {
     motivation_message:
       typeof data.motivation_message === "string" && data.motivation_message.trim()
         ? data.motivation_message
-        : "Continue consistente: pequenos passos diários geram grandes resultados.",
+        : "Continue consistente: pequenos passos diÃ¡rios geram grandes resultados.",
   };
 
   return parsed;
@@ -91,7 +92,7 @@ export default function AIRecommendations() {
 
       setRecommendations(parsed);
     } catch {
-      setError("Não foi possível carregar as recomendações");
+      setError("NÃ£o foi possÃ­vel carregar as recomendaÃ§Ãµes");
     } finally {
       setLoading(false);
     }
@@ -101,7 +102,7 @@ export default function AIRecommendations() {
     return (
       <div className="fl-card p-6">
         <div className="flex items-center justify-center gap-2 text-emerald-600">
-          <Loader2 className="w-5 h-5 animate-spin" />
+          <LoadingBall size="md" />
           <span className="text-sm">Analisando seu progresso...</span>
         </div>
       </div>
@@ -128,7 +129,7 @@ export default function AIRecommendations() {
     <div className="space-y-4">
       <div className="flex items-center gap-2 mb-4">
         <Sparkles className="w-5 h-5 text-purple-600" />
-        <h2 className="fl-title-card">Recomendações IA</h2>
+        <h2 className="fl-title-card">RecomendaÃ§Ãµes IA</h2>
       </div>
 
       <div className="bg-gradient-to-r from-purple-500 to-pink-500 rounded-2xl p-4 text-white shadow-lg">
@@ -144,7 +145,7 @@ export default function AIRecommendations() {
             <Target className="w-5 h-5 text-emerald-600" />
           </div>
           <div className="flex-1">
-            <h3 className="font-bold text-gray-900 mb-1">Próxima Skill Recomendada</h3>
+            <h3 className="font-bold text-gray-900 mb-1">PrÃ³xima Skill Recomendada</h3>
             <p className="text-emerald-600 font-medium text-sm mb-2">{recommendations.next_skill_recommendation.name}</p>
             <p className="text-gray-600 text-xs">{recommendations.next_skill_recommendation.reason}</p>
           </div>
@@ -157,7 +158,7 @@ export default function AIRecommendations() {
             <TrendingUp className="w-5 h-5 text-orange-600" />
           </div>
           <div className="flex-1">
-            <h3 className="font-bold text-gray-900 mb-1">Área para Melhorar</h3>
+            <h3 className="font-bold text-gray-900 mb-1">Ãrea para Melhorar</h3>
             <p className="text-orange-600 font-medium text-sm mb-2">{recommendations.weak_attribute.name}</p>
             <p className="text-gray-600 text-xs">{recommendations.weak_attribute.suggestion}</p>
           </div>
@@ -183,9 +184,10 @@ export default function AIRecommendations() {
       >
         <div className="flex items-center justify-center gap-2">
           <Sparkles className="w-4 h-4" />
-          <span>Atualizar Recomendações</span>
+          <span>Atualizar RecomendaÃ§Ãµes</span>
         </div>
       </button>
     </div>
   );
 }
+

@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+﻿import { useCallback } from "react";
 import { AUTHENTICATED_HINT_KEY, PENDING_404_ACHIEVEMENT_KEY } from "@/react-app/constants/auth";
 import { triggerRouteNotFoundAchievement } from "@/react-app/services/achievementService";
 import { fetchCurrentUser, notifyAppOpen } from "@/react-app/services/authService";
@@ -15,6 +15,7 @@ export function useAuthBootstrap({ setUser, setLoading }: UseAuthBootstrapParams
   return useCallback(async () => {
     const hasSessionHint = localStorage.getItem(AUTHENTICATED_HINT_KEY) === "1";
     if (!hasSessionHint) {
+      applyProfileTheme(null);
       setUser(null);
       setLoading(false);
       return;
@@ -23,8 +24,16 @@ export function useAuthBootstrap({ setUser, setLoading }: UseAuthBootstrapParams
     try {
       const user = await fetchCurrentUser();
       if (!user) {
+        applyProfileTheme(null);
         setUser(null);
         return;
+      }
+
+      try {
+        const profile = await fetchProfileTheme();
+        applyProfileTheme(profile);
+      } catch {
+        applyProfileTheme(null);
       }
 
       setUser(user);
@@ -36,14 +45,8 @@ export function useAuthBootstrap({ setUser, setLoading }: UseAuthBootstrapParams
           localStorage.removeItem(PENDING_404_ACHIEVEMENT_KEY);
         });
       }
-
-      try {
-        const profile = await fetchProfileTheme();
-        applyProfileTheme(profile);
-      } catch {
-        // noop
-      }
     } catch {
+      applyProfileTheme(null);
       setUser(null);
     } finally {
       setLoading(false);

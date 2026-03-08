@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
+﻿import { useCallback, useEffect, useState } from "react";
 import { useAuth } from "@/react-app/App";
 import { useNavigate, useSearchParams } from "react-router";
 import BottomNav from "@/react-app/components/BottomNav";
-import { Swords, Trophy, Clock, Zap, Target, Users, Loader2, ChevronRight } from "lucide-react";
+import PageLoader from "@/react-app/components/PageLoader";
+import { Swords, Trophy, Clock, Zap, Target, Users, ChevronRight } from "lucide-react";
 import { api } from "@/react-app/utils/api";
 
 interface MiniGame {
@@ -67,7 +68,7 @@ export default function MiniGames() {
       setCompletedGames(list.filter((g: MiniGame) => g.status === 'completed').slice(0, 10));
     } catch (loadError) {
       console.error("Error loading games:", loadError);
-      setError("N�o foi poss�vel carregar os mini-games agora.");
+      setError("Nï¿½o foi possï¿½vel carregar os mini-games agora.");
     } finally {
       setLoading(false);
     }
@@ -90,7 +91,7 @@ export default function MiniGames() {
       setSkills(Array.isArray(data) ? data : []);
     } catch (loadError) {
       console.error("Error loading skills:", loadError);
-      setError("N�o foi poss�vel carregar habilidades para desafio.");
+      setError("Nï¿½o foi possï¿½vel carregar habilidades para desafio.");
     }
   }, [navigate]);
 
@@ -155,7 +156,7 @@ export default function MiniGames() {
         void loadGames();
       } else {
         const responseError = (await response.json().catch(() => null)) as { error?: string | undefined } | null;
-        setError(responseError?.error || "N�o foi poss�vel aceitar o desafio.");
+        setError(responseError?.error || "Nï¿½o foi possï¿½vel aceitar o desafio.");
       }
     } catch (acceptError) {
       console.error("Error accepting challenge:", acceptError);
@@ -181,12 +182,12 @@ export default function MiniGames() {
       if (response.ok) {
         const result = await response.json();
         if (result.winner) {
-          alert(result.winner === user?.id ? "Voc� venceu!" : "Desafio finalizado.");
+          alert(result.winner === user?.id ? "Vocï¿½ venceu!" : "Desafio finalizado.");
         }
         void loadGames();
       } else {
         const responseError = (await response.json().catch(() => null)) as { error?: string | undefined } | null;
-        setError(responseError?.error || "N�o foi poss�vel concluir o desafio.");
+        setError(responseError?.error || "Nï¿½o foi possï¿½vel concluir o desafio.");
       }
     } catch (error) {
       console.error("Error completing challenge:", error);
@@ -194,11 +195,7 @@ export default function MiniGames() {
   };
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-purple-50 via-pink-50 to-red-50">
-        <Loader2 className="w-10 h-10 text-purple-600 animate-spin" />
-      </div>
-    );
+    return <PageLoader />;
   }
 
   if (error) {
@@ -268,7 +265,7 @@ export default function MiniGames() {
                     disabled={!!challengeUserId}
                   >
                     <Zap className="w-5 h-5 inline mr-2" />
-                    Aleatório
+                    AleatÃ³rio
                   </button>
                 </div>
               </div>
@@ -291,7 +288,7 @@ export default function MiniGames() {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Meta de Repetições: {targetReps}
+                  Meta de RepetiÃ§Ãµes: {targetReps}
                 </label>
                 <input
                   type="range"
@@ -307,8 +304,8 @@ export default function MiniGames() {
               <div className="bg-purple-50 rounded-xl p-4 border border-purple-200">
                 <h3 className="font-bold text-purple-900 mb-2">Recompensas</h3>
                 <div className="space-y-1 text-sm text-purple-700">
-                  <div>🏆 Vencedor: {targetReps * 5} XP + {targetReps} Pontos</div>
-                  <div>🎖️ Perdedor: {Math.floor(targetReps * 2.5)} XP + {Math.floor(targetReps / 2)} Pontos</div>
+                  <div>ðŸ† Vencedor: {targetReps * 5} XP + {targetReps} Pontos</div>
+                  <div>ðŸŽ–ï¸ Perdedor: {Math.floor(targetReps * 2.5)} XP + {Math.floor(targetReps / 2)} Pontos</div>
                 </div>
               </div>
 
@@ -337,7 +334,7 @@ export default function MiniGames() {
           <div className="text-center py-12 bg-white rounded-3xl shadow-lg">
             <Swords className="w-16 h-16 text-gray-300 mx-auto mb-4" />
             <p className="text-gray-500">Nenhum desafio ativo</p>
-            <p className="text-gray-400 text-sm">Crie um novo desafio para começar!</p>
+            <p className="text-gray-400 text-sm">Crie um novo desafio para comeÃ§ar!</p>
           </div>
         ) : (
           <div className="grid md:grid-cols-2 gap-4 mb-8">
@@ -364,13 +361,13 @@ export default function MiniGames() {
                     <div className="flex items-center justify-between">
                       <span className="text-sm text-gray-600">Desafiante:</span>
                       <span className={`font-bold ${isChallenger ? 'text-purple-600' : 'text-gray-900'}`}>
-                        {game.challenger_username} {isChallenger && '(Você)'}
+                        {game.challenger_username} {isChallenger && '(VocÃª)'}
                       </span>
                     </div>
                     <div className="flex items-center justify-between">
                       <span className="text-sm text-gray-600">Desafiado:</span>
                       <span className={`font-bold ${!isChallenger ? 'text-purple-600' : 'text-gray-900'}`}>
-                        {game.challenged_username} {!isChallenger && '(Você)'}
+                        {game.challenged_username} {!isChallenger && '(VocÃª)'}
                       </span>
                     </div>
                   </div>
@@ -381,7 +378,7 @@ export default function MiniGames() {
                       <span className="font-bold text-gray-900">{game.skill_name}</span>
                     </div>
                     <div className="text-2xl font-bold text-purple-600">
-                      {game.target_reps} repetições
+                      {game.target_reps} repetiÃ§Ãµes
                     </div>
                   </div>
 
@@ -410,7 +407,7 @@ export default function MiniGames() {
                   {isActive && (
                     <button
                       onClick={() => {
-                        const reps = parseInt(prompt(`Quantas repetições você completou?`) || '0');
+                        const reps = parseInt(prompt(`Quantas repetiÃ§Ãµes vocÃª completou?`) || '0');
                         const time = parseInt(prompt(`Quanto tempo levou (segundos)?`) || '0');
                         if (reps > 0 && time > 0) {
                           completeChallenge(game.id, reps, time);
@@ -437,7 +434,7 @@ export default function MiniGames() {
         {/* Completed Games */}
         {completedGames.length > 0 && (
           <>
-            <h2 className="fl-title-card mb-4">Histórico Recente</h2>
+            <h2 className="fl-title-card mb-4">HistÃ³rico Recente</h2>
             <div className="space-y-3">
               {completedGames.map((game) => {
                 const isWinner = game.winner_user_id === user?.id;
@@ -452,7 +449,7 @@ export default function MiniGames() {
                     <div className={`px-4 py-2 rounded-full font-bold ${
                       isWinner ? 'bg-yellow-100 text-yellow-700' : 'bg-gray-100 text-gray-600'
                     }`}>
-                      {isWinner ? '🏆 Vitória' : '🎖️ Participação'}
+                      {isWinner ? 'ðŸ† VitÃ³ria' : 'ðŸŽ–ï¸ ParticipaÃ§Ã£o'}
                     </div>
                   </div>
                 );
@@ -466,5 +463,6 @@ export default function MiniGames() {
     </div>
   );
 }
+
 
 

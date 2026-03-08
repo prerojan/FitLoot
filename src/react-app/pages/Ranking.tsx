@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+﻿import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { useAuth } from "@/react-app/App";
 import BottomNav from "@/react-app/components/BottomNav";
@@ -8,6 +8,7 @@ import { Trophy, Medal, Crown, Flame, Zap } from "lucide-react";
 import { api } from "@/react-app/utils/api";
 import type { RankingPlayer } from "@/shared/types";
 import { safeGet } from "@/utils/typeHelpers";
+import PageLoader from "@/react-app/components/PageLoader";
 
 export default function Ranking() {
   const { user } = useAuth();
@@ -35,7 +36,7 @@ export default function Ranking() {
       setRanking(Array.isArray(data) ? data : []);
     } catch (loadError) {
       console.error("Error loading ranking:", loadError);
-      setError("N�o foi poss�vel carregar o ranking agora.");
+      setError("Nï¿½o foi possï¿½vel carregar o ranking agora.");
       setRanking([]);
     } finally {
       setLoading(false);
@@ -51,11 +52,7 @@ export default function Ranking() {
   }, [user, navigate, loadRanking]);
 
   if (loading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 flex items-center justify-center">
-        <div className="text-emerald-600">Carregando...</div>
-      </div>
-    );
+    return <PageLoader />;
   }
 
   if (error) {
@@ -179,5 +176,6 @@ function RankingCard({ position, player }: { position: number; player: RankingPl
     </Card>
   );
 }
+
 
 

@@ -1,4 +1,4 @@
-// ====================================
+﻿// ====================================
 // src/react-app/pages/AIChat.tsx
 // Componente de Chatbot com IA
 // ====================================
@@ -7,8 +7,9 @@ import { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router";
 import { useAuth } from '@/react-app/App';
 import BottomNav from "@/react-app/components/BottomNav";
-import { Send, Bot, User, Sparkles, Loader2 } from "lucide-react";
+import { Send, Bot, User, Sparkles } from "lucide-react";
 import { api } from "@/react-app/utils/api";
+import LoadingBall from "@/react-app/components/LoadingBall";
 
 interface Message {
   role: "user" | "assistant";
@@ -39,11 +40,11 @@ function parseAIResponse(text: string): string {
           .split("|")
           .map((chunk) => chunk.trim())
           .filter(Boolean)
-          .join(" • ");
+          .join(" â€¢ ");
       }
 
       if (/^[-*]\s+/.test(trimmed)) {
-        return `• ${trimmed.replace(/^[-*]\s+/, "")}`;
+        return `â€¢ ${trimmed.replace(/^[-*]\s+/, "")}`;
       }
 
       return line;
@@ -61,7 +62,7 @@ export default function AIChat() {
   const [messages, setMessages] = useState<Message[]>([
     {
       role: "assistant",
-      content: "Olá! Sou o FitBot. Como posso te ajudar hoje?",
+      content: "OlÃ¡! Sou o FitBot. Como posso te ajudar hoje?",
       timestamp: new Date(),
     },
   ]);
@@ -150,10 +151,10 @@ export default function AIChat() {
   };
 
   const quickQuestions = [
-    "Como fazer flexões corretamente?",
+    "Como fazer flexÃµes corretamente?",
     "Qual treino para perder peso?",
-    "Dicas para manter motivação",
-    "Como aumentar força?",
+    "Dicas para manter motivaÃ§Ã£o",
+    "Como aumentar forÃ§a?",
   ];
 
   const handleQuickQuestion = (question: string) => {
@@ -228,7 +229,7 @@ export default function AIChat() {
               <Bot className="w-5 h-5 text-emerald-600" />
             </div>
             <div className="bg-white shadow-md p-4 rounded-2xl rounded-tl-none">
-              <Loader2 className="w-5 h-5 animate-spin text-emerald-600" />
+              <LoadingBall size="md" />
             </div>
           </div>
         )}
@@ -239,7 +240,7 @@ export default function AIChat() {
       {/* Quick Questions */}
       {messages.length <= 1 && !loading && (
         <div className="px-4 mb-4">
-          <p className="text-xs text-gray-500 mb-2">Perguntas rápidas:</p>
+          <p className="text-xs text-gray-500 mb-2">Perguntas rÃ¡pidas:</p>
           <div className="flex flex-wrap gap-2">
             {quickQuestions.map((question, index) => (
               <button

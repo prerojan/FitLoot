@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useState } from "react";
+﻿import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { useAuth } from "@/react-app/App";
 import BottomNav from "@/react-app/components/BottomNav";
 import { ShoppingBag, Coins, QrCode, Package } from "lucide-react";
 import type { UserProgression } from "@/shared/types";
 import { api } from "@/react-app/utils/api";
+import PageLoader from "@/react-app/components/PageLoader";
 
 type ShopProductView = {
   id: number;
@@ -66,7 +67,7 @@ export default function Shop() {
       setProgression(progressionData);
     } catch (loadError) {
       console.error("Error loading shop data:", loadError);
-      setError("N�o foi poss�vel carregar a loja agora.");
+      setError("Nï¿½o foi possï¿½vel carregar a loja agora.");
     } finally {
       setLoading(false);
     }
@@ -107,11 +108,7 @@ export default function Shop() {
   };
 
   if (loading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 flex items-center justify-center">
-        <div className="text-emerald-600">Carregando...</div>
-      </div>
-    );
+    return <PageLoader />;
   }
 
   if (error) {
@@ -147,7 +144,7 @@ export default function Shop() {
               <Coins className="w-5 h-5" />
               <span className="text-2xl font-bold">{progression?.points?.toLocaleString() || 0}</span>
             </div>
-            <p className="text-xs text-emerald-100 mt-1">pontos disponíveis</p>
+            <p className="text-xs text-emerald-100 mt-1">pontos disponÃ­veis</p>
           </div>
         </div>
 
@@ -332,7 +329,7 @@ function OrderCard({ order }: { order: ShopOrderView }) {
             <span>{order.points_spent ?? 0} pontos</span>
           </div>
           <p className="text-xs text-gray-500">
-            {order.created_at ? new Date(order.created_at).toLocaleDateString('pt-BR') : '—'}
+            {order.created_at ? new Date(order.created_at).toLocaleDateString('pt-BR') : 'â€”'}
           </p>
         </div>
 
@@ -343,7 +340,7 @@ function OrderCard({ order }: { order: ShopOrderView }) {
             </span>
           ) : (
             <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-xs font-medium">
-              Disponível
+              DisponÃ­vel
             </span>
           )}
           <button className="text-emerald-600 hover:text-emerald-700 transition-colors">
@@ -355,12 +352,12 @@ function OrderCard({ order }: { order: ShopOrderView }) {
       {!isRedeemed && (
         <div className="mt-4 pt-4 border-t border-gray-200">
           <div className="bg-emerald-50 rounded-2xl p-4">
-            <p className="text-xs text-gray-600 mb-2 text-center">Código do Cupom:</p>
+            <p className="text-xs text-gray-600 mb-2 text-center">CÃ³digo do Cupom:</p>
             <p className="text-center font-mono font-bold text-emerald-700 text-lg tracking-wider">
               {order.qr_code}
             </p>
             <p className="text-xs text-gray-500 text-center mt-2">
-              Mostre este código ao parceiro para resgatar
+              Mostre este cÃ³digo ao parceiro para resgatar
             </p>
           </div>
         </div>
@@ -368,5 +365,6 @@ function OrderCard({ order }: { order: ShopOrderView }) {
     </div>
   );
 }
+
 
 

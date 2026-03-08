@@ -1,11 +1,12 @@
-// ====================================
+﻿// ====================================
 // src/react-app/components/AIMissionGenerator.tsx
-// Botão para gerar missões personalizadas com IA
+// BotÃ£o para gerar missÃµes personalizadas com IA
 // ====================================
 
 import { useState } from "react";
-import { Wand2, Loader2, CheckCircle, XCircle } from "lucide-react";
+import { Wand2, CheckCircle, XCircle } from "lucide-react";
 import { api } from "@/react-app/utils/api";
+import LoadingBall from "@/react-app/components/LoadingBall";
 
 interface GeneratedMission {
   title: string;
@@ -51,7 +52,7 @@ export default function AIMissionGenerator({ onMissionsGenerated, conditioning }
 
     } catch (err) {
       console.error("Error generating missions:", err);
-      setError("Não foi possível gerar missões. Tente novamente.");
+      setError("NÃ£o foi possÃ­vel gerar missÃµes. Tente novamente.");
     } finally {
       setLoading(false);
     }
@@ -73,11 +74,11 @@ export default function AIMissionGenerator({ onMissionsGenerated, conditioning }
   const getDifficultyLabel = (difficulty: string) => {
     switch (difficulty) {
       case "easy":
-        return "Fácil";
+        return "FÃ¡cil";
       case "medium":
-        return "Médio";
+        return "MÃ©dio";
       case "hard":
-        return "Difícil";
+        return "DifÃ­cil";
       default:
         return difficulty;
     }
@@ -88,7 +89,7 @@ export default function AIMissionGenerator({ onMissionsGenerated, conditioning }
       <div className="bg-green-50 border-2 border-green-200 rounded-2xl p-4 space-y-3">
         <div className="flex items-center gap-2 text-green-600">
           <CheckCircle className="w-5 h-5" />
-          <span className="font-medium">Missões geradas com sucesso!</span>
+          <span className="font-medium">MissÃµes geradas com sucesso!</span>
         </div>
 
         <div className="space-y-2">
@@ -147,9 +148,9 @@ export default function AIMissionGenerator({ onMissionsGenerated, conditioning }
           <Wand2 className="w-5 h-5 text-white" />
         </div>
         <div className="flex-1 text-white">
-          <h3 className="font-bold mb-1">Gerador de Missões IA</h3>
+          <h3 className="font-bold mb-1">Gerador de MissÃµes IA</h3>
           <p className="text-sm text-white/90">
-            Deixe a IA criar missões personalizadas para você baseadas no seu perfil e progresso!
+            Deixe a IA criar missÃµes personalizadas para vocÃª baseadas no seu perfil e progresso!
           </p>
         </div>
       </div>
@@ -161,19 +162,19 @@ export default function AIMissionGenerator({ onMissionsGenerated, conditioning }
       >
         {loading ? (
           <div className="flex items-center justify-center gap-2">
-            <Loader2 className="w-4 h-4 animate-spin" />
-            <span>Gerando missões...</span>
+            <LoadingBall size="sm" />
+            <span>Gerando missÃµes...</span>
           </div>
         ) : (
           <div className="flex items-center justify-center gap-2">
             <Wand2 className="w-4 h-4" />
-            <span>Gerar Missões Personalizadas</span>
+            <span>Gerar MissÃµes Personalizadas</span>
           </div>
         )}
       </button>
 
       <p className="text-xs text-white/70 text-center mt-2">
-        Gera 3 missões diárias adaptadas ao seu nível
+        Gera 3 missÃµes diÃ¡rias adaptadas ao seu nÃ­vel
       </p>
     </div>
   );

@@ -1,4 +1,4 @@
-import {
+﻿import {
   useCallback,
   useEffect,
   useRef,
@@ -9,6 +9,7 @@ import {
 } from "react";
 import { useNavigate } from "react-router";
 import { useAuth } from "@/react-app/App";
+import PageLoader from "@/react-app/components/PageLoader";
 import { api } from "@/react-app/utils/api";
 import { safeGet } from "@/utils/typeHelpers";
 import { Button } from "@/react-app/components/ui/button";
@@ -291,8 +292,8 @@ const GOAL_OPTIONS: { value: GoalValue; label: string; icon: typeof Target }[] =
   { value: "perder_peso", label: "Perder peso", icon: Zap },
   { value: "ganhar_massa", label: "Ganhar massa muscular", icon: Dumbbell },
   { value: "resistencia", label: "Melhorar condicionamento", icon: Activity },
-  { value: "saude_geral", label: "Saúde e qualidade de vida", icon: HeartPulse },
-  { value: "calistenia", label: "Estética e definição", icon: Gauge },
+  { value: "saude_geral", label: "SaÃºde e qualidade de vida", icon: HeartPulse },
+  { value: "calistenia", label: "EstÃ©tica e definiÃ§Ã£o", icon: Gauge },
 ];
 
 const EQUIPMENT_OPTIONS: { id: string; label: string; icon: typeof Dumbbell }[] = [
@@ -300,14 +301,14 @@ const EQUIPMENT_OPTIONS: { id: string; label: string; icon: typeof Dumbbell }[] 
   { id: "barra", label: "Barra", icon: Monitor },
   { id: "anilhas", label: "Anilhas", icon: Gauge },
   { id: "corda", label: "Corda", icon: Activity },
-  { id: "elastico", label: "Elástico", icon: Zap },
+  { id: "elastico", label: "ElÃ¡stico", icon: Zap },
   { id: "kettlebell", label: "Kettlebell", icon: Weight },
 ];
 
 function availabilityMessage(state: AvailabilityState): { tone: "green" | "red" | "muted"; text: string } | null {
-  if (state.status === "available") return { tone: "green", text: "✅ Disponível" };
-  if (state.status === "unavailable") return { tone: "red", text: `❌ ${state.message || "Já cadastrado"}` };
-  if (state.status === "invalid") return { tone: "red", text: `❌ ${state.message || "Valor inválido"}` };
+  if (state.status === "available") return { tone: "green", text: "âœ… DisponÃ­vel" };
+  if (state.status === "unavailable") return { tone: "red", text: `âŒ ${state.message || "JÃ¡ cadastrado"}` };
+  if (state.status === "invalid") return { tone: "red", text: `âŒ ${state.message || "Valor invÃ¡lido"}` };
   if (state.status === "checking") return { tone: "muted", text: "Validando..." };
   return null;
 }
@@ -375,7 +376,7 @@ export default function Onboarding() {
     }
 
     if (username.length < 3) {
-      setUsernameAvailability({ status: "invalid", message: "Mínimo de 3 caracteres." });
+      setUsernameAvailability({ status: "invalid", message: "MÃ­nimo de 3 caracteres." });
       return false;
     }
 
@@ -389,12 +390,12 @@ export default function Onboarding() {
       if (requestId !== usernameReqRef.current) return false;
 
       if (!response.ok || payload?.usernameAvailable === undefined) {
-        setUsernameAvailability({ status: "invalid", message: "Não foi possível validar agora." });
+        setUsernameAvailability({ status: "invalid", message: "NÃ£o foi possÃ­vel validar agora." });
         return false;
       }
 
       if (!payload.usernameAvailable) {
-        setUsernameAvailability({ status: "unavailable", message: "Nome de usuário já está em uso." });
+        setUsernameAvailability({ status: "unavailable", message: "Nome de usuÃ¡rio jÃ¡ estÃ¡ em uso." });
         return false;
       }
 
@@ -402,7 +403,7 @@ export default function Onboarding() {
       return true;
     } catch {
       if (requestId === usernameReqRef.current) {
-        setUsernameAvailability({ status: "invalid", message: "Erro de conexão ao validar." });
+        setUsernameAvailability({ status: "invalid", message: "Erro de conexÃ£o ao validar." });
       }
       return false;
     }
@@ -417,7 +418,7 @@ export default function Onboarding() {
 
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
-      setEmailAvailability({ status: "invalid", message: "E-mail inválido." });
+      setEmailAvailability({ status: "invalid", message: "E-mail invÃ¡lido." });
       return false;
     }
 
@@ -431,12 +432,12 @@ export default function Onboarding() {
       if (requestId !== emailReqRef.current) return false;
 
       if (!response.ok || payload?.emailAvailable === undefined) {
-        setEmailAvailability({ status: "invalid", message: "Não foi possível validar agora." });
+        setEmailAvailability({ status: "invalid", message: "NÃ£o foi possÃ­vel validar agora." });
         return false;
       }
 
       if (!payload.emailAvailable) {
-        setEmailAvailability({ status: "unavailable", message: "E-mail já está cadastrado." });
+        setEmailAvailability({ status: "unavailable", message: "E-mail jÃ¡ estÃ¡ cadastrado." });
         return false;
       }
 
@@ -444,7 +445,7 @@ export default function Onboarding() {
       return true;
     } catch {
       if (requestId === emailReqRef.current) {
-        setEmailAvailability({ status: "invalid", message: "Erro de conexão ao validar." });
+        setEmailAvailability({ status: "invalid", message: "Erro de conexÃ£o ao validar." });
       }
       return false;
     }
@@ -480,12 +481,12 @@ export default function Onboarding() {
     setStepError(null);
 
     if (!profile.full_name.trim() || !profile.username.trim() || profile.username.length < 3) {
-      setStepError("Preencha nome completo e nome de usuário (mín. 3 caracteres).");
+      setStepError("Preencha nome completo e nome de usuÃ¡rio (mÃ­n. 3 caracteres).");
       return;
     }
 
     if (usernameAvailability.status === "checking" || usernameAvailability.status === "unavailable" || usernameAvailability.status === "invalid") {
-      setStepError(usernameAvailability.message ?? "Escolha um nome de usuário disponível.");
+      setStepError(usernameAvailability.message ?? "Escolha um nome de usuÃ¡rio disponÃ­vel.");
       return;
     }
 
@@ -513,7 +514,7 @@ export default function Onboarding() {
       height < 140 ||
       height > 220
     ) {
-      setStepError("Altura (140–220 cm) e peso (40–200 kg) devem estar no intervalo válido.");
+      setStepError("Altura (140â€“220 cm) e peso (40â€“200 kg) devem estar no intervalo vÃ¡lido.");
       return;
     }
 
@@ -542,7 +543,7 @@ export default function Onboarding() {
     const squats = Number(profile.initial_squats) || 0;
 
     if (pushups < 0 || situps < 0 || squats < 0) {
-      setStepError("Valores dos contadores não podem ser negativos.");
+      setStepError("Valores dos contadores nÃ£o podem ser negativos.");
       return;
     }
 
@@ -563,7 +564,7 @@ export default function Onboarding() {
         credentials.password.length < 8
           ? "A senha deve ter pelo menos 8 caracteres"
           : credentials.password !== credentials.confirmPassword
-            ? "As senhas não coincidem"
+            ? "As senhas nÃ£o coincidem"
             : "Preencha e-mail e senha.",
       );
       return;
@@ -575,7 +576,7 @@ export default function Onboarding() {
     }
 
     if (emailAvailability.status === "checking" || emailAvailability.status === "unavailable" || emailAvailability.status === "invalid") {
-      setStepError(emailAvailability.message ?? "Use um e-mail disponível para criar a conta.");
+      setStepError(emailAvailability.message ?? "Use um e-mail disponÃ­vel para criar a conta.");
       return;
     }
 
@@ -592,7 +593,7 @@ export default function Onboarding() {
       });
 
       if (registerRes.status === 409) {
-        setStepError("Este e-mail já está cadastrado.");
+        setStepError("Este e-mail jÃ¡ estÃ¡ cadastrado.");
         setStepLoading(false);
         return;
       }
@@ -609,7 +610,7 @@ export default function Onboarding() {
       });
 
       if (!loginRes.ok) {
-        setStepError("Conta criada. Faça login em /app");
+        setStepError("Conta criada. FaÃ§a login em /app");
         setStepLoading(false);
         return;
       }
@@ -676,18 +677,14 @@ export default function Onboarding() {
       await checkAuth();
       navigate("/home");
     } catch {
-      setStepError("Não foi possível conectar ao servidor.");
+      setStepError("NÃ£o foi possÃ­vel conectar ao servidor.");
     } finally {
       setStepLoading(false);
     }
   };
 
   if (authLoading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50">
-        <div className="text-emerald-600">Carregando...</div>
-      </div>
-    );
+    return <PageLoader />;
   }
 
   const progress = ((currentStep + 1) / totalSteps) * 100;
@@ -721,7 +718,7 @@ export default function Onboarding() {
           {stepError && (
             <div className="mb-5 rounded-xl border border-red-400/30 bg-red-50 px-4 py-3 text-sm text-red-600">
               <div className="mb-2">{stepError}</div>
-              {stepError.includes("já está cadastrado") && (
+              {stepError.includes("jÃ¡ estÃ¡ cadastrado") && (
                 <Button type="button" onClick={() => navigate("/app")} className="w-full">
                   Fazer login
                 </Button>
@@ -734,7 +731,7 @@ export default function Onboarding() {
               <div className="mb-2 text-center">
                 <h2 className="text-2xl font-bold text-gray-900">Sua identidade</h2>
                 <p className="mt-1 text-sm text-gray-600">
-                  Vamos configurar um perfil rápido para personalizar sua experiência.
+                  Vamos configurar um perfil rÃ¡pido para personalizar sua experiÃªncia.
                 </p>
               </div>
 
@@ -748,7 +745,7 @@ export default function Onboarding() {
               </Field>
 
               <Field
-                label="Nome de usuário"
+                label="Nome de usuÃ¡rio"
                 leftIcon={<User className="h-4 w-4" />}
                 rightSlot={
                   usernameAvailability.status === "checking"
@@ -774,12 +771,12 @@ export default function Onboarding() {
               )}
 
               <div>
-                <label className="mb-2 block text-sm font-medium text-gray-700">Gênero</label>
+                <label className="mb-2 block text-sm font-medium text-gray-700">GÃªnero</label>
                 <div className="grid grid-cols-3 gap-2">
                   {([
                     { value: "homem", label: "Masculino" },
                     { value: "mulher", label: "Feminino" },
-                    { value: "outro", label: "Prefiro não dizer" },
+                    { value: "outro", label: "Prefiro nÃ£o dizer" },
                   ] as const).map((opt) => (
                     <button
                       key={opt.value}
@@ -821,7 +818,7 @@ export default function Onboarding() {
               <div className="text-center">
                 <h2 className="text-2xl font-bold text-gray-900">Medidas do corpo</h2>
                 <p className="mt-1 text-sm text-gray-600">
-                  Isso nos ajuda a criar metas mais inteligentes para você.
+                  Isso nos ajuda a criar metas mais inteligentes para vocÃª.
                 </p>
               </div>
 
@@ -902,15 +899,15 @@ export default function Onboarding() {
             <form onSubmit={handleConditioningNext} className="space-y-6 animate-stepIn">
               <div className="text-center">
                 <h2 className="text-2xl font-bold text-gray-900">Condicionamento</h2>
-                <p className="mt-1 text-sm text-gray-600">Um retrato rápido do seu nível atual.</p>
+                <p className="mt-1 text-sm text-gray-600">Um retrato rÃ¡pido do seu nÃ­vel atual.</p>
               </div>
 
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                 {([
-                  { value: "sedentario", label: "Sedentário" },
+                  { value: "sedentario", label: "SedentÃ¡rio" },
                   { value: "iniciante", label: "Iniciante" },
-                  { value: "intermediario", label: "Intermediário" },
-                  { value: "avancado", label: "Avançado" },
+                  { value: "intermediario", label: "IntermediÃ¡rio" },
+                  { value: "avancado", label: "AvanÃ§ado" },
                 ] as const).map((c) => (
                   <button
                     key={c.value}
@@ -928,7 +925,7 @@ export default function Onboarding() {
 
               <div className="grid grid-cols-3 gap-3">
                 {([
-                  { key: "initial_pushups" as const, label: "Flexões" },
+                  { key: "initial_pushups" as const, label: "FlexÃµes" },
                   { key: "initial_situps" as const, label: "Abdominais" },
                   { key: "initial_squats" as const, label: "Agachamentos" },
                 ] as const).map(({ key, label }) => {
@@ -942,7 +939,7 @@ export default function Onboarding() {
                           onClick={() => setProfile((p) => ({ ...p, [key]: String(Math.max(0, val - 1)) }))}
                           className="h-8 w-8 rounded-lg bg-gray-100 font-bold"
                         >
-                          −
+                          âˆ’
                         </button>
                         <span className="w-8 font-bold text-emerald-700">{val}</span>
                         <button
@@ -960,7 +957,7 @@ export default function Onboarding() {
 
               <div>
                 <label className="mb-1 block text-sm font-medium text-gray-700">
-                  Lesões ou limitações (opcional)
+                  LesÃµes ou limitaÃ§Ãµes (opcional)
                 </label>
                 <div className={`${FIELD_WRAP} h-auto items-start py-2`}>
                   <textarea
@@ -974,7 +971,7 @@ export default function Onboarding() {
               </div>
 
               <div>
-                <label className="mb-2 block text-sm font-medium text-gray-700">Equipamentos disponíveis</label>
+                <label className="mb-2 block text-sm font-medium text-gray-700">Equipamentos disponÃ­veis</label>
                 <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                   {EQUIPMENT_OPTIONS.map((eq) => {
                     const Icon = eq.icon;
@@ -1029,23 +1026,23 @@ export default function Onboarding() {
                 {([
                   {
                     id: "free" as const,
-                    name: "Básico",
-                    price: "R$ 49/mês",
+                    name: "BÃ¡sico",
+                    price: "R$ 49/mÃªs",
                     color: "from-gray-500 to-gray-600",
-                    features: ["Missões diárias", "XP e níveis", "Ranking"],
+                    features: ["MissÃµes diÃ¡rias", "XP e nÃ­veis", "Ranking"],
                   },
                   {
                     id: "pro" as const,
                     name: "Pro",
-                    price: "R$ 99/mês",
+                    price: "R$ 99/mÃªs",
                     color: "from-emerald-500 to-teal-600",
-                    features: ["Tudo do Básico", "Scanner com IA", "Ranking global"],
+                    features: ["Tudo do BÃ¡sico", "Scanner com IA", "Ranking global"],
                     popular: true,
                   },
                   {
                     id: "annual" as const,
                     name: "Elite",
-                    price: "R$ 149/mês",
+                    price: "R$ 149/mÃªs",
                     color: "from-purple-500 to-pink-600",
                     features: ["Tudo do Pro", "Planos de treino", "Suporte VIP"],
                   },
@@ -1137,7 +1134,7 @@ export default function Onboarding() {
                     type={showPassword ? "text" : "password"}
                     value={credentials.password}
                     onChange={setCredential("password")}
-                    placeholder="Senha (mín. 8)"
+                    placeholder="Senha (mÃ­n. 8)"
                     minLength={8}
                     required
                     className={FIELD_INPUT}
@@ -1161,7 +1158,7 @@ export default function Onboarding() {
 
                 <div className="flex flex-wrap gap-2">
                   {([
-                    { tab: "card", label: "Cartão", icon: CreditCard },
+                    { tab: "card", label: "CartÃ£o", icon: CreditCard },
                     { tab: "pix", label: "PIX", icon: QrCode },
                   ] as const).map(({ tab, label, icon: Icon }) => (
                     <button
@@ -1180,12 +1177,12 @@ export default function Onboarding() {
 
                 {paymentTab === "card" && (
                   <div className="space-y-3">
-                    <Field label="Número do cartão">
-                      <Input placeholder="Número do cartão" className={FIELD_INPUT} />
+                    <Field label="NÃºmero do cartÃ£o">
+                      <Input placeholder="NÃºmero do cartÃ£o" className={FIELD_INPUT} />
                     </Field>
 
-                    <Field label="Nome no cartão">
-                      <Input placeholder="Nome no cartão" className={FIELD_INPUT} />
+                    <Field label="Nome no cartÃ£o">
+                      <Input placeholder="Nome no cartÃ£o" className={FIELD_INPUT} />
                     </Field>
 
                     <div className="grid grid-cols-2 gap-3">
@@ -1201,7 +1198,7 @@ export default function Onboarding() {
 
                 {paymentTab === "pix" && (
                   <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 text-center text-sm text-gray-600">
-                    QR Code de demonstração será exibido após criar a conta.
+                    QR Code de demonstraÃ§Ã£o serÃ¡ exibido apÃ³s criar a conta.
                   </div>
                 )}
               </div>
@@ -1231,4 +1228,5 @@ export default function Onboarding() {
     </div>
   );
 }
+
 
