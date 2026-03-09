@@ -1,9 +1,13 @@
 import { api } from "@/react-app/utils/api";
-import { ROUTE_PATHS } from "@/react-app/constants/auth";
+import { AUTHENTICATED_HINT_KEY, ROUTE_PATHS } from "@/react-app/constants/auth";
 import type { User } from "@/react-app/types/auth";
 
 export async function fetchCurrentUser(): Promise<User | null> {
   const response = await api("/api/users/me");
+  if (response.status === 401) {
+    localStorage.removeItem(AUTHENTICATED_HINT_KEY);
+    return null;
+  }
   if (!response.ok) return null;
   return (await response.json()) as User;
 }
