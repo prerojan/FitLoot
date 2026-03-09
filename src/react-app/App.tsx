@@ -1,5 +1,6 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router";
 import { useState, useEffect, createContext, useContext, lazy, Suspense } from "react";
+import { Analytics } from "@vercel/analytics/react";
 import PageLoader from "@/react-app/components/PageLoader";
 import LoadingBall from "@/react-app/components/LoadingBall";
 import { ROUTE_PATHS, AUTHENTICATED_HINT_KEY } from "@/react-app/constants/auth";
@@ -99,6 +100,7 @@ export default function App() {
             <Route path={ROUTE_PATHS.wildcard} element={<NotFoundPage />} />
           </Routes>
         </Suspense>
+        <Analytics />
       </Router>
     </AuthContext.Provider>
   );
