@@ -232,6 +232,10 @@ export default function Dashboard() {
 
       const result = (await response.json()) as { leveledUp?: boolean | undefined };
 
+      setMissions((currentMissions) =>
+        currentMissions.filter((mission) => mission.id !== missionId),
+      );
+
       if (result.leveledUp) {
         clearJsonCache("/api/progression");
         try {

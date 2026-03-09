@@ -16,9 +16,28 @@ export async function processDailyResetForAllUsers({ db, processUser }: DailyRes
     return;
   }
 
-  const users = await db.prepare("SELECT user_id FROM user_profiles").all<{ user_id: string }>();
-  for (const user of users.results) {
-    await processUser(user.user_id);
+  const pageSize = 200;
+  let offset = 0;
+
+  while (true) {
+    const users = await db
+      .prepare("SELECT user_id FROM user_profiles ORDER BY user_id LIMIT ? OFFSET ?")
+      .bind(pageSize, offset)
+      .all<{ user_id: string }>();
+
+    const batch = Array.isArray(users.results) ? users.results : [];
+    if (batch.length === 0) {
+      break;
+    }
+
+    for (const user of batch) {
+      await processUser(user.user_id);
+    }
+
+    if (batch.length < pageSize) {
+      break;
+    }
+    offset += pageSize;
   }
 
   await db
