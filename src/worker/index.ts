@@ -56,6 +56,8 @@ const streakRefreshLocks = new Map<string, Promise<void>>();
 const streakRefreshLastRun = new Map<string, number>();
 const SCHEMA_CACHE_TTL_MS = 10_000;
 const CATALOG_CACHE_TTL_MS = 60_000;
+const TABLE_COLUMN_CACHE_TTL_MS = 60_000;
+const tableColumnCache = new Map<string, { checkedAt: number; columns: Set<string> }>();
 
 async function hasCoreSchema(db: D1Database) {
   const now = Date.now();
@@ -192,6 +194,32 @@ function isMissingOnboardingCompletedColumnError(error: unknown) {
   return message.includes("onboarding_completed") && message.includes("no such column");
 }
 
+async function getTableColumns(db: D1Database, tableName: string): Promise<Set<string>> {
+  const cacheKey = tableName.trim().toLowerCase();
+  const now = Date.now();
+  const cached = tableColumnCache.get(cacheKey);
+  if (cached && now - cached.checkedAt < TABLE_COLUMN_CACHE_TTL_MS) {
+    return cached.columns;
+  }
+
+  const info = await db.prepare(`PRAGMA table_info('${cacheKey}')`).all<{
+    name: string | null;
+  }>();
+  const columns = new Set(
+    (Array.isArray(info.results) ? info.results : [])
+      .map((row) => (typeof row.name === "string" ? row.name.toLowerCase() : ""))
+      .filter((value) => value.length > 0),
+  );
+
+  tableColumnCache.set(cacheKey, { checkedAt: now, columns });
+  return columns;
+}
+
+async function hasTableColumn(db: D1Database, tableName: string, columnName: string): Promise<boolean> {
+  const columns = await getTableColumns(db, tableName);
+  return columns.has(columnName.trim().toLowerCase());
+}
+
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
@@ -224,32 +252,12 @@ async function getUserAuthRecordById(db: D1Database, userId: string): Promise<Us
 
     if (!userRecord) return null;
 
-    let onboardingCompleted = Number(userRecord.onboarding_completed) === 1 ? 1 : 0;
-    if (onboardingCompleted === 0) {
-      try {
-        const profileExists = await db
-          .prepare("SELECT 1 as exists_flag FROM user_profiles WHERE user_id = ? LIMIT 1")
-          .bind(userId)
-          .first<{ exists_flag: number }>();
-
-        if (Number(profileExists?.exists_flag ?? 0) === 1) {
-          onboardingCompleted = 1;
-          await db
-            .prepare("UPDATE users SET onboarding_completed = 1 WHERE id = ?")
-            .bind(userId)
-            .run();
-        }
-      } catch {
-        // If profile table is temporarily unavailable, keep current value without blocking auth.
-      }
-    }
-
     return {
       id: userRecord.id,
       email: userRecord.email,
       name: userRecord.name,
       avatar_url: userRecord.avatar_url,
-      onboarding_completed: onboardingCompleted,
+      onboarding_completed: Number(userRecord.onboarding_completed) === 1 ? 1 : 0,
     };
   } catch (error) {
     if (!isMissingOnboardingCompletedColumnError(error)) {
@@ -263,25 +271,60 @@ async function getUserAuthRecordById(db: D1Database, userId: string): Promise<Us
 
     if (!fallbackRecord) return null;
 
-    let onboardingCompleted = 0;
-    try {
-      const profileExists = await db
-        .prepare("SELECT 1 as exists_flag FROM user_profiles WHERE user_id = ? LIMIT 1")
-        .bind(userId)
-        .first<{ exists_flag: number }>();
-      onboardingCompleted = Number(profileExists?.exists_flag ?? 0) === 1 ? 1 : 0;
-    } catch {
-      onboardingCompleted = 0;
-    }
-
     return {
       id: fallbackRecord.id,
       email: fallbackRecord.email,
       name: fallbackRecord.name,
       avatar_url: fallbackRecord.avatar_url,
-      onboarding_completed: onboardingCompleted,
+      onboarding_completed: 0,
     };
   }
+}
+
+async function updateUserPlanState(
+  db: D1Database,
+  userId: string,
+  params: {
+    planId: "free" | "pro" | "annual";
+    status: "active" | "pending";
+    paymentMethod: "none" | "card" | "pix";
+    markOnboardingCompleted: boolean;
+  },
+): Promise<void> {
+  const [paymentMethodColumnExists, onboardingColumnExists] = await Promise.all([
+    hasTableColumn(db, "users", "payment_method"),
+    params.markOnboardingCompleted ? hasTableColumn(db, "users", "onboarding_completed") : Promise.resolve(false),
+  ]);
+
+  const assignments = ["plan_id = ?", "plan_status = ?"];
+  const values: Array<string> = [params.planId, params.status];
+
+  if (paymentMethodColumnExists) {
+    assignments.push("payment_method = ?");
+    values.push(params.paymentMethod);
+  }
+  if (params.markOnboardingCompleted && onboardingColumnExists) {
+    assignments.push("onboarding_completed = 1");
+  }
+
+  await db
+    .prepare(`UPDATE users SET ${assignments.join(", ")} WHERE id = ?`)
+    .bind(...values, userId)
+    .run();
+}
+
+function scheduleCatalogInitialization(db: D1Database, executionCtx: ExecutionContext): void {
+  const now = Date.now();
+  if (now - catalogInitCheckedAt < CATALOG_CACHE_TTL_MS) return;
+  if (catalogInitPromise) return;
+
+  executionCtx.waitUntil(
+    ensureCatalogReady(db).catch((error) => {
+      console.error("[catalog][background-init]", {
+        message: error instanceof Error ? error.message : String(error),
+      });
+    })
+  );
 }
 
 async function authMiddleware(
@@ -293,13 +336,7 @@ async function authMiddleware(
     return databaseNotInitializedResponse(c);
   }
 
-  try {
-    await ensureCatalogReady(c.env.fitloot_db);
-  } catch (error) {
-    console.error("[authMiddleware][ensureCatalogReady] Falha ao inicializar catÃƒÂ¡logo de gamificaÃƒÂ§ÃƒÂ£o", {
-      message: error instanceof Error ? error.message : String(error),
-    });
-  }
+  scheduleCatalogInitialization(c.env.fitloot_db, c.executionCtx);
 
   try {
     const sessionId = getSessionIdFromCookieHeader(c.req.header("Cookie"));
@@ -330,15 +367,6 @@ async function authMiddleware(
       avatar_url: userRecord.avatar_url ?? undefined,
       onboarding_completed: userRecord.onboarding_completed,
     });
-
-    try {
-      await ensureUserCounterRow(c.env.fitloot_db, userRecord.id);
-    } catch (counterError) {
-      console.error("[authMiddleware][ensureUserCounterRow]", {
-        message: counterError instanceof Error ? counterError.message : String(counterError),
-        userId: userRecord.id,
-      });
-    }
 
     try {
       await refreshMissionExpiryWithGuard(c.env.fitloot_db, userRecord.id);
@@ -1059,18 +1087,44 @@ async function buildInitialTrainingPlan(mainGoal: string | null | undefined, con
   };
 }
 
-async function upsertTrainingPlan(db: D1Database, userId: string, plan: Record<string, unknown>, mainGoal: string | null, conditioning: ConditioningLevel, equipment: string | null, injuries: string | null) {
+function normalizeTrainingFrequencyInput(value: unknown): number {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 4;
+  return Math.max(1, Math.min(7, Math.round(numeric)));
+}
+
+async function upsertTrainingPlan(
+  db: D1Database,
+  userId: string,
+  plan: Record<string, unknown>,
+  mainGoal: string | null,
+  conditioning: ConditioningLevel,
+  equipment: string | null,
+  injuries: string | null,
+  trainingFrequency: number | null | undefined,
+) {
+  const normalizedTrainingFrequency = normalizeTrainingFrequencyInput(trainingFrequency);
   await db.prepare(`INSERT INTO user_training_plans (user_id, main_goal, conditioning, training_frequency, equipment, injuries, weekly_plan_json, progression_notes, updated_at)
-    VALUES (?, ?, ?, 4, ?, ?, ?, ?, datetime('now'))
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
     ON CONFLICT(user_id) DO UPDATE SET
       main_goal=excluded.main_goal,
       conditioning=excluded.conditioning,
+      training_frequency=excluded.training_frequency,
       equipment=excluded.equipment,
       injuries=excluded.injuries,
       weekly_plan_json=excluded.weekly_plan_json,
       progression_notes=excluded.progression_notes,
       updated_at=datetime('now')`)
-    .bind(userId, mainGoal, conditioning, equipment ?? "", injuries ?? "", JSON.stringify(plan), "progressÃƒÂ£o de base")
+    .bind(
+      userId,
+      mainGoal,
+      conditioning,
+      normalizedTrainingFrequency,
+      equipment ?? "",
+      injuries ?? "",
+      JSON.stringify(plan),
+      "progressao de base",
+    )
     .run();
 }
 
@@ -1550,21 +1604,12 @@ app.post(
     if (!user) return c.json({ error: "Unauthorized" }, 401);
     const data = c.req.valid("json");
 
-    try {
-      await c.env.fitloot_db
-        .prepare("UPDATE users SET plan_id = ?, plan_status = ?, onboarding_completed = 1 WHERE id = ?")
-        .bind(data.plan_id, data.status, user.id)
-        .run();
-    } catch (error) {
-      if (!isMissingOnboardingCompletedColumnError(error)) {
-        throw error;
-      }
-
-      await c.env.fitloot_db
-        .prepare("UPDATE users SET plan_id = ?, plan_status = ? WHERE id = ?")
-        .bind(data.plan_id, data.status, user.id)
-        .run();
-    }
+    await updateUserPlanState(c.env.fitloot_db, user.id, {
+      planId: data.plan_id,
+      status: data.status,
+      paymentMethod: data.payment_method,
+      markOnboardingCompleted: false,
+    });
 
     const updated = await getUserAuthRecordById(c.env.fitloot_db, user.id);
     return c.json(updated ?? c.get("user"));
@@ -1596,12 +1641,16 @@ app.get("/api/profile", authMiddleware, async (c) => {
   if (!user) return c.json({ error: "Unauthorized" }, 401);
 
   try {
+    if (Number(user.onboarding_completed ?? 0) !== 1) {
+      return c.json({ error: "Perfil nao encontrado", code: "PROFILE_NOT_FOUND" }, 404);
+    }
+
     const profile = await c.env.fitloot_db.prepare(
       "SELECT * FROM user_profiles WHERE user_id = ?"
     ).bind(user.id).first();
 
     if (!profile) {
-      return c.json({ error: "Perfil n?o encontrado", code: "PROFILE_NOT_FOUND" }, 404);
+      return c.json({ error: "Perfil nao encontrado", code: "PROFILE_NOT_FOUND" }, 404);
     }
 
     return c.json(profile);
@@ -1707,15 +1756,31 @@ app.post("/api/profile/goal", authMiddleware, async (c) => {
   await onGoalChanged(c.env.fitloot_db, user.id, oldGoal, newGoal, changeCount);
   if (completedGoals.size >= 5) await unlockAchievementIfNeeded(c.env.fitloot_db, user.id, 'A Jornada ÃƒÂ© o Destino', completedGoals.size, 5);
 
-  const profileForRegeneration = await c.env.fitloot_db
-    .prepare("SELECT initial_conditioning, injuries, equipment FROM user_profiles WHERE user_id = ?")
-    .bind(user.id)
-    .first<{ initial_conditioning: string | null; injuries: string | null; equipment: string | null }>();
+  const [profileForRegeneration, planForRegeneration] = await Promise.all([
+    c.env.fitloot_db
+      .prepare("SELECT initial_conditioning, injuries, equipment FROM user_profiles WHERE user_id = ?")
+      .bind(user.id)
+      .first<{ initial_conditioning: string | null; injuries: string | null; equipment: string | null }>(),
+    c.env.fitloot_db
+      .prepare("SELECT training_frequency FROM user_training_plans WHERE user_id = ?")
+      .bind(user.id)
+      .first<{ training_frequency: number | null }>(),
+  ]);
   const conditioning = normalizeConditioning(profileForRegeneration?.initial_conditioning);
   const injuries = typeof profileForRegeneration?.injuries === "string" ? profileForRegeneration.injuries : "";
   const equipment = typeof profileForRegeneration?.equipment === "string" ? profileForRegeneration.equipment : "";
+  const trainingFrequency = normalizeTrainingFrequencyInput(planForRegeneration?.training_frequency);
   const refreshedPlan = await buildInitialTrainingPlan(newGoal, conditioning, equipment, injuries);
-  await upsertTrainingPlan(c.env.fitloot_db, user.id, refreshedPlan as unknown as Record<string, unknown>, newGoal, conditioning, equipment, injuries);
+  await upsertTrainingPlan(
+    c.env.fitloot_db,
+    user.id,
+    refreshedPlan as unknown as Record<string, unknown>,
+    newGoal,
+    conditioning,
+    equipment,
+    injuries,
+    trainingFrequency,
+  );
 
   const dailyCycleStart = missionCycleStartIso("daily");
   await c.env.fitloot_db.prepare(
@@ -1907,49 +1972,96 @@ app.post("/api/feedback", authMiddleware, async (c) => {
 app.post("/api/onboarding", authMiddleware, zValidator("json", OnboardingRequestSchema), async (c) => {
   const user = c.get("user");
   if (!user) return c.json({ error: "Unauthorized" }, 401);
-  
+
   const data = c.req.valid("json");
   await ensureGamificationCatalog(c.env.fitloot_db);
 
-  // Check if username exists
-  const existingUsername = await c.env.fitloot_db.prepare(
-    "SELECT id FROM user_profiles WHERE username = ?"
-  ).bind(data.username).first();
+  const selectedGoals = Array.from(
+    new Set(
+      (Array.isArray(data.goals) && data.goals.length > 0 ? data.goals : [data.main_goal])
+        .map((item) => String(item).trim())
+        .filter((item) => item.length > 0),
+    ),
+  );
+  const username = data.username.trim();
+  const fullName = data.full_name.trim();
+  const primaryGoal = selectedGoals[0] ?? data.main_goal;
+  const trainingFrequency = normalizeTrainingFrequencyInput(data.training_frequency);
+  const goalsJson = JSON.stringify(selectedGoals);
 
-  if (existingUsername) {
+  if (username.length < 3 || fullName.length === 0) {
+    return c.json({ error: "Dados de identidade invalidos" }, 400);
+  }
+
+  const existingUsername = await c.env.fitloot_db.prepare(
+    "SELECT user_id FROM user_profiles WHERE username = ? LIMIT 1"
+  ).bind(username).first<{ user_id: string | null }>();
+
+  if (existingUsername?.user_id && existingUsername.user_id !== user.id) {
     return c.json({ error: "Username already taken" }, 400);
   }
 
-  // Calculate initial attributes based on conditioning
   let initialAttrs = { strength: 10, constitution: 10, vitality: 10, dexterity: 10, focus: 10 };
-  if (data.initial_conditioning === 'iniciante') {
+  if (data.initial_conditioning === "iniciante") {
     initialAttrs = { strength: 15, constitution: 15, vitality: 15, dexterity: 12, focus: 12 };
-  } else if (data.initial_conditioning === 'intermediario') {
+  } else if (data.initial_conditioning === "intermediario") {
     initialAttrs = { strength: 25, constitution: 25, vitality: 25, dexterity: 20, focus: 20 };
-  } else if (data.initial_conditioning === 'avancado') {
+  } else if (data.initial_conditioning === "avancado") {
     initialAttrs = { strength: 40, constitution: 40, vitality: 40, dexterity: 35, focus: 35 };
   }
 
-  // Add bonus based on initial reps
   initialAttrs.strength += Math.floor(data.initial_pushups / 5);
   initialAttrs.constitution += Math.floor(data.initial_situps / 5);
   initialAttrs.vitality += Math.floor(data.initial_squats / 5);
 
-  // Create profile
   await c.env.fitloot_db.prepare(
-    `INSERT INTO user_profiles (user_id, username, full_name, weight, height, initial_conditioning, injuries, equipment, main_goal, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`
-  ).bind(user.id, data.username, data.full_name, data.weight, data.height, data.initial_conditioning, data.injuries || '', data.equipment || '', data.main_goal).run();
+    `INSERT INTO user_profiles (
+      user_id, username, full_name, weight, height, initial_conditioning, injuries, equipment, main_goal,
+      age, gender, goals_json, updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    ON CONFLICT(user_id) DO UPDATE SET
+      username = excluded.username,
+      full_name = excluded.full_name,
+      weight = excluded.weight,
+      height = excluded.height,
+      initial_conditioning = excluded.initial_conditioning,
+      injuries = excluded.injuries,
+      equipment = excluded.equipment,
+      main_goal = excluded.main_goal,
+      age = excluded.age,
+      gender = excluded.gender,
+      goals_json = excluded.goals_json,
+      updated_at = datetime('now')`
+  ).bind(
+    user.id,
+    username,
+    fullName,
+    data.weight,
+    data.height,
+    data.initial_conditioning,
+    data.injuries || "",
+    data.equipment || "",
+    primaryGoal,
+    data.age,
+    data.gender,
+    goalsJson,
+  ).run();
 
-  // Create attributes
   await c.env.fitloot_db.prepare(
     `INSERT INTO user_attributes (user_id, strength, constitution, vitality, dexterity, focus, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, datetime('now'))`
+    VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+    ON CONFLICT(user_id) DO UPDATE SET
+      strength = excluded.strength,
+      constitution = excluded.constitution,
+      vitality = excluded.vitality,
+      dexterity = excluded.dexterity,
+      focus = excluded.focus,
+      updated_at = datetime('now')`
   ).bind(user.id, initialAttrs.strength, initialAttrs.constitution, initialAttrs.vitality, initialAttrs.dexterity, initialAttrs.focus).run();
 
-  // Create progression
   await c.env.fitloot_db.prepare(
-    `INSERT INTO user_progression (user_id, xp, level, points, current_streak, best_streak, updated_at)
+    `INSERT OR IGNORE INTO user_progression (user_id, xp, level, points, current_streak, best_streak, updated_at)
     VALUES (?, 0, 1, 0, 0, 0, datetime('now'))`
   ).bind(user.id).run();
 
@@ -1969,24 +2081,34 @@ app.post("/api/onboarding", authMiddleware, zValidator("json", OnboardingRequest
     }
   }
 
-  const plan = await buildInitialTrainingPlan(data.main_goal, conditioning, data.equipment ?? null, data.injuries ?? null);
-  await upsertTrainingPlan(c.env.fitloot_db, user.id, plan, data.main_goal, conditioning, data.equipment ?? null, data.injuries ?? null);
-  await ensureGoalStatsRow(c.env.fitloot_db, user.id, data.main_goal);
+  const plan = await buildInitialTrainingPlan(primaryGoal, conditioning, data.equipment ?? null, data.injuries ?? null);
+  await upsertTrainingPlan(
+    c.env.fitloot_db,
+    user.id,
+    plan,
+    primaryGoal,
+    conditioning,
+    data.equipment ?? null,
+    data.injuries ?? null,
+    trainingFrequency,
+  );
+  await updateUserPlanState(c.env.fitloot_db, user.id, {
+    planId: data.plan_id,
+    status: data.plan_status,
+    paymentMethod: data.payment_method,
+    markOnboardingCompleted: true,
+  });
+  await ensureGoalStatsRow(c.env.fitloot_db, user.id, primaryGoal);
   await ensureUserCounterRow(c.env.fitloot_db, user.id);
-  await logUserEvent(c.env.fitloot_db, user.id, 'onboarding_completed', { conditioning, main_goal: data.main_goal });
-  try {
-    await c.env.fitloot_db
-      .prepare("UPDATE users SET onboarding_completed = 1 WHERE id = ?")
-      .bind(user.id)
-      .run();
-  } catch (error) {
-    if (!isMissingOnboardingCompletedColumnError(error)) {
-      throw error;
-    }
-  }
+  await logUserEvent(c.env.fitloot_db, user.id, "onboarding_completed", {
+    conditioning,
+    main_goal: primaryGoal,
+    goals: selectedGoals,
+    training_frequency: trainingFrequency,
+    plan_id: data.plan_id,
+  });
   await evaluateLevelTitles(c.env.fitloot_db, user.id, 1);
 
-  // Create initial missions in background to avoid blocking onboarding response.
   c.executionCtx.waitUntil((async () => {
     try {
       await ensurePeriodicMissions(c.env, c.env.fitloot_db, user.id);
@@ -2215,12 +2337,21 @@ type NormalizedMissionComputedFields = {
   sets: number | null;
   rest_seconds: number | null;
   instructions: string[];
+  exercise_instructions_en: string[];
+  exercise_instructions_pt: string[];
   muscle_groups: string[];
+  exercise_secondary_muscles: string[];
   attributes_benefited: string[];
   safety_tips: string[];
   circuit_tasks: CircuitTask[];
   exercise_type: string;
   body_area: string;
+  exercise_name: string | null;
+  exercise_equipment: string | null;
+  exercise_body_part: string | null;
+  exercise_target: string | null;
+  exercise_db_gif_url: string | null;
+  exercise_db_image_url: string | null;
   duration_estimate_minutes: number;
   exercise_category: string;
   difficulty_level: string | undefined;
@@ -2247,7 +2378,10 @@ function normalizeMissionRow(rawMission: Record<string, unknown>): Record<string
     sets: rawMission.sets === null || rawMission.sets === undefined ? null : Number(rawMission.sets),
     rest_seconds: rawMission.rest_seconds === null || rawMission.rest_seconds === undefined ? null : Number(rawMission.rest_seconds),
     instructions: parseMissionArrayField(rawMission.instructions_json),
+    exercise_instructions_en: parseMissionArrayField(rawMission.exercise_instructions_en_json),
+    exercise_instructions_pt: parseMissionArrayField(rawMission.exercise_instructions_pt_json),
     muscle_groups: parseMissionArrayField(rawMission.muscle_groups_json),
+    exercise_secondary_muscles: parseMissionArrayField(rawMission.exercise_secondary_muscles_json),
     attributes_benefited: parseMissionArrayField(rawMission.attributes_benefited_json),
     safety_tips: parseMissionArrayField(rawMission.safety_tips_json),
     circuit_tasks: parseCircuitTaskField(rawMission.circuit_tasks_json),
@@ -2255,6 +2389,12 @@ function normalizeMissionRow(rawMission: Record<string, unknown>): Record<string
     body_area: rawMission.body_area === "upper" || rawMission.body_area === "lower" || rawMission.body_area === "core" || rawMission.body_area === "full_body"
       ? rawMission.body_area
       : "full_body",
+    exercise_name: typeof rawMission.exercise_name === "string" ? rawMission.exercise_name : null,
+    exercise_equipment: typeof rawMission.exercise_equipment === "string" ? rawMission.exercise_equipment : null,
+    exercise_body_part: typeof rawMission.exercise_body_part === "string" ? rawMission.exercise_body_part : null,
+    exercise_target: typeof rawMission.exercise_target === "string" ? rawMission.exercise_target : null,
+    exercise_db_gif_url: typeof rawMission.exercise_db_gif_url === "string" ? rawMission.exercise_db_gif_url : null,
+    exercise_db_image_url: typeof rawMission.exercise_db_image_url === "string" ? rawMission.exercise_db_image_url : null,
     duration_estimate_minutes: Number(rawMission.duration_estimate_minutes ?? 10),
     exercise_category: typeof rawMission.exercise_category === "string" ? rawMission.exercise_category : "default",
     difficulty_level: typeof rawMission.difficulty_level === "string" ? rawMission.difficulty_level : undefined,
@@ -2285,8 +2425,20 @@ function missionSummaryFromNormalized(mission: NormalizedMissionRow): Record<str
     metric_unit: mission.metric_unit,
     sets: mission.sets,
     rest_seconds: mission.rest_seconds,
+    instructions: mission.instructions,
+    safety_tips: mission.safety_tips,
+    video_url: mission.video_url,
+    exercise_instructions_en: mission.exercise_instructions_en,
+    exercise_instructions_pt: mission.exercise_instructions_pt,
     image_url: mission.image_url,
+    exercise_db_gif_url: mission.exercise_db_gif_url,
+    exercise_db_image_url: mission.exercise_db_image_url,
     muscle_groups: mission.muscle_groups,
+    exercise_secondary_muscles: mission.exercise_secondary_muscles,
+    exercise_name: mission.exercise_name,
+    exercise_equipment: mission.exercise_equipment,
+    exercise_body_part: mission.exercise_body_part,
+    exercise_target: mission.exercise_target,
     exercise_type: mission.exercise_type,
     body_area: mission.body_area,
     duration_estimate_minutes: mission.duration_estimate_minutes,
@@ -3804,8 +3956,17 @@ type MissionPayload = {
   sets: number | null;
   rest_seconds: number | null;
   instructions: string[];
+  exercise_instructions_en: string[];
+  exercise_instructions_pt: string[];
   image_url: string | null;
+  exercise_db_gif_url: string | null;
+  exercise_db_image_url: string | null;
   muscle_groups: string[];
+  exercise_secondary_muscles: string[];
+  exercise_name: string | null;
+  exercise_equipment: string | null;
+  exercise_body_part: string | null;
+  exercise_target: string | null;
   exercise_type: MissionExerciseType;
   body_area: MissionBodyArea;
   attributes_benefited: string[];
@@ -4358,6 +4519,14 @@ function buildMissionPayload(params: {
   exerciseName: string;
   muscle: string;
   imageUrl?: string | undefined;
+  exerciseDbGifUrl?: string | undefined;
+  exerciseDbImageUrl?: string | undefined;
+  exerciseEquipment?: string | undefined;
+  exerciseBodyPart?: string | undefined;
+  exerciseTarget?: string | undefined;
+  exerciseSecondaryMuscles?: string[] | undefined;
+  exerciseInstructionsEn?: string[] | undefined;
+  exerciseInstructionsPt?: string[] | undefined;
   videoUrl?: string | undefined;
   thumbnailUrl?: string | undefined;
   instruction?: string | undefined;
@@ -4402,8 +4571,17 @@ function buildMissionPayload(params: {
     sets,
     rest_seconds: restSeconds,
     instructions,
+    exercise_instructions_en: Array.isArray(params.exerciseInstructionsEn) ? params.exerciseInstructionsEn.slice(0, 8) : [],
+    exercise_instructions_pt: Array.isArray(params.exerciseInstructionsPt) ? params.exerciseInstructionsPt.slice(0, 8) : [],
     image_url: params.imageUrl ?? null,
+    exercise_db_gif_url: params.exerciseDbGifUrl ?? null,
+    exercise_db_image_url: params.exerciseDbImageUrl ?? null,
     muscle_groups: [params.muscle],
+    exercise_secondary_muscles: Array.isArray(params.exerciseSecondaryMuscles) ? params.exerciseSecondaryMuscles.slice(0, 8) : [],
+    exercise_name: params.exerciseName,
+    exercise_equipment: params.exerciseEquipment ?? null,
+    exercise_body_part: params.exerciseBodyPart ?? null,
+    exercise_target: params.exerciseTarget ?? null,
     exercise_type: exerciseType,
     body_area: bodyArea,
     attributes_benefited: attributes,
@@ -4426,10 +4604,12 @@ async function insertMission(db: D1Database, userId: string, period: MissionPeri
   await db.prepare(
     `INSERT INTO missions (
       user_id, type, title, description, skill_id, target_reps, target_time, xp_reward, points_reward, deadline,
-      metric_type, metric_value, metric_unit, sets, rest_seconds, instructions_json, image_url, muscle_groups_json,
-      exercise_type, body_area, attributes_benefited_json, duration_estimate_minutes, exercise_category,
+      metric_type, metric_value, metric_unit, sets, rest_seconds, instructions_json,
+      exercise_instructions_en_json, exercise_instructions_pt_json, exercise_db_gif_url, exercise_db_image_url,
+      exercise_name, exercise_equipment, exercise_body_part, exercise_target, exercise_secondary_muscles_json,
+      image_url, muscle_groups_json, exercise_type, body_area, attributes_benefited_json, duration_estimate_minutes, exercise_category,
       mission_origin, circuit_tasks_json, safety_tips_json, difficulty_level, video_url, thumbnail_url, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`
   ).bind(
     userId,
     period,
@@ -4447,6 +4627,15 @@ async function insertMission(db: D1Database, userId: string, period: MissionPeri
     mission.sets,
     mission.rest_seconds,
     JSON.stringify(mission.instructions),
+    JSON.stringify(mission.exercise_instructions_en),
+    JSON.stringify(mission.exercise_instructions_pt),
+    mission.exercise_db_gif_url,
+    mission.exercise_db_image_url,
+    mission.exercise_name,
+    mission.exercise_equipment,
+    mission.exercise_body_part,
+    mission.exercise_target,
+    JSON.stringify(mission.exercise_secondary_muscles),
     mission.image_url,
     JSON.stringify(mission.muscle_groups),
     mission.exercise_type,
@@ -4697,6 +4886,76 @@ function ensureInstructionSteps(
   return merged.slice(0, 6);
 }
 
+function normalizeInstructionList(value: unknown, limit = 8): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => String(item).trim())
+    .filter((item) => item.length > 0)
+    .slice(0, limit);
+}
+
+function mergeUniqueStrings(values: string[], limit: number): string[] {
+  const merged: string[] = [];
+  const seen = new Set<string>();
+  for (const value of values) {
+    const normalized = value.trim();
+    if (normalized.length === 0) continue;
+    const key = normalized.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push(normalized);
+    if (merged.length >= limit) break;
+  }
+  return merged;
+}
+
+async function translateExerciseInstructionsToPt(
+  instructionsEn: string[],
+  exerciseName: string,
+  env: Env,
+): Promise<string[]> {
+  const normalizedInstructions = normalizeInstructionList(instructionsEn, 8);
+  if (normalizedInstructions.length === 0) return [];
+  if (!env.HF_TOKEN) return normalizedInstructions;
+
+  const prompt = [
+    "Traduza os passos de execucao para portugues brasileiro.",
+    "Mantenha o mesmo numero de passos e nao adicione explicacoes extras.",
+    `Exercicio: ${exerciseName}`,
+    "Responda APENAS JSON valido no formato:",
+    '{ "instructions_pt": ["passo 1", "passo 2"] }',
+    "",
+    `instructions_en: ${JSON.stringify(normalizedInstructions)}`,
+  ].join("\n");
+
+  try {
+    const completion = await fetchJsonWithTimeout<{ choices?: Array<{ message?: { content?: string | undefined } }> }>(
+      "https://router.huggingface.co/v1/chat/completions",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${env.HF_TOKEN}`,
+        },
+        body: JSON.stringify({
+          model: "openai/gpt-oss-120b:groq",
+          messages: [{ role: "user", content: prompt }],
+          max_tokens: 500,
+          response_format: { type: "json_object" },
+        }),
+      },
+      timeoutMsByService.huggingface,
+    );
+
+    const rawContent = safeGet(completion.choices ?? [], 0)?.message?.content ?? "";
+    const parsed = JSON.parse(rawContent) as { instructions_pt?: unknown };
+    const translated = normalizeInstructionList(parsed.instructions_pt, 8);
+    return translated.length > 0 ? translated : normalizedInstructions;
+  } catch {
+    return normalizedInstructions;
+  }
+}
+
 async function getExerciseInstructionsFromAI(
   exerciseName: string,
   metricType: MissionMetricType,
@@ -4883,7 +5142,9 @@ async function createMissionsForPeriod(env: Env, db: D1Database, userId: string,
        WHERE us.user_id = ?
        ORDER BY COALESCE(us.best_reps,0) DESC, COALESCE(us.total_time,0) DESC`
     ).bind(userId).all<{ skill_name: string; best_reps: number; total_time: number }>(),
-    db.prepare("SELECT weekly_plan_json FROM user_training_plans WHERE user_id = ?").bind(userId).first<{ weekly_plan_json: string | null }>(),
+    db.prepare("SELECT weekly_plan_json, training_frequency FROM user_training_plans WHERE user_id = ?")
+      .bind(userId)
+      .first<{ weekly_plan_json: string | null; training_frequency: number | null }>(),
   ]);
 
   const mainGoal = typeof profile?.main_goal === "string" ? profile.main_goal.trim() : "";
@@ -4908,6 +5169,7 @@ async function createMissionsForPeriod(env: Env, db: D1Database, userId: string,
   const previousWeekKey = typeof previousPlanRaw?.week_key === "string" ? previousPlanRaw.week_key : "";
   const previousHash = typeof previousPlanRaw?.profile_hash === "string" ? previousPlanRaw.profile_hash : "";
   const previousVolumeMultiplier = typeof previousPlanRaw?.volume_multiplier === "number" ? previousPlanRaw.volume_multiplier : 1;
+  const trainingFrequency = normalizeTrainingFrequencyInput(planRow?.training_frequency);
   const volumeMultiplier = normalizeVolumeMultiplier(previousVolumeMultiplier, currentRate);
   const mustRegeneratePlan = !previousPlanRaw || previousWeekKey !== weekKey || previousHash !== profileHash;
 
@@ -4992,6 +5254,7 @@ async function createMissionsForPeriod(env: Env, db: D1Database, userId: string,
       conditioning,
       equipment,
       injuries,
+      trainingFrequency,
     );
   }
 
@@ -5082,19 +5345,32 @@ async function createMissionsForPeriod(env: Env, db: D1Database, userId: string,
       normalizeMatchText(resolvedName) === normalizeMatchText(exerciseName) &&
       precomputedAiContext.metricType === metricHint;
 
-    const aiContext = canReuseAiContext
-      ? precomputedAiContext
-      : await getExerciseInstructionsFromAI(
-        resolvedName,
-        metricHint,
-        conditioning,
-        env,
-        period,
-        promptContext,
-      );
+    const apiInstructionsEn = normalizeInstructionList(enriched?.instructions, 8);
+    const [aiContext, apiInstructionsPt] = await Promise.all([
+      canReuseAiContext
+        ? Promise.resolve(precomputedAiContext as ExerciseInstructionPayload)
+        : getExerciseInstructionsFromAI(
+          resolvedName,
+          metricHint,
+          conditioning,
+          env,
+          period,
+          promptContext,
+        ),
+      translateExerciseInstructionsToPt(apiInstructionsEn, resolvedName, env),
+    ]);
+
+    const apiMuscles = mergeUniqueStrings(
+      [
+        enriched?.target ?? muscle,
+        ...(Array.isArray(enriched?.secondaryMuscles) ? enriched.secondaryMuscles : []),
+      ],
+      8,
+    );
 
     const missionMediaUrl = enriched?.gifUrl
-      ?? (enriched?.videoUrl ? (enriched.thumbnailUrl ?? enriched.imageUrl ?? null) : null)
+      ?? enriched?.exerciseDbGifUrl
+      ?? (enriched?.videoUrl ? (enriched.thumbnailUrl ?? null) : null)
       ?? enriched?.imageUrl
       ?? null;
     const baseMission = buildMissionPayload({
@@ -5103,9 +5379,17 @@ async function createMissionsForPeriod(env: Env, db: D1Database, userId: string,
       exerciseName: resolvedName,
       muscle: enriched?.target ?? muscle,
       imageUrl: missionMediaUrl ?? undefined,
+      exerciseDbGifUrl: enriched?.exerciseDbGifUrl ?? undefined,
+      exerciseDbImageUrl: enriched?.exerciseDbImageUrl ?? undefined,
+      exerciseEquipment: enriched?.equipment ?? undefined,
+      exerciseBodyPart: enriched?.bodyPart ?? undefined,
+      exerciseTarget: enriched?.target ?? muscle,
+      exerciseSecondaryMuscles: enriched?.secondaryMuscles ?? [],
+      exerciseInstructionsEn: apiInstructionsEn,
+      exerciseInstructionsPt: apiInstructionsPt,
       videoUrl: enriched?.videoUrl ?? undefined,
       thumbnailUrl: enriched?.thumbnailUrl ?? undefined,
-      instruction: safeGet(enriched?.instructions ?? [], 0),
+      instruction: safeGet(apiInstructionsPt.length > 0 ? apiInstructionsPt : apiInstructionsEn, 0),
       safetyTips: aiContext.safetyTips,
       difficultyLevel: aiContext.difficultyLevel,
       xp: config.xp,
@@ -5121,20 +5405,49 @@ async function createMissionsForPeriod(env: Env, db: D1Database, userId: string,
       aiContext.metricValue,
       { conditioning, volumeMultiplier },
     );
+
+    const aiInstructionSource = normalizeInstructionList(aiContext.instructions, 6);
+    let mergedInstructionSource = apiInstructionsPt.slice(0, 6);
+    if (mergedInstructionSource.length < 4) {
+      mergedInstructionSource = mergeUniqueStrings(
+        [...mergedInstructionSource, ...aiInstructionSource],
+        6,
+      );
+    }
+    if (mergedInstructionSource.length === 0) {
+      mergedInstructionSource = aiInstructionSource;
+    }
+
     withMetric.instructions = ensureInstructionSteps(
-      aiContext.instructions.length > 0 ? aiContext.instructions : withMetric.instructions,
+      mergedInstructionSource.length > 0 ? mergedInstructionSource : withMetric.instructions,
       resolvedName,
       withMetric.metric_type,
       withMetric.sets,
       withMetric.rest_seconds,
     );
+    withMetric.exercise_instructions_en = apiInstructionsEn;
+    withMetric.exercise_instructions_pt = apiInstructionsPt;
     withMetric.safety_tips = aiContext.safetyTips.length > 0 ? aiContext.safetyTips.slice(0, 4) : withMetric.safety_tips;
-    withMetric.muscle_groups = aiContext.musclesAffected.length > 0
-      ? aiContext.musclesAffected.slice(0, 6)
-      : [enriched?.target ?? muscle, ...(enriched?.secondaryMuscles ?? [])]
-        .map((item) => item.trim())
-        .filter((item) => item.length > 0)
-        .slice(0, 6);
+    withMetric.muscle_groups = mergeUniqueStrings(
+      [
+        ...apiMuscles,
+        ...normalizeInstructionList(aiContext.musclesAffected, 8),
+      ],
+      6,
+    );
+    if (withMetric.muscle_groups.length === 0) {
+      withMetric.muscle_groups = [enriched?.target ?? muscle];
+    }
+    withMetric.exercise_secondary_muscles = mergeUniqueStrings(
+      Array.isArray(enriched?.secondaryMuscles) ? enriched.secondaryMuscles : [],
+      8,
+    );
+    withMetric.exercise_name = resolvedName;
+    withMetric.exercise_equipment = enriched?.equipment ?? withMetric.exercise_equipment;
+    withMetric.exercise_body_part = enriched?.bodyPart ?? withMetric.exercise_body_part;
+    withMetric.exercise_target = enriched?.target ?? withMetric.exercise_target ?? muscle;
+    withMetric.exercise_db_gif_url = enriched?.exerciseDbGifUrl ?? withMetric.exercise_db_gif_url;
+    withMetric.exercise_db_image_url = enriched?.exerciseDbImageUrl ?? withMetric.exercise_db_image_url;
     withMetric.attributes_benefited = aiContext.attributesBenefited.length > 0
       ? aiContext.attributesBenefited.slice(0, 6)
       : withMetric.attributes_benefited;
@@ -5757,11 +6070,34 @@ async function generateAiMissionsForUser(
           missionPeriod
         ),
       ]);
+      const apiInstructionsEn = normalizeInstructionList(enrichedMedia?.instructions, 8);
+      const apiInstructionsPt = await translateExerciseInstructionsToPt(apiInstructionsEn, exerciseName, env);
+      const missionMediaUrl = enrichedMedia?.gifUrl
+        ?? enrichedMedia?.exerciseDbGifUrl
+        ?? (enrichedMedia?.videoUrl ? (enrichedMedia?.thumbnailUrl ?? null) : null)
+        ?? enrichedMedia?.imageUrl
+        ?? mission.image_url
+        ?? mission.thumbnail_url
+        ?? null;
 
       const withMetric = applyMissionMetricContext(
         {
           ...mission,
-          image_url: mission.image_url ?? enrichedMedia?.gifUrl ?? enrichedMedia?.thumbnailUrl ?? enrichedMedia?.imageUrl ?? null,
+          image_url: missionMediaUrl,
+          exercise_db_gif_url: mission.exercise_db_gif_url ?? enrichedMedia?.exerciseDbGifUrl ?? null,
+          exercise_db_image_url: mission.exercise_db_image_url ?? enrichedMedia?.exerciseDbImageUrl ?? null,
+          exercise_name: mission.exercise_name ?? enrichedMedia?.name ?? exerciseName,
+          exercise_equipment: mission.exercise_equipment ?? enrichedMedia?.equipment ?? null,
+          exercise_body_part: mission.exercise_body_part ?? enrichedMedia?.bodyPart ?? null,
+          exercise_target: mission.exercise_target ?? enrichedMedia?.target ?? null,
+          exercise_secondary_muscles: mission.exercise_secondary_muscles.length > 0
+            ? mission.exercise_secondary_muscles
+            : mergeUniqueStrings(
+              Array.isArray(enrichedMedia?.secondaryMuscles) ? enrichedMedia.secondaryMuscles : [],
+              8,
+            ),
+          exercise_instructions_en: mission.exercise_instructions_en.length > 0 ? mission.exercise_instructions_en : apiInstructionsEn,
+          exercise_instructions_pt: mission.exercise_instructions_pt.length > 0 ? mission.exercise_instructions_pt : apiInstructionsPt,
           video_url: mission.video_url ?? enrichedMedia?.videoUrl ?? null,
           thumbnail_url: mission.thumbnail_url ?? enrichedMedia?.thumbnailUrl ?? null,
         },
@@ -5771,17 +6107,49 @@ async function generateAiMissionsForUser(
         aiContext.metricValue
       );
 
+      const aiInstructionSource = normalizeInstructionList(aiContext.instructions, 6);
+      let mergedInstructionSource = apiInstructionsPt.slice(0, 6);
+      if (mergedInstructionSource.length < 4) {
+        mergedInstructionSource = mergeUniqueStrings([...mergedInstructionSource, ...aiInstructionSource], 6);
+      }
+      if (mergedInstructionSource.length === 0) {
+        mergedInstructionSource = aiInstructionSource;
+      }
+
+      const combinedMuscles = mergeUniqueStrings(
+        [
+          enrichedMedia?.target ?? "",
+          ...(Array.isArray(enrichedMedia?.secondaryMuscles) ? enrichedMedia.secondaryMuscles : []),
+          ...normalizeInstructionList(aiContext.musclesAffected, 8),
+        ],
+        6,
+      );
+
       const withDetails: MissionPayload = {
         ...withMetric,
         mission_origin: "ai",
-        instructions: aiContext.instructions.length > 0 ? aiContext.instructions.slice(0, 6) : withMetric.instructions,
+        instructions: ensureInstructionSteps(
+          mergedInstructionSource.length > 0 ? mergedInstructionSource : withMetric.instructions,
+          exerciseName,
+          withMetric.metric_type,
+          withMetric.sets,
+          withMetric.rest_seconds,
+        ),
+        exercise_instructions_en: apiInstructionsEn,
+        exercise_instructions_pt: apiInstructionsPt,
         safety_tips: aiContext.safetyTips.length > 0 ? aiContext.safetyTips.slice(0, 4) : withMetric.safety_tips,
         difficulty_level: aiContext.difficultyLevel,
-        muscle_groups: aiContext.musclesAffected.length > 0
-          ? aiContext.musclesAffected.slice(0, 6)
-          : enrichedMedia?.secondaryMuscles?.length
-            ? enrichedMedia.secondaryMuscles.slice(0, 6)
-            : withMetric.muscle_groups,
+        muscle_groups: combinedMuscles.length > 0 ? combinedMuscles : withMetric.muscle_groups,
+        exercise_secondary_muscles: mergeUniqueStrings(
+          Array.isArray(enrichedMedia?.secondaryMuscles) ? enrichedMedia.secondaryMuscles : [],
+          8,
+        ),
+        exercise_name: enrichedMedia?.name ?? withMetric.exercise_name ?? exerciseName,
+        exercise_equipment: enrichedMedia?.equipment ?? withMetric.exercise_equipment,
+        exercise_body_part: enrichedMedia?.bodyPart ?? withMetric.exercise_body_part,
+        exercise_target: enrichedMedia?.target ?? withMetric.exercise_target,
+        exercise_db_gif_url: enrichedMedia?.exerciseDbGifUrl ?? withMetric.exercise_db_gif_url,
+        exercise_db_image_url: enrichedMedia?.exerciseDbImageUrl ?? withMetric.exercise_db_image_url,
         attributes_benefited: aiContext.attributesBenefited.length > 0
           ? aiContext.attributesBenefited.slice(0, 6)
           : withMetric.attributes_benefited,

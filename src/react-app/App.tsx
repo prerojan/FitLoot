@@ -24,17 +24,12 @@ const AIChat = lazy(() => import("@/react-app/pages/AIChat"));
 const FoodAnalysis = lazy(() => import("@/react-app/pages/FoodAnalysis"));
 const NotFoundPage = lazy(() => import("@/react-app/pages/NotFound"));
 
-function AppEntryRedirect() {
+const AppEntryRedirect = () => {
   const hasSavedSession = localStorage.getItem(AUTHENTICATED_HINT_KEY) === "1";
   return <Navigate to={hasSavedSession ? ROUTE_PATHS.home : ROUTE_PATHS.login} replace />;
-}
+};
 
-function AppEntryRedirect() {
-  const hasSavedSession = localStorage.getItem(AUTHENTICATED_HINT_KEY) === "1";
-  return <Navigate to={hasSavedSession ? ROUTE_PATHS.home : ROUTE_PATHS.login} replace />;
-}
-
-function ProtectedRoute({ children }: { children: React.ReactNode }) {
+const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   const { user, loading } = useAuth();
 
   if (loading) {
@@ -49,7 +44,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   if (!user) return <Navigate to={ROUTE_PATHS.login} replace />;
   if (user.onboarding_completed !== 1) return <Navigate to={ROUTE_PATHS.onboarding} replace />;
   return <>{children}</>;
-}
+};
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);

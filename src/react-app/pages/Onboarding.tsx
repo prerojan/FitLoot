@@ -254,6 +254,7 @@ type ProfileStep = {
   main_goal: "perder_peso" | "ganhar_massa" | "resistencia" | "calistenia" | "saude_geral";
   gender: "homem" | "mulher" | "outro";
   age: string;
+  training_frequency: string;
 };
 
 const INITIAL_CREDENTIALS: CredentialsStep = {
@@ -276,6 +277,7 @@ const INITIAL_PROFILE: ProfileStep = {
   main_goal: "saude_geral",
   gender: "homem",
   age: "25",
+  training_frequency: "4",
 };
 
 const STEP_NAMES = ["Identidade", "Corpo", "Objetivos", "Condicionamento", "Plano e conta"] as const;
@@ -543,9 +545,14 @@ export default function Onboarding() {
     const pushups = Number(profile.initial_pushups) || 0;
     const situps = Number(profile.initial_situps) || 0;
     const squats = Number(profile.initial_squats) || 0;
+    const trainingFrequency = Number(profile.training_frequency) || 0;
 
     if (pushups < 0 || situps < 0 || squats < 0) {
       setStepError("Valores dos contadores não podem ser negativos.");
+      return;
+    }
+    if (!Number.isFinite(trainingFrequency) || trainingFrequency < 1 || trainingFrequency > 7) {
+      setStepError("Frequência semanal deve ser entre 1 e 7 dias.");
       return;
     }
 
@@ -618,7 +625,6 @@ export default function Onboarding() {
       }
 
       localStorage.setItem("fitloot_authenticated_hint", "1");
-      await checkAuth();
 
       const patchRes = await api("/api/users/me", {
         method: "PATCH",
@@ -633,6 +639,15 @@ export default function Onboarding() {
 
       const equipmentStr = [...selectedEquipment, profile.equipment].filter(Boolean).join(", ");
       const mainGoal = safeGet(selectedGoals, 0) ?? profile.main_goal;
+      const goals = selectedGoals.length > 0 ? selectedGoals : [mainGoal];
+      const paymentMethod = selectedPlan === "free"
+        ? "none"
+        : paymentTab === "card"
+          ? "card"
+          : "pix";
+      const status = selectedPlan === "free" || paymentTab === "card" ? "active" : "pending";
+      const age = Number(profile.age);
+      const trainingFrequency = Number(profile.training_frequency);
 
       const res = await api("/api/onboarding", {
         method: "POST",
@@ -641,6 +656,8 @@ export default function Onboarding() {
           full_name: profile.full_name.trim(),
           weight: Number(profile.weight),
           height: Number(profile.height),
+          age: Number.isFinite(age) ? age : 25,
+          gender: profile.gender,
           initial_conditioning: profile.initial_conditioning,
           initial_pushups: Number(profile.initial_pushups) || 0,
           initial_situps: Number(profile.initial_situps) || 0,
@@ -648,30 +665,17 @@ export default function Onboarding() {
           injuries: profile.injuries || undefined,
           equipment: equipmentStr || undefined,
           main_goal: mainGoal,
+          goals,
+          training_frequency: Number.isFinite(trainingFrequency) ? trainingFrequency : 4,
+          plan_id: selectedPlan,
+          plan_status: status,
+          payment_method: paymentMethod as "none" | "card" | "pix",
         }),
       });
 
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         setStepError((data as { error?: string | undefined }).error ?? "Erro ao salvar perfil.");
-        setStepLoading(false);
-        return;
-      }
-
-      const paymentMethod = paymentTab === "card" ? "card" : "pix";
-      const status = paymentTab === "card" ? "active" : "pending";
-
-      const planRes = await api("/api/users/plan", {
-        method: "POST",
-        body: JSON.stringify({
-          plan_id: selectedPlan,
-          payment_method: paymentMethod as "card" | "pix",
-          status: status as "active" | "pending",
-        }),
-      });
-
-      if (!planRes.ok) {
-        setStepError("Erro ao salvar plano.");
         setStepLoading(false);
         return;
       }
@@ -967,6 +971,17 @@ export default function Onboarding() {
                     </div>
                   );
                 })}
+              </div>
+
+              <div className="rounded-2xl border border-gray-200 bg-white/80 p-4">
+                <ScrollPicker
+                  label="Treinos por semana"
+                  value={Math.min(7, Math.max(1, parseInt(profile.training_frequency, 10) || 4))}
+                  onChange={(v) => setProfile((p) => ({ ...p, training_frequency: String(v) }))}
+                  min={1}
+                  max={7}
+                  unit="dias"
+                />
               </div>
 
               <div>

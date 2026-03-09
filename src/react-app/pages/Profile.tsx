@@ -694,24 +694,54 @@ function SkillCard({ skill }: { skill: SkillWithProgress }) {
 }
 
 function AchievementCard({ achievement }: { achievement: AchievementWithUnlock }) {
-  const rarityColors = {
-    Comum: "from-gray-400 to-gray-500",
-    Raro: "from-blue-400 to-blue-600",
-    Épico: "from-purple-400 to-purple-600",
-    Lendário: "from-yellow-400 to-orange-500",
+  const unlocked = achievement.unlocked === 1;
+  const isSecret = Number(achievement.secret ?? 0) === 1;
+  const isSecretLocked = isSecret && !unlocked;
+
+  const rarityColorByLabel = {
+    Comum: "#D1D5DB",
+    Incomum: "#22C55E",
+    Raro: "#3B82F6",
+    "Mítico": "#EF4444",
+    Secreto: "#F59E0B",
+  } as const;
+
+  const normalizeRarity = (value: string | undefined) => {
+    if (!value) return undefined;
+    const normalized = value
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase();
+
+    if (normalized.includes("incomum")) return "Incomum" as const;
+    if (normalized.includes("comum")) return "Comum" as const;
+    if (normalized.includes("raro")) return "Raro" as const;
+    if (normalized.includes("mitico")) return "Mítico" as const;
+    if (normalized.includes("secreto")) return "Secreto" as const;
+    return undefined;
   };
 
-  const unlocked = achievement.unlocked === 1;
+  const normalizedRarity = normalizeRarity(achievement.rarity);
+  const rarityColor = unlocked
+    ? (achievement.color || (normalizedRarity ? rarityColorByLabel[normalizedRarity] : undefined) || "#D1D5DB")
+    : null;
+  const displayName = isSecretLocked ? "?" : achievement.name;
+  const displayDescription = isSecretLocked ? "?" : achievement.description;
+  const cardClassName = unlocked
+    ? "bg-white/90 text-gray-700 border-2"
+    : "bg-gray-200 text-gray-500 border-2 border-gray-300 grayscale opacity-70";
+  const icon = isSecretLocked ? "?" : unlocked ? "🏆" : "🔒";
 
   return (
-    <div className={`rounded-2xl p-4 shadow-lg text-center ${
-      unlocked
-        ? `bg-gradient-to-br ${rarityColors[achievement.rarity as keyof typeof rarityColors] || "from-gray-400 to-gray-500"} text-white`
-        : "bg-gray-200 text-gray-400"
-    }`}>
-      <div className="text-3xl mb-2">{unlocked ? "🏆" : "🔒"}</div>
-      <h3 className="font-bold text-sm mb-1">{achievement.name}</h3>
-      <p className="text-xs opacity-90">{achievement.description}</p>
+    <div
+      className={`rounded-2xl p-4 shadow-lg text-center ${cardClassName}`}
+      style={unlocked && rarityColor ? { borderColor: rarityColor } : undefined}
+    >
+      <div className="text-3xl mb-2" style={unlocked && rarityColor ? { color: rarityColor } : undefined}>{icon}</div>
+      <h3 className="font-bold text-sm mb-1" style={unlocked && rarityColor ? { color: rarityColor } : undefined}>
+        {displayName}
+      </h3>
+      <p className="text-xs opacity-90">{displayDescription}</p>
       {unlocked && achievement.unlocked_at && (
         <p className="text-xs opacity-75 mt-2">
           {new Date(achievement.unlocked_at).toLocaleDateString()}

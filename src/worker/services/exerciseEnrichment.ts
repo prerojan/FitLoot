@@ -7,6 +7,9 @@ type ExerciseDbExercise = {
   name: string;
   bodyPart?: string | undefined;
   target?: string | undefined;
+  equipment?: string | undefined;
+  gifUrl?: string | undefined;
+  imageUrl?: string | undefined;
   secondaryMuscles?: string[] | undefined;
   instructions?: string[] | undefined;
 };
@@ -33,9 +36,13 @@ export type EnrichedExercise = {
   name: string;
   bodyPart: string;
   target: string;
+  equipment: string;
   secondaryMuscles: string[];
   instructions: string[];
   gifUrl: string | null;
+  ascendImageUrl: string | null;
+  exerciseDbGifUrl: string | null;
+  exerciseDbImageUrl: string | null;
   imageUrl: string | null;
   videoUrl: string | null;
   thumbnailUrl: string | null;
@@ -140,17 +147,79 @@ async function getExerciseCatalog(env: RapidApiEnv): Promise<ExerciseDbExercise[
   return normalized;
 }
 
+function normalizeExerciseNameToken(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function rankExercisesByName(exercises: ExerciseDbExercise[], query: string): ExerciseDbExercise[] {
+  const normalizedQuery = normalizeExerciseNameToken(query);
+  if (!normalizedQuery) return exercises.slice(0, 8);
+
+  const queryTokens = normalizedQuery.split(" ").filter((token) => token.length > 0);
+  const scoreByName = (exerciseName: string): number => {
+    const normalizedName = normalizeExerciseNameToken(exerciseName);
+    if (!normalizedName) return 0;
+
+    let score = 0;
+    if (normalizedName === normalizedQuery) score += 100;
+    if (normalizedName.startsWith(normalizedQuery)) score += 60;
+    if (normalizedName.includes(normalizedQuery)) score += 35;
+
+    for (const token of queryTokens) {
+      if (normalizedName === token) {
+        score += 16;
+      } else if (normalizedName.startsWith(token)) {
+        score += 12;
+      } else if (normalizedName.includes(token)) {
+        score += 8;
+      }
+    }
+
+    return score;
+  };
+
+  return exercises
+    .slice()
+    .sort((a, b) => scoreByName(b.name) - scoreByName(a.name))
+    .slice(0, 8);
+}
+
 export async function searchExerciseDB(exerciseName: string, env: RapidApiEnv): Promise<ExerciseDbExercise[]> {
-  const normalizedQuery = exerciseName.toLowerCase();
+  const normalizedQuery = normalizeExerciseNameToken(exerciseName);
+  if (!normalizedQuery) return [];
+
   const cached = getCachedValue(searchCache, normalizedQuery);
   if (cached) {
     return cached;
   }
 
-  const payload = await getExerciseCatalog(env);
-  const results = payload
-    .filter((exercise) => exercise.name.toLowerCase().includes(normalizedQuery))
-    .slice(0, 8);
+  let results: ExerciseDbExercise[] = [];
+  try {
+    const directByName = await rapidGet<ExerciseDbExercise[]>(
+      `https://exercisedb.p.rapidapi.com/exercises/name/${encodeURIComponent(normalizedQuery)}?offset=0&limit=24`,
+      "exercisedb.p.rapidapi.com",
+      env,
+    );
+    if (Array.isArray(directByName) && directByName.length > 0) {
+      results = rankExercisesByName(directByName, normalizedQuery);
+    }
+  } catch {
+    results = [];
+  }
+
+  if (results.length === 0) {
+    const payload = await getExerciseCatalog(env);
+    const fallbackMatches = payload.filter((exercise) =>
+      normalizeExerciseNameToken(exercise.name).includes(normalizedQuery),
+    );
+    results = rankExercisesByName(fallbackMatches, normalizedQuery);
+  }
+
   setCachedValue(searchCache, normalizedQuery, results);
   return results;
 }
@@ -200,16 +269,31 @@ export async function enrichExercise(exerciseName: string, env: RapidApiEnv): Pr
   const exercise = exercises[0];
   const media = await fetchExerciseMedia(exercise.id, env);
   const video = !media?.gifUrl ? await fetchExerciseVideo(exercise.id, env) : null;
+  const exerciseDbGifUrl = typeof exercise.gifUrl === "string" ? exercise.gifUrl : null;
+  const exerciseDbImageUrl =
+    typeof exercise.imageUrl === "string"
+      ? exercise.imageUrl
+      : exerciseDbGifUrl;
+  const exerciseInstructions =
+    Array.isArray(exercise.instructions) && exercise.instructions.length > 0
+      ? exercise.instructions
+      : Array.isArray(media?.instructions)
+        ? media.instructions
+        : [];
 
   return {
     id: exercise.id,
     name: exercise.name,
     bodyPart: exercise.bodyPart ?? "full body",
     target: exercise.target ?? "full body",
+    equipment: exercise.equipment ?? "body weight",
     secondaryMuscles: Array.isArray(exercise.secondaryMuscles) ? exercise.secondaryMuscles : [],
-    instructions: Array.isArray(exercise.instructions) ? exercise.instructions : [],
+    instructions: exerciseInstructions,
     gifUrl: media?.gifUrl ?? null,
-    imageUrl: media?.imageUrl ?? null,
+    ascendImageUrl: media?.imageUrl ?? null,
+    exerciseDbGifUrl,
+    exerciseDbImageUrl,
+    imageUrl: exerciseDbImageUrl,
     videoUrl: video?.videoUrl ?? null,
     thumbnailUrl: video?.thumbnailUrl ?? null,
   };
