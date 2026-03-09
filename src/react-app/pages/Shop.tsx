@@ -1,6 +1,6 @@
 ﻿import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router";
-import { useAuth } from "@/react-app/App";
+import { useAuth } from "@/react-app/contexts/auth";
 import BottomNav from "@/react-app/components/BottomNav";
 import LoadingBall from "@/react-app/components/LoadingBall";
 import { ShoppingBag, Coins, QrCode, Package } from "lucide-react";

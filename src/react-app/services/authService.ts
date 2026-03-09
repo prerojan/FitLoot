@@ -4,7 +4,7 @@ import type { User } from "@/react-app/types/auth";
 
 export async function fetchCurrentUser(): Promise<User | null> {
   const response = await api("/api/users/me");
-  if (response.status === 401) {
+  if (response.status === 401 || response.status === 403) {
     localStorage.removeItem(AUTHENTICATED_HINT_KEY);
     return null;
   }

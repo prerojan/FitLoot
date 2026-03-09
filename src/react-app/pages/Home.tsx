@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, type FC, type FormEvent, type ChangeEvent } from "react";
 import { useNavigate } from "react-router";
-import { useAuth } from "@/react-app/App";
+import { useAuth } from "@/react-app/contexts/auth";
 import {
   Zap,
   Mail,

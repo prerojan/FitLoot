@@ -5,7 +5,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router";
-import { useAuth } from '@/react-app/App';
+import { useAuth } from "@/react-app/contexts/auth";
 import BottomNav from "@/react-app/components/BottomNav";
 import { Send, Bot, User, Sparkles } from "lucide-react";
 import { api } from "@/react-app/utils/api";

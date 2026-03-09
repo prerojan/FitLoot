@@ -55,6 +55,15 @@ export async function api(path: string, options: ApiRequestOptions = {}) {
   const requestPath = normalizePath(path);
   const url = API_URL ? `${API_URL}${requestPath}` : requestPath;
   const { timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS, headers, signal, ...restOptions } = options;
+  const method = String(restOptions.method ?? "GET").toUpperCase();
+  const requestHeaders = new Headers(headers ?? {});
+  const hasBody = typeof restOptions.body !== "undefined" && restOptions.body !== null;
+  const shouldSendJsonContentType = hasBody && method !== "GET" && method !== "HEAD";
+
+  if (shouldSendJsonContentType && !requestHeaders.has("Content-Type")) {
+    requestHeaders.set("Content-Type", "application/json");
+  }
+
   const controller = new AbortController();
   const abortListener = () => controller.abort();
 
@@ -76,12 +85,10 @@ export async function api(path: string, options: ApiRequestOptions = {}) {
   try {
     return await fetch(url, {
       ...restOptions,
+      method,
       credentials: "include",
       signal: controller.signal,
-      headers: {
-        "Content-Type": "application/json",
-        ...(headers || {}),
-      },
+      headers: requestHeaders,
     });
   } finally {
     if (timeoutId !== null) {

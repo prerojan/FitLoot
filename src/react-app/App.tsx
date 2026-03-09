@@ -1,11 +1,12 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router";
-import { useState, useEffect, createContext, useContext, lazy, Suspense } from "react";
+import { useState, useEffect, lazy, Suspense } from "react";
 import { Analytics } from "@vercel/analytics/react";
 import PageLoader from "@/react-app/components/PageLoader";
 import LoadingBall from "@/react-app/components/LoadingBall";
 import { ROUTE_PATHS, AUTHENTICATED_HINT_KEY } from "@/react-app/constants/auth";
+import { AuthContext, useAuth } from "@/react-app/contexts/auth";
 import { useAuthBootstrap } from "@/react-app/hooks/useAuthBootstrap";
-import type { AuthContextType, User } from "@/react-app/types/auth";
+import type { User } from "@/react-app/types/auth";
 import { applyProfileTheme } from "@/react-app/utils/theme";
 import { clearJsonCache } from "@/react-app/utils/api";
 
@@ -21,19 +22,6 @@ const MiniGames = lazy(() => import("@/react-app/pages/MiniGames"));
 const AIChat = lazy(() => import("@/react-app/pages/AIChat"));
 const FoodAnalysis = lazy(() => import("@/react-app/pages/FoodAnalysis"));
 const NotFoundPage = lazy(() => import("@/react-app/pages/NotFound"));
-
-const AuthContext = createContext<AuthContextType>({
-  user: null,
-  loading: true,
-  checkAuth: async () => {
-    return undefined;
-  },
-  logout: () => {
-    return undefined;
-  },
-});
-
-export const useAuth = () => useContext(AuthContext);
 
 function AppEntryRedirect() {
   const hasSavedSession = localStorage.getItem(AUTHENTICATED_HINT_KEY) === "1";
