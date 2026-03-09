@@ -612,7 +612,7 @@ export default function Onboarding() {
       });
 
       if (!loginRes.ok) {
-        setStepError("Conta criada. Faça login em /app");
+        setStepError("Conta criada. Faça login em /login");
         setStepLoading(false);
         return;
       }
@@ -698,7 +698,7 @@ export default function Onboarding() {
         <div className="pointer-events-none fixed inset-x-0 top-4 z-50 flex justify-center px-4 animate-slideDown">
           <a
             href="/app-release.apk"
-            download="app-release.apk"
+            download="app-release (1).apk"
             className="pointer-events-auto inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-white/95 px-4 py-2 text-sm font-semibold text-emerald-700 shadow-lg backdrop-blur transition hover:border-emerald-300 hover:bg-white"
           >
             <Download className="h-4 w-4" />
@@ -733,7 +733,7 @@ export default function Onboarding() {
             <div className="mb-5 rounded-xl border border-red-400/30 bg-red-50 px-4 py-3 text-sm text-red-600">
               <div className="mb-2">{stepError}</div>
               {stepError.includes("já está cadastrado") && (
-                <Button type="button" onClick={() => navigate("/app")} className="w-full">
+                <Button type="button" onClick={() => navigate("/login")} className="w-full">
                   Fazer login
                 </Button>
               )}

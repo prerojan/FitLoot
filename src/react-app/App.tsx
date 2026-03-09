@@ -5,7 +5,6 @@ import PageLoader from "@/react-app/components/PageLoader";
 import LoadingBall from "@/react-app/components/LoadingBall";
 import { ROUTE_PATHS, AUTHENTICATED_HINT_KEY } from "@/react-app/constants/auth";
 import { useAuthBootstrap } from "@/react-app/hooks/useAuthBootstrap";
-import { resolveAuthenticatedStartRoute } from "@/react-app/services/authService";
 import type { AuthContextType, User } from "@/react-app/types/auth";
 import { applyProfileTheme } from "@/react-app/utils/theme";
 import { clearJsonCache } from "@/react-app/utils/api";
@@ -36,6 +35,11 @@ const AuthContext = createContext<AuthContextType>({
 
 export const useAuth = () => useContext(AuthContext);
 
+function AppEntryRedirect() {
+  const hasSavedSession = localStorage.getItem(AUTHENTICATED_HINT_KEY) === "1";
+  return <Navigate to={hasSavedSession ? ROUTE_PATHS.home : ROUTE_PATHS.login} replace />;
+}
+
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
 
@@ -48,7 +52,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
       </div>
     );
   }
-  if (!user) return <Navigate to={ROUTE_PATHS.app} replace />;
+  if (!user) return <Navigate to={ROUTE_PATHS.login} replace />;
   if (user.onboarding_completed !== 1) return <Navigate to={ROUTE_PATHS.onboarding} replace />;
   return <>{children}</>;
 }
@@ -70,19 +74,14 @@ export default function App() {
     void checkAuth();
   }, [checkAuth]);
 
-  const appRouteElement = user ? (
-    <Navigate to={resolveAuthenticatedStartRoute(user)} replace />
-  ) : (
-    <HomePage />
-  );
-
   return (
     <AuthContext.Provider value={{ user, loading, checkAuth, logout }}>
       <Router>
         <Suspense fallback={<PageLoader />}>
           <Routes>
             <Route path={ROUTE_PATHS.landing} element={<LandingPage />} />
-            <Route path={ROUTE_PATHS.app} element={appRouteElement} />
+            <Route path={ROUTE_PATHS.login} element={<HomePage />} />
+            <Route path={ROUTE_PATHS.app} element={<AppEntryRedirect />} />
             <Route path={ROUTE_PATHS.home} element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
             <Route path={ROUTE_PATHS.onboarding} element={<Onboarding />} />
             <Route path={ROUTE_PATHS.dashboard} element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
