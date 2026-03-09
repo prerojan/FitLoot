@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import {
   CheckCircle2,
   Clock3,
@@ -119,6 +119,29 @@ function bodyAreaLabel(bodyArea: Mission["body_area"]): string {
   if (bodyArea === "lower") return "Parte inferior";
   if (bodyArea === "core") return "Core";
   return "Corpo inteiro";
+}
+
+function isGifUrl(url: string | null | undefined): boolean {
+  if (!url) return false;
+  return /\.gif(?:$|\?)/i.test(url) || /format=gif/i.test(url);
+}
+
+function isPixelOrLineArtUrl(url: string | null | undefined): boolean {
+  if (!url) return false;
+  return /(pixel|lineart|sprite|icon|outline|vector)/i.test(url);
+}
+
+function resolveMissionMediaUrl(mission: Mission): string | null {
+  const primaryImage = mission.image_url ?? null;
+  const ascendGif = isGifUrl(primaryImage) ? primaryImage : null;
+
+  return ascendGif
+    ?? mission.exercise_db_gif_url
+    ?? (mission.video_url ? (mission.thumbnail_url ?? null) : null)
+    ?? mission.exercise_db_image_url
+    ?? primaryImage
+    ?? mission.thumbnail_url
+    ?? null;
 }
 
 function MissionExecutionModal({
@@ -399,7 +422,7 @@ function MissionCardComponent({ mission, onComplete }: MissionCardProps) {
   const circuitTasks = useMemo(() => resolveCircuitTasks(mission), [mission]);
   const completedCircuitTasks = circuitTasks.filter((task) => task.completed).length;
   const circuitProgress = circuitTasks.length > 0 ? (completedCircuitTasks / circuitTasks.length) * 100 : 0;
-  const missionMediaUrl = mission.image_url ?? mission.thumbnail_url ?? null;
+  const missionMediaUrl = resolveMissionMediaUrl(mission);
   const primaryMuscle = mission.muscle_groups?.[0] ?? bodyAreaLabel(mission.body_area);
   const hasCircuitProgress = circuitTasks.some((task) => task.current_count > 0);
   const isInProgress = !isFailed && !isCompleted && (missionStatus === "in_progress" || hasCircuitProgress);
@@ -416,18 +439,35 @@ function MissionCardComponent({ mission, onComplete }: MissionCardProps) {
   const monthlyProgressValue = Number((mission as Mission & { progress_value?: number | undefined }).progress_value ?? 0);
   const monthlyCurrent = isCompleted ? monthlyTarget : Math.max(0, Math.min(monthlyTarget, monthlyProgressValue));
   const monthlyProgress = Math.min(100, Math.round((monthlyCurrent / monthlyTarget) * 100));
+  const hasInlineDetails =
+    Array.isArray(mission.instructions) &&
+    mission.instructions.length > 0 &&
+    Array.isArray(mission.safety_tips) &&
+    mission.safety_tips.length > 0;
 
-  const detailsInstructions = Array.isArray(mission.instructions) && mission.instructions.length > 0
-    ? mission.instructions
-    : [
-      "Aqueca por 3 a 5 minutos antes de iniciar.",
-      "Mantenha postura e amplitude seguras durante o movimento.",
-      "Respeite intervalos e hidratacao durante a execucao.",
-    ];
+  const loadMissionDetails = useCallback(async (options?: { silent?: boolean }) => {
+    if (hasInlineDetails) return;
+    if (detailsLoading || detailedMission) return;
 
-  const safetyTips = Array.isArray(mission.safety_tips) && mission.safety_tips.length > 0
-    ? mission.safety_tips
-    : ["Mantenha alinhamento postural e interrompa em caso de dor aguda."];
+    try {
+      setDetailsLoading(true);
+      if (!options?.silent) {
+        setDetailsError(null);
+      }
+      const response = await api(`/api/missions/${mission.id}`);
+      if (!response.ok) {
+        throw new Error("Falha ao carregar detalhes da missão.");
+      }
+      const payload = (await response.json()) as Mission;
+      setDetailedMission(payload);
+    } catch {
+      if (!options?.silent) {
+        setDetailsError("Não foi possível carregar os detalhes completos desta missão agora.");
+      }
+    } finally {
+      setDetailsLoading(false);
+    }
+  }, [detailedMission, detailsLoading, hasInlineDetails, mission.id]);
 
   const completeMission = async (value: number) => {
     setCompleting(true);
@@ -443,26 +483,29 @@ function MissionCardComponent({ mission, onComplete }: MissionCardProps) {
   const openDetails = async () => {
     setShowDetails(true);
     setDetailsError(null);
-    if (detailsLoading || detailedMission) return;
-
-    try {
-      setDetailsLoading(true);
-      const response = await api(`/api/missions/${mission.id}`);
-      if (!response.ok) {
-        throw new Error("Falha ao carregar detalhes da missão.");
-      }
-      const payload = (await response.json()) as Mission;
-      setDetailedMission(payload);
-    } catch {
-      setDetailsError("Não foi possível carregar os detalhes completos desta missão agora.");
-    } finally {
-      setDetailsLoading(false);
-    }
+    await loadMissionDetails();
   };
+
+  useEffect(() => {
+    if (hasInlineDetails || detailedMission || detailsLoading) return;
+    void loadMissionDetails({ silent: true });
+  }, [detailedMission, detailsLoading, hasInlineDetails, loadMissionDetails]);
 
   const missionDetails = detailedMission ?? mission;
   const detailMetricType = normalizeMetricType(missionDetails);
-  const detailMissionMediaUrl = missionDetails.image_url ?? missionDetails.thumbnail_url ?? null;
+  const detailMissionMediaUrl = resolveMissionMediaUrl(missionDetails);
+  const detailsInstructions = Array.isArray(missionDetails.instructions) && missionDetails.instructions.length > 0
+    ? missionDetails.instructions
+    : [
+      "Aqueca por 3 a 5 minutos antes de iniciar.",
+      "Mantenha postura e amplitude seguras durante o movimento.",
+      "Respeite intervalos e hidratacao durante a execucao.",
+    ];
+  const safetyTips = Array.isArray(missionDetails.safety_tips) && missionDetails.safety_tips.length > 0
+    ? missionDetails.safety_tips
+    : ["Mantenha alinhamento postural e interrompa em caso de dor aguda."];
+  const pixelOrLineArt = isPixelOrLineArtUrl(detailMissionMediaUrl);
+  const gifLikeMedia = isGifUrl(detailMissionMediaUrl);
   const detailCircuitTasks = resolveCircuitTasks(missionDetails);
   const detailCompletedCircuitTasks = detailCircuitTasks.filter((task) => task.completed).length;
   const detailCircuitProgress = detailCircuitTasks.length > 0 ? (detailCompletedCircuitTasks / detailCircuitTasks.length) * 100 : 0;
@@ -625,7 +668,7 @@ function MissionCardComponent({ mission, onComplete }: MissionCardProps) {
         <div className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm flex items-center justify-center px-4">
           <div className="w-full max-w-xl bg-white rounded-3xl shadow-2xl p-6 space-y-5 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between">
-              <h3 className="text-xl font-bold text-gray-900">{mission.title}</h3>
+              <h3 className="text-xl font-bold text-gray-900">{missionDetails.title}</h3>
               <button onClick={() => setShowDetails(false)} className="p-2 rounded-xl hover:bg-gray-100" aria-label="Fechar">
                 <X className="w-4 h-4" />
               </button>
@@ -633,15 +676,23 @@ function MissionCardComponent({ mission, onComplete }: MissionCardProps) {
 
             <div className="space-y-3">
               {detailMissionMediaUrl ? (
-                <img
-                  src={detailMissionMediaUrl}
-                  alt={missionDetails.title}
-                  loading="lazy"
-                  decoding="async"
-                  className="w-full h-48 object-cover rounded-2xl border border-gray-200"
-                />
+                <div className="w-full h-64 rounded-2xl border border-gray-200 overflow-hidden bg-gradient-to-br from-gray-50 to-gray-100 flex items-center justify-center">
+                  <img
+                    src={detailMissionMediaUrl}
+                    alt={missionDetails.title}
+                    loading="lazy"
+                    decoding="async"
+                    className="w-[125%] h-[125%] object-contain"
+                    style={{
+                      objectFit: "contain",
+                      imageRendering: pixelOrLineArt ? "crisp-edges" : "auto",
+                      filter: pixelOrLineArt || gifLikeMedia ? "blur(0px)" : "contrast(1.05) saturate(1.1) blur(0px)",
+                      transform: "scale(1)",
+                    }}
+                  />
+                </div>
               ) : (
-                <div className="w-full h-48 rounded-2xl border border-emerald-100 bg-gradient-to-br from-emerald-100 to-teal-100 flex items-center justify-center">
+                <div className="w-full h-64 rounded-2xl border border-emerald-100 bg-gradient-to-br from-emerald-100 to-teal-100 flex items-center justify-center overflow-hidden">
                   <Dumbbell className="w-12 h-12 text-emerald-600" />
                 </div>
               )}
@@ -784,3 +835,4 @@ function MissionCardComponent({ mission, onComplete }: MissionCardProps) {
 
 const MissionCard = memo(MissionCardComponent);
 export default MissionCard;
+
