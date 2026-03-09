@@ -13,8 +13,10 @@ import {
 import { Card } from "@/react-app/components/ui/card";
 import { Button } from "@/react-app/components/ui/button";
 import { Badge } from "@/react-app/components/ui/badge";
+import LoadingBall from "@/react-app/components/LoadingBall";
 import { formatMissionGoal } from "@/constants/missionMetrics";
 import type { CircuitTask, Mission, MissionMetricType } from "@/shared/types";
+import { api } from "@/react-app/utils/api";
 
 type MissionCardProps = {
   mission: Mission & { skill_name?: string | undefined };
@@ -382,6 +384,9 @@ function MissionCardComponent({ mission, onComplete }: MissionCardProps) {
   const [showDetails, setShowDetails] = useState(false);
   const [showExecution, setShowExecution] = useState(false);
   const [completing, setCompleting] = useState(false);
+  const [detailsLoading, setDetailsLoading] = useState(false);
+  const [detailsError, setDetailsError] = useState<string | null>(null);
+  const [detailedMission, setDetailedMission] = useState<Mission | null>(null);
 
   const metricType = useMemo(() => normalizeMetricType(mission), [mission]);
   const missionStatus = (mission as Mission & { status?: string | undefined }).status || (mission.is_completed === 1 ? "completed" : "pending");
@@ -434,6 +439,33 @@ function MissionCardComponent({ mission, onComplete }: MissionCardProps) {
       setCompleting(false);
     }
   };
+
+  const openDetails = async () => {
+    setShowDetails(true);
+    setDetailsError(null);
+    if (detailsLoading || detailedMission) return;
+
+    try {
+      setDetailsLoading(true);
+      const response = await api(`/api/missions/${mission.id}`);
+      if (!response.ok) {
+        throw new Error("Falha ao carregar detalhes da missão.");
+      }
+      const payload = (await response.json()) as Mission;
+      setDetailedMission(payload);
+    } catch {
+      setDetailsError("Não foi possível carregar os detalhes completos desta missão agora.");
+    } finally {
+      setDetailsLoading(false);
+    }
+  };
+
+  const missionDetails = detailedMission ?? mission;
+  const detailMetricType = normalizeMetricType(missionDetails);
+  const detailMissionMediaUrl = missionDetails.image_url ?? missionDetails.thumbnail_url ?? null;
+  const detailCircuitTasks = resolveCircuitTasks(missionDetails);
+  const detailCompletedCircuitTasks = detailCircuitTasks.filter((task) => task.completed).length;
+  const detailCircuitProgress = detailCircuitTasks.length > 0 ? (detailCompletedCircuitTasks / detailCircuitTasks.length) * 100 : 0;
 
   return (
     <>
@@ -573,7 +605,7 @@ function MissionCardComponent({ mission, onComplete }: MissionCardProps) {
           </div>
         ) : (
           <Button
-            onClick={() => setShowDetails(true)}
+            onClick={() => { void openDetails(); }}
             variant="primary"
             className="w-full py-3 rounded-xl shadow-md hover:shadow-lg"
             disabled={completing}
@@ -594,47 +626,56 @@ function MissionCardComponent({ mission, onComplete }: MissionCardProps) {
             </div>
 
             <div className="space-y-3">
-              {missionMediaUrl ? (
-                <img src={missionMediaUrl} alt={mission.title} className="w-full h-48 object-cover rounded-2xl border border-gray-200" />
+              {detailMissionMediaUrl ? (
+                <img src={detailMissionMediaUrl} alt={missionDetails.title} className="w-full h-48 object-cover rounded-2xl border border-gray-200" />
               ) : (
                 <div className="w-full h-48 rounded-2xl border border-emerald-100 bg-gradient-to-br from-emerald-100 to-teal-100 flex items-center justify-center">
                   <Dumbbell className="w-12 h-12 text-emerald-600" />
                 </div>
               )}
-              <p className="text-sm text-gray-700">{mission.description}</p>
+              {detailsLoading ? (
+                <div className="flex items-center gap-2 text-sm text-gray-500">
+                  <LoadingBall size="sm" />
+                  Carregando detalhes completos...
+                </div>
+              ) : null}
+              {detailsError ? (
+                <p className="text-sm text-red-600">{detailsError}</p>
+              ) : null}
+              <p className="text-sm text-gray-700">{missionDetails.description}</p>
             </div>
 
             <div className="grid grid-cols-2 gap-3">
               <div className="rounded-xl border border-gray-200 p-3">
                 <p className="text-xs text-gray-500">Area do corpo</p>
-                <p className="font-semibold text-gray-900">{bodyAreaLabel(mission.body_area)}</p>
+                <p className="font-semibold text-gray-900">{bodyAreaLabel(missionDetails.body_area)}</p>
               </div>
               <div className="rounded-xl border border-gray-200 p-3">
                 <p className="text-xs text-gray-500">Meta</p>
-                <p className="font-semibold text-gray-900">{formatGoal(mission, metricType)}</p>
+                <p className="font-semibold text-gray-900">{formatGoal(missionDetails, detailMetricType)}</p>
               </div>
               <div className="rounded-xl border border-gray-200 p-3">
                 <p className="text-xs text-gray-500">Dificuldade</p>
-                <p className="font-semibold text-gray-900">{mission.difficulty_level ?? "iniciante"}</p>
+                <p className="font-semibold text-gray-900">{missionDetails.difficulty_level ?? "iniciante"}</p>
               </div>
               <div className="rounded-xl border border-gray-200 p-3">
                 <p className="text-xs text-gray-500">Tempo estimado</p>
-                <p className="font-semibold text-gray-900">{mission.duration_estimate_minutes ?? 10} min</p>
+                <p className="font-semibold text-gray-900">{missionDetails.duration_estimate_minutes ?? 10} min</p>
               </div>
               <div className="rounded-xl border border-gray-200 p-3">
                 <p className="text-xs text-gray-500">XP</p>
-                <p className="font-semibold text-emerald-700">{mission.xp_reward}</p>
+                <p className="font-semibold text-emerald-700">{missionDetails.xp_reward}</p>
               </div>
               <div className="rounded-xl border border-gray-200 p-3">
                 <p className="text-xs text-gray-500">Pontos</p>
-                <p className="font-semibold text-teal-700">{mission.points_reward}</p>
+                <p className="font-semibold text-teal-700">{missionDetails.points_reward}</p>
               </div>
             </div>
 
             <div className="space-y-2">
               <p className="text-sm font-semibold text-gray-900">Atributos beneficiados</p>
               <div className="flex flex-wrap gap-2">
-                {(mission.attributes_benefited ?? []).map((attribute) => (
+                {(missionDetails.attributes_benefited ?? []).map((attribute) => (
                   <span key={attribute} className="px-2 py-1 text-xs rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
                     <Star className="w-3 h-3 inline mr-1" />
                     {attribute}
@@ -643,14 +684,14 @@ function MissionCardComponent({ mission, onComplete }: MissionCardProps) {
               </div>
             </div>
 
-            {isCircuitMission && circuitTasks.length > 0 && (
+            {isCircuitMission && detailCircuitTasks.length > 0 && (
               <div className="space-y-3">
                 <p className="text-sm font-semibold text-gray-900">Progresso do circuito semanal</p>
                 <div className="h-2 rounded-full bg-gray-100 overflow-hidden">
-                  <div className="h-full bg-emerald-500" style={{ width: `${circuitProgress}%` }} />
+                  <div className="h-full bg-emerald-500" style={{ width: `${detailCircuitProgress}%` }} />
                 </div>
                 <div className="space-y-2">
-                  {circuitTasks.map((task) => (
+                  {detailCircuitTasks.map((task) => (
                     <div key={task.id} className="rounded-xl border border-gray-200 p-3 text-sm flex items-center justify-between">
                       <span>{task.label}</span>
                       <span className="font-semibold text-emerald-700">
@@ -665,15 +706,18 @@ function MissionCardComponent({ mission, onComplete }: MissionCardProps) {
             <div className="space-y-2">
               <p className="text-sm font-semibold text-gray-900">Como executar</p>
               <ol className="space-y-2">
-                {detailsInstructions.map((instruction, index) => (
+                {(Array.isArray(missionDetails.instructions) && missionDetails.instructions.length > 0
+                  ? missionDetails.instructions
+                  : detailsInstructions
+                ).map((instruction, index) => (
                   <li key={`${instruction}-${index}`} className="text-sm text-gray-700 flex gap-2">
                     <span className="font-semibold text-emerald-700">{index + 1}.</span>
                     <span>{instruction}</span>
                   </li>
                 ))}
               </ol>
-              {mission.rest_seconds ? (
-                <p className="text-xs text-gray-500">Descanso entre series: {mission.rest_seconds} segundos</p>
+              {missionDetails.rest_seconds ? (
+                <p className="text-xs text-gray-500">Descanso entre series: {missionDetails.rest_seconds} segundos</p>
               ) : null}
             </div>
 
@@ -706,8 +750,8 @@ function MissionCardComponent({ mission, onComplete }: MissionCardProps) {
 
       {!isCircuitMission && (
         <MissionExecutionModal
-          mission={mission}
-          metricType={metricType}
+          mission={missionDetails}
+          metricType={detailMetricType}
           open={showExecution}
           onClose={() => setShowExecution(false)}
           onFinish={completeMission}
