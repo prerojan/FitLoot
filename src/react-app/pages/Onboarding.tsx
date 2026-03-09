@@ -22,6 +22,7 @@ import {
   ChevronRight,
   CreditCard,
   Dumbbell,
+  Download,
   Gauge,
   HeartPulse,
   Monitor,
@@ -693,6 +694,18 @@ export default function Onboarding() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 px-4 py-8 pb-24">
+      {currentStep === 4 && (
+        <div className="pointer-events-none fixed inset-x-0 top-4 z-50 flex justify-center px-4 animate-slideDown">
+          <a
+            href="/app-release.apk"
+            download="app-release.apk"
+            className="pointer-events-auto inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-white/95 px-4 py-2 text-sm font-semibold text-emerald-700 shadow-lg backdrop-blur transition hover:border-emerald-300 hover:bg-white"
+          >
+            <Download className="h-4 w-4" />
+            Baixar app Android
+          </a>
+        </div>
+      )}
       <div className="mx-auto max-w-3xl">
         <div className="mb-6 rounded-2xl border border-white/50 bg-white/70 p-4 shadow-lg backdrop-blur-lg">
           <div className="mb-3 flex items-center gap-3">
