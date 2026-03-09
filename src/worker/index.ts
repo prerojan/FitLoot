@@ -284,6 +284,20 @@ async function getUserAuthRecordById(db: D1Database, userId: string): Promise<Us
   }
 }
 
+function scheduleCatalogInitialization(db: D1Database, executionCtx: ExecutionContext): void {
+  const now = Date.now();
+  if (now - catalogInitCheckedAt < CATALOG_CACHE_TTL_MS) return;
+  if (catalogInitPromise) return;
+
+  executionCtx.waitUntil(
+    ensureCatalogReady(db).catch((error) => {
+      console.error("[catalog][background-init]", {
+        message: error instanceof Error ? error.message : String(error),
+      });
+    })
+  );
+}
+
 async function authMiddleware(
   c: import("hono").Context<{ Bindings: Env; Variables: { user: AuthUser } }>,
   next: () => Promise<void>
@@ -293,13 +307,7 @@ async function authMiddleware(
     return databaseNotInitializedResponse(c);
   }
 
-  try {
-    await ensureCatalogReady(c.env.fitloot_db);
-  } catch (error) {
-    console.error("[authMiddleware][ensureCatalogReady] Falha ao inicializar catÃƒÂ¡logo de gamificaÃƒÂ§ÃƒÂ£o", {
-      message: error instanceof Error ? error.message : String(error),
-    });
-  }
+  scheduleCatalogInitialization(c.env.fitloot_db, c.executionCtx);
 
   try {
     const sessionId = getSessionIdFromCookieHeader(c.req.header("Cookie"));
