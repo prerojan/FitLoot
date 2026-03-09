@@ -5,7 +5,7 @@ import PageLoader from "@/react-app/components/PageLoader";
 import LoadingBall from "@/react-app/components/LoadingBall";
 import { ROUTE_PATHS, AUTHENTICATED_HINT_KEY } from "@/react-app/constants/auth";
 import { useAuthBootstrap } from "@/react-app/hooks/useAuthBootstrap";
-import { prefetchCoreRoutes, resolveAuthenticatedStartRoute } from "@/react-app/services/authService";
+import { resolveAuthenticatedStartRoute } from "@/react-app/services/authService";
 import type { AuthContextType, User } from "@/react-app/types/auth";
 import { applyProfileTheme } from "@/react-app/utils/theme";
 import { clearJsonCache } from "@/react-app/utils/api";
@@ -69,10 +69,6 @@ export default function App() {
   useEffect(() => {
     void checkAuth();
   }, [checkAuth]);
-
-  useEffect(() => {
-    prefetchCoreRoutes();
-  }, []);
 
   const appRouteElement = user ? (
     <Navigate to={resolveAuthenticatedStartRoute(user)} replace />

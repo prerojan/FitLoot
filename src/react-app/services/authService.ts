@@ -16,14 +16,38 @@ export async function notifyAppOpen(): Promise<void> {
   await api("/api/app/open", { method: "POST" });
 }
 
+type IdleDeadlineLike = {
+  timeRemaining: () => number;
+};
+
+type IdleCallbackHandle = number;
+type IdleCallbackFn = (deadline: IdleDeadlineLike) => void;
+
+type IdleWindow = Window & {
+  requestIdleCallback?: (callback: IdleCallbackFn, options?: { timeout: number }) => IdleCallbackHandle;
+  cancelIdleCallback?: (handle: IdleCallbackHandle) => void;
+};
+
 export function prefetchCoreRoutes(): void {
-  void import(`@/react-app/pages/Dashboard`);
-  void import(`@/react-app/pages/Profile`);
-  void import(`@/react-app/pages/Arena`);
-  void import(`@/react-app/pages/Shop`);
-  void import(`@/react-app/pages/Ranking`);
-  void import(`@/react-app/pages/AIChat`);
-  void import(`@/react-app/pages/FoodAnalysis`);
+  const loadCoreRoutes = () => {
+    void Promise.all([
+      import(`@/react-app/pages/Dashboard`),
+      import(`@/react-app/pages/Profile`),
+      import(`@/react-app/pages/Arena`),
+    ]);
+  };
+
+  const idleWindow = window as IdleWindow;
+  if (typeof idleWindow.requestIdleCallback === "function") {
+    idleWindow.requestIdleCallback(() => {
+      loadCoreRoutes();
+    }, { timeout: 1500 });
+    return;
+  }
+
+  window.setTimeout(() => {
+    loadCoreRoutes();
+  }, 900);
 }
 
 export function resolveAuthenticatedStartRoute(user: User): string {

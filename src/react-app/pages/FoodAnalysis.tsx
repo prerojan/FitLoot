@@ -387,7 +387,15 @@ export default function FoodAnalysis() {
           )}
 
           {streamActive && <video ref={videoRef} className="w-full rounded-2xl" autoPlay playsInline muted />}
-          {preview && <img src={preview} alt="Prévia do alimento" className="w-full rounded-2xl" />}
+          {preview && (
+            <img
+              src={preview}
+              alt="Prévia do alimento"
+              loading="lazy"
+              decoding="async"
+              className="w-full rounded-2xl"
+            />
+          )}
           <canvas ref={canvasRef} className="hidden" />
         </Card>
 

@@ -542,7 +542,15 @@ export default function Profile() {
                     </label>
                   </div>
 
-                  {bgPreview && <img src={bgPreview} alt="Prévia do fundo" className="w-full h-28 object-cover rounded-xl border border-gray-200" />}
+                  {bgPreview && (
+                    <img
+                      src={bgPreview}
+                      alt="Prévia do fundo"
+                      loading="lazy"
+                      decoding="async"
+                      className="w-full h-28 object-cover rounded-xl border border-gray-200"
+                    />
+                  )}
 
                   {customizationSaving && (
                     <div className="text-xs text-gray-500 flex items-center gap-2">

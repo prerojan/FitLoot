@@ -1,6 +1,7 @@
 const DEFAULT_PROD_API_URL = "https://fitloot-worker.suportefitloot.workers.dev";
 const DEFAULT_DEV_API_URL = "http://localhost:8787";
 const DEFAULT_CACHE_TTL_MS = 60_000;
+const DEFAULT_REQUEST_TIMEOUT_MS = 20_000;
 
 const rawApiUrl = import.meta.env.VITE_API_URL?.trim() ?? "";
 const resolvedApiUrl = rawApiUrl || (import.meta.env.PROD ? DEFAULT_PROD_API_URL : DEFAULT_DEV_API_URL);
@@ -11,6 +12,10 @@ type CacheEntry = {
   data: unknown;
   timestamp: number;
   inflight: Promise<unknown> | null;
+};
+
+export type ApiRequestOptions = RequestInit & {
+  timeoutMs?: number | undefined;
 };
 
 export class ApiRequestError extends Error {
@@ -46,18 +51,47 @@ async function parseJsonResponse<T>(response: Response): Promise<T> {
   return payload as T;
 }
 
-export async function api(path: string, options: RequestInit = {}) {
-    const requestPath = normalizePath(path);
-    const url = API_URL ? `${API_URL}${requestPath}` : requestPath;
+export async function api(path: string, options: ApiRequestOptions = {}) {
+  const requestPath = normalizePath(path);
+  const url = API_URL ? `${API_URL}${requestPath}` : requestPath;
+  const { timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS, headers, signal, ...restOptions } = options;
+  const controller = new AbortController();
+  const abortListener = () => controller.abort();
 
-    return fetch(url, {
-        ...options,
-        credentials: "include",
-        headers: {
-            "Content-Type": "application/json",
-            ...(options.headers || {})
-        },
+  if (signal) {
+    if (signal.aborted) {
+      controller.abort();
+    } else {
+      signal.addEventListener("abort", abortListener, { once: true });
+    }
+  }
+
+  const hasTimeout = Number.isFinite(timeoutMs) && Number(timeoutMs) > 0;
+  const timeoutId = hasTimeout
+    ? globalThis.setTimeout(() => {
+        controller.abort();
+      }, Number(timeoutMs))
+    : null;
+
+  try {
+    return await fetch(url, {
+      ...restOptions,
+      credentials: "include",
+      signal: controller.signal,
+      headers: {
+        "Content-Type": "application/json",
+        ...(headers || {}),
+      },
     });
+  } finally {
+    if (timeoutId !== null) {
+      globalThis.clearTimeout(timeoutId);
+    }
+
+    if (signal) {
+      signal.removeEventListener("abort", abortListener);
+    }
+  }
 }
 
 export function readCachedJson<T>(path: string, ttlMs = DEFAULT_CACHE_TTL_MS): { data: T; stale: boolean } | null {
@@ -71,7 +105,7 @@ export function readCachedJson<T>(path: string, ttlMs = DEFAULT_CACHE_TTL_MS): {
   };
 }
 
-export async function fetchJson<T>(path: string, options: RequestInit = {}): Promise<T> {
+export async function fetchJson<T>(path: string, options: ApiRequestOptions = {}): Promise<T> {
   const response = await api(path, options);
   return parseJsonResponse<T>(response);
 }

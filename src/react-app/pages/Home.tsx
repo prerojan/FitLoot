@@ -92,7 +92,7 @@ const Home: FC = () => {
       // Após login, atualiza contexto global e redireciona
       localStorage.setItem("fitloot_authenticated_hint", "1");
       await checkAuth();
-      navigate("/dashboard");
+      navigate("/app", { replace: true });
     } catch {
       setError("Não foi possível conectar ao servidor");
     } finally {
@@ -103,7 +103,7 @@ const Home: FC = () => {
   return (
     <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 flex items-center justify-center p-4 relative overflow-hidden">
       {/* Background decorativo */}
-      <div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1534438327276-14e5300c3a48?w=1920')] bg-cover bg-center opacity-5" />
+      <div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1534438327276-14e5300c3a48?auto=format&fit=crop&w=960&q=40')] bg-cover bg-center opacity-5" />
 
       {/* Elementos decorativos flutuantes */}
       <div className="absolute top-20 left-10 w-20 h-20 bg-emerald-200 rounded-full blur-3xl opacity-50 animate-pulse" />
