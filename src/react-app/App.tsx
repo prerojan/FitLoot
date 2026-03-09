@@ -28,6 +28,11 @@ function AppEntryRedirect() {
   return <Navigate to={hasSavedSession ? ROUTE_PATHS.home : ROUTE_PATHS.login} replace />;
 }
 
+function AppEntryRedirect() {
+  const hasSavedSession = localStorage.getItem(AUTHENTICATED_HINT_KEY) === "1";
+  return <Navigate to={hasSavedSession ? ROUTE_PATHS.home : ROUTE_PATHS.login} replace />;
+}
+
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
 
