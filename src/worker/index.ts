@@ -1089,22 +1089,102 @@ app.get("/favicon.ico", (c) => {
   });
 });
 
-app.use("*", async (c, next) => {
-  const origin = resolveCorsOrigin(c.req.header("Origin"), new URL(c.req.url), c.env);
+const CORS_ALLOWED_METHODS = "GET, POST, PUT, PATCH, DELETE, OPTIONS";
+const DEFAULT_CORS_ALLOW_HEADERS = "Content-Type, Authorization";
+const CORS_PREFLIGHT_MAX_AGE_SECONDS = "86400";
+
+function resolveCorsAllowHeaders(requestHeaders: Headers): string {
+  const requestedHeaders = requestHeaders.get("Access-Control-Request-Headers");
+  return requestedHeaders && requestedHeaders.trim().length > 0
+    ? requestedHeaders
+    : DEFAULT_CORS_ALLOW_HEADERS;
+}
+
+function mergeVaryHeader(existingValue: string | null, nextValues: string[]): string {
+  const merged = new Set(
+    (existingValue ?? "")
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean)
+  );
+
+  for (const value of nextValues) {
+    merged.add(value);
+  }
+
+  return Array.from(merged).join(", ");
+}
+
+function applyCorsHeadersToContext(
+  c: import("hono").Context<AppContext>,
+  origin: string | null,
+  allowHeaders: string
+) {
   if (origin) {
     c.header("Access-Control-Allow-Origin", origin);
+    c.header("Access-Control-Allow-Credentials", "true");
   }
-  c.header("Access-Control-Allow-Credentials", "true");
-  c.header("Access-Control-Allow-Headers", "Content-Type");
-  c.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-  c.header("Vary", "Origin");
 
-  if (c.req.method === "OPTIONS") {
-    if (!origin) {
+  c.header("Access-Control-Allow-Headers", allowHeaders);
+  c.header("Access-Control-Allow-Methods", CORS_ALLOWED_METHODS);
+  c.header("Access-Control-Max-Age", CORS_PREFLIGHT_MAX_AGE_SECONDS);
+  c.header(
+    "Vary",
+    mergeVaryHeader(c.res.headers.get("Vary"), [
+      "Origin",
+      "Access-Control-Request-Headers",
+      "Access-Control-Request-Method",
+    ])
+  );
+}
+
+function applyCorsHeadersToResponseHeaders(
+  headers: Headers,
+  origin: string | null,
+  allowHeaders: string
+) {
+  if (origin) {
+    headers.set("Access-Control-Allow-Origin", origin);
+    headers.set("Access-Control-Allow-Credentials", "true");
+  }
+
+  headers.set("Access-Control-Allow-Headers", allowHeaders);
+  headers.set("Access-Control-Allow-Methods", CORS_ALLOWED_METHODS);
+  headers.set("Access-Control-Max-Age", CORS_PREFLIGHT_MAX_AGE_SECONDS);
+  headers.set(
+    "Vary",
+    mergeVaryHeader(headers.get("Vary"), [
+      "Origin",
+      "Access-Control-Request-Headers",
+      "Access-Control-Request-Method",
+    ])
+  );
+}
+
+app.use("*", async (c, next) => {
+  const requestOrigin = c.req.header("Origin");
+  const origin = resolveCorsOrigin(requestOrigin, c.env);
+  const allowHeaders = resolveCorsAllowHeaders(c.req.raw.headers);
+
+  if (requestOrigin && !origin) {
+    if (c.req.method === "OPTIONS") {
       return c.newResponse("", {
         status: 403,
       });
     }
+
+    return c.json(
+      {
+        error: "Origin não permitida",
+        code: "ORIGIN_NOT_ALLOWED",
+      },
+      403
+    );
+  }
+
+  applyCorsHeadersToContext(c, origin, allowHeaders);
+
+  if (c.req.method === "OPTIONS") {
     return c.newResponse("", {
       status: 204,
     });
@@ -6317,11 +6397,11 @@ function buildAllowedOrigins(env: Env) {
   return { exactOrigins, wildcardPatterns };
 }
 
-function resolveCorsOrigin(requestOrigin: string | undefined, requestUrl: URL, env: Env) {
+function resolveCorsOrigin(requestOrigin: string | undefined, env: Env) {
   const { exactOrigins, wildcardPatterns } = buildAllowedOrigins(env);
 
   if (!requestOrigin) {
-    return requestUrl.origin;
+    return null;
   }
 
   if (exactOrigins.has(requestOrigin)) {
@@ -6342,6 +6422,13 @@ async function handleFetchWithGuard(request: Request, env: Env, ctx: ExecutionCo
       stack: error instanceof Error ? error.stack : undefined,
     });
 
+    const origin = resolveCorsOrigin(request.headers.get("Origin") ?? undefined, env);
+    const allowHeaders = resolveCorsAllowHeaders(request.headers);
+    const headers = new Headers({
+      "Content-Type": "application/json",
+    });
+    applyCorsHeadersToResponseHeaders(headers, origin, allowHeaders);
+
     return new Response(
       JSON.stringify({
         error: "Erro interno",
@@ -6349,9 +6436,7 @@ async function handleFetchWithGuard(request: Request, env: Env, ctx: ExecutionCo
       }),
       {
         status: 500,
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers,
       }
     );
   }
