@@ -1,6 +1,6 @@
 ﻿import { useCallback, useEffect, useRef, useState, type ChangeEventHandler } from "react";
 import { useNavigate } from "react-router";
-import { useAuth } from "@/react-app/App";
+import { useAuth } from "@/react-app/contexts/auth";
 import BottomNav from "@/react-app/components/BottomNav";
 import ProfileFriendsPanel from "@/react-app/components/ProfileFriendsPanel";
 import LoadingBall from "@/react-app/components/LoadingBall";

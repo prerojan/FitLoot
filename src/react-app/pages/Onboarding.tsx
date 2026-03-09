@@ -8,7 +8,7 @@
   type KeyboardEvent,
 } from "react";
 import { useNavigate } from "react-router";
-import { useAuth } from "@/react-app/App";
+import { useAuth } from "@/react-app/contexts/auth";
 import PageLoader from "@/react-app/components/PageLoader";
 import LoadingBall from "@/react-app/components/LoadingBall";
 import { api } from "@/react-app/utils/api";

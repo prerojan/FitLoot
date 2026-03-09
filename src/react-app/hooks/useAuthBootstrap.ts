@@ -27,6 +27,7 @@ export function useAuthBootstrap({ setUser, setLoading }: UseAuthBootstrapParams
         fetchProfileTheme().catch(() => null),
       ]);
       if (!user) {
+        localStorage.removeItem(AUTHENTICATED_HINT_KEY);
         applyProfileTheme(null);
         setUser(null);
         return;
@@ -47,6 +48,7 @@ export function useAuthBootstrap({ setUser, setLoading }: UseAuthBootstrapParams
         });
       }
     } catch {
+      localStorage.removeItem(AUTHENTICATED_HINT_KEY);
       applyProfileTheme(null);
       setUser(null);
     } finally {
