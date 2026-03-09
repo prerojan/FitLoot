@@ -1194,8 +1194,39 @@ app.use("*", async (c, next) => {
 });
 
 // Helper: Gera cookie com configuraÃƒÂ§ÃƒÂµes corretas
-export function generateCookie(sessionId: string) {
-  return `session_id=${sessionId}; Path=/; HttpOnly; Secure; SameSite=None; Max-Age=2592000`;
+function shouldUseSecureCookie(requestUrl: string): boolean {
+  try {
+    return new URL(requestUrl).protocol === "https:";
+  } catch {
+    return true;
+  }
+}
+
+function buildSessionCookieAttributes(requestUrl: string, maxAgeSeconds: number): string {
+  const secureCookie = shouldUseSecureCookie(requestUrl);
+  const attributes = [
+    "Path=/",
+    "HttpOnly",
+    "SameSite=None",
+    `Max-Age=${maxAgeSeconds}`,
+  ];
+
+  if (secureCookie) {
+    attributes.push("Secure");
+    // Required for reliable cross-site cookie storage when frontend and API are in different domains.
+    attributes.push("Partitioned");
+  }
+
+  return attributes.join("; ");
+}
+
+export function generateCookie(sessionId: string, requestUrl: string) {
+  const encodedSessionId = encodeURIComponent(sessionId);
+  return `session_id=${encodedSessionId}; ${buildSessionCookieAttributes(requestUrl, 2_592_000)}`;
+}
+
+function generateExpiredSessionCookie(requestUrl: string) {
+  return `session_id=; ${buildSessionCookieAttributes(requestUrl, 0)}`;
 }
 
 
@@ -1357,7 +1388,7 @@ app.post(
       .bind(sessionId, userRow.id, expiresAt)
       .run();
 
-    const cookie = generateCookie(sessionId);
+    const cookie = generateCookie(sessionId, c.req.url);
     c.header("Set-Cookie", cookie);
 
     return c.json({ success: true }, 200);
@@ -1521,7 +1552,7 @@ app.get("/api/logout", async (c) => {
 
   c.header(
     "Set-Cookie",
-    "session_id=; Path=/; HttpOnly; Max-Age=0; Secure; SameSite=None"
+    generateExpiredSessionCookie(c.req.url)
   );
 
   return c.json({ success: true });
