@@ -282,6 +282,8 @@ function ProductCard({
           <img
             src={product.image_url}
             alt={product.name}
+            loading="lazy"
+            decoding="async"
             className="w-full h-full object-cover"
           />
         ) : (
@@ -336,7 +338,13 @@ function OrderCard({ order }: { order: ShopOrderView }) {
       <div className="flex gap-4">
         <div className="w-20 h-20 bg-gradient-to-br from-emerald-100 to-teal-100 rounded-2xl flex-shrink-0 overflow-hidden">
           {order.image_url ? (
-            <img src={order.image_url} alt={order.product_name} className="w-full h-full object-cover" />
+            <img
+              src={order.image_url}
+              alt={order.product_name}
+              loading="lazy"
+              decoding="async"
+              className="w-full h-full object-cover"
+            />
           ) : (
             <div className="flex items-center justify-center h-full">
               <Package className="w-8 h-8 text-emerald-500" />

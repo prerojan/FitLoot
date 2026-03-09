@@ -517,7 +517,13 @@ function MissionCardComponent({ mission, onComplete }: MissionCardProps) {
 
         {!isWeeklyMission && missionMediaUrl && (
           <div className="hidden sm:block w-full mb-3">
-            <img src={missionMediaUrl} alt={mission.title} className="w-full h-36 object-cover rounded-2xl border border-gray-200" />
+            <img
+              src={missionMediaUrl}
+              alt={mission.title}
+              loading="lazy"
+              decoding="async"
+              className="w-full h-36 object-cover rounded-2xl border border-gray-200"
+            />
           </div>
         )}
 
@@ -627,7 +633,13 @@ function MissionCardComponent({ mission, onComplete }: MissionCardProps) {
 
             <div className="space-y-3">
               {detailMissionMediaUrl ? (
-                <img src={detailMissionMediaUrl} alt={missionDetails.title} className="w-full h-48 object-cover rounded-2xl border border-gray-200" />
+                <img
+                  src={detailMissionMediaUrl}
+                  alt={missionDetails.title}
+                  loading="lazy"
+                  decoding="async"
+                  className="w-full h-48 object-cover rounded-2xl border border-gray-200"
+                />
               ) : (
                 <div className="w-full h-48 rounded-2xl border border-emerald-100 bg-gradient-to-br from-emerald-100 to-teal-100 flex items-center justify-center">
                   <Dumbbell className="w-12 h-12 text-emerald-600" />

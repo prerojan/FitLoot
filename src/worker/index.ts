@@ -224,12 +224,32 @@ async function getUserAuthRecordById(db: D1Database, userId: string): Promise<Us
 
     if (!userRecord) return null;
 
+    let onboardingCompleted = Number(userRecord.onboarding_completed) === 1 ? 1 : 0;
+    if (onboardingCompleted === 0) {
+      try {
+        const profileExists = await db
+          .prepare("SELECT 1 as exists_flag FROM user_profiles WHERE user_id = ? LIMIT 1")
+          .bind(userId)
+          .first<{ exists_flag: number }>();
+
+        if (Number(profileExists?.exists_flag ?? 0) === 1) {
+          onboardingCompleted = 1;
+          await db
+            .prepare("UPDATE users SET onboarding_completed = 1 WHERE id = ?")
+            .bind(userId)
+            .run();
+        }
+      } catch {
+        // If profile table is temporarily unavailable, keep current value without blocking auth.
+      }
+    }
+
     return {
       id: userRecord.id,
       email: userRecord.email,
       name: userRecord.name,
       avatar_url: userRecord.avatar_url,
-      onboarding_completed: Number(userRecord.onboarding_completed) === 1 ? 1 : 0,
+      onboarding_completed: onboardingCompleted,
     };
   } catch (error) {
     if (!isMissingOnboardingCompletedColumnError(error)) {
@@ -243,12 +263,23 @@ async function getUserAuthRecordById(db: D1Database, userId: string): Promise<Us
 
     if (!fallbackRecord) return null;
 
+    let onboardingCompleted = 0;
+    try {
+      const profileExists = await db
+        .prepare("SELECT 1 as exists_flag FROM user_profiles WHERE user_id = ? LIMIT 1")
+        .bind(userId)
+        .first<{ exists_flag: number }>();
+      onboardingCompleted = Number(profileExists?.exists_flag ?? 0) === 1 ? 1 : 0;
+    } catch {
+      onboardingCompleted = 0;
+    }
+
     return {
       id: fallbackRecord.id,
       email: fallbackRecord.email,
       name: fallbackRecord.name,
       avatar_url: fallbackRecord.avatar_url,
-      onboarding_completed: 0,
+      onboarding_completed: onboardingCompleted,
     };
   }
 }
@@ -1943,6 +1974,16 @@ app.post("/api/onboarding", authMiddleware, zValidator("json", OnboardingRequest
   await ensureGoalStatsRow(c.env.fitloot_db, user.id, data.main_goal);
   await ensureUserCounterRow(c.env.fitloot_db, user.id);
   await logUserEvent(c.env.fitloot_db, user.id, 'onboarding_completed', { conditioning, main_goal: data.main_goal });
+  try {
+    await c.env.fitloot_db
+      .prepare("UPDATE users SET onboarding_completed = 1 WHERE id = ?")
+      .bind(user.id)
+      .run();
+  } catch (error) {
+    if (!isMissingOnboardingCompletedColumnError(error)) {
+      throw error;
+    }
+  }
   await evaluateLevelTitles(c.env.fitloot_db, user.id, 1);
 
   // Create initial missions in background to avoid blocking onboarding response.
