@@ -618,7 +618,6 @@ export default function Onboarding() {
       }
 
       localStorage.setItem("fitloot_authenticated_hint", "1");
-      await checkAuth();
 
       const patchRes = await api("/api/users/me", {
         method: "PATCH",

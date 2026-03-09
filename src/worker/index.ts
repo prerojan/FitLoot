@@ -187,6 +187,17 @@ type UserAuthRecord = {
   onboarding_completed: number;
 };
 
+type UserBootstrapRecord = {
+  id: string;
+  email: string;
+  name: string;
+  avatar_url: string | null;
+};
+
+type UserBootstrapResult = {
+  profileReady: boolean;
+};
+
 function isMissingOnboardingCompletedColumnError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
   return message.includes("onboarding_completed") && message.includes("no such column");
@@ -215,6 +226,118 @@ function internalErrorResponse(c: import("hono").Context<AppContext>) {
   return c.json({ error: "Erro interno", code: "INTERNAL_ERROR" }, 500);
 }
 
+function normalizeUsernameToken(rawValue: string): string {
+  const normalized = rawValue
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9_]/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "");
+
+  return normalized;
+}
+
+function defaultUsernameBase(user: UserBootstrapRecord): string {
+  const emailPrefix = user.email.split("@")[0] ?? "";
+  const source = user.name.trim().length > 0 ? user.name : emailPrefix;
+  const normalized = normalizeUsernameToken(source);
+  if (normalized.length >= 3) return normalized;
+  return `fitloot_${user.id.replace(/-/g, "").slice(0, 8)}`;
+}
+
+function usernameCandidate(base: string, attempt: number): string {
+  const suffix = attempt === 0 ? "" : `_${attempt + 1}`;
+  const maxBaseLength = Math.max(3, 28 - suffix.length);
+  const normalizedBase = base.length > maxBaseLength ? base.slice(0, maxBaseLength) : base;
+  const candidate = `${normalizedBase}${suffix}`;
+  return candidate.length >= 3 ? candidate : `fitloot_${attempt + 1}`;
+}
+
+function defaultFullName(user: UserBootstrapRecord): string {
+  const trimmedName = user.name.trim();
+  if (trimmedName.length > 0) return trimmedName;
+
+  const emailPrefix = user.email.split("@")[0] ?? "";
+  const fallback = emailPrefix.trim();
+  if (fallback.length > 0) return fallback;
+
+  return "Aventureiro FitLoot";
+}
+
+async function ensureDefaultProfileRow(db: D1Database, user: UserBootstrapRecord): Promise<boolean> {
+  const existing = await db
+    .prepare("SELECT user_id FROM user_profiles WHERE user_id = ? LIMIT 1")
+    .bind(user.id)
+    .first<{ user_id: string }>();
+  if (existing?.user_id) return true;
+
+  const usernameBase = defaultUsernameBase(user);
+  const fullName = defaultFullName(user);
+  const maxAttempts = 30;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const username = usernameCandidate(usernameBase, attempt);
+
+    await db.prepare(
+      `INSERT OR IGNORE INTO user_profiles (
+         user_id,
+         username,
+         full_name,
+         weight,
+         height,
+         initial_conditioning,
+         injuries,
+         equipment,
+         main_goal,
+         updated_at
+       ) VALUES (?, ?, ?, NULL, NULL, 'iniciante', '', '', 'saude_geral', datetime('now'))`
+    ).bind(user.id, username, fullName).run();
+
+    const created = await db
+      .prepare("SELECT user_id FROM user_profiles WHERE user_id = ? LIMIT 1")
+      .bind(user.id)
+      .first<{ user_id: string }>();
+    if (created?.user_id) return true;
+  }
+
+  return false;
+}
+
+async function ensureUserBootstrapData(db: D1Database, user: UserBootstrapRecord): Promise<UserBootstrapResult> {
+  const profileReady = await ensureDefaultProfileRow(db, user);
+  if (!profileReady) return { profileReady: false };
+
+  await Promise.all([
+    db.prepare(
+      `INSERT OR IGNORE INTO user_progression (
+         user_id,
+         xp,
+         level,
+         points,
+         current_streak,
+         best_streak,
+         updated_at
+       ) VALUES (?, 0, 1, 0, 0, 0, datetime('now'))`
+    ).bind(user.id).run(),
+    db.prepare(
+      `INSERT OR IGNORE INTO user_attributes (
+         user_id,
+         strength,
+         constitution,
+         vitality,
+         dexterity,
+         focus,
+         updated_at
+       ) VALUES (?, 10, 10, 10, 10, 10, datetime('now'))`
+    ).bind(user.id).run(),
+    ensureUserCounterRow(db, user.id),
+    ensureGoalStatsRow(db, user.id, "saude_geral"),
+  ]);
+
+  return { profileReady: true };
+}
+
 async function getUserAuthRecordById(db: D1Database, userId: string): Promise<UserAuthRecord | null> {
   try {
     const userRecord = await db
@@ -227,20 +350,19 @@ async function getUserAuthRecordById(db: D1Database, userId: string): Promise<Us
     let onboardingCompleted = Number(userRecord.onboarding_completed) === 1 ? 1 : 0;
     if (onboardingCompleted === 0) {
       try {
-        const profileExists = await db
-          .prepare("SELECT 1 as exists_flag FROM user_profiles WHERE user_id = ? LIMIT 1")
-          .bind(userId)
-          .first<{ exists_flag: number }>();
-
-        if (Number(profileExists?.exists_flag ?? 0) === 1) {
+        const bootstrap = await ensureUserBootstrapData(db, userRecord);
+        if (bootstrap.profileReady) {
           onboardingCompleted = 1;
           await db
             .prepare("UPDATE users SET onboarding_completed = 1 WHERE id = ?")
             .bind(userId)
             .run();
         }
-      } catch {
-        // If profile table is temporarily unavailable, keep current value without blocking auth.
+      } catch (bootstrapError) {
+        console.error("[auth][auto-bootstrap]", {
+          message: getErrorMessage(bootstrapError),
+          userId,
+        });
       }
     }
 
@@ -265,12 +387,13 @@ async function getUserAuthRecordById(db: D1Database, userId: string): Promise<Us
 
     let onboardingCompleted = 0;
     try {
-      const profileExists = await db
-        .prepare("SELECT 1 as exists_flag FROM user_profiles WHERE user_id = ? LIMIT 1")
-        .bind(userId)
-        .first<{ exists_flag: number }>();
-      onboardingCompleted = Number(profileExists?.exists_flag ?? 0) === 1 ? 1 : 0;
-    } catch {
+      const bootstrap = await ensureUserBootstrapData(db, fallbackRecord);
+      onboardingCompleted = bootstrap.profileReady ? 1 : 0;
+    } catch (bootstrapError) {
+      console.error("[auth][auto-bootstrap][fallback]", {
+        message: getErrorMessage(bootstrapError),
+        userId,
+      });
       onboardingCompleted = 0;
     }
 
@@ -1604,9 +1727,31 @@ app.get("/api/profile", authMiddleware, async (c) => {
   if (!user) return c.json({ error: "Unauthorized" }, 401);
 
   try {
-    const profile = await c.env.fitloot_db.prepare(
+    let profile = await c.env.fitloot_db.prepare(
       "SELECT * FROM user_profiles WHERE user_id = ?"
     ).bind(user.id).first();
+
+    if (!profile) {
+      try {
+        const bootstrap = await ensureUserBootstrapData(c.env.fitloot_db, {
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          avatar_url: user.avatar_url ?? null,
+        });
+
+        if (bootstrap.profileReady) {
+          profile = await c.env.fitloot_db.prepare(
+            "SELECT * FROM user_profiles WHERE user_id = ?"
+          ).bind(user.id).first();
+        }
+      } catch (bootstrapError) {
+        console.error("[/api/profile][auto-bootstrap]", {
+          message: getErrorMessage(bootstrapError),
+          userId: user.id,
+        });
+      }
+    }
 
     if (!profile) {
       return c.json({ error: "Perfil n?o encontrado", code: "PROFILE_NOT_FOUND" }, 404);
