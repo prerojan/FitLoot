@@ -835,4 +835,3 @@ function MissionCardComponent({ mission, onComplete }: MissionCardProps) {
 
 const MissionCard = memo(MissionCardComponent);
 export default MissionCard;
-

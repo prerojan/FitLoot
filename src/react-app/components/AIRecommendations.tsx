@@ -1,4 +1,4 @@
-﻿import { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { Sparkles, TrendingUp, Target, Lightbulb } from "lucide-react";
 import { api } from "@/react-app/utils/api";
 import LoadingBall from "@/react-app/components/LoadingBall";

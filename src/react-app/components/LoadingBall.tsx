@@ -1,4 +1,4 @@
-﻿type LoadingBallSize = "sm" | "md" | "lg";
+type LoadingBallSize = "sm" | "md" | "lg";
 
 type LoadingBallProps = {
   size?: LoadingBallSize;

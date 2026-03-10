@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useRef, useState, type ChangeEventHandler } from "react";
+import { useCallback, useEffect, useRef, useState, type ChangeEventHandler } from "react";
 import { useNavigate } from "react-router";
 import { useAuth } from "@/react-app/contexts/auth";
 import BottomNav from "@/react-app/components/BottomNav";
@@ -31,6 +31,126 @@ const FONT_OPTIONS = [
 
 const DEFAULT_PRIMARY_COLOR = "#10b981";
 const DEFAULT_SECONDARY_COLOR = "#14b8a6";
+const SHOWCASED_ACHIEVEMENT_LIMIT = 3;
+const RARITY_FILTER_OPTIONS = ["Todos", "Comum", "Incomum", "Raro", "Mítico", "Secreto"] as const;
+type RarityFilterOption = typeof RARITY_FILTER_OPTIONS[number];
+type DetailModalState =
+  | { type: "achievement"; value: AchievementWithUnlock }
+  | { type: "title"; value: TitleWithUnlock }
+  | null;
+
+const RARITY_COLOR_MAP = {
+  Comum: "#D1D5DB",
+  Incomum: "#22C55E",
+  Raro: "#3B82F6",
+  "Mítico": "#EF4444",
+  Secreto: "#F59E0B",
+} as const;
+
+function normalizeRarity(value: string | null | undefined): keyof typeof RARITY_COLOR_MAP {
+  const normalized = String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+
+  if (normalized.includes("incomum")) return "Incomum";
+  if (normalized.includes("comum")) return "Comum";
+  if (normalized.includes("raro")) return "Raro";
+  if (normalized.includes("mitico")) return "Mítico";
+  if (normalized.includes("secreto")) return "Secreto";
+  return "Comum";
+}
+
+function raritySortWeight(value: string | null | undefined): number {
+  const rarity = normalizeRarity(value);
+  if (rarity === "Mítico") return 4;
+  if (rarity === "Raro") return 3;
+  if (rarity === "Incomum") return 2;
+  if (rarity === "Comum") return 1;
+  return 0;
+}
+
+function resolveRarityColor(value: { rarity?: string | null | undefined; color?: string | null | undefined }): string {
+  if (typeof value.color === "string" && value.color.trim().length > 0) {
+    return value.color;
+  }
+  return RARITY_COLOR_MAP[normalizeRarity(value.rarity)];
+}
+
+function parseShowcasedAchievementIds(rawValue: string | null | undefined): number[] {
+  if (!rawValue || rawValue.trim().length === 0) return [];
+  try {
+    const parsed = JSON.parse(rawValue) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    const valid = parsed
+      .map((value) => Number(value))
+      .filter((value) => Number.isInteger(value) && value > 0);
+    return Array.from(new Set(valid));
+  } catch {
+    return [];
+  }
+}
+
+function formatUnlockDateTime(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleString();
+}
+
+const CONDITION_LABELS: Record<string, string> = {
+  missions_completed: "Missões completas",
+  streak: "Sequência de dias",
+  chat_messages: "Mensagens no FitBot",
+  ranking: "Posição no ranking",
+  strength: "Força",
+  skills: "Habilidades desbloqueadas",
+  weekly: "Desafios semanais",
+  failures: "Falhas registradas",
+};
+
+function formatConditionLabel(rawValue: string): string {
+  const normalized = rawValue.trim().toLowerCase();
+  return CONDITION_LABELS[normalized] ?? rawValue.replace(/_/g, " ");
+}
+
+function formatUnlockCondition(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return null;
+
+  if (trimmed.includes(":")) {
+    const [kind, ...parts] = trimmed.split(":").map((part) => part.trim());
+    if (kind === "level" && parts[0]) return `Alcance o nível ${parts[0]}.`;
+    if (kind === "skill" && parts[0] && parts[1]) return `Complete ${parts[0]} até o estágio ${parts[1]}.`;
+    if (kind === "missions" && parts[0]) return `Complete ${parts[0]} missões.`;
+    if (kind === "streak" && parts[0]) return `Mantenha uma sequência de ${parts[0]} dias.`;
+    if (kind === "weekly" && parts[0]) return `Conclua ${parts[0]} desafio(s) semanal(is).`;
+    if (kind === "skills" && parts[0]) return `Desbloqueie ${parts[0]} habilidade(s).`;
+    return trimmed.replace(/_/g, " ");
+  }
+
+  const comparatorMatch = trimmed.match(/^([a-z_]+)\s*(>=|<=|==)\s*(\d+)$/i);
+  if (!comparatorMatch) {
+    return trimmed.replace(/_/g, " ");
+  }
+
+  const metric = comparatorMatch[1] ?? "";
+  const operator = comparatorMatch[2] ?? "==";
+  const threshold = comparatorMatch[3] ?? "0";
+  const metricLabel = formatConditionLabel(metric);
+  if (operator === ">=") return `${metricLabel}: ${threshold}+`;
+  if (operator === "<=") return `${metricLabel}: até ${threshold}`;
+  return `${metricLabel}: ${threshold}`;
+}
+
+function isAchievementSecretLocked(achievement: AchievementWithUnlock): boolean {
+  return Number(achievement.secret ?? 0) === 1 && achievement.unlocked !== 1;
+}
+
+function isTitleSecretLocked(title: TitleWithUnlock): boolean {
+  return normalizeRarity(title.rarity) === "Secreto" && title.unlocked !== 1;
+}
 
 export default function Profile() {
   const { user, logout } = useAuth();
@@ -60,6 +180,11 @@ export default function Profile() {
   const [feedbackMessage, setFeedbackMessage] = useState("");
   const [feedbackSending, setFeedbackSending] = useState(false);
   const [feedbackStatus, setFeedbackStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
+  const [achievementFilter, setAchievementFilter] = useState<RarityFilterOption>("Todos");
+  const [titleFilter, setTitleFilter] = useState<RarityFilterOption>("Todos");
+  const [detailModal, setDetailModal] = useState<DetailModalState>(null);
+  const [showcasePendingId, setShowcasePendingId] = useState<number | null>(null);
+  const [titlePendingId, setTitlePendingId] = useState<number | null>(null);
 
   const primaryColorInputRef = useRef<HTMLInputElement>(null);
   const secondaryColorInputRef = useRef<HTMLInputElement>(null);
@@ -164,11 +289,80 @@ export default function Profile() {
 
   const handleActivateTitle = async (titleId: number) => {
     try {
+      setTitlePendingId(titleId);
       await api(`/api/titles/${titleId}/activate`, { method: "POST" });
       clearJsonCache("/api/titles");
       await loadData();
     } catch {
-      setError("Não foi possível ativar o título agora.");
+      setError("Não foi possível equipar o título agora.");
+    } finally {
+      setTitlePendingId(null);
+    }
+  };
+
+  const handleDeactivateTitle = async (titleId: number) => {
+    try {
+      setTitlePendingId(titleId);
+      await api(`/api/titles/${titleId}/deactivate`, { method: "POST" });
+      clearJsonCache("/api/titles");
+      await loadData();
+    } catch {
+      setError("Não foi possível desequipar o título agora.");
+    } finally {
+      setTitlePendingId(null);
+    }
+  };
+
+  const updateShowcasedAchievements = (ids: number[]) => {
+    setProfile((currentProfile) => {
+      if (!currentProfile) return currentProfile;
+      return {
+        ...currentProfile,
+        showcased_achievements: JSON.stringify(ids),
+      };
+    });
+    clearJsonCache("/api/profile");
+  };
+
+  const handleAddAchievementToShowcase = async (achievementId: number) => {
+    try {
+      setShowcasePendingId(achievementId);
+      const response = await api("/api/profile/achievements/showcase", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ achievement_id: achievementId }),
+      });
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as { error?: string | undefined } | null;
+        throw new Error(payload?.error ?? "Falha ao adicionar conquista no perfil.");
+      }
+
+      const payload = (await response.json()) as { showcased_achievements?: number[] | undefined };
+      updateShowcasedAchievements(Array.isArray(payload.showcased_achievements) ? payload.showcased_achievements : []);
+    } catch (showcaseError) {
+      setError(showcaseError instanceof Error ? showcaseError.message : "Não foi possível destacar a conquista agora.");
+    } finally {
+      setShowcasePendingId(null);
+    }
+  };
+
+  const handleRemoveAchievementFromShowcase = async (achievementId: number) => {
+    try {
+      setShowcasePendingId(achievementId);
+      const response = await api(`/api/profile/achievements/showcase/${achievementId}`, { method: "DELETE" });
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as { error?: string | undefined } | null;
+        throw new Error(payload?.error ?? "Falha ao remover conquista do perfil.");
+      }
+
+      const payload = (await response.json()) as { showcased_achievements?: number[] | undefined };
+      updateShowcasedAchievements(Array.isArray(payload.showcased_achievements) ? payload.showcased_achievements : []);
+    } catch (showcaseError) {
+      setError(showcaseError instanceof Error ? showcaseError.message : "Não foi possível remover a conquista agora.");
+    } finally {
+      setShowcasePendingId(null);
     }
   };
 
@@ -335,7 +529,55 @@ export default function Profile() {
     );
   }
 
-  const activeTitle = titles.find((title) => title.is_active === 1);
+  const activeTitle = titles.find((title) => title.is_active === 1 && title.unlocked === 1);
+  const showcasedAchievementIds = parseShowcasedAchievementIds(profile?.showcased_achievements);
+  const showcasedAchievements = showcasedAchievementIds
+    .map((achievementId) => achievements.find((achievement) => achievement.id === achievementId))
+    .filter((achievement): achievement is AchievementWithUnlock => Boolean(achievement));
+
+  const filteredAchievements = achievements.filter((achievement) => {
+    if (achievementFilter === "Todos") return true;
+    return normalizeRarity(achievement.rarity) === achievementFilter;
+  });
+  const unlockedAchievements = filteredAchievements
+    .filter((achievement) => achievement.unlocked === 1)
+    .sort((first, second) => {
+      const firstTime = new Date(first.unlocked_at ?? 0).getTime();
+      const secondTime = new Date(second.unlocked_at ?? 0).getTime();
+      return secondTime - firstTime;
+    });
+  const blockedRegularAchievements = filteredAchievements
+    .filter((achievement) => achievement.unlocked !== 1 && Number(achievement.secret ?? 0) !== 1)
+    .sort((first, second) => {
+      const rarityDiff = raritySortWeight(second.rarity) - raritySortWeight(first.rarity);
+      if (rarityDiff !== 0) return rarityDiff;
+      return first.name.localeCompare(second.name);
+    });
+  const blockedSecretAchievements = filteredAchievements
+    .filter((achievement) => achievement.unlocked !== 1 && Number(achievement.secret ?? 0) === 1)
+    .sort((first, second) => first.id - second.id);
+
+  const filteredTitles = titles.filter((title) => {
+    if (titleFilter === "Todos") return true;
+    return normalizeRarity(title.rarity) === titleFilter;
+  });
+  const unlockedTitles = filteredTitles
+    .filter((title) => title.unlocked === 1)
+    .sort((first, second) => {
+      const firstTime = new Date(first.unlocked_at ?? 0).getTime();
+      const secondTime = new Date(second.unlocked_at ?? 0).getTime();
+      return secondTime - firstTime;
+    });
+  const blockedRegularTitles = filteredTitles
+    .filter((title) => title.unlocked !== 1 && normalizeRarity(title.rarity) !== "Secreto")
+    .sort((first, second) => {
+      const rarityDiff = raritySortWeight(second.rarity) - raritySortWeight(first.rarity);
+      if (rarityDiff !== 0) return rarityDiff;
+      return first.name.localeCompare(second.name);
+    });
+  const blockedSecretTitles = filteredTitles
+    .filter((title) => title.unlocked !== 1 && normalizeRarity(title.rarity) === "Secreto")
+    .sort((first, second) => first.id - second.id);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 pb-24">
@@ -402,6 +644,42 @@ export default function Profile() {
 
       {profileSection === "profile" ? (
         <>
+          <div className="px-6 mt-6">
+            <div className="fl-card p-4">
+              <div className="flex items-center justify-between gap-3 mb-3">
+                <h2 className="text-sm font-bold text-gray-900">Conquistas em Destaque</h2>
+                <span className="text-xs text-gray-500">{showcasedAchievements.length}/{SHOWCASED_ACHIEVEMENT_LIMIT}</span>
+              </div>
+              {showcasedAchievements.length === 0 ? (
+                <p className="text-xs text-gray-500">
+                  Selecione até {SHOWCASED_ACHIEVEMENT_LIMIT} conquistas desbloqueadas para destacar no perfil.
+                </p>
+              ) : (
+                <div className="grid grid-cols-3 gap-3">
+                  {showcasedAchievements.map((achievement) => {
+                    const rarityColor = resolveRarityColor(achievement);
+                    return (
+                      <button
+                        key={achievement.id}
+                        onClick={() => setDetailModal({ type: "achievement", value: achievement })}
+                        className="rounded-2xl border-2 bg-white/90 p-3 text-center shadow-md transition-transform hover:-translate-y-0.5"
+                        style={{ borderColor: rarityColor }}
+                      >
+                        <div className="text-3xl mb-1" style={{ color: rarityColor }}>
+                          {achievement.icon || "🏆"}
+                        </div>
+                        <p className="text-[11px] font-bold leading-tight text-gray-900 line-clamp-2">{achievement.name}</p>
+                        <span className="inline-flex mt-2 rounded-full px-2 py-0.5 text-[10px] font-semibold text-white" style={{ backgroundColor: rarityColor }}>
+                          {normalizeRarity(achievement.rarity)}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+
           <div className="px-6 mt-4">
             <div className="bg-white/80 backdrop-blur-sm rounded-2xl p-1 shadow-lg flex gap-1">
               <TabButton icon={<Target className="w-4 h-4" />} label="Atributos" active={activeTab === "attributes"} onClick={() => setActiveTab("attributes")} />
@@ -435,18 +713,99 @@ export default function Profile() {
             )}
 
             {activeTab === "achievements" && (
-              <div className="grid grid-cols-2 gap-3">
-                {achievements.map((achievement) => (
-                  <AchievementCard key={achievement.id} achievement={achievement} />
-                ))}
+              <div className="space-y-4">
+                <RarityFilterBar selected={achievementFilter} onChange={setAchievementFilter} />
+
+                <SectionHeader title="Desbloqueadas" subtitle={`${unlockedAchievements.length} desbloqueadas`} />
+                {unlockedAchievements.length === 0 ? (
+                  <p className="text-center text-gray-500 text-sm py-3">Nenhuma conquista desbloqueada neste filtro.</p>
+                ) : (
+                  <div className="grid grid-cols-2 gap-3">
+                    {unlockedAchievements.map((achievement) => (
+                      <AchievementCard
+                        key={achievement.id}
+                        achievement={achievement}
+                        highlighted={showcasedAchievementIds.includes(achievement.id)}
+                        onClick={() => setDetailModal({ type: "achievement", value: achievement })}
+                      />
+                    ))}
+                  </div>
+                )}
+
+                <SectionHeader title="Bloqueadas" subtitle={`${blockedRegularAchievements.length} restantes`} />
+                {blockedRegularAchievements.length === 0 ? (
+                  <p className="text-center text-gray-500 text-sm py-3">Nenhuma conquista bloqueada neste filtro.</p>
+                ) : (
+                  <div className="grid grid-cols-2 gap-3">
+                    {blockedRegularAchievements.map((achievement) => (
+                      <AchievementCard
+                        key={achievement.id}
+                        achievement={achievement}
+                        highlighted={false}
+                        onClick={() => setDetailModal({ type: "achievement", value: achievement })}
+                      />
+                    ))}
+                  </div>
+                )}
+
+                {(achievementFilter === "Todos" || achievementFilter === "Secreto") && (
+                  <>
+                    <SectionHeader title="Secretas" subtitle="? secretas" />
+                    {blockedSecretAchievements.length === 0 ? (
+                      <p className="text-center text-gray-500 text-sm py-3">Nenhuma conquista secreta disponível neste filtro.</p>
+                    ) : (
+                      <div className="grid grid-cols-2 gap-3">
+                        {blockedSecretAchievements.map((achievement) => (
+                          <AchievementCard
+                            key={achievement.id}
+                            achievement={achievement}
+                            highlighted={false}
+                            onClick={() => setDetailModal({ type: "achievement", value: achievement })}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
             )}
 
             {activeTab === "titles" && (
-              <div className="space-y-3">
-                {titles.map((title) => (
-                  <TitleCard key={title.id} title={title} onActivate={handleActivateTitle} />
-                ))}
+              <div className="space-y-4">
+                <RarityFilterBar selected={titleFilter} onChange={setTitleFilter} />
+
+                <SectionHeader title="Desbloqueados" subtitle={`${unlockedTitles.length} desbloqueados`} />
+                {unlockedTitles.length === 0 ? (
+                  <p className="text-center text-gray-500 text-sm py-3">Nenhum título desbloqueado neste filtro.</p>
+                ) : (
+                  <div className="space-y-3">
+                    {unlockedTitles.map((title) => (
+                      <TitleCard key={title.id} title={title} onClick={() => setDetailModal({ type: "title", value: title })} />
+                    ))}
+                  </div>
+                )}
+
+                <SectionHeader title="Bloqueados" subtitle={`${blockedRegularTitles.length} restantes`} />
+                {blockedRegularTitles.length === 0 ? (
+                  <p className="text-center text-gray-500 text-sm py-3">Nenhum título bloqueado neste filtro.</p>
+                ) : (
+                  <div className="space-y-3">
+                    {blockedRegularTitles.map((title) => (
+                      <TitleCard key={title.id} title={title} onClick={() => setDetailModal({ type: "title", value: title })} />
+                    ))}
+                  </div>
+                )}
+
+                {(titleFilter === "Todos" || titleFilter === "Secreto") && blockedSecretTitles.length > 0 && (
+                  <>
+                    <SectionHeader title="Secretos" subtitle="? secretos" />
+                    <div className="space-y-3">
+                      {blockedSecretTitles.map((title) => (
+                        <TitleCard key={title.id} title={title} onClick={() => setDetailModal({ type: "title", value: title })} />
+                      ))}
+                    </div>
+                  </>
+                )}
               </div>
             )}
           </div>
@@ -606,6 +965,20 @@ export default function Profile() {
         </div>
       )}
 
+      {detailModal && (
+        <ProfileDetailModal
+          detail={detailModal}
+          showcasedAchievementIds={showcasedAchievementIds}
+          showcasePendingId={showcasePendingId}
+          titlePendingId={titlePendingId}
+          onClose={() => setDetailModal(null)}
+          onAddAchievement={handleAddAchievementToShowcase}
+          onRemoveAchievement={handleRemoveAchievementFromShowcase}
+          onEquipTitle={handleActivateTitle}
+          onUnequipTitle={handleDeactivateTitle}
+        />
+      )}
+
       <BottomNav active="profile" />
     </div>
   );
@@ -693,98 +1066,338 @@ function SkillCard({ skill }: { skill: SkillWithProgress }) {
   );
 }
 
-function AchievementCard({ achievement }: { achievement: AchievementWithUnlock }) {
-  const unlocked = achievement.unlocked === 1;
-  const isSecret = Number(achievement.secret ?? 0) === 1;
-  const isSecretLocked = isSecret && !unlocked;
-
-  const rarityColorByLabel = {
-    Comum: "#D1D5DB",
-    Incomum: "#22C55E",
-    Raro: "#3B82F6",
-    "Mítico": "#EF4444",
-    Secreto: "#F59E0B",
-  } as const;
-
-  const normalizeRarity = (value: string | undefined) => {
-    if (!value) return undefined;
-    const normalized = value
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .toLowerCase();
-
-    if (normalized.includes("incomum")) return "Incomum" as const;
-    if (normalized.includes("comum")) return "Comum" as const;
-    if (normalized.includes("raro")) return "Raro" as const;
-    if (normalized.includes("mitico")) return "Mítico" as const;
-    if (normalized.includes("secreto")) return "Secreto" as const;
-    return undefined;
-  };
-
-  const normalizedRarity = normalizeRarity(achievement.rarity);
-  const rarityColor = unlocked
-    ? (achievement.color || (normalizedRarity ? rarityColorByLabel[normalizedRarity] : undefined) || "#D1D5DB")
-    : null;
-  const displayName = isSecretLocked ? "?" : achievement.name;
-  const displayDescription = isSecretLocked ? "?" : achievement.description;
-  const cardClassName = unlocked
-    ? "bg-white/90 text-gray-700 border-2"
-    : "bg-gray-200 text-gray-500 border-2 border-gray-300 grayscale opacity-70";
-  const icon = isSecretLocked ? "?" : unlocked ? "🏆" : "🔒";
-
+function RarityFilterBar({
+  selected,
+  onChange,
+}: {
+  selected: RarityFilterOption;
+  onChange: (option: RarityFilterOption) => void;
+}) {
   return (
-    <div
-      className={`rounded-2xl p-4 shadow-lg text-center ${cardClassName}`}
-      style={unlocked && rarityColor ? { borderColor: rarityColor } : undefined}
-    >
-      <div className="text-3xl mb-2" style={unlocked && rarityColor ? { color: rarityColor } : undefined}>{icon}</div>
-      <h3 className="font-bold text-sm mb-1" style={unlocked && rarityColor ? { color: rarityColor } : undefined}>
-        {displayName}
-      </h3>
-      <p className="text-xs opacity-90">{displayDescription}</p>
-      {unlocked && achievement.unlocked_at && (
-        <p className="text-xs opacity-75 mt-2">
-          {new Date(achievement.unlocked_at).toLocaleDateString()}
-        </p>
-      )}
+    <div className="flex flex-wrap gap-2">
+      {RARITY_FILTER_OPTIONS.map((option) => {
+        const active = option === selected;
+        return (
+          <button
+            key={option}
+            type="button"
+            onClick={() => onChange(option)}
+            className={`rounded-full px-3 py-1.5 text-xs font-semibold transition-colors ${
+              active
+                ? "bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-sm"
+                : "bg-white text-gray-600 border border-gray-200 hover:bg-gray-50"
+            }`}
+          >
+            {option}
+          </button>
+        );
+      })}
     </div>
   );
 }
 
-function TitleCard({ title, onActivate }: { title: TitleWithUnlock; onActivate: (id: number) => void }) {
-  const rarityColors = {
-    Comum: "border-gray-400",
-    Raro: "border-blue-500",
-    Épico: "border-purple-500",
-    Lendário: "border-yellow-500",
-  };
+function SectionHeader({ title, subtitle }: { title: string; subtitle: string }) {
+  return (
+    <div className="flex items-center justify-between gap-3 pt-1">
+      <h3 className="text-sm font-bold text-gray-900">{title}</h3>
+      <span className="text-xs text-gray-500">{subtitle}</span>
+    </div>
+  );
+}
 
-  const unlocked = title.unlocked === 1;
-  const active = title.is_active === 1;
+function AchievementCard({
+  achievement,
+  highlighted,
+  onClick,
+}: {
+  achievement: AchievementWithUnlock;
+  highlighted: boolean;
+  onClick: () => void;
+}) {
+  const unlocked = achievement.unlocked === 1;
+  const secretLocked = isAchievementSecretLocked(achievement);
+  const rarityColor = unlocked ? resolveRarityColor(achievement) : null;
+  const displayName = secretLocked ? "???" : achievement.name;
+  const displayDescription = secretLocked
+    ? "Complete desafios para descobrir esta conquista"
+    : achievement.description ?? "Sem descrição";
+  const badgeLabel = secretLocked ? "?" : normalizeRarity(achievement.rarity);
+  const icon = secretLocked ? "?" : achievement.icon || (unlocked ? "🏆" : "🔒");
 
   return (
-    <div className={`bg-white/80 backdrop-blur-sm rounded-2xl p-4 shadow-lg border-2 ${
-      unlocked ? rarityColors[title.rarity as keyof typeof rarityColors] || "border-gray-400" : "border-gray-200"
-    } ${active ? "ring-2 ring-emerald-500" : ""}`}>
-      <div className="flex items-center justify-between">
-        <div className="flex-1">
-          <h3 className={`font-bold ${unlocked ? "text-gray-900" : "text-gray-400"}`}>
-            {unlocked ? title.name : "🔒 Bloqueado"}
-          </h3>
-          <p className="text-xs text-gray-500">{title.rarity}</p>
+    <button
+      type="button"
+      onClick={onClick}
+      className={`w-full rounded-2xl border-2 p-4 shadow-lg text-left transition-transform hover:-translate-y-0.5 ${
+        unlocked
+          ? "bg-white/95 text-gray-800"
+          : "bg-gray-200 text-gray-500 border-gray-300 grayscale opacity-75"
+      } ${highlighted ? "ring-2 ring-emerald-300" : ""}`}
+      style={unlocked && rarityColor ? { borderColor: rarityColor } : undefined}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="text-3xl leading-none" style={unlocked && rarityColor ? { color: rarityColor } : undefined}>
+          {icon}
         </div>
-        {unlocked && !active && (
-          <button
-            onClick={() => onActivate(title.id)}
-            className="px-4 py-2 bg-emerald-500 text-white rounded-lg text-sm font-medium hover:bg-emerald-600 transition-colors"
+        <span
+          className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+            unlocked ? "text-white" : "bg-gray-300 text-gray-600"
+          }`}
+          style={unlocked && rarityColor ? { backgroundColor: rarityColor } : undefined}
+        >
+          {badgeLabel}
+        </span>
+      </div>
+      <h3 className="mt-3 text-sm font-bold leading-tight" style={unlocked && rarityColor ? { color: rarityColor } : undefined}>
+        {displayName}
+      </h3>
+      <p className="mt-1 text-xs leading-snug">{displayDescription}</p>
+      {unlocked && achievement.unlocked_at && (
+        <p className="mt-2 text-[11px] text-gray-500">
+          {formatUnlockDateTime(achievement.unlocked_at) ?? "Data indisponível"}
+        </p>
+      )}
+    </button>
+  );
+}
+
+function TitleCard({ title, onClick }: { title: TitleWithUnlock; onClick: () => void }) {
+  const unlocked = title.unlocked === 1;
+  const active = title.is_active === 1;
+  const secretLocked = isTitleSecretLocked(title);
+  const rarityColor = unlocked ? resolveRarityColor(title) : null;
+  const displayName = secretLocked ? "???" : title.name;
+  const displayDescription = secretLocked
+    ? "Continue evoluindo para descobrir este título."
+    : title.description ?? "Sem descrição";
+  const badgeLabel = secretLocked ? "?" : normalizeRarity(title.rarity);
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`w-full rounded-2xl border-2 p-4 text-left shadow-lg transition-transform hover:-translate-y-0.5 ${
+        unlocked
+          ? "bg-white/90 text-gray-800"
+          : "bg-gray-200 text-gray-500 border-gray-300 grayscale opacity-75"
+      } ${active ? "ring-2 ring-emerald-400" : ""}`}
+      style={unlocked && rarityColor ? { borderColor: rarityColor } : undefined}
+    >
+      <div className="flex items-center justify-between gap-3">
+        <h3 className="font-bold leading-tight" style={unlocked && rarityColor ? { color: rarityColor } : undefined}>
+          {displayName}
+        </h3>
+        <span
+          className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+            unlocked ? "text-white" : "bg-gray-300 text-gray-600"
+          }`}
+          style={unlocked && rarityColor ? { backgroundColor: rarityColor } : undefined}
+        >
+          {badgeLabel}
+        </span>
+      </div>
+      <p className="mt-1 text-xs">{displayDescription}</p>
+      {active && <p className="mt-2 text-[11px] font-semibold text-emerald-700">Equipado no perfil</p>}
+    </button>
+  );
+}
+
+function ProfileDetailModal({
+  detail,
+  showcasedAchievementIds,
+  showcasePendingId,
+  titlePendingId,
+  onClose,
+  onAddAchievement,
+  onRemoveAchievement,
+  onEquipTitle,
+  onUnequipTitle,
+}: {
+  detail: Exclude<DetailModalState, null>;
+  showcasedAchievementIds: number[];
+  showcasePendingId: number | null;
+  titlePendingId: number | null;
+  onClose: () => void;
+  onAddAchievement: (id: number) => Promise<void>;
+  onRemoveAchievement: (id: number) => Promise<void>;
+  onEquipTitle: (id: number) => Promise<void>;
+  onUnequipTitle: (id: number) => Promise<void>;
+}) {
+  if (detail.type === "achievement") {
+    const achievement = detail.value;
+    const unlocked = achievement.unlocked === 1;
+    const secretLocked = isAchievementSecretLocked(achievement);
+    const rarityColor = unlocked ? resolveRarityColor(achievement) : "#9CA3AF";
+    const rarityLabel = secretLocked ? "?" : normalizeRarity(achievement.rarity);
+    const unlockedAt = unlocked ? formatUnlockDateTime(achievement.unlocked_at) : null;
+    const isShowcased = showcasedAchievementIds.includes(achievement.id);
+    const showcaseLimitReached = showcasedAchievementIds.length >= SHOWCASED_ACHIEVEMENT_LIMIT && !isShowcased;
+    const canManageShowcase = unlocked;
+    const pending = showcasePendingId === achievement.id;
+    const displayName = secretLocked ? "???" : achievement.name;
+    const displayDescription = secretLocked ? null : achievement.description ?? "Sem descrição.";
+    const displayCondition = secretLocked ? null : formatUnlockCondition(achievement.condition);
+    const icon = secretLocked ? "?" : achievement.icon || (unlocked ? "🏆" : "🔒");
+
+    return (
+      <div className="fixed inset-0 z-[60] bg-black/50 backdrop-blur-sm flex items-end sm:items-center justify-center">
+        <button type="button" className="absolute inset-0" aria-label="Fechar modal" onClick={onClose} />
+        <div className="relative z-10 w-full sm:max-w-xl bg-white rounded-t-3xl sm:rounded-3xl p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-lg font-bold text-gray-900">Detalhes da Conquista</h2>
+            <button type="button" onClick={onClose} className="fl-btn-secondary rounded-lg px-3 py-1 text-sm">Fechar</button>
+          </div>
+
+          <div className="mt-5 flex items-start gap-4">
+            <div
+              className={`h-16 w-16 rounded-2xl border-2 flex items-center justify-center text-3xl ${
+                unlocked ? "bg-white" : "bg-gray-100 grayscale opacity-80"
+              }`}
+              style={unlocked ? { borderColor: rarityColor, color: rarityColor } : undefined}
+            >
+              {icon}
+            </div>
+            <div className="flex-1">
+              <h3 className="text-xl font-bold leading-tight" style={unlocked ? { color: rarityColor } : undefined}>
+                {displayName}
+              </h3>
+              <span
+                className={`inline-flex mt-2 rounded-full px-2.5 py-1 text-xs font-semibold ${
+                  unlocked ? "text-white" : "bg-gray-200 text-gray-600"
+                }`}
+                style={unlocked ? { backgroundColor: rarityColor } : undefined}
+              >
+                {rarityLabel}
+              </span>
+            </div>
+          </div>
+
+          <div className="mt-5 space-y-3 text-sm text-gray-700">
+            {secretLocked ? (
+              <p>Complete desafios para descobrir esta conquista</p>
+            ) : (
+              <>
+                <p>{displayDescription}</p>
+                <p>
+                  <strong className="text-gray-900">Condição:</strong>{" "}
+                  {displayCondition ?? "Condição não informada."}
+                </p>
+              </>
+            )}
+            {unlockedAt && (
+              <p>
+                <strong className="text-gray-900">Desbloqueada em:</strong> {unlockedAt}
+              </p>
+            )}
+          </div>
+
+          {canManageShowcase && (
+            <div className="mt-6">
+              {isShowcased ? (
+                <button
+                  type="button"
+                  onClick={() => { void onRemoveAchievement(achievement.id); }}
+                  disabled={pending}
+                  className="fl-btn-secondary rounded-xl px-4 py-2 disabled:opacity-60"
+                >
+                  {pending ? "Removendo..." : "Remover do Perfil"}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => { void onAddAchievement(achievement.id); }}
+                  disabled={pending || showcaseLimitReached}
+                  className="fl-btn-primary rounded-xl px-4 py-2 disabled:opacity-60"
+                >
+                  {pending ? "Adicionando..." : "Adicionar ao Perfil"}
+                </button>
+              )}
+              {showcaseLimitReached && (
+                <p className="mt-2 text-xs text-amber-700">
+                  Limite de {SHOWCASED_ACHIEVEMENT_LIMIT} conquistas em destaque atingido.
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  const title = detail.value;
+  const unlocked = title.unlocked === 1;
+  const active = title.is_active === 1;
+  const secretLocked = isTitleSecretLocked(title);
+  const rarityColor = unlocked ? resolveRarityColor(title) : "#9CA3AF";
+  const rarityLabel = secretLocked ? "?" : normalizeRarity(title.rarity);
+  const unlockedAt = unlocked ? formatUnlockDateTime(title.unlocked_at) : null;
+  const displayName = secretLocked ? "???" : title.name;
+  const displayDescription = secretLocked
+    ? "Continue evoluindo para descobrir este título."
+    : title.description ?? "Sem descrição.";
+  const displayCondition = secretLocked ? null : formatUnlockCondition(title.unlock_condition);
+  const pending = titlePendingId === title.id;
+
+  return (
+    <div className="fixed inset-0 z-[60] bg-black/50 backdrop-blur-sm flex items-end sm:items-center justify-center">
+      <button type="button" className="absolute inset-0" aria-label="Fechar modal" onClick={onClose} />
+      <div className="relative z-10 w-full sm:max-w-xl bg-white rounded-t-3xl sm:rounded-3xl p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="text-lg font-bold text-gray-900">Detalhes do Título</h2>
+          <button type="button" onClick={onClose} className="fl-btn-secondary rounded-lg px-3 py-1 text-sm">Fechar</button>
+        </div>
+
+        <div className="mt-5">
+          <h3 className="text-2xl font-bold leading-tight" style={unlocked ? { color: rarityColor } : undefined}>
+            {displayName}
+          </h3>
+          <span
+            className={`inline-flex mt-2 rounded-full px-2.5 py-1 text-xs font-semibold ${
+              unlocked ? "text-white" : "bg-gray-200 text-gray-600"
+            }`}
+            style={unlocked ? { backgroundColor: rarityColor } : undefined}
           >
-            Ativar
-          </button>
-        )}
-        {active && (
-          <span className="px-4 py-2 bg-emerald-100 text-emerald-700 rounded-lg text-sm font-medium">
-            Ativo
+            {rarityLabel}
           </span>
+        </div>
+
+        <div className="mt-5 space-y-3 text-sm text-gray-700">
+          <p>{displayDescription}</p>
+          {!secretLocked && (
+            <p>
+              <strong className="text-gray-900">Condição:</strong>{" "}
+              {displayCondition ?? "Condição não informada."}
+            </p>
+          )}
+          {unlockedAt && (
+            <p>
+              <strong className="text-gray-900">Desbloqueado em:</strong> {unlockedAt}
+            </p>
+          )}
+        </div>
+
+        {unlocked && (
+          <div className="mt-6">
+            {active ? (
+              <button
+                type="button"
+                onClick={() => { void onUnequipTitle(title.id); }}
+                disabled={pending}
+                className="fl-btn-secondary rounded-xl px-4 py-2 disabled:opacity-60"
+              >
+                {pending ? "Desequipando..." : "Desequipar"}
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => { void onEquipTitle(title.id); }}
+                disabled={pending}
+                className="fl-btn-primary rounded-xl px-4 py-2 disabled:opacity-60"
+              >
+                {pending ? "Equipando..." : "Equipar"}
+              </button>
+            )}
+          </div>
         )}
       </div>
     </div>

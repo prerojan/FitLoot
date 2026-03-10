@@ -1,4 +1,4 @@
-﻿// ====================================
+// ====================================
 // src/react-app/components/AIMissionGenerator.tsx
 // Botão para gerar missões personalizadas com IA
 // ====================================

@@ -1,4 +1,4 @@
-﻿import type { UserProfileTheme } from "@/react-app/types/profile";
+import type { UserProfileTheme } from "@/react-app/types/profile";
 
 const CLASS_PREFIXES = ["font-title-"];
 const DEFAULT_PRIMARY_COLOR = "#10b981";

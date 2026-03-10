@@ -1,4 +1,4 @@
-﻿import LoadingBall from "@/react-app/components/LoadingBall";
+import LoadingBall from "@/react-app/components/LoadingBall";
 
 type PageLoaderProps = {
   fullScreen?: boolean | undefined;

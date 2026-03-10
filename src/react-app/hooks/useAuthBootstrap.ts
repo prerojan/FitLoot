@@ -1,4 +1,4 @@
-﻿import { useCallback } from "react";
+import { useCallback } from "react";
 import { AUTHENTICATED_HINT_KEY, PENDING_404_ACHIEVEMENT_KEY } from "@/react-app/constants/auth";
 import { triggerRouteNotFoundAchievement } from "@/react-app/services/achievementService";
 import { fetchCurrentUser, notifyAppOpen, prefetchCoreRoutes } from "@/react-app/services/authService";

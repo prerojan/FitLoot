@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useAuth } from "@/react-app/contexts/auth";
 import { useNavigate } from "react-router";
 import BottomNav from "@/react-app/components/BottomNav";
@@ -217,7 +217,7 @@ export default function Friends() {
             <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
             <input
               type="text"
-              placeholder="Buscar usuÃ¡rios por username..."
+              placeholder="Buscar usuários por username..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               onKeyPress={(e) => e.key === 'Enter' && searchUsers()}
@@ -243,7 +243,7 @@ export default function Friends() {
                     <div>
                       <div className="font-bold text-gray-900">{result.username}</div>
                       <div className="text-sm text-gray-500">{result.full_name}</div>
-                      <Badge className="mt-1">NÃ­vel {result.level}</Badge>
+                      <Badge className="mt-1">Nível {result.level}</Badge>
                     </div>
                   </div>
                   <Button
@@ -265,7 +265,7 @@ export default function Friends() {
         {/* Pending Requests */}
         {pendingRequests.length > 0 && (
           <div className="mb-6">
-            <h2 className="fl-title-card mb-4">SolicitaÃ§Ãµes Pendentes ({pendingRequests.length})</h2>
+            <h2 className="fl-title-card mb-4">Solicitações Pendentes ({pendingRequests.length})</h2>
             <div className="space-y-3">
               {pendingRequests.map((request) => (
                 <div key={request.id} className="fl-card p-4 flex items-center justify-between">
@@ -299,8 +299,8 @@ export default function Friends() {
         {friends.length === 0 ? (
           <div className="text-center py-12">
             <Users className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-            <p className="text-gray-500">VocÃª ainda nÃ£o tem amigos adicionados</p>
-            <p className="text-gray-400 text-sm">Use a busca acima para encontrar usuÃ¡rios</p>
+            <p className="text-gray-500">Você ainda não tem amigos adicionados</p>
+            <p className="text-gray-400 text-sm">Use a busca acima para encontrar usuários</p>
           </div>
         ) : (
           <div className="grid md:grid-cols-2 gap-4">
@@ -343,8 +343,4 @@ export default function Friends() {
     </div>
   );
 }
-
-
-
-
 

@@ -1,4 +1,4 @@
-﻿import { useMemo, useRef, useState, useEffect, type ChangeEventHandler } from "react";
+import { useMemo, useRef, useState, useEffect, type ChangeEventHandler } from "react";
 import { useNavigate } from "react-router";
 import { Camera, ImagePlus, RefreshCw, Save, AlertTriangle, CheckCircle2 } from "lucide-react";
 import BottomNav from "@/react-app/components/BottomNav";

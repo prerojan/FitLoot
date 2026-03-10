@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useAuth } from "@/react-app/contexts/auth";
 import { useNavigate, useSearchParams } from "react-router";
 import BottomNav from "@/react-app/components/BottomNav";

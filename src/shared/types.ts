@@ -257,6 +257,7 @@ export type TitleWithUnlock = Title & {
   unlocked?: number | undefined;
   is_active?: number | undefined;
   is_equipped?: number | undefined;
+  unlocked_at?: string | undefined;
 };
 
 export type RankingPlayer = {
