@@ -1,5 +1,5 @@
-import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router";
-import { useState, useEffect, lazy, Suspense } from "react";
+import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate } from "react-router";
+import { useState, useEffect, lazy, Suspense, useCallback } from "react";
 import { Analytics } from "@vercel/analytics/react";
 import { SpeedInsights } from "@vercel/speed-insights/react";
 import PageLoader from "@/react-app/components/PageLoader";
@@ -7,7 +7,6 @@ import LoadingBall from "@/react-app/components/LoadingBall";
 import { ROUTE_PATHS, AUTHENTICATED_HINT_KEY } from "@/react-app/constants/auth";
 import { AuthContext, useAuth } from "@/react-app/contexts/auth";
 import { useAuthBootstrap } from "@/react-app/hooks/useAuthBootstrap";
-import { resolveAuthenticatedStartRoute } from "@/react-app/services/authService";
 import type { User } from "@/react-app/types/auth";
 import { applyProfileTheme } from "@/react-app/utils/theme";
 import { clearJsonCache } from "@/react-app/utils/api";
@@ -27,7 +26,7 @@ const FoodAnalysis = lazy(() => import("@/react-app/pages/FoodAnalysis"));
 const LandingPage = lazy(() => import("@/react-app/pages/Landing"));
 const NotFoundPage = lazy(() => import("@/react-app/pages/NotFound"));
 
-const AppStartRoute = () => {
+const AuthRoute = ({ children }: { children: React.ReactNode }) => {
   const { user, loading } = useAuth();
 
   if (loading) {
@@ -41,28 +40,10 @@ const AppStartRoute = () => {
   }
 
   if (!user) return <Navigate to={ROUTE_PATHS.login} replace />;
-  return <Navigate to={resolveAuthenticatedStartRoute(user)} replace />;
-};
-
-const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
-  const { user, loading } = useAuth();
-
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 px-6 pt-20">
-        <div className="fl-card p-6 flex items-center justify-center">
-          <LoadingBall size="md" />
-        </div>
-      </div>
-    );
-  }
-  if (!user) return <Navigate to={ROUTE_PATHS.login} replace />;
-  const target = resolveAuthenticatedStartRoute(user);
-  if (target !== ROUTE_PATHS.home) return <Navigate to={target} replace />;
   return <>{children}</>;
 };
 
-const SessionRoute = ({ children }: { children: React.ReactNode }) => {
+const AppRoute = () => {
   const { user, loading } = useAuth();
 
   if (loading) {
@@ -76,49 +57,45 @@ const SessionRoute = ({ children }: { children: React.ReactNode }) => {
   }
 
   if (!user) return <Navigate to={ROUTE_PATHS.login} replace />;
-  if (user.onboarding_completed !== 1) return <Navigate to={ROUTE_PATHS.onboarding} replace />;
-  return <>{children}</>;
+  return <Navigate to={ROUTE_PATHS.home} replace />;
 };
 
-const LoginRoute = () => {
-  const { user, loading } = useAuth();
-
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 px-6 pt-20">
-        <div className="fl-card p-6 flex items-center justify-center">
-          <LoadingBall size="md" />
-        </div>
-      </div>
-    );
-  }
-
-  if (user) return <Navigate to={resolveAuthenticatedStartRoute(user)} replace />;
-  return <HomePage />;
+type InitialRedirectControllerProps = {
+  user: User | null;
+  loading: boolean;
+  initialRedirectDone: boolean;
+  onInitialRedirectHandled: () => void;
 };
 
-const RootRoute = () => {
-  const { user, loading } = useAuth();
+const InitialRedirectController = ({
+  user,
+  loading,
+  initialRedirectDone,
+  onInitialRedirectHandled,
+}: InitialRedirectControllerProps) => {
+  const navigate = useNavigate();
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 px-6 pt-20">
-        <div className="fl-card p-6 flex items-center justify-center">
-          <LoadingBall size="md" />
-        </div>
-      </div>
-    );
-  }
+  useEffect(() => {
+    if (loading || initialRedirectDone) return;
 
-  if (user) return <Navigate to={resolveAuthenticatedStartRoute(user)} replace />;
-  return <LandingPage />;
+    onInitialRedirectHandled();
+    if (user) {
+      navigate(ROUTE_PATHS.home, { replace: true });
+    }
+  }, [initialRedirectDone, loading, navigate, onInitialRedirectHandled, user]);
+
+  return null;
 };
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [initialRedirectDone, setInitialRedirectDone] = useState(false);
 
   const checkAuth = useAuthBootstrap({ setUser, setLoading });
+  const markInitialRedirectHandled = useCallback(() => {
+    setInitialRedirectDone(true);
+  }, []);
 
   const logout = () => {
     localStorage.removeItem(AUTHENTICATED_HINT_KEY);
@@ -135,23 +112,29 @@ export default function App() {
     <AuthContext.Provider value={{ user, loading, checkAuth, logout }}>
       <Router>
         <Suspense fallback={<PageLoader />}>
+          <InitialRedirectController
+            user={user}
+            loading={loading}
+            initialRedirectDone={initialRedirectDone}
+            onInitialRedirectHandled={markInitialRedirectHandled}
+          />
           <Routes>
-            <Route path={ROUTE_PATHS.landing} element={<RootRoute />} />
+            <Route path={ROUTE_PATHS.landing} element={<LandingPage />} />
             <Route path={ROUTE_PATHS.publicLanding} element={<LandingPage />} />
-            <Route path={ROUTE_PATHS.login} element={<LoginRoute />} />
-            <Route path={ROUTE_PATHS.app} element={<AppStartRoute />} />
-            <Route path={ROUTE_PATHS.paymentPending} element={<SessionRoute><PaymentPending /></SessionRoute>} />
-            <Route path={ROUTE_PATHS.payment} element={<SessionRoute><PaymentRequired /></SessionRoute>} />
-            <Route path={ROUTE_PATHS.home} element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+            <Route path={ROUTE_PATHS.login} element={<HomePage />} />
+            <Route path={ROUTE_PATHS.app} element={<AppRoute />} />
+            <Route path={ROUTE_PATHS.paymentPending} element={<AuthRoute><PaymentPending /></AuthRoute>} />
+            <Route path={ROUTE_PATHS.payment} element={<AuthRoute><PaymentRequired /></AuthRoute>} />
+            <Route path={ROUTE_PATHS.home} element={<AuthRoute><Dashboard /></AuthRoute>} />
             <Route path={ROUTE_PATHS.onboarding} element={<Onboarding />} />
-            <Route path={ROUTE_PATHS.dashboard} element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
-            <Route path={ROUTE_PATHS.profile} element={<ProtectedRoute><Profile /></ProtectedRoute>} />
-            <Route path={ROUTE_PATHS.shop} element={<ProtectedRoute><Shop /></ProtectedRoute>} />
-            <Route path={ROUTE_PATHS.ranking} element={<ProtectedRoute><Ranking /></ProtectedRoute>} />
-            <Route path={ROUTE_PATHS.friends} element={<ProtectedRoute><Arena /></ProtectedRoute>} />
-            <Route path={ROUTE_PATHS.minigames} element={<ProtectedRoute><MiniGames /></ProtectedRoute>} />
-            <Route path={ROUTE_PATHS.aiChat} element={<ProtectedRoute><AIChat /></ProtectedRoute>} />
-            <Route path={ROUTE_PATHS.foodAnalysis} element={<ProtectedRoute><FoodAnalysis /></ProtectedRoute>} />
+            <Route path={ROUTE_PATHS.dashboard} element={<AuthRoute><Dashboard /></AuthRoute>} />
+            <Route path={ROUTE_PATHS.profile} element={<AuthRoute><Profile /></AuthRoute>} />
+            <Route path={ROUTE_PATHS.shop} element={<AuthRoute><Shop /></AuthRoute>} />
+            <Route path={ROUTE_PATHS.ranking} element={<AuthRoute><Ranking /></AuthRoute>} />
+            <Route path={ROUTE_PATHS.friends} element={<AuthRoute><Arena /></AuthRoute>} />
+            <Route path={ROUTE_PATHS.minigames} element={<AuthRoute><MiniGames /></AuthRoute>} />
+            <Route path={ROUTE_PATHS.aiChat} element={<AuthRoute><AIChat /></AuthRoute>} />
+            <Route path={ROUTE_PATHS.foodAnalysis} element={<AuthRoute><FoodAnalysis /></AuthRoute>} />
             <Route path={ROUTE_PATHS.wildcard} element={<NotFoundPage />} />
           </Routes>
         </Suspense>
