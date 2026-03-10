@@ -1118,44 +1118,49 @@ function AchievementCard({
   const secretLocked = isAchievementSecretLocked(achievement);
   const rarityColor = unlocked ? resolveRarityColor(achievement) : null;
   const displayName = secretLocked ? "???" : achievement.name;
-  const displayDescription = secretLocked
-    ? "Complete desafios para descobrir esta conquista"
-    : achievement.description ?? "Sem descrição";
-  const badgeLabel = secretLocked ? "?" : normalizeRarity(achievement.rarity);
-  const icon = secretLocked ? "?" : achievement.icon || (unlocked ? "🏆" : "🔒");
+  const displayDescription = achievement.description ?? "Sem descri\u00e7\u00e3o";
+  const displayCondition = formatUnlockCondition(achievement.condition);
+  const badgeLabel = normalizeRarity(achievement.rarity);
+  const cardClassName = [
+    "w-full rounded-xl border-2 p-3 shadow-lg text-left transition-transform hover:-translate-y-0.5",
+    unlocked ? "bg-white/95 text-gray-800" : "bg-gray-200 text-gray-500 border-gray-300 grayscale opacity-75",
+    highlighted ? "ring-2 ring-emerald-300" : "",
+  ].filter(Boolean).join(" ");
 
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`w-full rounded-2xl border-2 p-4 shadow-lg text-left transition-transform hover:-translate-y-0.5 ${
-        unlocked
-          ? "bg-white/95 text-gray-800"
-          : "bg-gray-200 text-gray-500 border-gray-300 grayscale opacity-75"
-      } ${highlighted ? "ring-2 ring-emerald-300" : ""}`}
+      className={cardClassName}
       style={unlocked && rarityColor ? { borderColor: rarityColor } : undefined}
     >
-      <div className="flex items-start justify-between gap-3">
-        <div className="text-3xl leading-none" style={unlocked && rarityColor ? { color: rarityColor } : undefined}>
-          {icon}
-        </div>
-        <span
-          className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-            unlocked ? "text-white" : "bg-gray-300 text-gray-600"
-          }`}
-          style={unlocked && rarityColor ? { backgroundColor: rarityColor } : undefined}
-        >
-          {badgeLabel}
-        </span>
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="text-sm font-bold leading-tight" style={unlocked && rarityColor ? { color: rarityColor } : undefined}>
+          {displayName}
+        </h3>
+        {unlocked && (
+          <span
+            className="rounded-full px-2 py-0.5 text-[10px] font-semibold text-white"
+            style={rarityColor ? { backgroundColor: rarityColor } : undefined}
+          >
+            {badgeLabel}
+          </span>
+        )}
       </div>
-      <h3 className="mt-3 text-sm font-bold leading-tight" style={unlocked && rarityColor ? { color: rarityColor } : undefined}>
-        {displayName}
-      </h3>
-      <p className="mt-1 text-xs leading-snug">{displayDescription}</p>
-      {unlocked && achievement.unlocked_at && (
-        <p className="mt-2 text-[11px] text-gray-500">
-          {formatUnlockDateTime(achievement.unlocked_at) ?? "Data indisponível"}
-        </p>
+
+      {unlocked && (
+        <>
+          <p className="mt-1 text-xs leading-snug">{displayDescription}</p>
+          <p className="mt-1 text-[11px] leading-snug text-gray-600">
+            <strong className="text-gray-700">Condi\u00e7\u00e3o:</strong>{" "}
+            {displayCondition ?? "Condi\u00e7\u00e3o n\u00e3o informada."}
+          </p>
+          {achievement.unlocked_at && (
+            <p className="mt-2 text-[11px] text-gray-500">
+              {formatUnlockDateTime(achievement.unlocked_at) ?? "Data indispon\u00edvel"}
+            </p>
+          )}
+        </>
       )}
     </button>
   );
@@ -1228,16 +1233,16 @@ function ProfileDetailModal({
     const unlocked = achievement.unlocked === 1;
     const secretLocked = isAchievementSecretLocked(achievement);
     const rarityColor = unlocked ? resolveRarityColor(achievement) : "#9CA3AF";
-    const rarityLabel = secretLocked ? "?" : normalizeRarity(achievement.rarity);
+    const rarityLabel = normalizeRarity(achievement.rarity);
     const unlockedAt = unlocked ? formatUnlockDateTime(achievement.unlocked_at) : null;
     const isShowcased = showcasedAchievementIds.includes(achievement.id);
     const showcaseLimitReached = showcasedAchievementIds.length >= SHOWCASED_ACHIEVEMENT_LIMIT && !isShowcased;
     const canManageShowcase = unlocked;
     const pending = showcasePendingId === achievement.id;
     const displayName = secretLocked ? "???" : achievement.name;
-    const displayDescription = secretLocked ? null : achievement.description ?? "Sem descrição.";
-    const displayCondition = secretLocked ? null : formatUnlockCondition(achievement.condition);
-    const icon = secretLocked ? "?" : achievement.icon || (unlocked ? "🏆" : "🔒");
+    const displayDescription = achievement.description ?? "Sem descri\u00e7\u00e3o.";
+    const displayCondition = formatUnlockCondition(achievement.condition);
+    const icon = secretLocked ? "?" : achievement.icon || "?";
 
     return (
       <div className="fixed inset-0 z-[60] bg-black/50 backdrop-blur-sm flex items-end sm:items-center justify-center">
@@ -1248,48 +1253,46 @@ function ProfileDetailModal({
             <button type="button" onClick={onClose} className="fl-btn-secondary rounded-lg px-3 py-1 text-sm">Fechar</button>
           </div>
 
-          <div className="mt-5 flex items-start gap-4">
-            <div
-              className={`h-16 w-16 rounded-2xl border-2 flex items-center justify-center text-3xl ${
-                unlocked ? "bg-white" : "bg-gray-100 grayscale opacity-80"
-              }`}
-              style={unlocked ? { borderColor: rarityColor, color: rarityColor } : undefined}
-            >
-              {icon}
-            </div>
-            <div className="flex-1">
-              <h3 className="text-xl font-bold leading-tight" style={unlocked ? { color: rarityColor } : undefined}>
-                {displayName}
-              </h3>
-              <span
-                className={`inline-flex mt-2 rounded-full px-2.5 py-1 text-xs font-semibold ${
-                  unlocked ? "text-white" : "bg-gray-200 text-gray-600"
-                }`}
-                style={unlocked ? { backgroundColor: rarityColor } : undefined}
-              >
-                {rarityLabel}
-              </span>
-            </div>
-          </div>
+          {unlocked ? (
+            <>
+              <div className="mt-5 flex items-start gap-4">
+                <div
+                  className="h-16 w-16 rounded-2xl border-2 flex items-center justify-center text-3xl bg-white"
+                  style={{ borderColor: rarityColor, color: rarityColor }}
+                >
+                  {icon}
+                </div>
+                <div className="flex-1">
+                  <h3 className="text-xl font-bold leading-tight" style={{ color: rarityColor }}>
+                    {displayName}
+                  </h3>
+                  <span
+                    className="inline-flex mt-2 rounded-full px-2.5 py-1 text-xs font-semibold text-white"
+                    style={{ backgroundColor: rarityColor }}
+                  >
+                    {rarityLabel}
+                  </span>
+                </div>
+              </div>
 
-          <div className="mt-5 space-y-3 text-sm text-gray-700">
-            {secretLocked ? (
-              <p>Complete desafios para descobrir esta conquista</p>
-            ) : (
-              <>
+              <div className="mt-5 space-y-3 text-sm text-gray-700">
                 <p>{displayDescription}</p>
                 <p>
-                  <strong className="text-gray-900">Condição:</strong>{" "}
-                  {displayCondition ?? "Condição não informada."}
+                  <strong className="text-gray-900">Condi\u00e7\u00e3o:</strong>{" "}
+                  {displayCondition ?? "Condi\u00e7\u00e3o n\u00e3o informada."}
                 </p>
-              </>
-            )}
-            {unlockedAt && (
-              <p>
-                <strong className="text-gray-900">Desbloqueada em:</strong> {unlockedAt}
-              </p>
-            )}
-          </div>
+                {unlockedAt && (
+                  <p>
+                    <strong className="text-gray-900">Desbloqueada em:</strong> {unlockedAt}
+                  </p>
+                )}
+              </div>
+            </>
+          ) : (
+            <div className="mt-5">
+              <h3 className="text-xl font-bold leading-tight text-gray-900">{displayName}</h3>
+            </div>
+          )}
 
           {canManageShowcase && (
             <div className="mt-6">

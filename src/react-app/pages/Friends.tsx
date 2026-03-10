@@ -21,6 +21,17 @@ interface Friend {
   status: string;
 }
 
+interface FriendRequest {
+  id: number;
+  friend_user_id: string;
+  friend_username: string;
+  friend_full_name: string;
+  friend_level: number;
+  friend_xp: number;
+  friend_streak: number;
+  created_at?: string | undefined;
+}
+
 interface SearchResult {
   user_id: string;
   username: string;
@@ -33,35 +44,42 @@ export default function Friends() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [friends, setFriends] = useState<Friend[]>([]);
-  const [pendingRequests, setPendingRequests] = useState<Friend[]>([]);
+  const [receivedRequests, setReceivedRequests] = useState<FriendRequest[]>([]);
+  const [sentRequests, setSentRequests] = useState<FriendRequest[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [loading, setLoading] = useState(true);
   const [searching, setSearching] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-
   const loadFriends = useCallback(async () => {
     try {
       setError(null);
-      const [friendsRes, requestsRes] = await Promise.all([
+      const [friendsRes, receivedRes, sentRes] = await Promise.all([
         api("/api/friends"),
-        api("/api/friends/requests")
+        api("/api/friends/requests/received"),
+        api("/api/friends/requests/sent"),
       ]);
 
-      if (friendsRes.status === 401 || friendsRes.status === 403 || requestsRes.status === 401 || requestsRes.status === 403) {
+      if (
+        friendsRes.status === 401 || friendsRes.status === 403
+        || receivedRes.status === 401 || receivedRes.status === 403
+        || sentRes.status === 401 || sentRes.status === 403
+      ) {
         navigate("/app");
         return;
       }
 
-      if (!friendsRes.ok || !requestsRes.ok) {
+      if (!friendsRes.ok || !receivedRes.ok || !sentRes.ok) {
         throw new Error("Falha ao carregar amigos.");
       }
 
       const friendsData = await friendsRes.json();
-      const requestsData = await requestsRes.json();
+      const receivedData = await receivedRes.json();
+      const sentData = await sentRes.json();
       setFriends(Array.isArray(friendsData) ? friendsData : []);
-      setPendingRequests(Array.isArray(requestsData) ? requestsData : []);
+      setReceivedRequests(Array.isArray(receivedData) ? receivedData : []);
+      setSentRequests(Array.isArray(sentData) ? sentData : []);
     } catch (loadError) {
       console.error("Error loading friends:", loadError);
       setError("Não foi possível carregar a lista de amigos agora.");
@@ -109,7 +127,7 @@ export default function Friends() {
       const response = await api("/api/friends/request", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ friend_user_id: friendUserId })
+        body: JSON.stringify({ friend_user_id: friendUserId }),
       });
 
       if (response.status === 401 || response.status === 403) {
@@ -125,14 +143,15 @@ export default function Friends() {
 
       setSearchQuery("");
       setSearchResults([]);
-    } catch (error) {
-      console.error("Error sending friend request:", error);
+      void loadFriends();
+    } catch (requestError) {
+      console.error("Error sending friend request:", requestError);
     }
   };
 
   const acceptFriendRequest = async (requestId: number) => {
     try {
-      const response = await api(`/api/friends/accept`, {
+      const response = await api("/api/friends/accept", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ request_id: requestId }),
@@ -150,14 +169,14 @@ export default function Friends() {
       }
 
       void loadFriends();
-    } catch (error) {
-      console.error("Error accepting request:", error);
+    } catch (acceptError) {
+      console.error("Error accepting request:", acceptError);
     }
   };
 
   const rejectFriendRequest = async (requestId: number) => {
     try {
-      const response = await api(`/api/friends/reject`, {
+      const response = await api("/api/friends/reject", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ request_id: requestId }),
@@ -175,8 +194,31 @@ export default function Friends() {
       }
 
       void loadFriends();
-    } catch (error) {
-      console.error("Error rejecting request:", error);
+    } catch (rejectError) {
+      console.error("Error rejecting request:", rejectError);
+    }
+  };
+
+  const cancelFriendRequest = async (requestId: number) => {
+    try {
+      const response = await api(`/api/friends/requests/${requestId}`, {
+        method: "DELETE",
+      });
+
+      if (response.status === 401 || response.status === 403) {
+        navigate("/app");
+        return;
+      }
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as { error?: string | undefined } | null;
+        setError(payload?.error || "Não foi possível cancelar a solicitação.");
+        return;
+      }
+
+      void loadFriends();
+    } catch (cancelError) {
+      console.error("Error canceling request:", cancelError);
     }
   };
 
@@ -219,8 +261,8 @@ export default function Friends() {
               type="text"
               placeholder="Buscar usuários por username..."
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              onKeyPress={(e) => e.key === 'Enter' && searchUsers()}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              onKeyPress={(event) => event.key === "Enter" && searchUsers()}
               className="w-full pl-12 pr-4 py-3 rounded-full border-2 border-gray-200 focus:border-emerald-500 focus:outline-none"
             />
             <Button
@@ -262,12 +304,14 @@ export default function Friends() {
       </div>
 
       <div className="max-w-screen-xl mx-auto px-4 py-6">
-        {/* Pending Requests */}
-        {pendingRequests.length > 0 && (
-          <div className="mb-6">
-            <h2 className="fl-title-card mb-4">Solicitações Pendentes ({pendingRequests.length})</h2>
+        {/* Received Requests */}
+        <div className="mb-6">
+          <h2 className="fl-title-card mb-4">Pedidos Recebidos ({receivedRequests.length})</h2>
+          {receivedRequests.length === 0 ? (
+            <p className="text-sm text-gray-500">Nenhum pedido recebido pendente.</p>
+          ) : (
             <div className="space-y-3">
-              {pendingRequests.map((request) => (
+              {receivedRequests.map((request) => (
                 <div key={request.id} className="fl-card p-4 flex items-center justify-between">
                   <div>
                     <div className="font-bold text-gray-900">{request.friend_username}</div>
@@ -290,12 +334,37 @@ export default function Friends() {
                 </div>
               ))}
             </div>
-          </div>
-        )}
+          )}
+        </div>
+
+        {/* Sent Requests */}
+        <div className="mb-6">
+          <h2 className="fl-title-card mb-4">Pedidos Enviados ({sentRequests.length})</h2>
+          {sentRequests.length === 0 ? (
+            <p className="text-sm text-gray-500">Nenhum pedido enviado pendente.</p>
+          ) : (
+            <div className="space-y-3">
+              {sentRequests.map((request) => (
+                <div key={request.id} className="fl-card p-4 flex items-center justify-between">
+                  <div>
+                    <div className="font-bold text-gray-900">{request.friend_username}</div>
+                    <div className="text-sm text-gray-500">{request.friend_full_name}</div>
+                  </div>
+                  <button
+                    onClick={() => cancelFriendRequest(request.id)}
+                    className="bg-gray-200 text-gray-700 px-3 py-2 rounded-full hover:bg-gray-300 text-sm font-semibold"
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
 
         {/* Friends List */}
         <h2 className="fl-title-card mb-4">Meus Amigos ({friends.length})</h2>
-        
+
         {friends.length === 0 ? (
           <div className="text-center py-12">
             <Users className="w-16 h-16 text-gray-300 mx-auto mb-4" />
@@ -343,4 +412,3 @@ export default function Friends() {
     </div>
   );
 }
-

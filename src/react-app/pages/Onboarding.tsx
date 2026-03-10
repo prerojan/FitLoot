@@ -328,8 +328,10 @@ export default function Onboarding() {
 
   const [selectedPlan, setSelectedPlan] = useState<"free" | "pro" | "annual">("free");
   const [paymentTab, setPaymentTab] = useState<"card" | "pix">("card");
+  const [cardCvv, setCardCvv] = useState("");
 
   const [stepError, setStepError] = useState<string | null>(null);
+  const [stepSuccessMessage, setStepSuccessMessage] = useState<string | null>(null);
   const [stepLoading, setStepLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [selectedGoals, setSelectedGoals] = useState<GoalValue[]>([]);
@@ -562,6 +564,7 @@ export default function Onboarding() {
   const handlePlanAndCredentialsSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setStepError(null);
+    setStepSuccessMessage(null);
 
     if (
       !credentials.email ||
@@ -670,6 +673,7 @@ export default function Onboarding() {
           plan_id: selectedPlan,
           plan_status: status,
           payment_method: paymentMethod as "none" | "card" | "pix",
+          payment_cvv: paymentTab === "card" && cardCvv.length > 0 ? cardCvv : undefined,
         }),
       });
 
@@ -678,6 +682,18 @@ export default function Onboarding() {
         setStepError((data as { error?: string | undefined }).error ?? "Erro ao salvar perfil.");
         setStepLoading(false);
         return;
+      }
+
+      const onboardingResponse = (await res.json().catch(() => null)) as {
+        plan_activated?: string | undefined;
+        vip_activated?: boolean | undefined;
+      } | null;
+
+      if (onboardingResponse?.vip_activated === true || onboardingResponse?.plan_activated === "vip") {
+        setStepSuccessMessage("Plano ativado com sucesso. Todos os recursos ja estao disponiveis.");
+        await new Promise<void>((resolve) => {
+          window.setTimeout(resolve, 1400);
+        });
       }
 
       await checkAuth();
@@ -741,6 +757,11 @@ export default function Onboarding() {
                   Fazer login
                 </Button>
               )}
+            </div>
+          )}
+          {stepSuccessMessage && (
+            <div className="mb-5 rounded-xl border border-emerald-400/30 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+              {stepSuccessMessage}
             </div>
           )}
 
@@ -1219,7 +1240,14 @@ export default function Onboarding() {
                         <Input placeholder="MM/AA" className={FIELD_INPUT} />
                       </Field>
                       <Field label="CVV">
-                        <Input placeholder="CVV" className={FIELD_INPUT} />
+                        <Input
+                          placeholder="CVV"
+                          className={FIELD_INPUT}
+                          value={cardCvv}
+                          onChange={(e) => setCardCvv(e.target.value)}
+                          inputMode="numeric"
+                          autoComplete="cc-csc"
+                        />
                       </Field>
                     </div>
                   </div>

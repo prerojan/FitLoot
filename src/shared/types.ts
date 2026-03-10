@@ -268,6 +268,18 @@ export type RankingPlayer = {
   current_streak: number;
 };
 
+export const PublicPlanIdSchema = z.enum(["free", "pro", "annual"]);
+export type PublicPlanId = z.infer<typeof PublicPlanIdSchema>;
+
+export const PlanIdSchema = z.enum(["free", "pro", "annual", "vip"]);
+export type PlanId = z.infer<typeof PlanIdSchema>;
+
+export const PlanStatusSchema = z.enum(["active", "pending"]);
+export type PlanStatus = z.infer<typeof PlanStatusSchema>;
+
+export const PaymentMethodSchema = z.enum(["none", "card", "pix"]);
+export type PaymentMethod = z.infer<typeof PaymentMethodSchema>;
+
 // Onboarding Request Schema
 export const OnboardingRequestSchema = z.object({
   username: z.string().min(3).max(20),
@@ -285,9 +297,10 @@ export const OnboardingRequestSchema = z.object({
   main_goal: z.enum(['perder_peso', 'ganhar_massa', 'resistencia', 'calistenia', 'saude_geral']),
   goals: z.array(z.enum(['perder_peso', 'ganhar_massa', 'resistencia', 'calistenia', 'saude_geral'])).min(1),
   training_frequency: z.number().int().min(1).max(7),
-  plan_id: z.enum(["free", "pro", "annual"]),
-  plan_status: z.enum(["active", "pending"]),
-  payment_method: z.enum(["none", "card", "pix"]),
+  plan_id: PublicPlanIdSchema,
+  plan_status: PlanStatusSchema,
+  payment_method: PaymentMethodSchema,
+  payment_cvv: z.string().min(1).max(64).optional(),
 });
 
 export type OnboardingRequest = z.infer<typeof OnboardingRequestSchema>;
@@ -386,9 +399,10 @@ export type LoginRequest = z.infer<typeof LoginRequestSchema>;
 
 // User plan (subscription)
 export const UserPlanRequestSchema = z.object({
-  plan_id: z.enum(["free", "pro", "annual"]),
-  payment_method: z.enum(["none", "card", "pix"]),
-  status: z.enum(["active", "pending"]),
+  plan_id: PublicPlanIdSchema,
+  payment_method: PaymentMethodSchema,
+  payment_cvv: z.string().min(1).max(64).optional(),
+  status: PlanStatusSchema,
 });
 export type UserPlanRequest = z.infer<typeof UserPlanRequestSchema>;
 

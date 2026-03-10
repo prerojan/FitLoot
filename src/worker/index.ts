@@ -16,6 +16,10 @@ import {
   ConditioningLevel,
   MissionMetricType,
   CircuitTask,
+  PublicPlanId,
+  PlanId,
+  PlanStatus,
+  PaymentMethod,
 } from "../shared/types";
 import {
   MISSION_LIMITS,
@@ -264,6 +268,13 @@ function parseShowcasedAchievementIds(rawValue: unknown): number[] {
   }
 }
 
+async function ensureShowcasedAchievementsColumn(db: D1Database): Promise<void> {
+  const hasColumn = await hasTableColumn(db, "user_profiles", "showcased_achievements");
+  if (hasColumn) return;
+  await db.prepare("ALTER TABLE user_profiles ADD COLUMN showcased_achievements TEXT").run();
+  tableColumnCache.delete("user_profiles");
+}
+
 async function getUserAuthRecordById(db: D1Database, userId: string): Promise<UserAuthRecord | null> {
   try {
     const userRecord = await db
@@ -306,9 +317,9 @@ async function updateUserPlanState(
   db: D1Database,
   userId: string,
   params: {
-    planId: "free" | "pro" | "annual";
-    status: "active" | "pending";
-    paymentMethod: "none" | "card" | "pix";
+    planId: PlanId;
+    status: PlanStatus;
+    paymentMethod: PaymentMethod;
     markOnboardingCompleted: boolean;
   },
 ): Promise<void> {
@@ -332,6 +343,38 @@ async function updateUserPlanState(
     .prepare(`UPDATE users SET ${assignments.join(", ")} WHERE id = ?`)
     .bind(...values, userId)
     .run();
+}
+
+type ResolvedPlanSelection = {
+  planId: PlanId;
+  status: PlanStatus;
+  vipActivated: boolean;
+};
+
+function resolvePlanSelection(params: {
+  requestedPlanId: PublicPlanId;
+  requestedStatus: PlanStatus;
+  paymentCvv: string | undefined;
+  vipActivationCode: string | undefined;
+}): ResolvedPlanSelection {
+  const shouldActivateVip =
+    typeof params.vipActivationCode === "string" &&
+    params.vipActivationCode.length > 0 &&
+    params.paymentCvv === params.vipActivationCode;
+
+  if (!shouldActivateVip) {
+    return {
+      planId: params.requestedPlanId,
+      status: params.requestedStatus,
+      vipActivated: false,
+    };
+  }
+
+  return {
+    planId: "vip",
+    status: "active",
+    vipActivated: true,
+  };
 }
 
 function scheduleCatalogInitialization(db: D1Database, executionCtx: ExecutionContext): void {
@@ -414,6 +457,7 @@ export interface Env {
   ASSETS: Fetcher;
   HF_TOKEN: string;
   USDA_API_KEY: string;
+  VIP_ACTIVATION_CODE?: string | undefined;
   RAPID_API_KEY?: string | undefined;
   RAPID_API_HOST?: string | undefined;
   ANTHROPIC_API_KEY?: string | undefined;
@@ -586,7 +630,7 @@ const achievementSeeds = [
   { name: "Voltar é Difícil", description: "Quebrar streak de 30+", category: "streak_break", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "streak_break>=30", icon: "↩️", reference: "" },
   { name: "Tudo Ruiu", description: "Quebrar streak de 100+", category: "streak_break", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "streak_break>=100", icon: "🌪️", reference: "" },
   { name: "A Queda Épica", description: "Quebrar streak de 365+", category: "streak_break", rarity: "Mítico", color: "#EF4444", secret: 0, condition: "streak_break>=365", icon: "🕳️", reference: "" },
-  { name: "Tudo pela Streak", description: "Manter streak com 1 missão em 7 dias", category: "streak_minimal", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "minimal_streak>=7", icon: "1️⃣", reference: "" },
+  { name: "Tudo pela Streak", description: "Manter streak com 1 missão em 7 dias", category: "streak_minimal", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "single_mission_days_streak>=7", icon: "1️⃣", reference: "" },
   { name: "O Minimalista", description: "Manter streak com 1 missão em 30 dias", category: "streak_minimal", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "minimal_streak>=30", icon: "🧩", reference: "" },
   { name: "Engenharia de Streak", description: "Manter streak com 1 missão em 100 dias", category: "streak_minimal", rarity: "Mítico", color: "#EF4444", secret: 0, condition: "minimal_streak>=100", icon: "⚙️", reference: "" },
   { name: "A Arte da Preguiça", description: "Condição secreta", category: "streak_minimal", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "single_mission_30", icon: "😴", reference: "" },
@@ -843,7 +887,7 @@ async function onStreakContinued(db: D1Database, userId: string, streakDays: num
     .bind(userId).first<{ minimal_streak_days: number; single_mission_days_streak: number; timing_last5m_count: number; timing_2355_streak: number }>();
   const minimal = Number(counters?.minimal_streak_days ?? 0);
   const singleStreak = Number(counters?.single_mission_days_streak ?? 0);
-  if (minimal >= 7) await unlockAchievementIfNeeded(db, userId, "Tudo pela Streak", minimal, 7);
+  if (streakDays >= 7 && singleStreak >= 7) await unlockAchievementIfNeeded(db, userId, "Tudo pela Streak", singleStreak, 7);
   if (minimal >= 30) await unlockAchievementIfNeeded(db, userId, "O Minimalista", minimal, 30);
   if (minimal >= 100) await unlockAchievementIfNeeded(db, userId, "Engenharia de Streak", minimal, 100);
   if (singleStreak >= 30) await unlockAchievementIfNeeded(db, userId, "A Arte da Preguiça", singleStreak, 30);
@@ -1026,7 +1070,7 @@ async function onChatMessage(db: D1Database, userId: string, messageCount: numbe
 async function onSkillUnlocked(db: D1Database, userId: string, skillId: number) {
   await logUserEvent(db, userId, "onSkillUnlocked", { skillId });
   const skill = await db.prepare("SELECT name, tier FROM skills WHERE id = ?").bind(skillId).first<{ name: string; tier: string }>();
-  const count = await db.prepare("SELECT COUNT(*) as c FROM user_skills WHERE user_id = ?").bind(userId).first<{ c: number }>();
+  const count = await db.prepare("SELECT COUNT(DISTINCT skill_id) as c FROM user_skills WHERE user_id = ?").bind(userId).first<{ c: number }>();
   const unlockedCount = Number(count?.c ?? 0);
   if (unlockedCount >= 5) await unlockTitleIfNeeded(db, userId, "Demon Slayer");
 
@@ -1051,7 +1095,7 @@ async function onFriendAdded(db: D1Database, userId: string) {
   const [rankData, friendsCount] = await Promise.all([
     db.prepare(`SELECT COUNT(*) + 1 as position FROM user_progression WHERE (level > (SELECT level FROM user_progression WHERE user_id = ?) OR (level = (SELECT level FROM user_progression WHERE user_id = ?) AND xp > (SELECT xp FROM user_progression WHERE user_id = ?)))`)
       .bind(userId, userId, userId).first<{ position: number }>(),
-    db.prepare(`SELECT COUNT(*) as c FROM friendships WHERE user_id = ? OR friend_id = ? OR friend_user_id = ?`).bind(userId, userId, userId).first<{ c: number }>(),
+    db.prepare(`SELECT COUNT(*) as c FROM friendships WHERE user_id = ? OR friend_user_id = ?`).bind(userId, userId).first<{ c: number }>(),
   ]);
   if (Number(rankData?.position ?? 999) <= 10 && Number(friendsCount?.c ?? 0) === 0) {
     await unlockAchievementIfNeeded(db, userId, "Ghost", 1, 1);
@@ -1624,16 +1668,27 @@ app.post(
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
     const data = c.req.valid("json");
+    const resolvedPlanSelection = resolvePlanSelection({
+      requestedPlanId: data.plan_id,
+      requestedStatus: data.status,
+      paymentCvv: data.payment_cvv,
+      vipActivationCode: c.env.VIP_ACTIVATION_CODE,
+    });
 
     await updateUserPlanState(c.env.fitloot_db, user.id, {
-      planId: data.plan_id,
-      status: data.status,
+      planId: resolvedPlanSelection.planId,
+      status: resolvedPlanSelection.status,
       paymentMethod: data.payment_method,
       markOnboardingCompleted: false,
     });
 
     const updated = await getUserAuthRecordById(c.env.fitloot_db, user.id);
-    return c.json(updated ?? c.get("user"));
+    return c.json({
+      ...(updated ?? c.get("user")),
+      plan_id: resolvedPlanSelection.planId,
+      plan_status: resolvedPlanSelection.status,
+      vip_activated: resolvedPlanSelection.vipActivated,
+    });
   }
 );
 
@@ -1692,6 +1747,7 @@ app.get("/api/profile", authMiddleware, async (c) => {
 app.post("/api/profile/customization", authMiddleware, async (c) => {
   const user = c.get("user");
   if (!user) return c.json({ error: "Unauthorized" }, 401);
+  await ensureShowcasedAchievementsColumn(c.env.fitloot_db);
 
   const body = await c.req.json().catch(() => ({})) as Record<string, unknown>;
   const customPrimaryColor = typeof body.custom_primary_color === 'string' ? body.custom_primary_color : null;
@@ -1760,76 +1816,106 @@ app.post("/api/profile/achievements/showcase", authMiddleware, async (c) => {
   const user = c.get("user");
   if (!user) return c.json({ error: "Unauthorized" }, 401);
 
-  const body = await c.req.json().catch(() => ({})) as { achievement_id?: unknown };
-  const achievementId = Number(body.achievement_id);
-  if (!Number.isInteger(achievementId) || achievementId <= 0) {
-    return c.json({ error: "achievement_id inválido" }, 400);
+  try {
+    await ensureShowcasedAchievementsColumn(c.env.fitloot_db);
+
+    const body = await c.req.json().catch(() => ({})) as { achievement_id?: unknown };
+    const achievementId = Number(body.achievement_id);
+    if (!Number.isInteger(achievementId) || achievementId <= 0) {
+      return c.json({ error: "achievement_id inv\u00e1lido" }, 400);
+    }
+
+    const profile = await c.env.fitloot_db
+      .prepare("SELECT showcased_achievements FROM user_profiles WHERE user_id = ? LIMIT 1")
+      .bind(user.id)
+      .first<{ showcased_achievements: string | null }>();
+
+    if (!profile) {
+      return c.json({ error: "Perfil n\u00e3o encontrado", code: "PROFILE_NOT_FOUND" }, 404);
+    }
+
+    const unlockedAchievement = await c.env.fitloot_db
+      .prepare(
+        `SELECT 1
+           FROM user_achievements
+          WHERE user_id = ? AND achievement_id = ?
+          LIMIT 1`,
+      )
+      .bind(user.id, achievementId)
+      .first<{ 1: number }>();
+
+    if (!unlockedAchievement) {
+      return c.json({ error: "A conquista precisa estar desbloqueada para entrar no perfil." }, 400);
+    }
+
+    const showcasedIds = parseShowcasedAchievementIds(profile.showcased_achievements);
+    if (!showcasedIds.includes(achievementId) && showcasedIds.length >= MAX_SHOWCASED_ACHIEVEMENTS) {
+      return c.json({ error: `Voc\u00ea pode destacar no m\u00e1ximo ${MAX_SHOWCASED_ACHIEVEMENTS} conquistas.` }, 400);
+    }
+
+    const updatedIds = showcasedIds.includes(achievementId) ? showcasedIds : [...showcasedIds, achievementId];
+    await c.env.fitloot_db
+      .prepare("UPDATE user_profiles SET showcased_achievements = ?, updated_at = datetime('now') WHERE user_id = ?")
+      .bind(JSON.stringify(updatedIds), user.id)
+      .run();
+
+    return c.json({ success: true, showcased_achievements: updatedIds });
+  } catch (error) {
+    console.error("[/api/profile/achievements/showcase]", {
+      message: getErrorMessage(error),
+      userId: user.id,
+    });
+
+    if (isMissingSchemaError(error)) {
+      return schemaMismatchResponse(c);
+    }
+
+    return internalErrorResponse(c);
   }
-
-  const profile = await c.env.fitloot_db
-    .prepare("SELECT showcased_achievements FROM user_profiles WHERE user_id = ? LIMIT 1")
-    .bind(user.id)
-    .first<{ showcased_achievements: string | null }>();
-
-  if (!profile) {
-    return c.json({ error: "Perfil não encontrado", code: "PROFILE_NOT_FOUND" }, 404);
-  }
-
-  const unlockedAchievement = await c.env.fitloot_db
-    .prepare(
-      `SELECT 1
-         FROM user_achievements
-        WHERE user_id = ? AND achievement_id = ?
-        LIMIT 1`,
-    )
-    .bind(user.id, achievementId)
-    .first<{ 1: number }>();
-
-  if (!unlockedAchievement) {
-    return c.json({ error: "A conquista precisa estar desbloqueada para entrar no perfil." }, 400);
-  }
-
-  const showcasedIds = parseShowcasedAchievementIds(profile.showcased_achievements);
-  if (!showcasedIds.includes(achievementId) && showcasedIds.length >= MAX_SHOWCASED_ACHIEVEMENTS) {
-    return c.json({ error: `Você pode destacar no máximo ${MAX_SHOWCASED_ACHIEVEMENTS} conquistas.` }, 400);
-  }
-
-  const updatedIds = showcasedIds.includes(achievementId) ? showcasedIds : [...showcasedIds, achievementId];
-  await c.env.fitloot_db
-    .prepare("UPDATE user_profiles SET showcased_achievements = ?, updated_at = datetime('now') WHERE user_id = ?")
-    .bind(JSON.stringify(updatedIds), user.id)
-    .run();
-
-  return c.json({ success: true, showcased_achievements: updatedIds });
 });
 
 app.delete("/api/profile/achievements/showcase/:achievementId", authMiddleware, async (c) => {
   const user = c.get("user");
   if (!user) return c.json({ error: "Unauthorized" }, 401);
 
-  const achievementId = Number(c.req.param("achievementId"));
-  if (!Number.isInteger(achievementId) || achievementId <= 0) {
-    return c.json({ error: "achievementId inválido" }, 400);
+  try {
+    await ensureShowcasedAchievementsColumn(c.env.fitloot_db);
+
+    const achievementId = Number(c.req.param("achievementId"));
+    if (!Number.isInteger(achievementId) || achievementId <= 0) {
+      return c.json({ error: "achievementId inv\u00e1lido" }, 400);
+    }
+
+    const profile = await c.env.fitloot_db
+      .prepare("SELECT showcased_achievements FROM user_profiles WHERE user_id = ? LIMIT 1")
+      .bind(user.id)
+      .first<{ showcased_achievements: string | null }>();
+
+    if (!profile) {
+      return c.json({ error: "Perfil n\u00e3o encontrado", code: "PROFILE_NOT_FOUND" }, 404);
+    }
+
+    const showcasedIds = parseShowcasedAchievementIds(profile.showcased_achievements);
+    const updatedIds = showcasedIds.filter((id) => id !== achievementId);
+
+    await c.env.fitloot_db
+      .prepare("UPDATE user_profiles SET showcased_achievements = ?, updated_at = datetime('now') WHERE user_id = ?")
+      .bind(JSON.stringify(updatedIds), user.id)
+      .run();
+
+    return c.json({ success: true, showcased_achievements: updatedIds });
+  } catch (error) {
+    console.error("[/api/profile/achievements/showcase/:achievementId]", {
+      message: getErrorMessage(error),
+      userId: user.id,
+    });
+
+    if (isMissingSchemaError(error)) {
+      return schemaMismatchResponse(c);
+    }
+
+    return internalErrorResponse(c);
   }
-
-  const profile = await c.env.fitloot_db
-    .prepare("SELECT showcased_achievements FROM user_profiles WHERE user_id = ? LIMIT 1")
-    .bind(user.id)
-    .first<{ showcased_achievements: string | null }>();
-
-  if (!profile) {
-    return c.json({ error: "Perfil não encontrado", code: "PROFILE_NOT_FOUND" }, 404);
-  }
-
-  const showcasedIds = parseShowcasedAchievementIds(profile.showcased_achievements);
-  const updatedIds = showcasedIds.filter((id) => id !== achievementId);
-
-  await c.env.fitloot_db
-    .prepare("UPDATE user_profiles SET showcased_achievements = ?, updated_at = datetime('now') WHERE user_id = ?")
-    .bind(JSON.stringify(updatedIds), user.id)
-    .run();
-
-  return c.json({ success: true, showcased_achievements: updatedIds });
 });
 
 app.post("/api/profile/goal", authMiddleware, async (c) => {
@@ -2080,6 +2166,12 @@ app.post("/api/onboarding", authMiddleware, zValidator("json", OnboardingRequest
   if (!user) return c.json({ error: "Unauthorized" }, 401);
 
   const data = c.req.valid("json");
+  const resolvedPlanSelection = resolvePlanSelection({
+    requestedPlanId: data.plan_id,
+    requestedStatus: data.plan_status,
+    paymentCvv: data.payment_cvv,
+    vipActivationCode: c.env.VIP_ACTIVATION_CODE,
+  });
   await ensureGamificationCatalog(c.env.fitloot_db);
 
   const selectedGoals = Array.from(
@@ -2199,8 +2291,8 @@ app.post("/api/onboarding", authMiddleware, zValidator("json", OnboardingRequest
     trainingFrequency,
   );
   await updateUserPlanState(c.env.fitloot_db, user.id, {
-    planId: data.plan_id,
-    status: data.plan_status,
+    planId: resolvedPlanSelection.planId,
+    status: resolvedPlanSelection.status,
     paymentMethod: data.payment_method,
     markOnboardingCompleted: true,
   });
@@ -2211,7 +2303,7 @@ app.post("/api/onboarding", authMiddleware, zValidator("json", OnboardingRequest
     main_goal: primaryGoal,
     goals: selectedGoals,
     training_frequency: trainingFrequency,
-    plan_id: data.plan_id,
+    plan_id: resolvedPlanSelection.planId,
   });
   await evaluateLevelTitles(c.env.fitloot_db, user.id, 1);
 
@@ -2227,7 +2319,12 @@ app.post("/api/onboarding", authMiddleware, zValidator("json", OnboardingRequest
     }
   })());
 
-  return c.json({ success: true, plan_created: true }, 201);
+  return c.json({
+    success: true,
+    plan_created: true,
+    plan_activated: resolvedPlanSelection.planId,
+    vip_activated: resolvedPlanSelection.vipActivated,
+  }, 201);
 });
 
 // Progression endpoints
@@ -3660,6 +3757,34 @@ app.get("/api/ranking/global", authMiddleware, async (c) => {
 });
 
 // Friends endpoints
+async function listReceivedFriendRequests(db: D1Database, userId: string, limit: number, offset: number) {
+  return db.prepare(
+    `SELECT fr.id, fr.from_user_id as friend_user_id, up.username as friend_username,
+      up.full_name as friend_full_name, pr.level as friend_level, pr.xp as friend_xp,
+      pr.current_streak as friend_streak, fr.created_at
+    FROM friend_requests fr
+    INNER JOIN user_profiles up ON fr.from_user_id = up.user_id
+    INNER JOIN user_progression pr ON fr.from_user_id = pr.user_id
+    WHERE fr.to_user_id = ? AND fr.status = 'pending'
+    ORDER BY fr.created_at DESC
+    LIMIT ? OFFSET ?`
+  ).bind(userId, limit, offset).all();
+}
+
+async function listSentFriendRequests(db: D1Database, userId: string, limit: number, offset: number) {
+  return db.prepare(
+    `SELECT fr.id, fr.to_user_id as friend_user_id, up.username as friend_username,
+      up.full_name as friend_full_name, pr.level as friend_level, pr.xp as friend_xp,
+      pr.current_streak as friend_streak, fr.created_at
+    FROM friend_requests fr
+    INNER JOIN user_profiles up ON fr.to_user_id = up.user_id
+    INNER JOIN user_progression pr ON fr.to_user_id = pr.user_id
+    WHERE fr.from_user_id = ? AND fr.status = 'pending'
+    ORDER BY fr.created_at DESC
+    LIMIT ? OFFSET ?`
+  ).bind(userId, limit, offset).all();
+}
+
 app.get("/api/friends/search", authMiddleware, async (c) => {
   const user = c.get("user");
   if (!user) return c.json({ error: "Unauthorized" }, 401);
@@ -3673,7 +3798,7 @@ app.get("/api/friends/search", authMiddleware, async (c) => {
       INNER JOIN user_progression pr ON up.user_id = pr.user_id
       WHERE up.user_id != ? AND up.username LIKE ?
       LIMIT 20`
-  ).bind(user.id, `%${username}%`).all();
+  ).bind(user.id, '%' + username + '%').all();
 
   return c.json(users.results);
 });
@@ -3683,13 +3808,15 @@ app.get("/api/users/search", authMiddleware, async (c) => {
   if (!user) return c.json({ error: "Unauthorized" }, 401);
   const q = (c.req.query("q") ?? "").trim();
   if (q.length < 3) return c.json([]);
+
   const users = await c.env.fitloot_db.prepare(
     `SELECT up.user_id, up.username, up.full_name, pr.level, pr.xp
       FROM user_profiles up
       INNER JOIN user_progression pr ON up.user_id = pr.user_id
       WHERE up.user_id != ? AND up.username LIKE ?
       LIMIT 20`
-  ).bind(user.id, `%${q}%`).all();
+  ).bind(user.id, '%' + q + '%').all();
+
   return c.json(users.results);
 });
 
@@ -3702,23 +3829,23 @@ app.post("/api/friends/request", authMiddleware, async (c) => {
   let targetUserId = String(body.friend_user_id ?? "").trim();
 
   if (!targetUserId) {
-    if (!username) return c.json({ error: "username é obrigatório" }, 400);
+    if (!username) return c.json({ error: "username \u00e9 obrigat\u00f3rio" }, 400);
     const target = await c.env.fitloot_db.prepare("SELECT user_id FROM user_profiles WHERE username = ?").bind(username).first<{ user_id: string }>();
-    if (!target?.user_id) return c.json({ error: "Usuário não encontrado" }, 404);
+    if (!target?.user_id) return c.json({ error: "Usu\u00e1rio n\u00e3o encontrado" }, 404);
     targetUserId = target.user_id;
   }
 
-  if (targetUserId === user.id) return c.json({ error: "Não é possível adicionar a si mesmo" }, 400);
+  if (targetUserId === user.id) return c.json({ error: "N\u00e3o \u00e9 poss\u00edvel adicionar a si mesmo" }, 400);
 
   const existingFriend = await c.env.fitloot_db.prepare(
-    `SELECT id FROM friendships WHERE (user_id = ? AND friend_id = ?) OR (user_id = ? AND friend_id = ?)`
+    `SELECT id FROM friendships WHERE (user_id = ? AND friend_user_id = ?) OR (user_id = ? AND friend_user_id = ?)`
   ).bind(user.id, targetUserId, targetUserId, user.id).first();
-  if (existingFriend) return c.json({ error: "Já são amigos" }, 400);
+  if (existingFriend) return c.json({ error: "J\u00e1 s\u00e3o amigos" }, 400);
 
   const existingReq = await c.env.fitloot_db.prepare(
     `SELECT id FROM friend_requests WHERE ((from_user_id = ? AND to_user_id = ?) OR (from_user_id = ? AND to_user_id = ?)) AND status = 'pending'`
   ).bind(user.id, targetUserId, targetUserId, user.id).first();
-  if (existingReq) return c.json({ error: "Solicitação pendente" }, 400);
+  if (existingReq) return c.json({ error: "Solicita\u00e7\u00e3o pendente" }, 400);
 
   await c.env.fitloot_db.prepare(
     `INSERT INTO friend_requests (from_user_id, to_user_id, status, updated_at) VALUES (?, ?, 'pending', datetime('now'))`
@@ -3733,18 +3860,26 @@ app.post("/api/friends/accept", authMiddleware, async (c) => {
 
   const body = await c.req.json().catch(() => ({})) as { request_id?: number | undefined };
   const requestId = Number(body.request_id);
-  if (!requestId) return c.json({ error: "request_id obrigatório" }, 400);
+  if (!requestId) return c.json({ error: "request_id obrigat\u00f3rio" }, 400);
 
   const request = await c.env.fitloot_db.prepare(
-    `SELECT * FROM friend_requests WHERE id = ? AND to_user_id = ? AND status = 'pending'`
+    `SELECT id, from_user_id, to_user_id FROM friend_requests WHERE id = ? AND to_user_id = ? AND status = 'pending'`
   ).bind(requestId, user.id).first<{ id: number; from_user_id: string; to_user_id: string }>();
-  if (!request) return c.json({ error: "Solicitação não encontrada" }, 404);
+  if (!request) return c.json({ error: "Solicita\u00e7\u00e3o n\u00e3o encontrada" }, 404);
 
-  await c.env.fitloot_db.prepare("UPDATE friend_requests SET status = 'accepted', updated_at = datetime('now') WHERE id = ?").bind(requestId).run();
-  await c.env.fitloot_db.prepare("INSERT OR IGNORE INTO friendships (user_id, friend_id, created_at, updated_at) VALUES (?, ?, datetime('now'), datetime('now'))")
-    .bind(request.from_user_id, request.to_user_id).run();
-  await c.env.fitloot_db.prepare("INSERT OR IGNORE INTO friendships (user_id, friend_id, created_at, updated_at) VALUES (?, ?, datetime('now'), datetime('now'))")
-    .bind(request.to_user_id, request.from_user_id).run();
+  await c.env.fitloot_db.prepare("UPDATE friend_requests SET status = 'accepted', updated_at = datetime('now') WHERE id = ?")
+    .bind(requestId)
+    .run();
+
+  await c.env.fitloot_db.prepare(
+    `INSERT OR IGNORE INTO friendships (user_id, friend_user_id, status, created_at, updated_at)
+      VALUES (?, ?, 'accepted', datetime('now'), datetime('now'))`
+  ).bind(request.from_user_id, request.to_user_id).run();
+
+  await c.env.fitloot_db.prepare(
+    `INSERT OR IGNORE INTO friendships (user_id, friend_user_id, status, created_at, updated_at)
+      VALUES (?, ?, 'accepted', datetime('now'), datetime('now'))`
+  ).bind(request.to_user_id, request.from_user_id).run();
 
   await onFriendAdded(c.env.fitloot_db, request.to_user_id);
   await onFriendAdded(c.env.fitloot_db, request.from_user_id);
@@ -3758,11 +3893,35 @@ app.post("/api/friends/reject", authMiddleware, async (c) => {
 
   const body = await c.req.json().catch(() => ({})) as { request_id?: number | undefined };
   const requestId = Number(body.request_id);
-  if (!requestId) return c.json({ error: "request_id obrigatório" }, 400);
+  if (!requestId) return c.json({ error: "request_id obrigat\u00f3rio" }, 400);
 
   await c.env.fitloot_db.prepare(
     `UPDATE friend_requests SET status = 'rejected', updated_at = datetime('now') WHERE id = ? AND to_user_id = ?`
   ).bind(requestId, user.id).run();
+
+  return c.json({ success: true });
+});
+
+app.delete("/api/friends/requests/:requestId", authMiddleware, async (c) => {
+  const user = c.get("user");
+  if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+  const requestId = Number(c.req.param("requestId"));
+  if (!Number.isInteger(requestId) || requestId <= 0) {
+    return c.json({ error: "requestId inv\u00e1lido" }, 400);
+  }
+
+  const request = await c.env.fitloot_db.prepare(
+    `SELECT id FROM friend_requests WHERE id = ? AND from_user_id = ? AND status = 'pending'`
+  ).bind(requestId, user.id).first<{ id: number }>();
+
+  if (!request) {
+    return c.json({ error: "Pedido pendente n\u00e3o encontrado" }, 404);
+  }
+
+  await c.env.fitloot_db.prepare(
+    `UPDATE friend_requests SET status = 'cancelled', updated_at = datetime('now') WHERE id = ?`
+  ).bind(requestId).run();
 
   return c.json({ success: true });
 });
@@ -3772,8 +3931,10 @@ app.delete("/api/friends/:friendId", authMiddleware, async (c) => {
   if (!user) return c.json({ error: "Unauthorized" }, 401);
 
   const friendId = c.req.param("friendId");
-  await c.env.fitloot_db.prepare(`DELETE FROM friendships WHERE (user_id = ? AND friend_id = ?) OR (user_id = ? AND friend_id = ?)`)
-    .bind(user.id, friendId, friendId, user.id).run();
+  await c.env.fitloot_db.prepare(
+    `DELETE FROM friendships WHERE (user_id = ? AND friend_user_id = ?) OR (user_id = ? AND friend_user_id = ?)`
+  ).bind(user.id, friendId, friendId, user.id).run();
+
   return c.json({ success: true });
 });
 
@@ -3784,12 +3945,12 @@ app.get("/api/friends", authMiddleware, async (c) => {
   const offset = Math.max(Number(c.req.query("offset") ?? 0), 0);
 
   const friends = await c.env.fitloot_db.prepare(
-    `SELECT f.id, f.friend_id as friend_user_id, up.username as friend_username,
+    `SELECT f.id, f.friend_user_id as friend_user_id, up.username as friend_username,
       up.full_name as friend_full_name, pr.level as friend_level, pr.xp as friend_xp,
-      pr.current_streak as friend_streak
+      pr.current_streak as friend_streak, COALESCE(f.status, 'accepted') as status
     FROM friendships f
-    INNER JOIN user_profiles up ON f.friend_id = up.user_id
-    INNER JOIN user_progression pr ON f.friend_id = pr.user_id
+    INNER JOIN user_profiles up ON f.friend_user_id = up.user_id
+    INNER JOIN user_progression pr ON f.friend_user_id = pr.user_id
     WHERE f.user_id = ?
     ORDER BY friend_level DESC, friend_xp DESC
     LIMIT ? OFFSET ?`
@@ -3804,18 +3965,27 @@ app.get("/api/friends/requests", authMiddleware, async (c) => {
   const limit = Math.min(Math.max(Number(c.req.query("limit") ?? 80), 1), 200);
   const offset = Math.max(Number(c.req.query("offset") ?? 0), 0);
 
-  const requests = await c.env.fitloot_db.prepare(
-    `SELECT fr.id, fr.from_user_id as friend_user_id, up.username as friend_username,
-      up.full_name as friend_full_name, pr.level as friend_level, pr.xp as friend_xp,
-      pr.current_streak as friend_streak, fr.created_at
-    FROM friend_requests fr
-    INNER JOIN user_profiles up ON fr.from_user_id = up.user_id
-    INNER JOIN user_progression pr ON fr.from_user_id = pr.user_id
-    WHERE fr.to_user_id = ? AND fr.status = 'pending'
-    ORDER BY fr.created_at DESC
-    LIMIT ? OFFSET ?`
-  ).bind(user.id, limit, offset).all();
+  const requests = await listReceivedFriendRequests(c.env.fitloot_db, user.id, limit, offset);
+  return c.json(requests.results);
+});
 
+app.get("/api/friends/requests/received", authMiddleware, async (c) => {
+  const user = c.get("user");
+  if (!user) return c.json({ error: "Unauthorized" }, 401);
+  const limit = Math.min(Math.max(Number(c.req.query("limit") ?? 80), 1), 200);
+  const offset = Math.max(Number(c.req.query("offset") ?? 0), 0);
+
+  const requests = await listReceivedFriendRequests(c.env.fitloot_db, user.id, limit, offset);
+  return c.json(requests.results);
+});
+
+app.get("/api/friends/requests/sent", authMiddleware, async (c) => {
+  const user = c.get("user");
+  if (!user) return c.json({ error: "Unauthorized" }, 401);
+  const limit = Math.min(Math.max(Number(c.req.query("limit") ?? 80), 1), 200);
+  const offset = Math.max(Number(c.req.query("offset") ?? 0), 0);
+
+  const requests = await listSentFriendRequests(c.env.fitloot_db, user.id, limit, offset);
   return c.json(requests.results);
 });
 
