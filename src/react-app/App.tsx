@@ -7,13 +7,15 @@ import LoadingBall from "@/react-app/components/LoadingBall";
 import { ROUTE_PATHS, AUTHENTICATED_HINT_KEY } from "@/react-app/constants/auth";
 import { AuthContext, useAuth } from "@/react-app/contexts/auth";
 import { useAuthBootstrap } from "@/react-app/hooks/useAuthBootstrap";
+import { resolveAuthenticatedStartRoute } from "@/react-app/services/authService";
 import type { User } from "@/react-app/types/auth";
 import { applyProfileTheme } from "@/react-app/utils/theme";
 import { clearJsonCache } from "@/react-app/utils/api";
 
 const HomePage = lazy(() => import("@/react-app/pages/Home"));
-const LandingPage = lazy(() => import("@/react-app/pages/Landing"));
 const Onboarding = lazy(() => import("@/react-app/pages/Onboarding"));
+const PaymentPending = lazy(() => import("@/react-app/pages/PaymentPending"));
+const PaymentRequired = lazy(() => import("@/react-app/pages/PaymentRequired"));
 const Dashboard = lazy(() => import("@/react-app/pages/Dashboard"));
 const Profile = lazy(() => import("@/react-app/pages/Profile"));
 const Shop = lazy(() => import("@/react-app/pages/Shop"));
@@ -24,9 +26,21 @@ const AIChat = lazy(() => import("@/react-app/pages/AIChat"));
 const FoodAnalysis = lazy(() => import("@/react-app/pages/FoodAnalysis"));
 const NotFoundPage = lazy(() => import("@/react-app/pages/NotFound"));
 
-const AppEntryRedirect = () => {
-  const hasSavedSession = localStorage.getItem(AUTHENTICATED_HINT_KEY) === "1";
-  return <Navigate to={hasSavedSession ? ROUTE_PATHS.home : ROUTE_PATHS.login} replace />;
+const AppStartRoute = () => {
+  const { user, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 px-6 pt-20">
+        <div className="fl-card p-6 flex items-center justify-center">
+          <LoadingBall size="md" />
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) return <Navigate to={ROUTE_PATHS.login} replace />;
+  return <Navigate to={resolveAuthenticatedStartRoute(user)} replace />;
 };
 
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
@@ -41,6 +55,25 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
       </div>
     );
   }
+  if (!user) return <Navigate to={ROUTE_PATHS.login} replace />;
+  const target = resolveAuthenticatedStartRoute(user);
+  if (target !== ROUTE_PATHS.home) return <Navigate to={target} replace />;
+  return <>{children}</>;
+};
+
+const SessionRoute = ({ children }: { children: React.ReactNode }) => {
+  const { user, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 px-6 pt-20">
+        <div className="fl-card p-6 flex items-center justify-center">
+          <LoadingBall size="md" />
+        </div>
+      </div>
+    );
+  }
+
   if (!user) return <Navigate to={ROUTE_PATHS.login} replace />;
   if (user.onboarding_completed !== 1) return <Navigate to={ROUTE_PATHS.onboarding} replace />;
   return <>{children}</>;
@@ -68,9 +101,11 @@ export default function App() {
       <Router>
         <Suspense fallback={<PageLoader />}>
           <Routes>
-            <Route path={ROUTE_PATHS.landing} element={<LandingPage />} />
+            <Route path={ROUTE_PATHS.landing} element={<AppStartRoute />} />
             <Route path={ROUTE_PATHS.login} element={<HomePage />} />
-            <Route path={ROUTE_PATHS.app} element={<AppEntryRedirect />} />
+            <Route path={ROUTE_PATHS.app} element={<AppStartRoute />} />
+            <Route path={ROUTE_PATHS.paymentPending} element={<SessionRoute><PaymentPending /></SessionRoute>} />
+            <Route path={ROUTE_PATHS.payment} element={<SessionRoute><PaymentRequired /></SessionRoute>} />
             <Route path={ROUTE_PATHS.home} element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
             <Route path={ROUTE_PATHS.onboarding} element={<Onboarding />} />
             <Route path={ROUTE_PATHS.dashboard} element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />

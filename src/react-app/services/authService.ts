@@ -50,6 +50,12 @@ export function prefetchCoreRoutes(): void {
   }, 900);
 }
 
+export function hasPlanAccess(user: User): boolean {
+  return user.plan_id === "vip" || user.plan_status === "active";
+}
+
 export function resolveAuthenticatedStartRoute(user: User): string {
-  return user.onboarding_completed === 1 ? ROUTE_PATHS.home : ROUTE_PATHS.onboarding;
+  if (user.onboarding_completed !== 1) return ROUTE_PATHS.onboarding;
+  if (hasPlanAccess(user)) return ROUTE_PATHS.home;
+  return user.plan_status === "pending" ? ROUTE_PATHS.paymentPending : ROUTE_PATHS.payment;
 }

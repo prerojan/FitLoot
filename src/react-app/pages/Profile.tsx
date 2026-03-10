@@ -155,11 +155,16 @@ export default function Profile() {
     void loadData();
   }, [user, navigate, loadData]);
 
-  const handleLogout = () => {
-    logout();
-    clearJsonCache();
-    navigate("/app", { replace: true });
-    api("/api/logout", { credentials: "include" }).catch(() => undefined);
+  const handleLogout = async () => {
+    try {
+      await api("/api/logout", { credentials: "include" });
+    } catch {
+      // ignore: local cleanup still proceeds
+    } finally {
+      logout();
+      clearJsonCache();
+      navigate("/app", { replace: true });
+    }
   };
 
   const handleActivateTitle = async (titleId: number) => {
@@ -359,7 +364,9 @@ export default function Profile() {
               <Settings className="w-6 h-6" />
             </button>
             <button
-              onClick={handleLogout}
+                onClick={() => {
+                  void handleLogout();
+                }}
               className="text-white/80 hover:text-white transition-colors"
               aria-label="Sair"
             >

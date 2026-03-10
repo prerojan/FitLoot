@@ -8,9 +8,12 @@
   type KeyboardEvent,
 } from "react";
 import { useNavigate } from "react-router";
+import { ROUTE_PATHS } from "@/react-app/constants/auth";
 import { useAuth } from "@/react-app/contexts/auth";
+import PaymentStatusPopup from "@/react-app/components/PaymentStatusPopup";
 import PageLoader from "@/react-app/components/PageLoader";
 import LoadingBall from "@/react-app/components/LoadingBall";
+import { resolveAuthenticatedStartRoute } from "@/react-app/services/authService";
 import { api } from "@/react-app/utils/api";
 import { safeGet } from "@/utils/typeHelpers";
 import { Button } from "@/react-app/components/ui/button";
@@ -257,6 +260,22 @@ type ProfileStep = {
   training_frequency: string;
 };
 
+type PaymentTab = "card" | "pix";
+
+type CardPaymentForm = {
+  number: string;
+  holderName: string;
+  expiry: string;
+  cvv: string;
+};
+
+type CheckoutResult = {
+  checkout_status?: "pending" | "vip_active" | undefined;
+  message?: string | undefined;
+  amount?: number | undefined;
+  checkout_url?: string | null | undefined;
+};
+
 const INITIAL_CREDENTIALS: CredentialsStep = {
   email: "",
   password: "",
@@ -278,6 +297,13 @@ const INITIAL_PROFILE: ProfileStep = {
   gender: "homem",
   age: "25",
   training_frequency: "4",
+};
+
+const INITIAL_CARD_PAYMENT: CardPaymentForm = {
+  number: "",
+  holderName: "",
+  expiry: "",
+  cvv: "",
 };
 
 const STEP_NAMES = ["Identidade", "Corpo", "Objetivos", "Condicionamento", "Plano e conta"] as const;
@@ -309,6 +335,34 @@ const EQUIPMENT_OPTIONS: { id: string; label: string; icon: typeof Dumbbell }[] 
   { id: "kettlebell", label: "Kettlebell", icon: Weight },
 ];
 
+const PLAN_OPTIONS = [
+  {
+    id: "free" as const,
+    name: "Básico",
+    price: "R$ 49/mês",
+    amountCents: 4900,
+    color: "from-gray-500 to-gray-600",
+    features: ["Missões diárias", "XP e níveis", "Ranking"],
+  },
+  {
+    id: "pro" as const,
+    name: "Premium",
+    price: "R$ 99/mês",
+    amountCents: 9900,
+    color: "from-emerald-500 to-teal-600",
+    features: ["Tudo do Básico", "Scanner com IA", "Ranking global"],
+    popular: true,
+  },
+  {
+    id: "annual" as const,
+    name: "Elite",
+    price: "R$ 149/mês",
+    amountCents: 14900,
+    color: "from-purple-500 to-pink-600",
+    features: ["Tudo do Premium", "Planos de treino", "Suporte VIP"],
+  },
+] as const;
+
 function availabilityMessage(state: AvailabilityState): { tone: "green" | "red" | "muted"; text: string } | null {
   if (state.status === "available") return { tone: "green", text: "Disponível" };
   if (state.status === "unavailable") return { tone: "red", text: state.message || "Já cadastrado" };
@@ -327,11 +381,17 @@ export default function Onboarding() {
   const [profile, setProfile] = useState(INITIAL_PROFILE);
 
   const [selectedPlan, setSelectedPlan] = useState<"free" | "pro" | "annual">("free");
-  const [paymentTab, setPaymentTab] = useState<"card" | "pix">("card");
+  const [paymentTab, setPaymentTab] = useState<PaymentTab>("card");
+  const [cardPayment, setCardPayment] = useState<CardPaymentForm>(INITIAL_CARD_PAYMENT);
 
   const [stepError, setStepError] = useState<string | null>(null);
   const [stepLoading, setStepLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [statusPopup, setStatusPopup] = useState<{
+    title: string;
+    message: string;
+    tone: "success" | "warning" | "error";
+  } | null>(null);
   const [selectedGoals, setSelectedGoals] = useState<GoalValue[]>([]);
   const [selectedEquipment, setSelectedEquipment] = useState<string[]>([]);
   const [usernameAvailability, setUsernameAvailability] = useState<AvailabilityState>({ status: "idle" });
@@ -352,7 +412,9 @@ export default function Onboarding() {
 
   useEffect(() => {
     if (authLoading) return;
-    if (user?.onboarding_completed === 1) navigate("/home");
+    if (user?.onboarding_completed === 1) {
+      navigate(resolveAuthenticatedStartRoute(user), { replace: true });
+    }
   }, [authLoading, navigate, user]);
 
   const setCredential = (field: keyof CredentialsStep) => (e: ChangeEvent<HTMLInputElement>) => {
@@ -371,6 +433,11 @@ export default function Onboarding() {
         setUsernameAvailability({ status: "idle" });
       }
     };
+
+  const setCardField = (field: keyof CardPaymentForm) => (e: ChangeEvent<HTMLInputElement>) => {
+    const nextValue = e.target.value;
+    setCardPayment((current) => ({ ...current, [field]: nextValue }));
+  };
 
   const validateUsername = useCallback(async (rawUsername: string) => {
     const username = rawUsername.trim();
@@ -589,6 +656,11 @@ export default function Onboarding() {
       return;
     }
 
+    if (paymentTab === "card" && !cardPayment.cvv.trim()) {
+      setStepError("Informe o CVV para continuar.");
+      return;
+    }
+
     setStepLoading(true);
 
     try {
@@ -640,12 +712,6 @@ export default function Onboarding() {
       const equipmentStr = [...selectedEquipment, profile.equipment].filter(Boolean).join(", ");
       const mainGoal = safeGet(selectedGoals, 0) ?? profile.main_goal;
       const goals = selectedGoals.length > 0 ? selectedGoals : [mainGoal];
-      const paymentMethod = selectedPlan === "free"
-        ? "none"
-        : paymentTab === "card"
-          ? "card"
-          : "pix";
-      const status = selectedPlan === "free" || paymentTab === "card" ? "active" : "pending";
       const age = Number(profile.age);
       const trainingFrequency = Number(profile.training_frequency);
 
@@ -668,20 +734,56 @@ export default function Onboarding() {
           goals,
           training_frequency: Number.isFinite(trainingFrequency) ? trainingFrequency : 4,
           plan_id: selectedPlan,
-          plan_status: status,
-          payment_method: paymentMethod as "none" | "card" | "pix",
+          payment_method: paymentTab,
+          card_number: paymentTab === "card" && cardPayment.number.trim() ? cardPayment.number : undefined,
+          card_holder_name: paymentTab === "card" && cardPayment.holderName.trim() ? cardPayment.holderName : undefined,
+          card_expiry: paymentTab === "card" && cardPayment.expiry.trim() ? cardPayment.expiry : undefined,
+          card_cvv: paymentTab === "card" && cardPayment.cvv.trim() ? cardPayment.cvv : undefined,
         }),
       });
 
+      const payload = (await res.json().catch(() => null)) as CheckoutResult | { error?: string | undefined } | null;
+
       if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        setStepError((data as { error?: string | undefined }).error ?? "Erro ao salvar perfil.");
+        setStepError((payload as { error?: string | undefined } | null)?.error ?? "Erro ao salvar perfil.");
         setStepLoading(false);
         return;
       }
 
+      const checkoutResult = payload as CheckoutResult | null;
+      const checkoutAmount =
+        typeof checkoutResult?.amount === "number"
+          ? (checkoutResult.amount / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })
+          : null;
+      const checkoutUrl = typeof checkoutResult?.checkout_url === "string" ? checkoutResult.checkout_url : null;
+
+      if (checkoutResult?.checkout_status === "vip_active") {
+        setStatusPopup({
+          title: "Pagamento aprovado",
+          message: checkoutResult.message ?? "Pagamento confirmado com sucesso. Seu acesso completo foi liberado.",
+          tone: "success",
+        });
+        await checkAuth();
+        window.setTimeout(() => {
+          navigate(ROUTE_PATHS.home, { replace: true });
+        }, 1400);
+        return;
+      }
+
+      setStatusPopup({
+        title: "Pagamento em análise",
+        message:
+          checkoutResult?.message ??
+          `Cobrança iniciada${checkoutAmount ? ` (${checkoutAmount})` : ""}. Vamos abrir o checkout para você finalizar o pagamento.`,
+        tone: "warning",
+      });
       await checkAuth();
-      navigate("/home");
+      window.setTimeout(() => {
+        if (checkoutUrl) {
+          window.open(checkoutUrl, "_blank", "noopener,noreferrer");
+        }
+        navigate(ROUTE_PATHS.paymentPending, { replace: true });
+      }, 1400);
     } catch {
       setStepError("Não foi possível conectar ao servidor.");
     } finally {
@@ -1052,30 +1154,7 @@ export default function Onboarding() {
               </div>
 
               <div className="grid gap-3 sm:grid-cols-3">
-                {([
-                  {
-                    id: "free" as const,
-                    name: "Básico",
-                    price: "R$ 49/mês",
-                    color: "from-gray-500 to-gray-600",
-                    features: ["Missões diárias", "XP e níveis", "Ranking"],
-                  },
-                  {
-                    id: "pro" as const,
-                    name: "Pro",
-                    price: "R$ 99/mês",
-                    color: "from-emerald-500 to-teal-600",
-                    features: ["Tudo do Básico", "Scanner com IA", "Ranking global"],
-                    popular: true,
-                  },
-                  {
-                    id: "annual" as const,
-                    name: "Elite",
-                    price: "R$ 149/mês",
-                    color: "from-purple-500 to-pink-600",
-                    features: ["Tudo do Pro", "Planos de treino", "Suporte VIP"],
-                  },
-                ] as const).map((plan) => (
+                {PLAN_OPTIONS.map((plan) => (
                   <button
                     key={plan.id}
                     type="button"
@@ -1108,6 +1187,17 @@ export default function Onboarding() {
                     </ul>
                   </button>
                 ))}
+              </div>
+
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+                Cobrança do plano selecionado:
+                {" "}
+                <strong>
+                  {((PLAN_OPTIONS.find((plan) => plan.id === selectedPlan)?.amountCents ?? 0) / 100).toLocaleString("pt-BR", {
+                    style: "currency",
+                    currency: "BRL",
+                  })}
+                </strong>
               </div>
 
               <div className="space-y-3 border-t border-gray-200 pt-4">
@@ -1207,19 +1297,39 @@ export default function Onboarding() {
                 {paymentTab === "card" && (
                   <div className="space-y-3">
                     <Field label="Número do cartão">
-                      <Input placeholder="Número do cartão" className={FIELD_INPUT} />
+                      <Input
+                        placeholder="Número do cartão"
+                        value={cardPayment.number}
+                        onChange={setCardField("number")}
+                        className={FIELD_INPUT}
+                      />
                     </Field>
 
                     <Field label="Nome no cartão">
-                      <Input placeholder="Nome no cartão" className={FIELD_INPUT} />
+                      <Input
+                        placeholder="Nome no cartão"
+                        value={cardPayment.holderName}
+                        onChange={setCardField("holderName")}
+                        className={FIELD_INPUT}
+                      />
                     </Field>
 
                     <div className="grid grid-cols-2 gap-3">
                       <Field label="Validade">
-                        <Input placeholder="MM/AA" className={FIELD_INPUT} />
+                        <Input
+                          placeholder="MM/AA"
+                          value={cardPayment.expiry}
+                          onChange={setCardField("expiry")}
+                          className={FIELD_INPUT}
+                        />
                       </Field>
                       <Field label="CVV">
-                        <Input placeholder="CVV" className={FIELD_INPUT} />
+                        <Input
+                          placeholder="CVV"
+                          value={cardPayment.cvv}
+                          onChange={setCardField("cvv")}
+                          className={FIELD_INPUT}
+                        />
                       </Field>
                     </div>
                   </div>
@@ -1227,7 +1337,7 @@ export default function Onboarding() {
 
                 {paymentTab === "pix" && (
                   <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 text-center text-sm text-gray-600">
-                    QR Code de demonstração será exibido após criar a conta.
+                    Um código PIX será gerado no checkout. Após pagamento, clique em verificar status para liberar o acesso.
                   </div>
                 )}
               </div>
@@ -1242,7 +1352,8 @@ export default function Onboarding() {
                   credentials.password !== credentials.confirmPassword ||
                   emailAvailability.status === "checking" ||
                   emailAvailability.status === "unavailable" ||
-                  emailAvailability.status === "invalid"
+                  emailAvailability.status === "invalid" ||
+                  (paymentTab === "card" && !cardPayment.cvv.trim())
                 }
                 size="lg"
                 className="w-full rounded-xl disabled:opacity-50"
@@ -1254,7 +1365,7 @@ export default function Onboarding() {
                   </span>
                 ) : (
                   <>
-                    Criar conta e finalizar
+                    Criar conta e iniciar pagamento
                     <ArrowRight className="ml-2 h-4 w-4" />
                   </>
                 )}
@@ -1263,6 +1374,14 @@ export default function Onboarding() {
           )}
         </div>
       </div>
+
+      <PaymentStatusPopup
+        open={statusPopup !== null}
+        title={statusPopup?.title ?? ""}
+        message={statusPopup?.message ?? ""}
+        tone={statusPopup?.tone ?? "warning"}
+        onClose={() => setStatusPopup(null)}
+      />
     </div>
   );
 }

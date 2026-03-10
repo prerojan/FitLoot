@@ -2,6 +2,7 @@
 import { zValidator } from "@hono/zod-validator";
 import {
   OnboardingRequestSchema,
+  CheckoutStartRequestSchema,
   CompleteMissionRequestSchema,
   FoodScanRequestSchema,
   UpdateDailyMetricsRequestSchema,
@@ -36,6 +37,9 @@ interface AuthUser {
   name: string;
   avatar_url?: string | undefined;
   onboarding_completed: number;
+  plan_id: PlanId;
+  plan_status: PlanStatus;
+  payment_method: UserPaymentMethod;
 }
 
 // Context type para Hono
@@ -45,6 +49,83 @@ type AppContext = {
     user: AuthUser;
   };
 };
+
+type PublicPlanId = "free" | "pro" | "annual";
+type PlanId = PublicPlanId | "vip";
+type PlanStatus = "pending" | "active" | "cancelled" | "failed" | "expired";
+type CheckoutPaymentMethod = "card" | "pix";
+type UserPaymentMethod = CheckoutPaymentMethod | "none";
+
+const CHECKOUT_PLAN_CATALOG: Record<
+  PublicPlanId,
+  {
+    name: "basic" | "premium" | "elite";
+    amount: number;
+    checkout_url: string;
+    product_id: string;
+  }
+> = {
+  free: {
+    name: "basic",
+    amount: 4900,
+    checkout_url: "https://pay.cakto.com.br/4n3jesa_800215",
+    product_id: "800215",
+  },
+  pro: {
+    name: "premium",
+    amount: 9900,
+    checkout_url: "https://pay.cakto.com.br/j3gia6c_800252",
+    product_id: "800252",
+  },
+  annual: {
+    name: "elite",
+    amount: 14900,
+    checkout_url: "https://pay.cakto.com.br/3635e8b_800255",
+    product_id: "800255",
+  },
+};
+
+const USER_PURGE_TARGETS: ReadonlyArray<{ table: string; columns: ReadonlyArray<string> }> = [
+  { table: "sessions", columns: ["user_id"] },
+  { table: "subscriptions", columns: ["user_id"] },
+  { table: "user_profiles", columns: ["user_id"] },
+  { table: "user_attributes", columns: ["user_id"] },
+  { table: "user_progression", columns: ["user_id"] },
+  { table: "user_skills", columns: ["user_id"] },
+  { table: "missions", columns: ["user_id"] },
+  { table: "user_achievements", columns: ["user_id"] },
+  { table: "user_titles", columns: ["user_id"] },
+  { table: "friendships", columns: ["user_id", "friend_user_id", "friend_id"] },
+  { table: "friend_requests", columns: ["from_user_id", "to_user_id"] },
+  { table: "coupon_orders", columns: ["user_id"] },
+  { table: "food_diary", columns: ["user_id"] },
+  { table: "daily_metrics", columns: ["user_id"] },
+  { table: "mini_games", columns: ["challenger_user_id", "challenged_user_id", "winner_user_id"] },
+  { table: "user_training_plans", columns: ["user_id"] },
+  { table: "user_event_counters", columns: ["user_id"] },
+  { table: "user_event_log", columns: ["user_id"] },
+  { table: "user_goal_stats", columns: ["user_id"] },
+  { table: "user_monthly_counters", columns: ["user_id"] },
+  { table: "users", columns: ["id"] },
+];
+
+const PLAN_GUARD_EXEMPT_PATHS = new Set<string>([
+  "/api/users/me",
+  "/api/app/open",
+  "/api/events/route-not-found",
+  "/api/onboarding",
+  "/api/checkout/start",
+  "/api/subscription/status",
+]);
+
+const WEBHOOK_SUPPORTED_EVENTS = new Set<string>([
+  "subscription.created",
+  "subscription.cancelled",
+  "subscription.renewed",
+  "pix.generated",
+  "payment.approved",
+  "payment.refused",
+]);
 
 
 let cachedSchemaState: { ready: boolean; checkedAt: number } | null = null;
@@ -187,11 +268,142 @@ type UserAuthRecord = {
   name: string;
   avatar_url: string | null;
   onboarding_completed: number;
+  plan_id: PlanId;
+  plan_status: PlanStatus;
+  payment_method: UserPaymentMethod;
 };
 
-function isMissingOnboardingCompletedColumnError(error: unknown) {
-  const message = error instanceof Error ? error.message : String(error);
-  return message.includes("onboarding_completed") && message.includes("no such column");
+type SubscriptionRecord = {
+  id: string;
+  user_id: string;
+  plan_id: string;
+  status: string;
+  payment_method: string;
+  amount: number;
+  webhook_event_log: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type SubscriptionEventLogEntry = {
+  type: string;
+  received_at: string;
+  source: "checkout" | "webhook";
+  status: PlanStatus;
+};
+
+type CheckoutStartResult = {
+  checkout_status: "pending" | "vip_active";
+  plan_id: PlanId;
+  plan_status: PlanStatus;
+  payment_method: UserPaymentMethod;
+  amount: number;
+  checkout_url: string | null;
+  product_id: string | null;
+  subscription_id: string;
+  message: string;
+};
+
+class CheckoutValidationError extends Error {
+  readonly code: string;
+  readonly status: number;
+
+  constructor(message: string, code = "CHECKOUT_VALIDATION_ERROR", status = 400) {
+    super(message);
+    this.name = "CheckoutValidationError";
+    this.code = code;
+    this.status = status;
+  }
+}
+
+function isCheckoutValidationError(error: unknown): error is CheckoutValidationError {
+  return error instanceof CheckoutValidationError;
+}
+
+function isPublicPlanId(value: string): value is PublicPlanId {
+  return value === "free" || value === "pro" || value === "annual";
+}
+
+function isPlanStatus(value: string): value is PlanStatus {
+  return value === "pending" || value === "active" || value === "cancelled" || value === "failed" || value === "expired";
+}
+
+function isCheckoutPaymentMethod(value: string): value is CheckoutPaymentMethod {
+  return value === "card" || value === "pix";
+}
+
+function isUserPaymentMethod(value: string): value is UserPaymentMethod {
+  return value === "none" || isCheckoutPaymentMethod(value);
+}
+
+function normalizePlanId(value: string | null | undefined): PlanId {
+  if (value === "vip") return "vip";
+  if (typeof value === "string" && isPublicPlanId(value)) return value;
+  return "free";
+}
+
+function normalizePlanStatus(value: string | null | undefined): PlanStatus {
+  if (typeof value === "string" && isPlanStatus(value)) return value;
+  return "active";
+}
+
+function normalizeUserPaymentMethod(value: string | null | undefined): UserPaymentMethod {
+  if (typeof value === "string" && isUserPaymentMethod(value)) return value;
+  return "none";
+}
+
+function hasPlanAccess(planId: PlanId, planStatus: PlanStatus): boolean {
+  return planId === "vip" || planStatus === "active";
+}
+
+function shouldBypassPlanGuard(path: string): boolean {
+  return PLAN_GUARD_EXEMPT_PATHS.has(path);
+}
+
+function resolvePlanRedirectPath(planStatus: PlanStatus): "/payment/pending" | "/payment" {
+  return planStatus === "pending" ? "/payment/pending" : "/payment";
+}
+
+function shouldPurgeUserOnLogout(user: UserAuthRecord): boolean {
+  return Number(user.onboarding_completed) !== 1 || !hasPlanAccess(user.plan_id, user.plan_status);
+}
+
+function parseInteger(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Math.round(value);
+  }
+
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? Math.round(parsed) : null;
+  }
+
+  return null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function normalizePublicPlanIdFromValue(value: string | null | undefined): PublicPlanId | null {
+  if (!value) return null;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "free" || normalized === "basic") return "free";
+  if (normalized === "pro" || normalized === "premium") return "pro";
+  if (normalized === "annual" || normalized === "elite") return "annual";
+  return null;
+}
+
+function normalizeCheckoutPaymentMethodFromValue(value: string | null | undefined): CheckoutPaymentMethod | null {
+  if (!value) return null;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "card" || normalized === "credit_card") return "card";
+  if (normalized === "pix") return "pix";
+  return null;
+}
+
+function hasText(value: string | null | undefined): boolean {
+  return typeof value === "string" && value.trim().length > 0;
 }
 
 async function getTableColumns(db: D1Database, tableName: string): Promise<Set<string>> {
@@ -220,6 +432,35 @@ async function hasTableColumn(db: D1Database, tableName: string, columnName: str
   return columns.has(columnName.trim().toLowerCase());
 }
 
+async function deleteUserDataByColumns(
+  db: D1Database,
+  table: string,
+  columns: ReadonlyArray<string>,
+  userId: string,
+): Promise<void> {
+  const availableColumns: string[] = [];
+
+  for (const column of columns) {
+    if (await hasTableColumn(db, table, column)) {
+      availableColumns.push(column);
+    }
+  }
+
+  if (availableColumns.length === 0) {
+    return;
+  }
+
+  const clause = availableColumns.map((column) => `${column} = ?`).join(" OR ");
+  const params = availableColumns.map(() => userId);
+  await db.prepare(`DELETE FROM ${table} WHERE ${clause}`).bind(...params).run();
+}
+
+async function purgeUserAccountData(db: D1Database, userId: string): Promise<void> {
+  for (const target of USER_PURGE_TARGETS) {
+    await deleteUserDataByColumns(db, target.table, target.columns, userId);
+  }
+}
+
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
@@ -244,57 +485,73 @@ function internalErrorResponse(c: import("hono").Context<AppContext>) {
 }
 
 async function getUserAuthRecordById(db: D1Database, userId: string): Promise<UserAuthRecord | null> {
-  try {
-    const userRecord = await db
-      .prepare("SELECT id, email, name, avatar_url, COALESCE(onboarding_completed, 0) as onboarding_completed FROM users WHERE id = ?")
-      .bind(userId)
-      .first<{ id: string; email: string; name: string; avatar_url: string | null; onboarding_completed: number }>();
+  const [onboardingColumnExists, planIdColumnExists, planStatusColumnExists, paymentMethodColumnExists] = await Promise.all([
+    hasTableColumn(db, "users", "onboarding_completed"),
+    hasTableColumn(db, "users", "plan_id"),
+    hasTableColumn(db, "users", "plan_status"),
+    hasTableColumn(db, "users", "payment_method"),
+  ]);
 
-    if (!userRecord) return null;
+  const userRecord = await db
+    .prepare(
+      `SELECT
+        id,
+        email,
+        name,
+        avatar_url,
+        ${onboardingColumnExists ? "COALESCE(onboarding_completed, 0)" : "0"} as onboarding_completed,
+        ${planIdColumnExists ? "COALESCE(plan_id, 'free')" : "'free'"} as plan_id,
+        ${planStatusColumnExists ? "COALESCE(plan_status, 'active')" : "'active'"} as plan_status,
+        ${paymentMethodColumnExists ? "COALESCE(payment_method, 'none')" : "'none'"} as payment_method
+      FROM users
+      WHERE id = ?`
+    )
+    .bind(userId)
+    .first<{
+      id: string;
+      email: string;
+      name: string;
+      avatar_url: string | null;
+      onboarding_completed: number;
+      plan_id: string;
+      plan_status: string;
+      payment_method: string;
+    }>();
 
-    return {
-      id: userRecord.id,
-      email: userRecord.email,
-      name: userRecord.name,
-      avatar_url: userRecord.avatar_url,
-      onboarding_completed: Number(userRecord.onboarding_completed) === 1 ? 1 : 0,
-    };
-  } catch (error) {
-    if (!isMissingOnboardingCompletedColumnError(error)) {
-      throw error;
-    }
+  if (!userRecord) return null;
 
-    const fallbackRecord = await db
-      .prepare("SELECT id, email, name, avatar_url FROM users WHERE id = ?")
-      .bind(userId)
-      .first<{ id: string; email: string; name: string; avatar_url: string | null }>();
-
-    if (!fallbackRecord) return null;
-
-    return {
-      id: fallbackRecord.id,
-      email: fallbackRecord.email,
-      name: fallbackRecord.name,
-      avatar_url: fallbackRecord.avatar_url,
-      onboarding_completed: 0,
-    };
-  }
+  return {
+    id: userRecord.id,
+    email: userRecord.email,
+    name: userRecord.name,
+    avatar_url: userRecord.avatar_url,
+    onboarding_completed: Number(userRecord.onboarding_completed) === 1 ? 1 : 0,
+    plan_id: normalizePlanId(userRecord.plan_id),
+    plan_status: normalizePlanStatus(userRecord.plan_status),
+    payment_method: normalizeUserPaymentMethod(userRecord.payment_method),
+  };
 }
 
 async function updateUserPlanState(
   db: D1Database,
   userId: string,
   params: {
-    planId: "free" | "pro" | "annual";
-    status: "active" | "pending";
-    paymentMethod: "none" | "card" | "pix";
+    planId: PlanId;
+    status: PlanStatus;
+    paymentMethod: UserPaymentMethod;
     markOnboardingCompleted: boolean;
   },
 ): Promise<void> {
-  const [paymentMethodColumnExists, onboardingColumnExists] = await Promise.all([
+  const [planIdColumnExists, planStatusColumnExists, paymentMethodColumnExists, onboardingColumnExists] = await Promise.all([
+    hasTableColumn(db, "users", "plan_id"),
+    hasTableColumn(db, "users", "plan_status"),
     hasTableColumn(db, "users", "payment_method"),
     params.markOnboardingCompleted ? hasTableColumn(db, "users", "onboarding_completed") : Promise.resolve(false),
   ]);
+
+  if (!planIdColumnExists || !planStatusColumnExists) {
+    throw new Error("Users table is missing plan columns.");
+  }
 
   const assignments = ["plan_id = ?", "plan_status = ?"];
   const values: Array<string> = [params.planId, params.status];
@@ -360,12 +617,32 @@ async function authMiddleware(
       return c.json({ error: "UsuÃƒÂ¡rio nÃƒÂ£o encontrado", code: "USER_NOT_FOUND" }, 404);
     }
 
+    if (!shouldBypassPlanGuard(c.req.path) && !hasPlanAccess(userRecord.plan_id, userRecord.plan_status)) {
+      const isPending = userRecord.plan_status === "pending";
+      return c.json(
+        {
+          error: isPending
+            ? "Pagamento em processamento. Aguarde a confirmação para liberar o acesso."
+            : "Pagamento não aprovado. Atualize seu plano para liberar o acesso.",
+          code: "PLAN_ACCESS_REQUIRED",
+          plan_id: userRecord.plan_id,
+          plan_status: userRecord.plan_status,
+          payment_method: userRecord.payment_method,
+          redirect_to: resolvePlanRedirectPath(userRecord.plan_status),
+        },
+        402
+      );
+    }
+
     (c as import("hono").Context<AppContext>).set("user", {
       id: userRecord.id,
       email: userRecord.email,
       name: userRecord.name,
       avatar_url: userRecord.avatar_url ?? undefined,
       onboarding_completed: userRecord.onboarding_completed,
+      plan_id: userRecord.plan_id,
+      plan_status: userRecord.plan_status,
+      payment_method: userRecord.payment_method,
     });
 
     try {
@@ -403,6 +680,8 @@ export interface Env {
   FRONTEND_ORIGINS?: string | undefined;
   RESEND_API_KEY?: string | undefined;
   FEEDBACK_FROM_EMAIL?: string | undefined;
+  VIP_ACTIVATION_CODE?: string | undefined;
+  WEBHOOK_SECRET?: string | undefined;
 }
 // --------------------------------
 
@@ -1351,6 +1630,271 @@ async function hashPassword(password: string, salt: string): Promise<string> {
   return toHex(derivedBits);
 }
 
+function normalizeWebhookSignature(signatureHeader: string): string {
+  const trimmed = signatureHeader.trim();
+  return trimmed.toLowerCase().startsWith("sha256=") ? trimmed.slice(7) : trimmed;
+}
+
+function timingSafeEquals(left: string, right: string): boolean {
+  if (left.length !== right.length) return false;
+  let mismatch = 0;
+  for (let index = 0; index < left.length; index += 1) {
+    mismatch |= left.charCodeAt(index) ^ right.charCodeAt(index);
+  }
+  return mismatch === 0;
+}
+
+async function signWebhookPayload(secret: string, payload: string): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    encoder.encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const signature = await crypto.subtle.sign("HMAC", key, encoder.encode(payload));
+  return toHex(signature);
+}
+
+function parseSubscriptionEventLog(raw: string | null): SubscriptionEventLogEntry[] {
+  if (!raw) return [];
+
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+
+    return parsed
+      .filter((entry) => isRecord(entry))
+      .map((entry) => {
+        const type = typeof entry.type === "string" ? entry.type : "unknown";
+        const source = entry.source === "webhook" ? "webhook" : "checkout";
+        const status = normalizePlanStatus(typeof entry.status === "string" ? entry.status : "pending");
+        const receivedAt = typeof entry.received_at === "string" ? entry.received_at : new Date().toISOString();
+        return {
+          type,
+          source,
+          status,
+          received_at: receivedAt,
+        } satisfies SubscriptionEventLogEntry;
+      });
+  } catch {
+    return [];
+  }
+}
+
+function serializeSubscriptionEventLog(entries: SubscriptionEventLogEntry[]): string {
+  return JSON.stringify(entries.slice(-100));
+}
+
+async function getSubscriptionById(db: D1Database, subscriptionId: string): Promise<SubscriptionRecord | null> {
+  return db
+    .prepare(
+      `SELECT id, user_id, plan_id, status, payment_method, amount, webhook_event_log, created_at, updated_at
+      FROM subscriptions
+      WHERE id = ?`
+    )
+    .bind(subscriptionId)
+    .first<SubscriptionRecord>();
+}
+
+async function getLatestSubscriptionByUser(db: D1Database, userId: string): Promise<SubscriptionRecord | null> {
+  return db
+    .prepare(
+      `SELECT id, user_id, plan_id, status, payment_method, amount, webhook_event_log, created_at, updated_at
+      FROM subscriptions
+      WHERE user_id = ?
+      ORDER BY datetime(updated_at) DESC
+      LIMIT 1`
+    )
+    .bind(userId)
+    .first<SubscriptionRecord>();
+}
+
+async function ensureSubscriptionRecord(
+  db: D1Database,
+  params: {
+    id: string;
+    status: PlanStatus;
+    eventType: string;
+    source: "checkout" | "webhook";
+    userId?: string | null;
+    planId?: string | null;
+    paymentMethod?: string | null;
+    amount?: number | null;
+  },
+): Promise<SubscriptionRecord | null> {
+  const existing = await getSubscriptionById(db, params.id);
+  const nextUserId = params.userId ?? existing?.user_id ?? null;
+  const nextPlanId = params.planId ?? existing?.plan_id ?? null;
+  const nextPaymentMethodRaw = params.paymentMethod ?? existing?.payment_method ?? null;
+  const nextAmountRaw = params.amount ?? existing?.amount ?? null;
+  const nextAmount = parseInteger(nextAmountRaw);
+
+  if (!nextUserId || !nextPlanId || !nextPaymentMethodRaw || nextAmount === null) {
+    return null;
+  }
+
+  const nextPaymentMethod = normalizeCheckoutPaymentMethodFromValue(nextPaymentMethodRaw);
+  if (!nextPaymentMethod) {
+    return null;
+  }
+
+  const nextStatus = normalizePlanStatus(params.status);
+  const nextLog = parseSubscriptionEventLog(existing?.webhook_event_log ?? null);
+  nextLog.push({
+    type: params.eventType,
+    source: params.source,
+    status: nextStatus,
+    received_at: new Date().toISOString(),
+  });
+  const serializedLog = serializeSubscriptionEventLog(nextLog);
+
+  if (existing) {
+    await db.prepare(
+      `UPDATE subscriptions
+      SET user_id = ?, plan_id = ?, status = ?, payment_method = ?, amount = ?, webhook_event_log = ?, updated_at = datetime('now')
+      WHERE id = ?`
+    ).bind(nextUserId, nextPlanId, nextStatus, nextPaymentMethod, nextAmount, serializedLog, params.id).run();
+  } else {
+    await db.prepare(
+      `INSERT INTO subscriptions (
+        id, user_id, plan_id, status, payment_method, amount, webhook_event_log, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`
+    ).bind(params.id, nextUserId, nextPlanId, nextStatus, nextPaymentMethod, nextAmount, serializedLog).run();
+  }
+
+  return getSubscriptionById(db, params.id);
+}
+
+async function syncUserPlanFromSubscription(db: D1Database, subscription: SubscriptionRecord): Promise<void> {
+  await updateUserPlanState(db, subscription.user_id, {
+    planId: normalizePlanId(subscription.plan_id),
+    status: normalizePlanStatus(subscription.status),
+    paymentMethod: normalizeUserPaymentMethod(subscription.payment_method),
+    markOnboardingCompleted: false,
+  });
+}
+
+function resolveCheckoutAmount(planId: PublicPlanId): number {
+  return CHECKOUT_PLAN_CATALOG[planId].amount;
+}
+
+function resolveCheckoutUrl(planId: PublicPlanId): string {
+  return CHECKOUT_PLAN_CATALOG[planId].checkout_url;
+}
+
+function resolveCheckoutProductId(planId: PublicPlanId): string {
+  return CHECKOUT_PLAN_CATALOG[planId].product_id;
+}
+
+async function startCheckoutForUser(
+  db: D1Database,
+  env: Env,
+  params: {
+    userId: string;
+    planId: PublicPlanId;
+    paymentMethod: CheckoutPaymentMethod;
+    cardNumber?: string | undefined;
+    cardHolderName?: string | undefined;
+    cardExpiry?: string | undefined;
+    cardCvv?: string | undefined;
+    markOnboardingCompleted: boolean;
+  },
+): Promise<CheckoutStartResult> {
+  const vipCode = typeof env.VIP_ACTIVATION_CODE === "string" ? env.VIP_ACTIVATION_CODE : "";
+  const isVipActivation =
+    params.paymentMethod === "card" &&
+    vipCode.length > 0 &&
+    typeof params.cardCvv === "string" &&
+    params.cardCvv === vipCode;
+
+  const subscriptionId = crypto.randomUUID();
+
+  if (isVipActivation) {
+    const vipSubscription = await ensureSubscriptionRecord(db, {
+      id: subscriptionId,
+      userId: params.userId,
+      planId: "vip",
+      status: "active",
+      paymentMethod: "card",
+      amount: 0,
+      eventType: "vip.activated",
+      source: "checkout",
+    });
+
+    if (!vipSubscription) {
+      throw new Error("Failed to activate VIP checkout record.");
+    }
+
+    await updateUserPlanState(db, params.userId, {
+      planId: "vip",
+      status: "active",
+      paymentMethod: "card",
+      markOnboardingCompleted: params.markOnboardingCompleted,
+    });
+
+    return {
+      checkout_status: "vip_active",
+      plan_id: "vip",
+      plan_status: "active",
+      payment_method: "card",
+      amount: 0,
+      checkout_url: null,
+      product_id: null,
+      subscription_id: subscriptionId,
+      message: "Pagamento confirmado. Seu acesso completo foi liberado.",
+    };
+  }
+
+  if (
+    params.paymentMethod === "card" &&
+    (!hasText(params.cardNumber) || !hasText(params.cardHolderName) || !hasText(params.cardExpiry))
+  ) {
+    throw new CheckoutValidationError(
+      "Preencha os dados do cartão para continuar ou escolha PIX.",
+      "CARD_DETAILS_REQUIRED",
+      400,
+    );
+  }
+
+  const amount = resolveCheckoutAmount(params.planId);
+  const checkoutUrl = resolveCheckoutUrl(params.planId);
+  const productId = resolveCheckoutProductId(params.planId);
+  const pendingSubscription = await ensureSubscriptionRecord(db, {
+    id: subscriptionId,
+    userId: params.userId,
+    planId: params.planId,
+    status: "pending",
+    paymentMethod: params.paymentMethod,
+    amount,
+    eventType: "checkout.started",
+    source: "checkout",
+  });
+
+  if (!pendingSubscription) {
+    throw new Error("Failed to create pending checkout.");
+  }
+
+  await updateUserPlanState(db, params.userId, {
+    planId: params.planId,
+    status: "pending",
+    paymentMethod: params.paymentMethod,
+    markOnboardingCompleted: params.markOnboardingCompleted,
+  });
+
+  return {
+    checkout_status: "pending",
+    plan_id: params.planId,
+    plan_status: "pending",
+    payment_method: params.paymentMethod,
+    amount,
+    checkout_url: checkoutUrl,
+    product_id: productId,
+    subscription_id: subscriptionId,
+    message: "Pagamento iniciado. Aguarde a confirmação para liberar o acesso.",
+  };
+}
+
 // Auth endpoints (e-mail/senha)
 app.post(
   "/api/auth/register",
@@ -1500,6 +2044,9 @@ app.get("/api/users/me", authMiddleware, async (c) => {
       name: userRecord.name,
       avatar_url: userRecord.avatar_url ?? undefined,
       onboarding_completed: userRecord.onboarding_completed,
+      plan_id: userRecord.plan_id,
+      plan_status: userRecord.plan_status,
+      payment_method: userRecord.payment_method,
     });
   } catch (err) {
     console.error("[/api/users/me] Erro interno:", {
@@ -1587,10 +2134,7 @@ app.patch(
       photo_changed: data.photo_url !== undefined,
     });
 
-    const updated = await c.env.fitloot_db
-      .prepare("SELECT id, email, name, avatar_url FROM users WHERE id = ?")
-      .bind(user.id)
-      .first();
+    const updated = await getUserAuthRecordById(c.env.fitloot_db, user.id);
     return c.json(updated ?? c.get("user"));
   }
 );
@@ -1600,30 +2144,243 @@ app.post(
   authMiddleware,
   zValidator("json", UserPlanRequestSchema),
   async (c) => {
-    const user = c.get("user");
-    if (!user) return c.json({ error: "Unauthorized" }, 401);
-    const data = c.req.valid("json");
-
-    await updateUserPlanState(c.env.fitloot_db, user.id, {
-      planId: data.plan_id,
-      status: data.status,
-      paymentMethod: data.payment_method,
-      markOnboardingCompleted: false,
-    });
-
-    const updated = await getUserAuthRecordById(c.env.fitloot_db, user.id);
-    return c.json(updated ?? c.get("user"));
+    c.req.valid("json");
+    return c.json(
+      {
+        error: "Endpoint desativado para evitar atualização manual de plano. Use o fluxo de checkout.",
+        code: "PLAN_ENDPOINT_DISABLED",
+      },
+      410
+    );
   }
 );
 
+app.post(
+  "/api/checkout/start",
+  authMiddleware,
+  zValidator("json", CheckoutStartRequestSchema),
+  async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const data = c.req.valid("json");
+    let checkoutResult: CheckoutStartResult;
+    try {
+      checkoutResult = await startCheckoutForUser(c.env.fitloot_db, c.env, {
+        userId: user.id,
+        planId: data.plan_id,
+        paymentMethod: data.payment_method,
+        cardNumber: data.card_number,
+        cardHolderName: data.card_holder_name,
+        cardExpiry: data.card_expiry,
+        cardCvv: data.card_cvv,
+        markOnboardingCompleted: false,
+      });
+    } catch (error) {
+      if (isCheckoutValidationError(error)) {
+        return c.json({ error: error.message, code: error.code }, 400);
+      }
+      throw error;
+    }
+
+    const refreshedUser = await getUserAuthRecordById(c.env.fitloot_db, user.id);
+
+    return c.json({
+      success: true,
+      ...checkoutResult,
+      user: refreshedUser,
+    });
+  }
+);
+
+app.get("/api/subscription/status", authMiddleware, async (c) => {
+  const user = c.get("user");
+  if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+  const [latestSubscription, refreshedUser] = await Promise.all([
+    getLatestSubscriptionByUser(c.env.fitloot_db, user.id),
+    getUserAuthRecordById(c.env.fitloot_db, user.id),
+  ]);
+
+  if (!refreshedUser) {
+    return c.json({ error: "Usuário não encontrado", code: "USER_NOT_FOUND" }, 404);
+  }
+
+  const effectivePublicPlanId =
+    normalizePublicPlanIdFromValue(latestSubscription?.plan_id ?? null) ??
+    (isPublicPlanId(refreshedUser.plan_id) ? refreshedUser.plan_id : null);
+  const currentPlanAmount = effectivePublicPlanId ? resolveCheckoutAmount(effectivePublicPlanId) : 0;
+  const checkoutUrl = effectivePublicPlanId ? resolveCheckoutUrl(effectivePublicPlanId) : null;
+  const productId = effectivePublicPlanId ? resolveCheckoutProductId(effectivePublicPlanId) : null;
+
+  return c.json({
+    plan_id: refreshedUser.plan_id,
+    plan_status: refreshedUser.plan_status,
+    payment_method: refreshedUser.payment_method,
+    has_access: hasPlanAccess(refreshedUser.plan_id, refreshedUser.plan_status),
+    amount: latestSubscription ? Number(latestSubscription.amount) : currentPlanAmount,
+    checkout_url: checkoutUrl,
+    product_id: productId,
+    subscription: latestSubscription
+      ? {
+        id: latestSubscription.id,
+        status: normalizePlanStatus(latestSubscription.status),
+        payment_method: normalizeUserPaymentMethod(latestSubscription.payment_method),
+        amount: Number(latestSubscription.amount),
+        updated_at: latestSubscription.updated_at,
+      }
+      : null,
+  });
+});
+
+app.post("/api/webhook/payment", async (c) => {
+  const webhookSecret = typeof c.env.WEBHOOK_SECRET === "string" ? c.env.WEBHOOK_SECRET : "";
+  const signatureHeader = c.req.header("x-webhook-signature") ?? c.req.header("x-signature") ?? "";
+
+  if (!webhookSecret || !signatureHeader) {
+    return c.json({ error: "Unauthorized", code: "WEBHOOK_SIGNATURE_INVALID" }, 401);
+  }
+
+  const rawBody = await c.req.text();
+  const expectedSignature = await signWebhookPayload(webhookSecret, rawBody);
+  const receivedSignature = normalizeWebhookSignature(signatureHeader);
+
+  if (!timingSafeEquals(receivedSignature, expectedSignature)) {
+    return c.json({ error: "Unauthorized", code: "WEBHOOK_SIGNATURE_INVALID" }, 401);
+  }
+
+  let payload: Record<string, unknown>;
+  try {
+    const parsed = JSON.parse(rawBody);
+    if (!isRecord(parsed)) {
+      return c.json({ received: true, ignored: true }, 200);
+    }
+    payload = parsed;
+  } catch {
+    return c.json({ received: true, ignored: true }, 200);
+  }
+
+  const eventType = typeof payload.type === "string" ? payload.type : "";
+  if (!WEBHOOK_SUPPORTED_EVENTS.has(eventType)) {
+    return c.json({ received: true, ignored: true }, 200);
+  }
+
+  const eventData = isRecord(payload.data) ? payload.data : {};
+  const subscriptionId =
+    (typeof eventData.subscription_id === "string" ? eventData.subscription_id : null) ??
+    (typeof eventData.id === "string" ? eventData.id : null) ??
+    (typeof payload.subscription_id === "string" ? payload.subscription_id : null) ??
+    (typeof payload.id === "string" ? payload.id : null);
+
+  if (!subscriptionId) {
+    return c.json({ received: true, ignored: true }, 200);
+  }
+
+  const existingSubscription = await getSubscriptionById(c.env.fitloot_db, subscriptionId);
+  const payloadPlanId = normalizePublicPlanIdFromValue(
+    (typeof eventData.plan_id === "string" ? eventData.plan_id : null) ??
+    (typeof payload.plan_id === "string" ? payload.plan_id : null),
+  );
+  const payloadPaymentMethod = normalizeCheckoutPaymentMethodFromValue(
+    (typeof eventData.payment_method === "string" ? eventData.payment_method : null) ??
+    (typeof payload.payment_method === "string" ? payload.payment_method : null),
+  );
+  const payloadUserId =
+    (typeof eventData.user_id === "string" ? eventData.user_id : null) ??
+    (typeof payload.user_id === "string" ? payload.user_id : null);
+  const payloadAmount = parseInteger((eventData.amount ?? payload.amount) as unknown);
+
+  let nextStatus: PlanStatus = "pending";
+  let forcedPaymentMethod: CheckoutPaymentMethod | null = null;
+
+  switch (eventType) {
+    case "subscription.created":
+      nextStatus = "pending";
+      break;
+    case "subscription.cancelled":
+      nextStatus = "cancelled";
+      break;
+    case "subscription.renewed":
+      nextStatus = "active";
+      break;
+    case "pix.generated":
+      nextStatus = "pending";
+      forcedPaymentMethod = "pix";
+      break;
+    case "payment.approved":
+      nextStatus = "active";
+      break;
+    case "payment.refused":
+      nextStatus = "failed";
+      break;
+    default:
+      return c.json({ received: true, ignored: true }, 200);
+  }
+
+  const effectiveUserId = payloadUserId ?? existingSubscription?.user_id ?? null;
+  const effectivePlanId = payloadPlanId ?? normalizePublicPlanIdFromValue(existingSubscription?.plan_id ?? null);
+  const effectivePaymentMethod =
+    forcedPaymentMethod ??
+    payloadPaymentMethod ??
+    normalizeCheckoutPaymentMethodFromValue(existingSubscription?.payment_method ?? null);
+  const effectiveAmount =
+    payloadAmount ??
+    parseInteger(existingSubscription?.amount ?? null) ??
+    (effectivePlanId ? resolveCheckoutAmount(effectivePlanId) : null);
+
+  const updatedSubscription = await ensureSubscriptionRecord(c.env.fitloot_db, {
+    id: subscriptionId,
+    userId: effectiveUserId,
+    planId: effectivePlanId,
+    paymentMethod: effectivePaymentMethod,
+    amount: effectiveAmount,
+    status: nextStatus,
+    eventType,
+    source: "webhook",
+  });
+
+  if (!updatedSubscription) {
+    return c.json({ received: true, ignored: true }, 200);
+  }
+
+  await syncUserPlanFromSubscription(c.env.fitloot_db, updatedSubscription);
+  return c.json({ received: true }, 200);
+});
+
 app.get("/api/logout", async (c) => {
   const sessionId = getSessionIdFromCookieHeader(c.req.header("Cookie"));
+  let accountReset = false;
 
   if (sessionId) {
-    await c.env.fitloot_db
-      .prepare("DELETE FROM sessions WHERE id = ?")
-      .bind(sessionId)
-      .run();
+    try {
+      const session = await c.env.fitloot_db
+        .prepare("SELECT user_id FROM sessions WHERE id = ?")
+        .bind(sessionId)
+        .first<{ user_id: string }>();
+
+      if (session?.user_id) {
+        const userRecord = await getUserAuthRecordById(c.env.fitloot_db, session.user_id);
+        if (userRecord && shouldPurgeUserOnLogout(userRecord)) {
+          await purgeUserAccountData(c.env.fitloot_db, session.user_id);
+          accountReset = true;
+        } else {
+          await c.env.fitloot_db
+            .prepare("DELETE FROM sessions WHERE id = ?")
+            .bind(sessionId)
+            .run();
+        }
+      } else {
+        await c.env.fitloot_db
+          .prepare("DELETE FROM sessions WHERE id = ?")
+          .bind(sessionId)
+          .run();
+      }
+    } catch (error) {
+      console.error("[/api/logout][cleanup]", {
+        message: getErrorMessage(error),
+      });
+      return c.json({ error: "Erro ao encerrar sessão", code: "LOGOUT_CLEANUP_FAILED" }, 500);
+    }
   }
 
   c.header(
@@ -1631,7 +2388,7 @@ app.get("/api/logout", async (c) => {
     generateExpiredSessionCookie(c.req.url)
   );
 
-  return c.json({ success: true });
+  return c.json({ success: true, account_reset: accountReset });
 });
 
 
@@ -2092,12 +2849,24 @@ app.post("/api/onboarding", authMiddleware, zValidator("json", OnboardingRequest
     data.injuries ?? null,
     trainingFrequency,
   );
-  await updateUserPlanState(c.env.fitloot_db, user.id, {
-    planId: data.plan_id,
-    status: data.plan_status,
-    paymentMethod: data.payment_method,
-    markOnboardingCompleted: true,
-  });
+  let checkoutResult: CheckoutStartResult;
+  try {
+    checkoutResult = await startCheckoutForUser(c.env.fitloot_db, c.env, {
+      userId: user.id,
+      planId: data.plan_id,
+      paymentMethod: data.payment_method,
+      cardNumber: data.card_number,
+      cardHolderName: data.card_holder_name,
+      cardExpiry: data.card_expiry,
+      cardCvv: data.card_cvv,
+      markOnboardingCompleted: true,
+    });
+  } catch (error) {
+    if (isCheckoutValidationError(error)) {
+      return c.json({ error: error.message, code: error.code }, 400);
+    }
+    throw error;
+  }
   await ensureGoalStatsRow(c.env.fitloot_db, user.id, primaryGoal);
   await ensureUserCounterRow(c.env.fitloot_db, user.id);
   await logUserEvent(c.env.fitloot_db, user.id, "onboarding_completed", {
@@ -2105,7 +2874,9 @@ app.post("/api/onboarding", authMiddleware, zValidator("json", OnboardingRequest
     main_goal: primaryGoal,
     goals: selectedGoals,
     training_frequency: trainingFrequency,
-    plan_id: data.plan_id,
+    plan_id: checkoutResult.plan_id,
+    plan_status: checkoutResult.plan_status,
+    amount: checkoutResult.amount,
   });
   await evaluateLevelTitles(c.env.fitloot_db, user.id, 1);
 
@@ -2121,7 +2892,7 @@ app.post("/api/onboarding", authMiddleware, zValidator("json", OnboardingRequest
     }
   })());
 
-  return c.json({ success: true, plan_created: true }, 201);
+  return c.json({ success: true, plan_created: true, ...checkoutResult }, 201);
 });
 
 // Progression endpoints
