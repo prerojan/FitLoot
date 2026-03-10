@@ -131,17 +131,43 @@ function isPixelOrLineArtUrl(url: string | null | undefined): boolean {
   return /(pixel|lineart|sprite|icon|outline|vector)/i.test(url);
 }
 
-function resolveMissionMediaUrl(mission: Mission): string | null {
-  const primaryImage = mission.image_url ?? null;
-  const ascendGif = isGifUrl(primaryImage) ? primaryImage : null;
+type MissionMediaAsset =
+  | { type: "gif"; src: string }
+  | { type: "video"; src: string; poster: string | null }
+  | { type: "image"; src: string }
+  | { type: "none" };
 
-  return ascendGif
-    ?? mission.exercise_db_gif_url
-    ?? (mission.video_url ? (mission.thumbnail_url ?? null) : null)
-    ?? mission.exercise_db_image_url
-    ?? primaryImage
-    ?? mission.thumbnail_url
-    ?? null;
+function resolveMissionMediaAsset(mission: Mission): MissionMediaAsset {
+  const primaryImage = mission.image_url ?? null;
+  const ascendGif = primaryImage && isGifUrl(primaryImage) ? primaryImage : null;
+  if (ascendGif) {
+    return { type: "gif", src: ascendGif };
+  }
+
+  if (mission.exercise_db_gif_url) {
+    return { type: "gif", src: mission.exercise_db_gif_url };
+  }
+
+  if (mission.video_url) {
+    return {
+      type: "video",
+      src: mission.video_url,
+      poster: mission.thumbnail_url ?? mission.exercise_db_image_url ?? primaryImage ?? null,
+    };
+  }
+
+  const staticImage = mission.exercise_db_image_url ?? primaryImage ?? null;
+  if (staticImage) {
+    return { type: "image", src: staticImage };
+  }
+
+  return { type: "none" };
+}
+
+function resolveCardPreviewUrl(media: MissionMediaAsset): string | null {
+  if (media.type === "none") return null;
+  if (media.type === "video") return media.poster;
+  return media.src;
 }
 
 function MissionExecutionModal({
@@ -422,7 +448,8 @@ function MissionCardComponent({ mission, onComplete }: MissionCardProps) {
   const circuitTasks = useMemo(() => resolveCircuitTasks(mission), [mission]);
   const completedCircuitTasks = circuitTasks.filter((task) => task.completed).length;
   const circuitProgress = circuitTasks.length > 0 ? (completedCircuitTasks / circuitTasks.length) * 100 : 0;
-  const missionMediaUrl = resolveMissionMediaUrl(mission);
+  const missionMediaAsset = resolveMissionMediaAsset(mission);
+  const missionMediaPreviewUrl = resolveCardPreviewUrl(missionMediaAsset);
   const primaryMuscle = mission.muscle_groups?.[0] ?? bodyAreaLabel(mission.body_area);
   const hasCircuitProgress = circuitTasks.some((task) => task.current_count > 0);
   const isInProgress = !isFailed && !isCompleted && (missionStatus === "in_progress" || hasCircuitProgress);
@@ -493,7 +520,12 @@ function MissionCardComponent({ mission, onComplete }: MissionCardProps) {
 
   const missionDetails = detailedMission ?? mission;
   const detailMetricType = normalizeMetricType(missionDetails);
-  const detailMissionMediaUrl = resolveMissionMediaUrl(missionDetails);
+  const detailMissionMediaAsset = resolveMissionMediaAsset(missionDetails);
+  const detailMissionMediaUrl = detailMissionMediaAsset.type === "none"
+    ? null
+    : detailMissionMediaAsset.type === "video"
+      ? detailMissionMediaAsset.poster
+      : detailMissionMediaAsset.src;
   const detailsInstructions = Array.isArray(missionDetails.instructions) && missionDetails.instructions.length > 0
     ? missionDetails.instructions
     : [
@@ -504,8 +536,10 @@ function MissionCardComponent({ mission, onComplete }: MissionCardProps) {
   const safetyTips = Array.isArray(missionDetails.safety_tips) && missionDetails.safety_tips.length > 0
     ? missionDetails.safety_tips
     : ["Mantenha alinhamento postural e interrompa em caso de dor aguda."];
-  const pixelOrLineArt = isPixelOrLineArtUrl(detailMissionMediaUrl);
-  const gifLikeMedia = isGifUrl(detailMissionMediaUrl);
+  const pixelOrLineArt =
+    detailMissionMediaAsset.type !== "video" &&
+    isPixelOrLineArtUrl(detailMissionMediaUrl);
+  const gifLikeMedia = detailMissionMediaAsset.type === "gif";
   const detailCircuitTasks = resolveCircuitTasks(missionDetails);
   const detailCompletedCircuitTasks = detailCircuitTasks.filter((task) => task.completed).length;
   const detailCircuitProgress = detailCircuitTasks.length > 0 ? (detailCompletedCircuitTasks / detailCircuitTasks.length) * 100 : 0;
@@ -558,10 +592,10 @@ function MissionCardComponent({ mission, onComplete }: MissionCardProps) {
           </Badge>
         </div>
 
-        {!isWeeklyMission && missionMediaUrl && (
+        {!isWeeklyMission && missionMediaPreviewUrl && (
           <div className="hidden sm:block w-full mb-3">
             <img
-              src={missionMediaUrl}
+              src={missionMediaPreviewUrl}
               alt={mission.title}
               loading="lazy"
               decoding="async"
@@ -675,21 +709,37 @@ function MissionCardComponent({ mission, onComplete }: MissionCardProps) {
             </div>
 
             <div className="space-y-3">
-              {detailMissionMediaUrl ? (
+              {detailMissionMediaAsset.type !== "none" ? (
                 <div className="w-full h-64 rounded-2xl border border-gray-200 overflow-hidden bg-gradient-to-br from-gray-50 to-gray-100 flex items-center justify-center">
-                  <img
-                    src={detailMissionMediaUrl}
-                    alt={missionDetails.title}
-                    loading="lazy"
-                    decoding="async"
-                    className="w-[125%] h-[125%] object-contain"
-                    style={{
-                      objectFit: "contain",
-                      imageRendering: pixelOrLineArt ? "crisp-edges" : "auto",
-                      filter: pixelOrLineArt || gifLikeMedia ? "blur(0px)" : "contrast(1.05) saturate(1.1) blur(0px)",
-                      transform: "scale(1)",
-                    }}
-                  />
+                  {detailMissionMediaAsset.type === "video" ? (
+                    <video
+                      src={detailMissionMediaAsset.src}
+                      poster={detailMissionMediaAsset.poster ?? undefined}
+                      controls
+                      playsInline
+                      preload="metadata"
+                      className="w-[125%] h-[125%] object-contain"
+                      style={{
+                        objectFit: "contain",
+                        filter: "blur(0px)",
+                        transform: "scale(1)",
+                      }}
+                    />
+                  ) : (
+                    <img
+                      src={detailMissionMediaAsset.src}
+                      alt={missionDetails.title}
+                      loading="lazy"
+                      decoding="async"
+                      className="w-[125%] h-[125%] object-contain"
+                      style={{
+                        objectFit: "contain",
+                        imageRendering: pixelOrLineArt ? "crisp-edges" : "auto",
+                        filter: pixelOrLineArt || gifLikeMedia ? "blur(0px)" : "contrast(1.05) saturate(1.1) blur(0px)",
+                        transform: "scale(1)",
+                      }}
+                    />
+                  )}
                 </div>
               ) : (
                 <div className="w-full h-64 rounded-2xl border border-emerald-100 bg-gradient-to-br from-emerald-100 to-teal-100 flex items-center justify-center overflow-hidden">

@@ -118,6 +118,10 @@ const PLAN_GUARD_EXEMPT_PATHS = new Set<string>([
   "/api/subscription/status",
 ]);
 
+const ONBOARDING_GUARD_EXEMPT_PATHS = new Set<string>([
+  ...PLAN_GUARD_EXEMPT_PATHS,
+]);
+
 const WEBHOOK_SUPPORTED_EVENTS = new Set<string>([
   "subscription.created",
   "subscription.cancelled",
@@ -304,6 +308,19 @@ type CheckoutStartResult = {
   message: string;
 };
 
+type CheckoutStartPreparation = {
+  subscriptionId: string;
+  checkoutStatus: "pending" | "vip_active";
+  planId: PlanId;
+  planStatus: PlanStatus;
+  paymentMethod: CheckoutPaymentMethod;
+  amount: number;
+  checkoutUrl: string | null;
+  productId: string | null;
+  message: string;
+  eventType: string;
+};
+
 class CheckoutValidationError extends Error {
   readonly code: string;
   readonly status: number;
@@ -358,6 +375,10 @@ function hasPlanAccess(planId: PlanId, planStatus: PlanStatus): boolean {
 
 function shouldBypassPlanGuard(path: string): boolean {
   return PLAN_GUARD_EXEMPT_PATHS.has(path);
+}
+
+function shouldBypassOnboardingGuard(path: string): boolean {
+  return ONBOARDING_GUARD_EXEMPT_PATHS.has(path);
 }
 
 function resolvePlanRedirectPath(planStatus: PlanStatus): "/payment/pending" | "/payment" {
@@ -615,6 +636,17 @@ async function authMiddleware(
 
     if (!userRecord) {
       return c.json({ error: "UsuÃƒÂ¡rio nÃƒÂ£o encontrado", code: "USER_NOT_FOUND" }, 404);
+    }
+
+    if (!shouldBypassOnboardingGuard(c.req.path) && Number(userRecord.onboarding_completed) !== 1) {
+      return c.json(
+        {
+          error: "Onboarding pendente. Finalize seu cadastro para continuar.",
+          code: "ONBOARDING_REQUIRED",
+          redirect_to: "/onboarding",
+        },
+        428
+      );
     }
 
     if (!shouldBypassPlanGuard(c.req.path) && !hasPlanAccess(userRecord.plan_id, userRecord.plan_status)) {
@@ -1787,20 +1819,17 @@ function resolveCheckoutProductId(planId: PublicPlanId): string {
   return CHECKOUT_PLAN_CATALOG[planId].product_id;
 }
 
-async function startCheckoutForUser(
-  db: D1Database,
+function prepareCheckoutStart(
   env: Env,
   params: {
-    userId: string;
     planId: PublicPlanId;
     paymentMethod: CheckoutPaymentMethod;
     cardNumber?: string | undefined;
     cardHolderName?: string | undefined;
     cardExpiry?: string | undefined;
     cardCvv?: string | undefined;
-    markOnboardingCompleted: boolean;
   },
-): Promise<CheckoutStartResult> {
+): CheckoutStartPreparation {
   const vipCode = typeof env.VIP_ACTIVATION_CODE === "string" ? env.VIP_ACTIVATION_CODE : "";
   const isVipActivation =
     params.paymentMethod === "card" &&
@@ -1811,38 +1840,17 @@ async function startCheckoutForUser(
   const subscriptionId = crypto.randomUUID();
 
   if (isVipActivation) {
-    const vipSubscription = await ensureSubscriptionRecord(db, {
-      id: subscriptionId,
-      userId: params.userId,
-      planId: "vip",
-      status: "active",
-      paymentMethod: "card",
-      amount: 0,
-      eventType: "vip.activated",
-      source: "checkout",
-    });
-
-    if (!vipSubscription) {
-      throw new Error("Failed to activate VIP checkout record.");
-    }
-
-    await updateUserPlanState(db, params.userId, {
-      planId: "vip",
-      status: "active",
-      paymentMethod: "card",
-      markOnboardingCompleted: params.markOnboardingCompleted,
-    });
-
     return {
-      checkout_status: "vip_active",
-      plan_id: "vip",
-      plan_status: "active",
-      payment_method: "card",
+      subscriptionId,
+      checkoutStatus: "vip_active",
+      planId: "vip",
+      planStatus: "active",
+      paymentMethod: "card",
       amount: 0,
-      checkout_url: null,
-      product_id: null,
-      subscription_id: subscriptionId,
+      checkoutUrl: null,
+      productId: null,
       message: "Pagamento confirmado. Seu acesso completo foi liberado.",
+      eventType: "vip.activated",
     };
   }
 
@@ -1857,17 +1865,64 @@ async function startCheckoutForUser(
     );
   }
 
-  const amount = resolveCheckoutAmount(params.planId);
-  const checkoutUrl = resolveCheckoutUrl(params.planId);
-  const productId = resolveCheckoutProductId(params.planId);
-  const pendingSubscription = await ensureSubscriptionRecord(db, {
-    id: subscriptionId,
-    userId: params.userId,
+  return {
+    subscriptionId,
+    checkoutStatus: "pending",
     planId: params.planId,
-    status: "pending",
+    planStatus: "pending",
     paymentMethod: params.paymentMethod,
-    amount,
+    amount: resolveCheckoutAmount(params.planId),
+    checkoutUrl: resolveCheckoutUrl(params.planId),
+    productId: resolveCheckoutProductId(params.planId),
+    message: "Pagamento iniciado. Aguarde a confirmação para liberar o acesso.",
     eventType: "checkout.started",
+  };
+}
+
+function checkoutStartResultFromPreparation(prepared: CheckoutStartPreparation): CheckoutStartResult {
+  return {
+    checkout_status: prepared.checkoutStatus,
+    plan_id: prepared.planId,
+    plan_status: prepared.planStatus,
+    payment_method: prepared.paymentMethod,
+    amount: prepared.amount,
+    checkout_url: prepared.checkoutUrl,
+    product_id: prepared.productId,
+    subscription_id: prepared.subscriptionId,
+    message: prepared.message,
+  };
+}
+
+async function startCheckoutForUser(
+  db: D1Database,
+  env: Env,
+  params: {
+    userId: string;
+    planId: PublicPlanId;
+    paymentMethod: CheckoutPaymentMethod;
+    cardNumber?: string | undefined;
+    cardHolderName?: string | undefined;
+    cardExpiry?: string | undefined;
+    cardCvv?: string | undefined;
+    markOnboardingCompleted: boolean;
+  },
+): Promise<CheckoutStartResult> {
+  const prepared = prepareCheckoutStart(env, {
+    planId: params.planId,
+    paymentMethod: params.paymentMethod,
+    cardNumber: params.cardNumber,
+    cardHolderName: params.cardHolderName,
+    cardExpiry: params.cardExpiry,
+    cardCvv: params.cardCvv,
+  });
+  const pendingSubscription = await ensureSubscriptionRecord(db, {
+    id: prepared.subscriptionId,
+    userId: params.userId,
+    planId: prepared.planId,
+    status: prepared.planStatus,
+    paymentMethod: prepared.paymentMethod,
+    amount: prepared.amount,
+    eventType: prepared.eventType,
     source: "checkout",
   });
 
@@ -1876,23 +1931,13 @@ async function startCheckoutForUser(
   }
 
   await updateUserPlanState(db, params.userId, {
-    planId: params.planId,
-    status: "pending",
-    paymentMethod: params.paymentMethod,
+    planId: prepared.planId,
+    status: prepared.planStatus,
+    paymentMethod: prepared.paymentMethod,
     markOnboardingCompleted: params.markOnboardingCompleted,
   });
 
-  return {
-    checkout_status: "pending",
-    plan_id: params.planId,
-    plan_status: "pending",
-    payment_method: params.paymentMethod,
-    amount,
-    checkout_url: checkoutUrl,
-    product_id: productId,
-    subscription_id: subscriptionId,
-    message: "Pagamento iniciado. Aguarde a confirmação para liberar o acesso.",
-  };
+  return checkoutStartResultFromPreparation(prepared);
 }
 
 // Auth endpoints (e-mail/senha)
@@ -2758,6 +2803,24 @@ app.post("/api/onboarding", authMiddleware, zValidator("json", OnboardingRequest
     return c.json({ error: "Username already taken" }, 400);
   }
 
+  let checkoutPreparation: CheckoutStartPreparation;
+  try {
+    checkoutPreparation = prepareCheckoutStart(c.env, {
+      planId: data.plan_id,
+      paymentMethod: data.payment_method,
+      cardNumber: data.card_number,
+      cardHolderName: data.card_holder_name,
+      cardExpiry: data.card_expiry,
+      cardCvv: data.card_cvv,
+    });
+  } catch (error) {
+    if (isCheckoutValidationError(error)) {
+      return c.json({ error: error.message, code: error.code }, 400);
+    }
+    throw error;
+  }
+  const checkoutResult = checkoutStartResultFromPreparation(checkoutPreparation);
+
   let initialAttrs = { strength: 10, constitution: 10, vitality: 10, dexterity: 10, focus: 10 };
   if (data.initial_conditioning === "iniciante") {
     initialAttrs = { strength: 15, constitution: 15, vitality: 15, dexterity: 12, focus: 12 };
@@ -2771,57 +2834,6 @@ app.post("/api/onboarding", authMiddleware, zValidator("json", OnboardingRequest
   initialAttrs.constitution += Math.floor(data.initial_situps / 5);
   initialAttrs.vitality += Math.floor(data.initial_squats / 5);
 
-  await c.env.fitloot_db.prepare(
-    `INSERT INTO user_profiles (
-      user_id, username, full_name, weight, height, initial_conditioning, injuries, equipment, main_goal,
-      age, gender, goals_json, updated_at
-    )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-    ON CONFLICT(user_id) DO UPDATE SET
-      username = excluded.username,
-      full_name = excluded.full_name,
-      weight = excluded.weight,
-      height = excluded.height,
-      initial_conditioning = excluded.initial_conditioning,
-      injuries = excluded.injuries,
-      equipment = excluded.equipment,
-      main_goal = excluded.main_goal,
-      age = excluded.age,
-      gender = excluded.gender,
-      goals_json = excluded.goals_json,
-      updated_at = datetime('now')`
-  ).bind(
-    user.id,
-    username,
-    fullName,
-    data.weight,
-    data.height,
-    data.initial_conditioning,
-    data.injuries || "",
-    data.equipment || "",
-    primaryGoal,
-    data.age,
-    data.gender,
-    goalsJson,
-  ).run();
-
-  await c.env.fitloot_db.prepare(
-    `INSERT INTO user_attributes (user_id, strength, constitution, vitality, dexterity, focus, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
-    ON CONFLICT(user_id) DO UPDATE SET
-      strength = excluded.strength,
-      constitution = excluded.constitution,
-      vitality = excluded.vitality,
-      dexterity = excluded.dexterity,
-      focus = excluded.focus,
-      updated_at = datetime('now')`
-  ).bind(user.id, initialAttrs.strength, initialAttrs.constitution, initialAttrs.vitality, initialAttrs.dexterity, initialAttrs.focus).run();
-
-  await c.env.fitloot_db.prepare(
-    `INSERT OR IGNORE INTO user_progression (user_id, xp, level, points, current_streak, best_streak, updated_at)
-    VALUES (?, 0, 1, 0, 0, 0, datetime('now'))`
-  ).bind(user.id).run();
-
   const conditioning = data.initial_conditioning as ConditioningLevel;
   const maxTier = conditioningOrder(conditioning);
 
@@ -2829,56 +2841,173 @@ app.post("/api/onboarding", authMiddleware, zValidator("json", OnboardingRequest
     `SELECT id, tier, level_required FROM skills`
   ).all<{ id: number; tier: string; level_required: number }>();
 
+  const plan = await buildInitialTrainingPlan(primaryGoal, conditioning, data.equipment ?? null, data.injuries ?? null);
+  const [planIdColumnExists, planStatusColumnExists, paymentMethodColumnExists, onboardingColumnExists] = await Promise.all([
+    hasTableColumn(c.env.fitloot_db, "users", "plan_id"),
+    hasTableColumn(c.env.fitloot_db, "users", "plan_status"),
+    hasTableColumn(c.env.fitloot_db, "users", "payment_method"),
+    hasTableColumn(c.env.fitloot_db, "users", "onboarding_completed"),
+  ]);
+
+  if (!planIdColumnExists || !planStatusColumnExists) {
+    throw new Error("Users table is missing plan columns.");
+  }
+
+  const userAssignments = ["plan_id = ?", "plan_status = ?"];
+  const userBindValues: string[] = [checkoutPreparation.planId, checkoutPreparation.planStatus];
+  if (paymentMethodColumnExists) {
+    userAssignments.push("payment_method = ?");
+    userBindValues.push(checkoutPreparation.paymentMethod);
+  }
+  if (onboardingColumnExists) {
+    userAssignments.push("onboarding_completed = 1");
+  }
+
+  const subscriptionEventLog = serializeSubscriptionEventLog([
+    {
+      type: checkoutPreparation.eventType,
+      source: "checkout",
+      status: checkoutPreparation.planStatus,
+      received_at: new Date().toISOString(),
+    },
+  ]);
+
+  const onboardingWrites: D1PreparedStatement[] = [
+    c.env.fitloot_db.prepare(
+      `INSERT INTO user_profiles (
+        user_id, username, full_name, weight, height, initial_conditioning, injuries, equipment, main_goal,
+        age, gender, goals_json, updated_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+      ON CONFLICT(user_id) DO UPDATE SET
+        username = excluded.username,
+        full_name = excluded.full_name,
+        weight = excluded.weight,
+        height = excluded.height,
+        initial_conditioning = excluded.initial_conditioning,
+        injuries = excluded.injuries,
+        equipment = excluded.equipment,
+        main_goal = excluded.main_goal,
+        age = excluded.age,
+        gender = excluded.gender,
+        goals_json = excluded.goals_json,
+        updated_at = datetime('now')`
+    ).bind(
+      user.id,
+      username,
+      fullName,
+      data.weight,
+      data.height,
+      data.initial_conditioning,
+      data.injuries || "",
+      data.equipment || "",
+      primaryGoal,
+      data.age,
+      data.gender,
+      goalsJson,
+    ),
+    c.env.fitloot_db.prepare(
+      `INSERT INTO user_attributes (user_id, strength, constitution, vitality, dexterity, focus, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+      ON CONFLICT(user_id) DO UPDATE SET
+        strength = excluded.strength,
+        constitution = excluded.constitution,
+        vitality = excluded.vitality,
+        dexterity = excluded.dexterity,
+        focus = excluded.focus,
+        updated_at = datetime('now')`
+    ).bind(user.id, initialAttrs.strength, initialAttrs.constitution, initialAttrs.vitality, initialAttrs.dexterity, initialAttrs.focus),
+    c.env.fitloot_db.prepare(
+      `INSERT OR IGNORE INTO user_progression (user_id, xp, level, points, current_streak, best_streak, updated_at)
+      VALUES (?, 0, 1, 0, 0, 0, datetime('now'))`
+    ).bind(user.id),
+    c.env.fitloot_db.prepare(
+      `INSERT INTO user_training_plans (user_id, main_goal, conditioning, training_frequency, equipment, injuries, weekly_plan_json, progression_notes, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+      ON CONFLICT(user_id) DO UPDATE SET
+        main_goal=excluded.main_goal,
+        conditioning=excluded.conditioning,
+        training_frequency=excluded.training_frequency,
+        equipment=excluded.equipment,
+        injuries=excluded.injuries,
+        weekly_plan_json=excluded.weekly_plan_json,
+        progression_notes=excluded.progression_notes,
+        updated_at=datetime('now')`
+    ).bind(
+      user.id,
+      primaryGoal,
+      conditioning,
+      trainingFrequency,
+      data.equipment ?? "",
+      data.injuries ?? "",
+      JSON.stringify(plan),
+      "progressao de base",
+    ),
+    c.env.fitloot_db.prepare(
+      `INSERT OR IGNORE INTO user_goal_stats (user_id, original_goal, current_goal, updated_at)
+      VALUES (?, ?, ?, datetime('now'))`
+    ).bind(user.id, primaryGoal, primaryGoal),
+    c.env.fitloot_db.prepare(
+      `INSERT OR IGNORE INTO user_event_counters (user_id, updated_at)
+      VALUES (?, datetime('now'))`
+    ).bind(user.id),
+    c.env.fitloot_db.prepare(
+      `INSERT INTO subscriptions (
+        id, user_id, plan_id, status, payment_method, amount, webhook_event_log, created_at, updated_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+      ON CONFLICT(id) DO UPDATE SET
+        user_id = excluded.user_id,
+        plan_id = excluded.plan_id,
+        status = excluded.status,
+        payment_method = excluded.payment_method,
+        amount = excluded.amount,
+        webhook_event_log = excluded.webhook_event_log,
+        updated_at = datetime('now')`
+    ).bind(
+      checkoutPreparation.subscriptionId,
+      user.id,
+      checkoutPreparation.planId,
+      checkoutPreparation.planStatus,
+      checkoutPreparation.paymentMethod,
+      checkoutPreparation.amount,
+      subscriptionEventLog,
+    ),
+    c.env.fitloot_db.prepare(
+      `UPDATE users SET ${userAssignments.join(", ")} WHERE id = ?`
+    ).bind(...userBindValues, user.id),
+  ];
+
   for (const skill of initialSkills.results) {
     if (skillTierOrder(skill.tier) <= Math.max(1, maxTier) && Number(skill.level_required ?? 1) <= 1) {
-      await c.env.fitloot_db.prepare(
-        `INSERT OR IGNORE INTO user_skills (user_id, skill_id, status, current_stage, total_reps, total_time, best_reps, unlocked_at, updated_at)
-        VALUES (?, ?, 'unlocked', 1, 0, 0, 0, datetime('now'), datetime('now'))`
-      ).bind(user.id, skill.id).run();
+      onboardingWrites.push(
+        c.env.fitloot_db.prepare(
+          `INSERT OR IGNORE INTO user_skills (user_id, skill_id, status, current_stage, total_reps, total_time, best_reps, unlocked_at, updated_at)
+          VALUES (?, ?, 'unlocked', 1, 0, 0, 0, datetime('now'), datetime('now'))`
+        ).bind(user.id, skill.id)
+      );
     }
   }
 
-  const plan = await buildInitialTrainingPlan(primaryGoal, conditioning, data.equipment ?? null, data.injuries ?? null);
-  await upsertTrainingPlan(
-    c.env.fitloot_db,
-    user.id,
-    plan,
-    primaryGoal,
-    conditioning,
-    data.equipment ?? null,
-    data.injuries ?? null,
-    trainingFrequency,
-  );
-  let checkoutResult: CheckoutStartResult;
+  await c.env.fitloot_db.batch(onboardingWrites);
+
   try {
-    checkoutResult = await startCheckoutForUser(c.env.fitloot_db, c.env, {
-      userId: user.id,
-      planId: data.plan_id,
-      paymentMethod: data.payment_method,
-      cardNumber: data.card_number,
-      cardHolderName: data.card_holder_name,
-      cardExpiry: data.card_expiry,
-      cardCvv: data.card_cvv,
-      markOnboardingCompleted: true,
+    await logUserEvent(c.env.fitloot_db, user.id, "onboarding_completed", {
+      conditioning,
+      main_goal: primaryGoal,
+      goals: selectedGoals,
+      training_frequency: trainingFrequency,
+      plan_id: checkoutResult.plan_id,
+      plan_status: checkoutResult.plan_status,
+      amount: checkoutResult.amount,
     });
+    await evaluateLevelTitles(c.env.fitloot_db, user.id, 1);
   } catch (error) {
-    if (isCheckoutValidationError(error)) {
-      return c.json({ error: error.message, code: error.code }, 400);
-    }
-    throw error;
+    console.error("[/api/onboarding][post-commit]", {
+      userId: user.id,
+      message: getErrorMessage(error),
+    });
   }
-  await ensureGoalStatsRow(c.env.fitloot_db, user.id, primaryGoal);
-  await ensureUserCounterRow(c.env.fitloot_db, user.id);
-  await logUserEvent(c.env.fitloot_db, user.id, "onboarding_completed", {
-    conditioning,
-    main_goal: primaryGoal,
-    goals: selectedGoals,
-    training_frequency: trainingFrequency,
-    plan_id: checkoutResult.plan_id,
-    plan_status: checkoutResult.plan_status,
-    amount: checkoutResult.amount,
-  });
-  await evaluateLevelTitles(c.env.fitloot_db, user.id, 1);
 
   c.executionCtx.waitUntil((async () => {
     try {
@@ -5436,12 +5565,14 @@ async function fetchExerciseDbExercises(env: Env, muscle: string, equipment: str
     equipment: String(item.equipment ?? (equipment || "bodyweight")),
     difficulty: "intermediate",
     instructions: Array.isArray(item.instructions) ? String(item.instructions[0] ?? "") : "",
-    image_url: typeof item.gifUrl === "string" ? item.gifUrl : undefined,
+    image_url: typeof item.imageUrl === "string"
+      ? item.imageUrl
+      : (typeof item.gifUrl === "string" ? item.gifUrl : undefined),
     body_part: typeof item.bodyPart === "string" ? item.bodyPart : undefined,
   });
 
   const targetMatches = await fetchJsonWithTimeout<Array<Record<string, unknown>>>(
-    `https://exercisedb.p.rapidapi.com/exercises/target/${encodeURIComponent(muscle)}?limit=12`,
+    `https://exercisedb.p.rapidapi.com/exercises/target/${encodeURIComponent(muscle)}?limit=10`,
     { headers: baseHeaders },
     8000
   );
@@ -5451,7 +5582,7 @@ async function fetchExerciseDbExercises(env: Env, muscle: string, equipment: str
   }
 
   const bodyPartMatches = await fetchJsonWithTimeout<Array<Record<string, unknown>>>(
-    `https://exercisedb.p.rapidapi.com/exercises/bodyPart/${encodeURIComponent(muscle)}?limit=12`,
+    `https://exercisedb.p.rapidapi.com/exercises/bodyPart/${encodeURIComponent(muscle)}?limit=10`,
     { headers: baseHeaders },
     8000
   );
@@ -6141,8 +6272,7 @@ async function createMissionsForPeriod(env: Env, db: D1Database, userId: string,
 
     const missionMediaUrl = enriched?.gifUrl
       ?? enriched?.exerciseDbGifUrl
-      ?? (enriched?.videoUrl ? (enriched.thumbnailUrl ?? null) : null)
-      ?? enriched?.imageUrl
+      ?? enriched?.exerciseDbImageUrl
       ?? null;
     const baseMission = buildMissionPayload({
       period,
@@ -6845,10 +6975,8 @@ async function generateAiMissionsForUser(
       const apiInstructionsPt = await translateExerciseInstructionsToPt(apiInstructionsEn, exerciseName, env);
       const missionMediaUrl = enrichedMedia?.gifUrl
         ?? enrichedMedia?.exerciseDbGifUrl
-        ?? (enrichedMedia?.videoUrl ? (enrichedMedia?.thumbnailUrl ?? null) : null)
-        ?? enrichedMedia?.imageUrl
+        ?? enrichedMedia?.exerciseDbImageUrl
         ?? mission.image_url
-        ?? mission.thumbnail_url
         ?? null;
 
       const withMetric = applyMissionMetricContext(
