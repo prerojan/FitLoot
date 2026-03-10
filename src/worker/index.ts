@@ -391,6 +391,52 @@ function scheduleCatalogInitialization(db: D1Database, executionCtx: ExecutionCo
   );
 }
 
+async function updateUserPlanState(
+  db: D1Database,
+  userId: string,
+  params: {
+    planId: "free" | "pro" | "annual";
+    status: "active" | "pending";
+    paymentMethod: "none" | "card" | "pix";
+    markOnboardingCompleted: boolean;
+  },
+): Promise<void> {
+  const [paymentMethodColumnExists, onboardingColumnExists] = await Promise.all([
+    hasTableColumn(db, "users", "payment_method"),
+    params.markOnboardingCompleted ? hasTableColumn(db, "users", "onboarding_completed") : Promise.resolve(false),
+  ]);
+
+  const assignments = ["plan_id = ?", "plan_status = ?"];
+  const values: Array<string> = [params.planId, params.status];
+
+  if (paymentMethodColumnExists) {
+    assignments.push("payment_method = ?");
+    values.push(params.paymentMethod);
+  }
+  if (params.markOnboardingCompleted && onboardingColumnExists) {
+    assignments.push("onboarding_completed = 1");
+  }
+
+  await db
+    .prepare(`UPDATE users SET ${assignments.join(", ")} WHERE id = ?`)
+    .bind(...values, userId)
+    .run();
+}
+
+function scheduleCatalogInitialization(db: D1Database, executionCtx: ExecutionContext): void {
+  const now = Date.now();
+  if (now - catalogInitCheckedAt < CATALOG_CACHE_TTL_MS) return;
+  if (catalogInitPromise) return;
+
+  executionCtx.waitUntil(
+    ensureCatalogReady(db).catch((error) => {
+      console.error("[catalog][background-init]", {
+        message: error instanceof Error ? error.message : String(error),
+      });
+    })
+  );
+}
+
 async function authMiddleware(
   c: import("hono").Context<{ Bindings: Env; Variables: { user: AuthUser } }>,
   next: () => Promise<void>

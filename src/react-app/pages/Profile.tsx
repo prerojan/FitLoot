@@ -1066,101 +1066,59 @@ function SkillCard({ skill }: { skill: SkillWithProgress }) {
   );
 }
 
-function RarityFilterBar({
-  selected,
-  onChange,
-}: {
-  selected: RarityFilterOption;
-  onChange: (option: RarityFilterOption) => void;
-}) {
-  return (
-    <div className="flex flex-wrap gap-2">
-      {RARITY_FILTER_OPTIONS.map((option) => {
-        const active = option === selected;
-        return (
-          <button
-            key={option}
-            type="button"
-            onClick={() => onChange(option)}
-            className={`rounded-full px-3 py-1.5 text-xs font-semibold transition-colors ${
-              active
-                ? "bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-sm"
-                : "bg-white text-gray-600 border border-gray-200 hover:bg-gray-50"
-            }`}
-          >
-            {option}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
-function SectionHeader({ title, subtitle }: { title: string; subtitle: string }) {
-  return (
-    <div className="flex items-center justify-between gap-3 pt-1">
-      <h3 className="text-sm font-bold text-gray-900">{title}</h3>
-      <span className="text-xs text-gray-500">{subtitle}</span>
-    </div>
-  );
-}
-
-function AchievementCard({
-  achievement,
-  highlighted,
-  onClick,
-}: {
-  achievement: AchievementWithUnlock;
-  highlighted: boolean;
-  onClick: () => void;
-}) {
+function AchievementCard({ achievement }: { achievement: AchievementWithUnlock }) {
   const unlocked = achievement.unlocked === 1;
-  const secretLocked = isAchievementSecretLocked(achievement);
-  const rarityColor = unlocked ? resolveRarityColor(achievement) : null;
-  const displayName = secretLocked ? "???" : achievement.name;
-  const displayDescription = achievement.description ?? "Sem descri\u00e7\u00e3o";
-  const displayCondition = formatUnlockCondition(achievement.condition);
-  const badgeLabel = normalizeRarity(achievement.rarity);
-  const cardClassName = [
-    "w-full rounded-xl border-2 p-3 shadow-lg text-left transition-transform hover:-translate-y-0.5",
-    unlocked ? "bg-white/95 text-gray-800" : "bg-gray-200 text-gray-500 border-gray-300 grayscale opacity-75",
-    highlighted ? "ring-2 ring-emerald-300" : "",
-  ].filter(Boolean).join(" ");
+  const isSecret = Number(achievement.secret ?? 0) === 1;
+  const isSecretLocked = isSecret && !unlocked;
+
+  const rarityColorByLabel = {
+    Comum: "#D1D5DB",
+    Incomum: "#22C55E",
+    Raro: "#3B82F6",
+    "Mítico": "#EF4444",
+    Secreto: "#F59E0B",
+  } as const;
+
+  const normalizeRarity = (value: string | undefined) => {
+    if (!value) return undefined;
+    const normalized = value
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase();
+
+    if (normalized.includes("incomum")) return "Incomum" as const;
+    if (normalized.includes("comum")) return "Comum" as const;
+    if (normalized.includes("raro")) return "Raro" as const;
+    if (normalized.includes("mitico")) return "Mítico" as const;
+    if (normalized.includes("secreto")) return "Secreto" as const;
+    return undefined;
+  };
+
+  const normalizedRarity = normalizeRarity(achievement.rarity);
+  const rarityColor = unlocked
+    ? (achievement.color || (normalizedRarity ? rarityColorByLabel[normalizedRarity] : undefined) || "#D1D5DB")
+    : null;
+  const displayName = isSecretLocked ? "?" : achievement.name;
+  const displayDescription = isSecretLocked ? "?" : achievement.description;
+  const cardClassName = unlocked
+    ? "bg-white/90 text-gray-700 border-2"
+    : "bg-gray-200 text-gray-500 border-2 border-gray-300 grayscale opacity-70";
+  const icon = isSecretLocked ? "?" : unlocked ? "🏆" : "🔒";
 
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cardClassName}
+    <div
+      className={`rounded-2xl p-4 shadow-lg text-center ${cardClassName}`}
       style={unlocked && rarityColor ? { borderColor: rarityColor } : undefined}
     >
-      <div className="flex items-center justify-between gap-2">
-        <h3 className="text-sm font-bold leading-tight" style={unlocked && rarityColor ? { color: rarityColor } : undefined}>
-          {displayName}
-        </h3>
-        {unlocked && (
-          <span
-            className="rounded-full px-2 py-0.5 text-[10px] font-semibold text-white"
-            style={rarityColor ? { backgroundColor: rarityColor } : undefined}
-          >
-            {badgeLabel}
-          </span>
-        )}
-      </div>
-
-      {unlocked && (
-        <>
-          <p className="mt-1 text-xs leading-snug">{displayDescription}</p>
-          <p className="mt-1 text-[11px] leading-snug text-gray-600">
-            <strong className="text-gray-700">Condi\u00e7\u00e3o:</strong>{" "}
-            {displayCondition ?? "Condi\u00e7\u00e3o n\u00e3o informada."}
-          </p>
-          {achievement.unlocked_at && (
-            <p className="mt-2 text-[11px] text-gray-500">
-              {formatUnlockDateTime(achievement.unlocked_at) ?? "Data indispon\u00edvel"}
-            </p>
-          )}
-        </>
+      <div className="text-3xl mb-2" style={unlocked && rarityColor ? { color: rarityColor } : undefined}>{icon}</div>
+      <h3 className="font-bold text-sm mb-1" style={unlocked && rarityColor ? { color: rarityColor } : undefined}>
+        {displayName}
+      </h3>
+      <p className="text-xs opacity-90">{displayDescription}</p>
+      {unlocked && achievement.unlocked_at && (
+        <p className="text-xs opacity-75 mt-2">
+          {new Date(achievement.unlocked_at).toLocaleDateString()}
+        </p>
       )}
     </button>
   );
