@@ -303,7 +303,6 @@ const Home: FC = () => {
                   Criar conta
                 </button>
               </p>
-
               <div className="mt-6 flex items-center justify-center gap-2 text-xs text-gray-500">
                 <Check className="w-4 h-4 text-emerald-500" />
                 <span>7 dias grátis • Cancele quando quiser</span>

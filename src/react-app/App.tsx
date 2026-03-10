@@ -80,6 +80,40 @@ const SessionRoute = ({ children }: { children: React.ReactNode }) => {
   return <>{children}</>;
 };
 
+const LoginRoute = () => {
+  const { user, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 px-6 pt-20">
+        <div className="fl-card p-6 flex items-center justify-center">
+          <LoadingBall size="md" />
+        </div>
+      </div>
+    );
+  }
+
+  if (user) return <Navigate to={resolveAuthenticatedStartRoute(user)} replace />;
+  return <HomePage />;
+};
+
+const RootRoute = () => {
+  const { user, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 px-6 pt-20">
+        <div className="fl-card p-6 flex items-center justify-center">
+          <LoadingBall size="md" />
+        </div>
+      </div>
+    );
+  }
+
+  if (user) return <Navigate to={resolveAuthenticatedStartRoute(user)} replace />;
+  return <LandingPage />;
+};
+
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
@@ -102,9 +136,9 @@ export default function App() {
       <Router>
         <Suspense fallback={<PageLoader />}>
           <Routes>
-            <Route path={ROUTE_PATHS.landing} element={<AppStartRoute />} />
+            <Route path={ROUTE_PATHS.landing} element={<RootRoute />} />
             <Route path={ROUTE_PATHS.publicLanding} element={<LandingPage />} />
-            <Route path={ROUTE_PATHS.login} element={<HomePage />} />
+            <Route path={ROUTE_PATHS.login} element={<LoginRoute />} />
             <Route path={ROUTE_PATHS.app} element={<AppStartRoute />} />
             <Route path={ROUTE_PATHS.paymentPending} element={<SessionRoute><PaymentPending /></SessionRoute>} />
             <Route path={ROUTE_PATHS.payment} element={<SessionRoute><PaymentRequired /></SessionRoute>} />
