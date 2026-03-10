@@ -24,6 +24,7 @@ const Arena = lazy(() => import("@/react-app/pages/Arena"));
 const MiniGames = lazy(() => import("@/react-app/pages/MiniGames"));
 const AIChat = lazy(() => import("@/react-app/pages/AIChat"));
 const FoodAnalysis = lazy(() => import("@/react-app/pages/FoodAnalysis"));
+const LandingPage = lazy(() => import("@/react-app/pages/Landing"));
 const NotFoundPage = lazy(() => import("@/react-app/pages/NotFound"));
 
 const AppStartRoute = () => {
@@ -102,6 +103,7 @@ export default function App() {
         <Suspense fallback={<PageLoader />}>
           <Routes>
             <Route path={ROUTE_PATHS.landing} element={<AppStartRoute />} />
+            <Route path={ROUTE_PATHS.publicLanding} element={<LandingPage />} />
             <Route path={ROUTE_PATHS.login} element={<HomePage />} />
             <Route path={ROUTE_PATHS.app} element={<AppStartRoute />} />
             <Route path={ROUTE_PATHS.paymentPending} element={<SessionRoute><PaymentPending /></SessionRoute>} />
