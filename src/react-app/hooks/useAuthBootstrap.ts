@@ -13,19 +13,8 @@ interface UseAuthBootstrapParams {
 
 export function useAuthBootstrap({ setUser, setLoading }: UseAuthBootstrapParams) {
   return useCallback(async () => {
-    const hasSessionHint = localStorage.getItem(AUTHENTICATED_HINT_KEY) === "1";
-    if (!hasSessionHint) {
-      applyProfileTheme(null);
-      setUser(null);
-      setLoading(false);
-      return;
-    }
-
     try {
-      const [user, profile] = await Promise.all([
-        fetchCurrentUser(),
-        fetchProfileTheme().catch(() => null),
-      ]);
+      const user = await fetchCurrentUser();
       if (!user) {
         localStorage.removeItem(AUTHENTICATED_HINT_KEY);
         applyProfileTheme(null);
@@ -33,6 +22,9 @@ export function useAuthBootstrap({ setUser, setLoading }: UseAuthBootstrapParams
         return;
       }
 
+      localStorage.setItem(AUTHENTICATED_HINT_KEY, "1");
+
+      const profile = await fetchProfileTheme().catch(() => null);
       applyProfileTheme(profile);
 
       setUser(user);

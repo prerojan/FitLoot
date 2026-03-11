@@ -1,22 +1,20 @@
-import { useState, useEffect, useRef, type FC, type FormEvent, type ChangeEvent } from "react";
+import { useEffect, useRef, useState, type ChangeEvent, type FC, type FormEvent } from "react";
 import { useNavigate } from "react-router";
-import { useAuth } from "@/react-app/contexts/auth";
 import {
-  Zap,
-  Mail,
   ArrowRight,
-  Shield,
-  Trophy,
-  Target,
-  Sparkles,
   Check,
   Eye,
   EyeOff,
+  Mail,
+  MoonStar,
+  Shield,
+  SunMedium,
+  Zap,
 } from "lucide-react";
-import { api } from "@/react-app/utils/api";
-import { Button } from "@/react-app/components/ui/button";
-import { Input } from "@/react-app/components/ui/input";
+import { useAuth } from "@/react-app/contexts/auth";
+import { useTheme } from "@/react-app/contexts/theme";
 import LoadingBall from "@/react-app/components/LoadingBall";
+import { api } from "@/react-app/utils/api";
 
 type LoginForm = {
   email: string;
@@ -31,6 +29,7 @@ type ApiError = {
 const Home: FC = () => {
   const navigate = useNavigate();
   const { checkAuth } = useAuth();
+  const { themeMode, toggleThemeMode } = useTheme();
 
   const [form, setForm] = useState<LoginForm>({ email: "", password: "" });
   const [showPassword, setShowPassword] = useState(false);
@@ -44,7 +43,7 @@ const Home: FC = () => {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get("registered") === "true") {
-      setSuccessMessage("Conta criada com sucesso! Faça login para continuar.");
+      setSuccessMessage("Conta criada com sucesso! Faca login para continuar.");
     }
   }, []);
 
@@ -89,254 +88,230 @@ const Home: FC = () => {
         return;
       }
 
-      // Após login, atualiza contexto global e redireciona
       localStorage.setItem("fitloot_authenticated_hint", "1");
       await checkAuth();
       navigate("/app", { replace: true });
     } catch {
-      setError("Não foi possível conectar ao servidor");
+      setError("Nao foi possivel conectar ao servidor");
     } finally {
       setIsLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 flex items-center justify-center p-4 relative overflow-hidden">
-      {/* Background decorativo */}
-      <div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1534438327276-14e5300c3a48?auto=format&fit=crop&w=960&q=40')] bg-cover bg-center opacity-5" />
-
-      {/* Elementos decorativos flutuantes */}
-      <div className="absolute top-20 left-10 w-20 h-20 bg-emerald-200 rounded-full blur-3xl opacity-50 animate-pulse" />
-      <div
-        className="absolute bottom-20 right-10 w-32 h-32 bg-teal-200 rounded-full blur-3xl opacity-50 animate-pulse"
-        style={{ animationDelay: "700ms" }}
-      />
-      <div
-        className="absolute top-1/2 left-1/4 w-24 h-24 bg-cyan-200 rounded-full blur-3xl opacity-50 animate-pulse"
-        style={{ animationDelay: "1000ms" }}
-      />
-
-      <div className="relative w-full max-w-6xl grid md:grid-cols-2 gap-8 items-center">
-        {/* Painel Esquerdo - Informações */}
-        <div className="hidden md:block space-y-8">
-          <div className="flex items-center gap-3 mb-8">
-            <div className="w-16 h-16 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-2xl flex items-center justify-center shadow-lg">
-              <Zap className="w-10 h-10 text-white" strokeWidth={2.5} />
-            </div>
-            <div>
-              <h1 className="fl-title-page text-4xl">
-                Fit<span className="text-emerald-500">Loot</span>
-              </h1>
-              <p className="text-gray-600">Transforme treinos em conquistas</p>
-            </div>
-          </div>
-
-          <div className="space-y-6">
-            <h2 className="fl-title-page leading-tight">
-              Entre e comece a{" "}
-              <span className="text-transparent bg-clip-text bg-gradient-to-r from-emerald-500 to-teal-500">
-                evoluir hoje
-              </span>
-            </h2>
-
-            <div className="space-y-4">
-              {[
-                { icon: Trophy, text: "Ganhe XP e suba de nível com cada treino" },
-                { icon: Target, text: "Complete missões e desbloqueie conquistas" },
-                { icon: Sparkles, text: "Troque pontos por cupons fitness reais" },
-                { icon: Shield, text: "Sistema anti-trapaça com validação por sensores" },
-              ].map((item, idx) => {
-                const Icon = item.icon;
-                return (
-                  <div
-                    key={idx}
-                    className="fl-card-soft flex items-center gap-4 p-4 hover:shadow-lg transition-all"
-                  >
-                    <div className="w-12 h-12 bg-gradient-to-br from-emerald-400 to-teal-500 rounded-xl flex items-center justify-center flex-shrink-0">
-                      <Icon className="w-6 h-6 text-white" strokeWidth={2} />
-                    </div>
-                    <p className="text-gray-700 font-medium">{item.text}</p>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="grid grid-cols-3 gap-4 pt-6">
-            {[
-              { value: "10K+", label: "Usuários" },
-              { value: "500K+", label: "Missões" },
-              { value: "95%", label: "Sucesso" },
-            ].map((stat, idx) => (
-              <div
-                key={idx}
-                className="fl-card-soft text-center p-4"
-              >
-                <div className="text-2xl font-bold text-emerald-600">{stat.value}</div>
-                <div className="text-sm text-gray-600">{stat.label}</div>
+    <div className="fl-auth-page">
+      <div className="relative z-10 flex min-h-screen flex-col">
+        <header className="px-5 pt-5 md:px-8 md:pt-8">
+          <div className="mx-auto flex w-full max-w-6xl items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-white/10 bg-[rgba(var(--fl-color-accent-rgb),0.14)] shadow-[0_0_24px_rgba(var(--fl-color-accent-rgb),0.16)]">
+                <Zap className="h-6 w-6 text-[var(--fl-color-accent)]" strokeWidth={2.3} />
               </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Painel Direito - Formulário de Login */}
-        <div className="relative">
-          <div className="bg-white/80 backdrop-blur-xl rounded-3xl shadow-2xl p-8 md:p-10 border border-white/20">
-            {/* Logo mobile */}
-            <div className="md:hidden flex items-center gap-3 mb-8 justify-center">
-              <div className="w-12 h-12 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-xl flex items-center justify-center">
-                <Zap className="w-7 h-7 text-white" strokeWidth={2.5} />
-              </div>
-              <h1 className="fl-title-page">
-                Fit<span className="text-emerald-500">Loot</span>
-              </h1>
-            </div>
-
-            <div className="text-center mb-6">
-              <h3 className="fl-title-section md:text-3xl mb-2">
-                Bem-vindo de volta! 👋
-              </h3>
-              <p className="text-gray-600">Entre para continuar sua jornada épica</p>
-            </div>
-
-            {successMessage && (
-              <div className="mb-4 p-3 rounded-lg bg-green-500/10 border border-green-500/20 text-green-600 text-sm">
-                {successMessage}
-              </div>
-            )}
-
-            {error && (
-              <div className="mb-4 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-600 text-sm space-y-2">
-                <p>{error}</p>
-                {userNotFound && (
-                  <button
-                    type="button"
-                    onClick={goToOnboarding}
-                    className="fl-btn-primary mt-2 w-full py-2 rounded-xl"
-                  >
-                    Criar minha conta
-                  </button>
-                )}
-              </div>
-            )}
-
-            <form onSubmit={handleSubmit} noValidate className="space-y-4">
-              {/* Campo de Email */}
-              <div className="relative">
-                <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-                <Input
-                  type="email"
-                  placeholder="seu@email.com"
-                  value={form.email}
-                  onChange={handleChange("email")}
-                  autoComplete="email"
-                  required
-                  className="w-full pl-12 pr-4 py-4 rounded-2xl border-2 border-gray-200 focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100 transition-all text-base"
-                />
-              </div>
-
-              {/* Campo de Senha */}
               <div>
-                <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-2">
-                  Senha
-                </label>
+                <p className="text-[0.68rem] font-bold uppercase tracking-[0.24em] text-[var(--fl-color-accent)]">
+                  Fitness RPG
+                </p>
+                <h1 className="fl-auth-display text-xl font-bold md:text-2xl">FitLoot</h1>
+              </div>
+            </div>
 
-                <div className="relative">
-                  <Input
-                    ref={passwordRef}
-                    id="password"
-                    type={showPassword ? "text" : "password"}
-                    placeholder="••••••••"
-                    value={form.password}
-                    onChange={handleChange("password")}
-                    autoComplete="current-password"
-                    required
-                    className="w-full pr-12 py-4 rounded-2xl border-2 border-gray-200 focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100 transition-all text-base"
-                  />
+            <button
+              type="button"
+              onClick={toggleThemeMode}
+              className="flex h-11 w-11 items-center justify-center rounded-full border border-[var(--fl-border-soft)] bg-[var(--fl-surface-muted)] text-[var(--fl-color-text-muted)] transition hover:border-[var(--fl-border-strong)] hover:text-[var(--fl-color-text)]"
+              aria-label={themeMode === "dark" ? "Ativar tema claro" : "Ativar tema escuro"}
+              title={themeMode === "dark" ? "Ativar tema claro" : "Ativar tema escuro"}
+            >
+              {themeMode === "dark" ? <SunMedium className="h-5 w-5" /> : <MoonStar className="h-5 w-5" />}
+            </button>
+          </div>
+        </header>
+
+        <main className="flex-1 px-5 pb-10 pt-6 md:px-8 md:pb-12 md:pt-8">
+          <div className="mx-auto grid w-full max-w-6xl gap-4 lg:grid-cols-[1.02fr_minmax(0,0.92fr)]">
+            <section className="hidden lg:block">
+              <div className="fl-auth-hero-panel rounded-[1.5rem] p-7 xl:p-8">
+                <div className="absolute inset-0">
+                  <div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1534438327276-14e5300c3a48?auto=format&fit=crop&w=1200&q=55')] bg-cover bg-center opacity-60" />
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/45 to-black/10" />
+                </div>
+
+                <div className="relative z-10 flex min-h-[540px] flex-col justify-end gap-7">
+                  <div className="space-y-4">
+                    <span className="fl-auth-chip">
+                      <Shield className="h-4 w-4" />
+                      Arena de evolucao
+                    </span>
+
+                    <div className="space-y-3">
+                      <h2 className="fl-auth-display max-w-xl text-5xl font-bold leading-[1.02] xl:text-6xl">
+                        Entre e{" "}
+                        <span className="italic text-[var(--fl-color-accent)]">suba de nivel</span>{" "}
+                        na vida real.
+                      </h2>
+                      <p className="max-w-md text-base leading-7 text-white/78 xl:text-lg">
+                        Transforme exercicios em conquistas epicas com XP.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section className="fl-auth-panel rounded-[1.5rem] p-5 md:p-6 lg:p-7">
+              <div className="space-y-6">
+                <div className="space-y-4 lg:hidden">
+                  <span className="fl-auth-chip">
+                    <Shield className="h-4 w-4" />
+                    Arena de evolucao
+                  </span>
+
+                  <div className="space-y-2">
+                    <h2 className="fl-auth-display text-4xl font-bold leading-[1.02]">
+                      Entre e{" "}
+                      <span className="italic text-[var(--fl-color-accent)]">suba de nivel</span>{" "}
+                      na vida real.
+                    </h2>
+                    <p className="text-sm leading-6 text-[var(--fl-color-text-muted)]">
+                      Transforme exercicios em conquistas epicas com XP.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <div className="space-y-2">
+                    <p className="text-[0.72rem] font-bold uppercase tracking-[0.2em] text-[var(--fl-color-accent)]">
+                      Login
+                    </p>
+                    <h3 className="fl-auth-display text-3xl font-bold">Bem-vindo de volta</h3>
+                    <p className="text-sm leading-6 text-[var(--fl-color-text-muted)]">
+                      Acesse sua conta para retomar missoes, streaks e recompensas.
+                    </p>
+                  </div>
+                </div>
+
+                {successMessage && (
+                  <div className="fl-auth-message fl-auth-message-success">
+                    {successMessage}
+                  </div>
+                )}
+
+                {error && (
+                  <div className="fl-auth-message fl-auth-message-error space-y-3">
+                    <p>{error}</p>
+                    {userNotFound && (
+                      <button
+                        type="button"
+                        onClick={goToOnboarding}
+                        className="fl-auth-submit text-sm"
+                      >
+                        Criar minha conta
+                        <ArrowRight className="h-4 w-4" />
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                <form onSubmit={handleSubmit} noValidate className="space-y-5">
+                  <div className="space-y-2">
+                    <label
+                      htmlFor="login-email"
+                      className="text-xs font-bold uppercase tracking-[0.18em] text-[var(--fl-color-text-soft)]"
+                    >
+                      Email
+                    </label>
+                    <div className="fl-auth-input-wrap">
+                      <Mail className="fl-auth-icon h-5 w-5" />
+                      <input
+                        id="login-email"
+                        type="email"
+                        placeholder="seu@email.com"
+                        value={form.email}
+                        onChange={handleChange("email")}
+                        autoComplete="email"
+                        required
+                        className="fl-auth-input"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label
+                      htmlFor="login-password"
+                      className="text-xs font-bold uppercase tracking-[0.18em] text-[var(--fl-color-text-soft)]"
+                    >
+                      Senha
+                    </label>
+                    <div className="fl-auth-input-wrap">
+                      <Shield className="fl-auth-icon h-5 w-5" />
+                      <input
+                        ref={passwordRef}
+                        id="login-password"
+                        type={showPassword ? "text" : "password"}
+                        placeholder="********"
+                        value={form.password}
+                        onChange={handleChange("password")}
+                        autoComplete="current-password"
+                        required
+                        className="fl-auth-input"
+                      />
+                      <button
+                        type="button"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={(e) => {
+                          setShowPassword((currentValue) => !currentValue);
+                          e.currentTarget.blur();
+                          passwordRef.current?.focus();
+                        }}
+                        className="rounded-full p-2 text-[var(--fl-color-text-muted)] transition hover:bg-white/5 hover:text-[var(--fl-color-text)] focus:outline-none"
+                        aria-label={showPassword ? "Ocultar senha" : "Mostrar senha"}
+                        title={showPassword ? "Ocultar senha" : "Mostrar senha"}
+                      >
+                        {showPassword ? <Eye className="h-5 w-5" /> : <EyeOff className="h-5 w-5" />}
+                      </button>
+                    </div>
+                  </div>
 
                   <button
-                    type="button"
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={(e) => {
-                      setShowPassword((p) => !p);
-                      e.currentTarget.blur();
-                      // opcional: mantém o cursor no input após clicar no olho
-                      passwordRef.current?.focus();
-                    }}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 rounded-lg p-2 text-gray-400 transition hover:bg-gray-50 hover:text-gray-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/30"
-                    aria-label={showPassword ? "Ocultar senha" : "Mostrar senha"}
-                    title={showPassword ? "Ocultar senha" : "Mostrar senha"}
+                    type="submit"
+                    disabled={isLoading || !form.email || !form.password}
+                    className="fl-auth-submit"
                   >
-                    {showPassword ? <Eye className="h-5 w-5" /> : <EyeOff className="h-5 w-5" />}
+                    {isLoading ? (
+                      <span className="inline-flex items-center gap-2">
+                        <LoadingBall size="sm" />
+                        Entrando
+                      </span>
+                    ) : (
+                      <>
+                        Inicializar sessao
+                        <ArrowRight className="h-4 w-4" />
+                      </>
+                    )}
                   </button>
+                </form>
+
+                <div className="space-y-4 border-t border-[var(--fl-border-soft)] pt-5 text-center">
+                  <p className="text-sm text-[var(--fl-color-text-muted)]">
+                    Nao tem uma conta?{" "}
+                    <button
+                      type="button"
+                      onClick={goToOnboarding}
+                      className="fl-auth-inline-link"
+                    >
+                      Criar conta
+                    </button>
+                  </p>
+
+                  <div className="inline-flex items-center gap-2 rounded-full border border-[var(--fl-auth-chip-border)] bg-[var(--fl-auth-chip-bg)] px-4 py-2 text-[0.72rem] font-semibold uppercase tracking-[0.14em] text-[var(--fl-color-text-soft)]">
+                    <Check className="h-4 w-4 text-[var(--fl-color-accent)]" />
+                    7 dias gratis - Cancele quando quiser
+                  </div>
                 </div>
               </div>
-
-              <Button
-                type="submit"
-                disabled={isLoading || !form.email || !form.password}
-                className="fl-btn-primary w-full py-4 rounded-2xl text-base shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
-              >
-                {isLoading ? (
-                  <span className="inline-flex items-center gap-2">
-                    <LoadingBall size="sm" />
-                    Entrando
-                  </span>
-                ) : (
-                  <>
-                    Entrar
-                    <ArrowRight className="ml-2 w-5 h-5" />
-                  </>
-                )}
-              </Button>
-            </form>
-
-            {/* Footer */}
-            <div className="mt-8 text-center">
-              <p className="text-sm text-gray-600">
-                Não tem uma conta?{" "}
-                <button
-                  type="button"
-                  onClick={goToOnboarding}
-                  className="font-semibold text-emerald-600 hover:text-emerald-700 transition-colors"
-                >
-                  Criar conta
-                </button>
-              </p>
-
-              <div className="mt-6 flex items-center justify-center gap-2 text-xs text-gray-500">
-                <Check className="w-4 h-4 text-emerald-500" />
-                <span>7 dias grátis • Cancele quando quiser</span>
-              </div>
-            </div>
-
-            {/* Trust indicators */}
-            <div className="mt-6 pt-6 border-t border-gray-200">
-              <div className="flex items-center justify-center gap-6 text-xs text-gray-500">
-                <div className="flex items-center gap-1">
-                  <Shield className="w-4 h-4 text-emerald-500" />
-                  <span>Seguro</span>
-                </div>
-                <div className="flex items-center gap-1">
-                  <Zap className="w-4 h-4 text-emerald-500" />
-                  <span>Rápido</span>
-                </div>
-                <div className="flex items-center gap-1">
-                  <Trophy className="w-4 h-4 text-emerald-500" />
-                  <span>10K+ usuários</span>
-                </div>
-              </div>
-            </div>
+            </section>
           </div>
-
-          {/* Badge flutuante */}
-          <div className="absolute -top-4 -right-4 bg-gradient-to-r from-yellow-400 to-orange-500 text-white px-6 py-3 rounded-full shadow-xl transform rotate-12 hidden md:block">
-            <div className="flex items-center gap-2">
-              <Sparkles className="w-5 h-5" />
-              <span className="font-bold text-sm">7 dias grátis!</span>
-            </div>
-          </div>
-        </div>
+        </main>
       </div>
     </div>
   );
