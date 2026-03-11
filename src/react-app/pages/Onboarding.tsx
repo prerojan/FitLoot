@@ -1,4 +1,4 @@
-import {
+﻿import {
   useCallback,
   useEffect,
   useRef,
@@ -8,7 +8,12 @@ import {
   type KeyboardEvent,
 } from "react";
 import { useNavigate } from "react-router";
-import { useAuth } from "@/react-app/App";
+import { ROUTE_PATHS } from "@/react-app/constants/auth";
+import { useAuth } from "@/react-app/contexts/auth";
+import PaymentStatusPopup from "@/react-app/components/PaymentStatusPopup";
+import PageLoader from "@/react-app/components/PageLoader";
+import LoadingBall from "@/react-app/components/LoadingBall";
+import { resolveAuthenticatedStartRoute } from "@/react-app/services/authService";
 import { api } from "@/react-app/utils/api";
 import { safeGet } from "@/utils/typeHelpers";
 import { Button } from "@/react-app/components/ui/button";
@@ -20,6 +25,7 @@ import {
   ChevronRight,
   CreditCard,
   Dumbbell,
+  Download,
   Gauge,
   HeartPulse,
   Monitor,
@@ -251,6 +257,23 @@ type ProfileStep = {
   main_goal: "perder_peso" | "ganhar_massa" | "resistencia" | "calistenia" | "saude_geral";
   gender: "homem" | "mulher" | "outro";
   age: string;
+  training_frequency: string;
+};
+
+type PaymentTab = "card" | "pix";
+
+type CardPaymentForm = {
+  number: string;
+  holderName: string;
+  expiry: string;
+  cvv: string;
+};
+
+type CheckoutResult = {
+  checkout_status?: "pending" | "vip_active" | undefined;
+  message?: string | undefined;
+  amount?: number | undefined;
+  checkout_url?: string | null | undefined;
 };
 
 const INITIAL_CREDENTIALS: CredentialsStep = {
@@ -273,6 +296,14 @@ const INITIAL_PROFILE: ProfileStep = {
   main_goal: "saude_geral",
   gender: "homem",
   age: "25",
+  training_frequency: "4",
+};
+
+const INITIAL_CARD_PAYMENT: CardPaymentForm = {
+  number: "",
+  holderName: "",
+  expiry: "",
+  cvv: "",
 };
 
 const STEP_NAMES = ["Identidade", "Corpo", "Objetivos", "Condicionamento", "Plano e conta"] as const;
@@ -304,10 +335,38 @@ const EQUIPMENT_OPTIONS: { id: string; label: string; icon: typeof Dumbbell }[] 
   { id: "kettlebell", label: "Kettlebell", icon: Weight },
 ];
 
+const PLAN_OPTIONS = [
+  {
+    id: "free" as const,
+    name: "Básico",
+    price: "R$ 49/mês",
+    amountCents: 4900,
+    color: "from-gray-500 to-gray-600",
+    features: ["Missões diárias", "XP e níveis", "Ranking"],
+  },
+  {
+    id: "pro" as const,
+    name: "Premium",
+    price: "R$ 99/mês",
+    amountCents: 9900,
+    color: "from-emerald-500 to-teal-600",
+    features: ["Tudo do Básico", "Scanner com IA", "Ranking global"],
+    popular: true,
+  },
+  {
+    id: "annual" as const,
+    name: "Elite",
+    price: "R$ 149/mês",
+    amountCents: 14900,
+    color: "from-purple-500 to-pink-600",
+    features: ["Tudo do Premium", "Planos de treino", "Suporte VIP"],
+  },
+] as const;
+
 function availabilityMessage(state: AvailabilityState): { tone: "green" | "red" | "muted"; text: string } | null {
-  if (state.status === "available") return { tone: "green", text: "✅ Disponível" };
-  if (state.status === "unavailable") return { tone: "red", text: `❌ ${state.message || "Já cadastrado"}` };
-  if (state.status === "invalid") return { tone: "red", text: `❌ ${state.message || "Valor inválido"}` };
+  if (state.status === "available") return { tone: "green", text: "Disponível" };
+  if (state.status === "unavailable") return { tone: "red", text: state.message || "Já cadastrado" };
+  if (state.status === "invalid") return { tone: "red", text: state.message || "Valor inválido" };
   if (state.status === "checking") return { tone: "muted", text: "Validando..." };
   return null;
 }
@@ -322,11 +381,17 @@ export default function Onboarding() {
   const [profile, setProfile] = useState(INITIAL_PROFILE);
 
   const [selectedPlan, setSelectedPlan] = useState<"free" | "pro" | "annual">("free");
-  const [paymentTab, setPaymentTab] = useState<"card" | "pix">("card");
+  const [paymentTab, setPaymentTab] = useState<PaymentTab>("card");
+  const [cardPayment, setCardPayment] = useState<CardPaymentForm>(INITIAL_CARD_PAYMENT);
 
   const [stepError, setStepError] = useState<string | null>(null);
   const [stepLoading, setStepLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [statusPopup, setStatusPopup] = useState<{
+    title: string;
+    message: string;
+    tone: "success" | "warning" | "error";
+  } | null>(null);
   const [selectedGoals, setSelectedGoals] = useState<GoalValue[]>([]);
   const [selectedEquipment, setSelectedEquipment] = useState<string[]>([]);
   const [usernameAvailability, setUsernameAvailability] = useState<AvailabilityState>({ status: "idle" });
@@ -347,7 +412,9 @@ export default function Onboarding() {
 
   useEffect(() => {
     if (authLoading) return;
-    if (user?.onboarding_completed === 1) navigate("/home");
+    if (user?.onboarding_completed === 1) {
+      navigate(resolveAuthenticatedStartRoute(user), { replace: true });
+    }
   }, [authLoading, navigate, user]);
 
   const setCredential = (field: keyof CredentialsStep) => (e: ChangeEvent<HTMLInputElement>) => {
@@ -366,6 +433,11 @@ export default function Onboarding() {
         setUsernameAvailability({ status: "idle" });
       }
     };
+
+  const setCardField = (field: keyof CardPaymentForm) => (e: ChangeEvent<HTMLInputElement>) => {
+    const nextValue = e.target.value;
+    setCardPayment((current) => ({ ...current, [field]: nextValue }));
+  };
 
   const validateUsername = useCallback(async (rawUsername: string) => {
     const username = rawUsername.trim();
@@ -513,7 +585,7 @@ export default function Onboarding() {
       height < 140 ||
       height > 220
     ) {
-      setStepError("Altura (140–220 cm) e peso (40–200 kg) devem estar no intervalo válido.");
+      setStepError("Altura (140-220 cm) e peso (40-200 kg) devem estar no intervalo válido.");
       return;
     }
 
@@ -540,9 +612,14 @@ export default function Onboarding() {
     const pushups = Number(profile.initial_pushups) || 0;
     const situps = Number(profile.initial_situps) || 0;
     const squats = Number(profile.initial_squats) || 0;
+    const trainingFrequency = Number(profile.training_frequency) || 0;
 
     if (pushups < 0 || situps < 0 || squats < 0) {
       setStepError("Valores dos contadores não podem ser negativos.");
+      return;
+    }
+    if (!Number.isFinite(trainingFrequency) || trainingFrequency < 1 || trainingFrequency > 7) {
+      setStepError("Frequência semanal deve ser entre 1 e 7 dias.");
       return;
     }
 
@@ -579,6 +656,11 @@ export default function Onboarding() {
       return;
     }
 
+    if (paymentTab === "card" && !cardPayment.cvv.trim()) {
+      setStepError("Informe o CVV para continuar.");
+      return;
+    }
+
     setStepLoading(true);
 
     try {
@@ -609,13 +691,12 @@ export default function Onboarding() {
       });
 
       if (!loginRes.ok) {
-        setStepError("Conta criada. Faça login em /app");
+        setStepError("Conta criada. Faça login em /login");
         setStepLoading(false);
         return;
       }
 
       localStorage.setItem("fitloot_authenticated_hint", "1");
-      await checkAuth();
 
       const patchRes = await api("/api/users/me", {
         method: "PATCH",
@@ -630,6 +711,9 @@ export default function Onboarding() {
 
       const equipmentStr = [...selectedEquipment, profile.equipment].filter(Boolean).join(", ");
       const mainGoal = safeGet(selectedGoals, 0) ?? profile.main_goal;
+      const goals = selectedGoals.length > 0 ? selectedGoals : [mainGoal];
+      const age = Number(profile.age);
+      const trainingFrequency = Number(profile.training_frequency);
 
       const res = await api("/api/onboarding", {
         method: "POST",
@@ -638,6 +722,8 @@ export default function Onboarding() {
           full_name: profile.full_name.trim(),
           weight: Number(profile.weight),
           height: Number(profile.height),
+          age: Number.isFinite(age) ? age : 25,
+          gender: profile.gender,
           initial_conditioning: profile.initial_conditioning,
           initial_pushups: Number(profile.initial_pushups) || 0,
           initial_situps: Number(profile.initial_situps) || 0,
@@ -645,36 +731,59 @@ export default function Onboarding() {
           injuries: profile.injuries || undefined,
           equipment: equipmentStr || undefined,
           main_goal: mainGoal,
+          goals,
+          training_frequency: Number.isFinite(trainingFrequency) ? trainingFrequency : 4,
+          plan_id: selectedPlan,
+          payment_method: paymentTab,
+          card_number: paymentTab === "card" && cardPayment.number.trim() ? cardPayment.number : undefined,
+          card_holder_name: paymentTab === "card" && cardPayment.holderName.trim() ? cardPayment.holderName : undefined,
+          card_expiry: paymentTab === "card" && cardPayment.expiry.trim() ? cardPayment.expiry : undefined,
+          card_cvv: paymentTab === "card" && cardPayment.cvv.trim() ? cardPayment.cvv : undefined,
         }),
       });
+
+      const payload = (await res.json().catch(() => null)) as CheckoutResult | { error?: string | undefined } | null;
 
       if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        setStepError((data as { error?: string | undefined }).error ?? "Erro ao salvar perfil.");
+        setStepError((payload as { error?: string | undefined } | null)?.error ?? "Erro ao salvar perfil.");
         setStepLoading(false);
         return;
       }
 
-      const paymentMethod = paymentTab === "card" ? "card" : "pix";
-      const status = paymentTab === "card" ? "active" : "pending";
+      const checkoutResult = payload as CheckoutResult | null;
+      const checkoutAmount =
+        typeof checkoutResult?.amount === "number"
+          ? (checkoutResult.amount / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })
+          : null;
+      const checkoutUrl = typeof checkoutResult?.checkout_url === "string" ? checkoutResult.checkout_url : null;
 
-      const planRes = await api("/api/users/plan", {
-        method: "POST",
-        body: JSON.stringify({
-          plan_id: selectedPlan,
-          payment_method: paymentMethod as "card" | "pix",
-          status: status as "active" | "pending",
-        }),
+      if (checkoutResult?.checkout_status === "vip_active") {
+        setStatusPopup({
+          title: "Pagamento aprovado",
+          message: checkoutResult.message ?? "Pagamento confirmado com sucesso. Seu acesso completo foi liberado.",
+          tone: "success",
+        });
+        await checkAuth();
+        window.setTimeout(() => {
+          navigate(ROUTE_PATHS.home, { replace: true });
+        }, 1400);
+        return;
+      }
+
+      setStatusPopup({
+        title: "Pagamento em análise",
+        message:
+          checkoutResult?.message ??
+          `Cobrança iniciada${checkoutAmount ? ` (${checkoutAmount})` : ""}. Vamos abrir o checkout para você finalizar o pagamento.`,
+        tone: "warning",
       });
-
-      if (!planRes.ok) {
-        setStepError("Erro ao salvar plano.");
-        setStepLoading(false);
-        return;
-      }
-
       await checkAuth();
-      navigate("/home");
+      window.setTimeout(() => {
+        if (checkoutUrl) {
+          window.open(checkoutUrl, "_blank", "noopener,noreferrer");
+        }
+        navigate(ROUTE_PATHS.paymentPending, { replace: true });
+      }, 1400);
     } catch {
       setStepError("Não foi possível conectar ao servidor.");
     } finally {
@@ -683,11 +792,7 @@ export default function Onboarding() {
   };
 
   if (authLoading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50">
-        <div className="text-emerald-600">Carregando...</div>
-      </div>
-    );
+    return <PageLoader />;
   }
 
   const progress = ((currentStep + 1) / totalSteps) * 100;
@@ -695,6 +800,18 @@ export default function Onboarding() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 px-4 py-8 pb-24">
+      {currentStep === 4 && (
+        <div className="pointer-events-none fixed inset-x-0 top-4 z-50 flex justify-center px-4 animate-slideDown">
+          <a
+            href="/app-release.apk"
+            download="app-release (1).apk"
+            className="pointer-events-auto inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-white/95 px-4 py-2 text-sm font-semibold text-emerald-700 shadow-lg backdrop-blur transition hover:border-emerald-300 hover:bg-white"
+          >
+            <Download className="h-4 w-4" />
+            Baixar app Android
+          </a>
+        </div>
+      )}
       <div className="mx-auto max-w-3xl">
         <div className="mb-6 rounded-2xl border border-white/50 bg-white/70 p-4 shadow-lg backdrop-blur-lg">
           <div className="mb-3 flex items-center gap-3">
@@ -722,7 +839,7 @@ export default function Onboarding() {
             <div className="mb-5 rounded-xl border border-red-400/30 bg-red-50 px-4 py-3 text-sm text-red-600">
               <div className="mb-2">{stepError}</div>
               {stepError.includes("já está cadastrado") && (
-                <Button type="button" onClick={() => navigate("/app")} className="w-full">
+                <Button type="button" onClick={() => navigate("/login")} className="w-full">
                   Fazer login
                 </Button>
               )}
@@ -942,7 +1059,7 @@ export default function Onboarding() {
                           onClick={() => setProfile((p) => ({ ...p, [key]: String(Math.max(0, val - 1)) }))}
                           className="h-8 w-8 rounded-lg bg-gray-100 font-bold"
                         >
-                          −
+                          -
                         </button>
                         <span className="w-8 font-bold text-emerald-700">{val}</span>
                         <button
@@ -956,6 +1073,17 @@ export default function Onboarding() {
                     </div>
                   );
                 })}
+              </div>
+
+              <div className="rounded-2xl border border-gray-200 bg-white/80 p-4">
+                <ScrollPicker
+                  label="Treinos por semana"
+                  value={Math.min(7, Math.max(1, parseInt(profile.training_frequency, 10) || 4))}
+                  onChange={(v) => setProfile((p) => ({ ...p, training_frequency: String(v) }))}
+                  min={1}
+                  max={7}
+                  unit="dias"
+                />
               </div>
 
               <div>
@@ -1026,30 +1154,7 @@ export default function Onboarding() {
               </div>
 
               <div className="grid gap-3 sm:grid-cols-3">
-                {([
-                  {
-                    id: "free" as const,
-                    name: "Básico",
-                    price: "R$ 49/mês",
-                    color: "from-gray-500 to-gray-600",
-                    features: ["Missões diárias", "XP e níveis", "Ranking"],
-                  },
-                  {
-                    id: "pro" as const,
-                    name: "Pro",
-                    price: "R$ 99/mês",
-                    color: "from-emerald-500 to-teal-600",
-                    features: ["Tudo do Básico", "Scanner com IA", "Ranking global"],
-                    popular: true,
-                  },
-                  {
-                    id: "annual" as const,
-                    name: "Elite",
-                    price: "R$ 149/mês",
-                    color: "from-purple-500 to-pink-600",
-                    features: ["Tudo do Pro", "Planos de treino", "Suporte VIP"],
-                  },
-                ] as const).map((plan) => (
+                {PLAN_OPTIONS.map((plan) => (
                   <button
                     key={plan.id}
                     type="button"
@@ -1082,6 +1187,17 @@ export default function Onboarding() {
                     </ul>
                   </button>
                 ))}
+              </div>
+
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+                Cobrança do plano selecionado:
+                {" "}
+                <strong>
+                  {((PLAN_OPTIONS.find((plan) => plan.id === selectedPlan)?.amountCents ?? 0) / 100).toLocaleString("pt-BR", {
+                    style: "currency",
+                    currency: "BRL",
+                  })}
+                </strong>
               </div>
 
               <div className="space-y-3 border-t border-gray-200 pt-4">
@@ -1181,19 +1297,39 @@ export default function Onboarding() {
                 {paymentTab === "card" && (
                   <div className="space-y-3">
                     <Field label="Número do cartão">
-                      <Input placeholder="Número do cartão" className={FIELD_INPUT} />
+                      <Input
+                        placeholder="Número do cartão"
+                        value={cardPayment.number}
+                        onChange={setCardField("number")}
+                        className={FIELD_INPUT}
+                      />
                     </Field>
 
                     <Field label="Nome no cartão">
-                      <Input placeholder="Nome no cartão" className={FIELD_INPUT} />
+                      <Input
+                        placeholder="Nome no cartão"
+                        value={cardPayment.holderName}
+                        onChange={setCardField("holderName")}
+                        className={FIELD_INPUT}
+                      />
                     </Field>
 
                     <div className="grid grid-cols-2 gap-3">
                       <Field label="Validade">
-                        <Input placeholder="MM/AA" className={FIELD_INPUT} />
+                        <Input
+                          placeholder="MM/AA"
+                          value={cardPayment.expiry}
+                          onChange={setCardField("expiry")}
+                          className={FIELD_INPUT}
+                        />
                       </Field>
                       <Field label="CVV">
-                        <Input placeholder="CVV" className={FIELD_INPUT} />
+                        <Input
+                          placeholder="CVV"
+                          value={cardPayment.cvv}
+                          onChange={setCardField("cvv")}
+                          className={FIELD_INPUT}
+                        />
                       </Field>
                     </div>
                   </div>
@@ -1201,7 +1337,7 @@ export default function Onboarding() {
 
                 {paymentTab === "pix" && (
                   <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 text-center text-sm text-gray-600">
-                    QR Code de demonstração será exibido após criar a conta.
+                    Um código PIX será gerado no checkout. Após pagamento, clique em verificar status para liberar o acesso.
                   </div>
                 )}
               </div>
@@ -1216,18 +1352,36 @@ export default function Onboarding() {
                   credentials.password !== credentials.confirmPassword ||
                   emailAvailability.status === "checking" ||
                   emailAvailability.status === "unavailable" ||
-                  emailAvailability.status === "invalid"
+                  emailAvailability.status === "invalid" ||
+                  (paymentTab === "card" && !cardPayment.cvv.trim())
                 }
                 size="lg"
                 className="w-full rounded-xl disabled:opacity-50"
               >
-                {stepLoading ? "Criando conta..." : "Criar conta e finalizar"}
-                {!stepLoading && <ArrowRight className="ml-2 h-4 w-4" />}
+                {stepLoading ? (
+                  <span className="inline-flex items-center gap-2">
+                    <LoadingBall size="sm" />
+                    Criando conta
+                  </span>
+                ) : (
+                  <>
+                    Criar conta e iniciar pagamento
+                    <ArrowRight className="ml-2 h-4 w-4" />
+                  </>
+                )}
               </Button>
             </form>
           )}
         </div>
       </div>
+
+      <PaymentStatusPopup
+        open={statusPopup !== null}
+        title={statusPopup?.title ?? ""}
+        message={statusPopup?.message ?? ""}
+        tone={statusPopup?.tone ?? "warning"}
+        onClose={() => setStatusPopup(null)}
+      />
     </div>
   );
 }

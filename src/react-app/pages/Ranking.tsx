@@ -1,11 +1,12 @@
-import { useCallback, useEffect, useState } from "react";
+ï»¿import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router";
-import { useAuth } from "@/react-app/App";
+import { useAuth } from "@/react-app/contexts/auth";
 import BottomNav from "@/react-app/components/BottomNav";
+import LoadingBall from "@/react-app/components/LoadingBall";
 import { Avatar } from "@/react-app/components/ui/avatar";
 import { Card } from "@/react-app/components/ui/card";
 import { Trophy, Medal, Crown, Flame, Zap } from "lucide-react";
-import { api } from "@/react-app/utils/api";
+import { ApiRequestError, fetchAndCacheJson, readCachedJson } from "@/react-app/utils/api";
 import type { RankingPlayer } from "@/shared/types";
 import { safeGet } from "@/utils/typeHelpers";
 
@@ -18,25 +19,30 @@ export default function Ranking() {
 
 
   const loadRanking = useCallback(async () => {
-    try {
-      setError(null);
-      const response = await api("/api/ranking/global");
+    setError(null);
+    const cacheRanking = readCachedJson<RankingPlayer[]>("/api/ranking/global");
 
-      if (response.status === 401 || response.status === 403) {
+    if (cacheRanking) {
+      setRanking(Array.isArray(cacheRanking.data) ? cacheRanking.data : []);
+      setLoading(false);
+      if (!cacheRanking.stale) {
+        return;
+      }
+    }
+
+    try {
+      const data = await fetchAndCacheJson<RankingPlayer[]>("/api/ranking/global");
+      setRanking(Array.isArray(data) ? data : []);
+    } catch (loadError) {
+      if (loadError instanceof ApiRequestError && (loadError.status === 401 || loadError.status === 403)) {
         navigate("/app");
         return;
       }
-
-      if (!response.ok) {
-        throw new Error("Falha ao carregar ranking.");
-      }
-
-      const data = (await response.json()) as RankingPlayer[];
-      setRanking(Array.isArray(data) ? data : []);
-    } catch (loadError) {
       console.error("Error loading ranking:", loadError);
-      setError("Não foi possível carregar o ranking agora.");
-      setRanking([]);
+      if (!cacheRanking) {
+        setError("NÃ£o foi possÃ­vel carregar o ranking agora.");
+        setRanking([]);
+      }
     } finally {
       setLoading(false);
     }
@@ -52,8 +58,27 @@ export default function Ranking() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 flex items-center justify-center">
-        <div className="text-emerald-600">Carregando...</div>
+      <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 pb-24">
+        <div className="px-6 py-10">
+          <div className="fl-card p-6 flex items-center justify-center">
+            <LoadingBall size="md" />
+          </div>
+        </div>
+        <BottomNav active="ranking" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 pb-24">
+        <div className="px-6 py-12 text-center">
+          <p className="text-red-600 mb-4">{error}</p>
+          <button onClick={loadRanking} className="fl-btn-primary rounded-xl px-4 py-2">
+            Tentar novamente
+          </button>
+        </div>
+        <BottomNav active="ranking" />
       </div>
     );
   }
