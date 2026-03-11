@@ -3,7 +3,9 @@
 const CLASS_PREFIXES = ["font-title-"];
 const DEFAULT_PRIMARY_COLOR = "#10b981";
 const DEFAULT_SECONDARY_COLOR = "#14b8a6";
-const DEFAULT_BG_COLOR = "#f8fafc";
+const DEFAULT_PRIMARY_RGB = "16 185 129";
+const DEFAULT_SECONDARY_RGB = "20 184 166";
+const DEFAULT_BG_COLOR = "var(--fl-body-bg)";
 const THEME_STORAGE_KEY = "fitloot_profile_theme";
 const FONT_QUERY_BY_KEY: Record<string, string> = {
   rajdhani: "family=Rajdhani:wght@400;500;600;700",
@@ -52,6 +54,54 @@ function persistProfileTheme(theme: UserProfileTheme): void {
   localStorage.setItem(THEME_STORAGE_KEY, JSON.stringify(theme));
 }
 
+function normalizeHexColor(color: string): string | null {
+  const value = color.trim();
+  if (!value.startsWith("#")) return null;
+
+  const hex = value.slice(1);
+  if (hex.length === 3) {
+    return hex
+      .split("")
+      .map((char) => char.repeat(2))
+      .join("");
+  }
+
+  if (hex.length === 6) {
+    return hex;
+  }
+
+  return null;
+}
+
+function resolveRgbTriplet(color: string | null | undefined, fallback: string): string {
+  if (!color) return fallback;
+
+  const normalizedHex = normalizeHexColor(color);
+  if (normalizedHex) {
+    const channels = normalizedHex.match(/.{1,2}/g);
+    if (!channels || channels.length !== 3) return fallback;
+    return channels.map((channel) => Number.parseInt(channel, 16)).join(" ");
+  }
+
+  const rgbMatch = color.match(/rgba?\(([^)]+)\)/i);
+  if (!rgbMatch) return fallback;
+  const rgbChannels = rgbMatch[1];
+  if (!rgbChannels) return fallback;
+
+  const channels = rgbChannels
+    .split(",")
+    .slice(0, 3)
+    .map((channel) => Number.parseFloat(channel.trim()))
+    .filter((channel) => Number.isFinite(channel))
+    .map((channel) => Math.min(255, Math.max(0, Math.round(channel))));
+
+  if (channels.length !== 3) {
+    return fallback;
+  }
+
+  return channels.join(" ");
+}
+
 export function getStoredProfileTheme(): UserProfileTheme | null {
   try {
     const rawTheme = localStorage.getItem(THEME_STORAGE_KEY);
@@ -80,6 +130,14 @@ export function applyProfileTheme(profile: UserProfileTheme | null): void {
 
   root.style.setProperty("--app-primary-color", theme.custom_primary_color ?? DEFAULT_PRIMARY_COLOR);
   root.style.setProperty("--app-secondary-color", theme.custom_secondary_color ?? DEFAULT_SECONDARY_COLOR);
+  root.style.setProperty(
+    "--app-primary-color-rgb",
+    resolveRgbTriplet(theme.custom_primary_color ?? DEFAULT_PRIMARY_COLOR, DEFAULT_PRIMARY_RGB),
+  );
+  root.style.setProperty(
+    "--app-secondary-color-rgb",
+    resolveRgbTriplet(theme.custom_secondary_color ?? DEFAULT_SECONDARY_COLOR, DEFAULT_SECONDARY_RGB),
+  );
 
   if (theme.custom_font) {
     const fontKey = String(theme.custom_font);

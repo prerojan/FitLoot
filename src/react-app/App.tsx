@@ -6,8 +6,15 @@ import PageLoader from "@/react-app/components/PageLoader";
 import LoadingBall from "@/react-app/components/LoadingBall";
 import { ROUTE_PATHS, AUTHENTICATED_HINT_KEY } from "@/react-app/constants/auth";
 import { AuthContext, useAuth } from "@/react-app/contexts/auth";
+import { ThemeContext } from "@/react-app/contexts/theme";
 import { useAuthBootstrap } from "@/react-app/hooks/useAuthBootstrap";
 import type { User } from "@/react-app/types/auth";
+import {
+  DEFAULT_APP_THEME_MODE,
+  applyAppThemeMode,
+  persistAppThemeMode,
+  type AppThemeMode,
+} from "@/react-app/utils/appTheme";
 import { applyProfileTheme } from "@/react-app/utils/theme";
 import { clearJsonCache } from "@/react-app/utils/api";
 
@@ -87,14 +94,25 @@ const InitialRedirectController = ({
   return null;
 };
 
-export default function App() {
+type AppProps = {
+  initialThemeMode?: AppThemeMode;
+};
+
+export default function App({ initialThemeMode = DEFAULT_APP_THEME_MODE }: AppProps) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [initialRedirectDone, setInitialRedirectDone] = useState(false);
+  const [themeMode, setThemeModeState] = useState<AppThemeMode>(initialThemeMode);
 
   const checkAuth = useAuthBootstrap({ setUser, setLoading });
   const markInitialRedirectHandled = useCallback(() => {
     setInitialRedirectDone(true);
+  }, []);
+  const setThemeMode = useCallback((mode: AppThemeMode) => {
+    setThemeModeState(mode);
+  }, []);
+  const toggleThemeMode = useCallback(() => {
+    setThemeModeState((currentMode) => (currentMode === "light" ? "dark" : "light"));
   }, []);
 
   const logout = () => {
@@ -108,39 +126,46 @@ export default function App() {
     void checkAuth();
   }, [checkAuth]);
 
+  useEffect(() => {
+    applyAppThemeMode(themeMode);
+    persistAppThemeMode(themeMode);
+  }, [themeMode]);
+
   return (
-    <AuthContext.Provider value={{ user, loading, checkAuth, logout }}>
-      <Router>
-        <Suspense fallback={<PageLoader />}>
-          <InitialRedirectController
-            user={user}
-            loading={loading}
-            initialRedirectDone={initialRedirectDone}
-            onInitialRedirectHandled={markInitialRedirectHandled}
-          />
-          <Routes>
-            <Route path={ROUTE_PATHS.landing} element={<LandingPage />} />
-            <Route path={ROUTE_PATHS.publicLanding} element={<LandingPage />} />
-            <Route path={ROUTE_PATHS.login} element={<HomePage />} />
-            <Route path={ROUTE_PATHS.app} element={<AppRoute />} />
-            <Route path={ROUTE_PATHS.paymentPending} element={<AuthRoute><PaymentPending /></AuthRoute>} />
-            <Route path={ROUTE_PATHS.payment} element={<AuthRoute><PaymentRequired /></AuthRoute>} />
-            <Route path={ROUTE_PATHS.home} element={<AuthRoute><Dashboard /></AuthRoute>} />
-            <Route path={ROUTE_PATHS.onboarding} element={<Onboarding />} />
-            <Route path={ROUTE_PATHS.dashboard} element={<AuthRoute><Dashboard /></AuthRoute>} />
-            <Route path={ROUTE_PATHS.profile} element={<AuthRoute><Profile /></AuthRoute>} />
-            <Route path={ROUTE_PATHS.shop} element={<AuthRoute><Shop /></AuthRoute>} />
-            <Route path={ROUTE_PATHS.ranking} element={<AuthRoute><Ranking /></AuthRoute>} />
-            <Route path={ROUTE_PATHS.friends} element={<AuthRoute><Arena /></AuthRoute>} />
-            <Route path={ROUTE_PATHS.minigames} element={<AuthRoute><MiniGames /></AuthRoute>} />
-            <Route path={ROUTE_PATHS.aiChat} element={<AuthRoute><AIChat /></AuthRoute>} />
-            <Route path={ROUTE_PATHS.foodAnalysis} element={<AuthRoute><FoodAnalysis /></AuthRoute>} />
-            <Route path={ROUTE_PATHS.wildcard} element={<NotFoundPage />} />
-          </Routes>
-        </Suspense>
-        <Analytics />
-        <SpeedInsights />
-      </Router>
-    </AuthContext.Provider>
+    <ThemeContext.Provider value={{ themeMode, setThemeMode, toggleThemeMode }}>
+      <AuthContext.Provider value={{ user, loading, checkAuth, logout }}>
+        <Router>
+          <Suspense fallback={<PageLoader />}>
+            <InitialRedirectController
+              user={user}
+              loading={loading}
+              initialRedirectDone={initialRedirectDone}
+              onInitialRedirectHandled={markInitialRedirectHandled}
+            />
+            <Routes>
+              <Route path={ROUTE_PATHS.landing} element={<LandingPage />} />
+              <Route path={ROUTE_PATHS.publicLanding} element={<LandingPage />} />
+              <Route path={ROUTE_PATHS.login} element={<HomePage />} />
+              <Route path={ROUTE_PATHS.app} element={<AppRoute />} />
+              <Route path={ROUTE_PATHS.paymentPending} element={<AuthRoute><PaymentPending /></AuthRoute>} />
+              <Route path={ROUTE_PATHS.payment} element={<AuthRoute><PaymentRequired /></AuthRoute>} />
+              <Route path={ROUTE_PATHS.home} element={<AuthRoute><Dashboard /></AuthRoute>} />
+              <Route path={ROUTE_PATHS.onboarding} element={<Onboarding />} />
+              <Route path={ROUTE_PATHS.dashboard} element={<AuthRoute><Dashboard /></AuthRoute>} />
+              <Route path={ROUTE_PATHS.profile} element={<AuthRoute><Profile /></AuthRoute>} />
+              <Route path={ROUTE_PATHS.shop} element={<AuthRoute><Shop /></AuthRoute>} />
+              <Route path={ROUTE_PATHS.ranking} element={<AuthRoute><Ranking /></AuthRoute>} />
+              <Route path={ROUTE_PATHS.friends} element={<AuthRoute><Arena /></AuthRoute>} />
+              <Route path={ROUTE_PATHS.minigames} element={<AuthRoute><MiniGames /></AuthRoute>} />
+              <Route path={ROUTE_PATHS.aiChat} element={<AuthRoute><AIChat /></AuthRoute>} />
+              <Route path={ROUTE_PATHS.foodAnalysis} element={<AuthRoute><FoodAnalysis /></AuthRoute>} />
+              <Route path={ROUTE_PATHS.wildcard} element={<NotFoundPage />} />
+            </Routes>
+          </Suspense>
+          <Analytics />
+          <SpeedInsights />
+        </Router>
+      </AuthContext.Provider>
+    </ThemeContext.Provider>
   );
 }
