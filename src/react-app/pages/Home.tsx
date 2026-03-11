@@ -6,14 +6,13 @@ import {
   Eye,
   EyeOff,
   Mail,
+  MoonStar,
   Shield,
-  Sparkles,
-  Target,
-  Trophy,
+  SunMedium,
   Zap,
-  type LucideIcon,
 } from "lucide-react";
 import { useAuth } from "@/react-app/contexts/auth";
+import { useTheme } from "@/react-app/contexts/theme";
 import LoadingBall from "@/react-app/components/LoadingBall";
 import { api } from "@/react-app/utils/api";
 
@@ -27,39 +26,10 @@ type ApiError = {
   code?: string | undefined;
 };
 
-type HeroFeature = {
-  icon: LucideIcon;
-  title: string;
-  description: string;
-};
-
-const HERO_FEATURES: HeroFeature[] = [
-  {
-    icon: Trophy,
-    title: "XP que vira progresso real",
-    description: "Cada treino alimenta niveis, streaks e recompensas dentro do app.",
-  },
-  {
-    icon: Target,
-    title: "Missoes com direcao clara",
-    description: "Objetivos diarios e semanais mantem o foco sem perder a pegada de jogo.",
-  },
-  {
-    icon: Sparkles,
-    title: "Recompensas que puxam voce",
-    description: "Cupons, evolucao visual e senso de conquista para sustentar o habito.",
-  },
-];
-
-const HERO_STATS = [
-  { value: "10K+", label: "atletas ativos" },
-  { value: "500K+", label: "missoes concluidas" },
-  { value: "95%", label: "taxa de adesao" },
-];
-
 const Home: FC = () => {
   const navigate = useNavigate();
   const { checkAuth } = useAuth();
+  const { themeMode, toggleThemeMode } = useTheme();
 
   const [form, setForm] = useState<LoginForm>({ email: "", password: "" });
   const [showPassword, setShowPassword] = useState(false);
@@ -145,106 +115,70 @@ const Home: FC = () => {
               </div>
             </div>
 
-            <div className="hidden rounded-full border border-[var(--fl-border-soft)] bg-[var(--fl-surface-muted)] px-4 py-2 text-[0.72rem] font-semibold uppercase tracking-[0.18em] text-[var(--fl-color-text-muted)] sm:flex">
-              Login FitLoot
-            </div>
+            <button
+              type="button"
+              onClick={toggleThemeMode}
+              className="flex h-11 w-11 items-center justify-center rounded-full border border-[var(--fl-border-soft)] bg-[var(--fl-surface-muted)] text-[var(--fl-color-text-muted)] transition hover:border-[var(--fl-border-strong)] hover:text-[var(--fl-color-text)]"
+              aria-label={themeMode === "dark" ? "Ativar tema claro" : "Ativar tema escuro"}
+              title={themeMode === "dark" ? "Ativar tema claro" : "Ativar tema escuro"}
+            >
+              {themeMode === "dark" ? <SunMedium className="h-5 w-5" /> : <MoonStar className="h-5 w-5" />}
+            </button>
           </div>
         </header>
 
         <main className="flex-1 px-5 pb-10 pt-6 md:px-8 md:pb-12 md:pt-8">
-          <div className="mx-auto grid w-full max-w-6xl gap-6 lg:grid-cols-[1.05fr_minmax(0,0.95fr)]">
+          <div className="mx-auto grid w-full max-w-6xl gap-4 lg:grid-cols-[1.02fr_minmax(0,0.92fr)]">
             <section className="hidden lg:block">
-              <div className="fl-auth-hero-panel rounded-[2rem] p-8 xl:p-10">
-                <div className="relative z-10 flex h-full flex-col justify-between gap-10">
-                  <div className="space-y-6">
+              <div className="fl-auth-hero-panel rounded-[1.5rem] p-7 xl:p-8">
+                <div className="absolute inset-0">
+                  <div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1534438327276-14e5300c3a48?auto=format&fit=crop&w=1200&q=55')] bg-cover bg-center opacity-60" />
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/45 to-black/10" />
+                </div>
+
+                <div className="relative z-10 flex min-h-[540px] flex-col justify-end gap-7">
+                  <div className="space-y-4">
                     <span className="fl-auth-chip">
                       <Shield className="h-4 w-4" />
                       Arena de evolucao
                     </span>
 
-                    <div className="space-y-4">
+                    <div className="space-y-3">
                       <h2 className="fl-auth-display max-w-xl text-5xl font-bold leading-[1.02] xl:text-6xl">
-                        Entre e suba de nivel na vida real.
+                        Entre e{" "}
+                        <span className="italic text-[var(--fl-color-accent)]">suba de nivel</span>{" "}
+                        na vida real.
                       </h2>
-                      <p className="max-w-xl text-base leading-7 text-[var(--fl-color-text-muted)] xl:text-lg">
-                        O redesign do login agora puxa a linguagem da Arena: superfices fortes,
-                        brilho de acento e leitura mais objetiva para colocar o usuario em jogo logo de cara.
+                      <p className="max-w-md text-base leading-7 text-white/78 xl:text-lg">
+                        Transforme exercicios em conquistas epicas com XP.
                       </p>
-                    </div>
-                  </div>
-
-                  <div className="grid gap-4">
-                    <div className="grid gap-3 xl:grid-cols-3">
-                      {HERO_FEATURES.map(({ icon: Icon, title, description }) => (
-                        <article
-                          key={title}
-                          className="fl-auth-feature-card rounded-[1.6rem] p-5"
-                        >
-                          <div className="mb-4 flex h-11 w-11 items-center justify-center rounded-2xl bg-[rgba(var(--fl-color-accent-rgb),0.14)] text-[var(--fl-color-accent)]">
-                            <Icon className="h-5 w-5" />
-                          </div>
-                          <h3 className="mb-2 text-sm font-semibold text-[var(--fl-color-text)]">
-                            {title}
-                          </h3>
-                          <p className="text-sm leading-6 text-[var(--fl-color-text-muted)]">
-                            {description}
-                          </p>
-                        </article>
-                      ))}
-                    </div>
-
-                    <div className="grid grid-cols-3 gap-3">
-                      {HERO_STATS.map((stat) => (
-                        <div
-                          key={stat.label}
-                          className="fl-auth-stat-card rounded-[1.4rem] px-4 py-5 text-center"
-                        >
-                          <p className="fl-auth-display text-2xl font-bold text-[var(--fl-color-accent)]">
-                            {stat.value}
-                          </p>
-                          <p className="mt-1 text-xs uppercase tracking-[0.18em] text-[var(--fl-color-text-soft)]">
-                            {stat.label}
-                          </p>
-                        </div>
-                      ))}
                     </div>
                   </div>
                 </div>
               </div>
             </section>
 
-            <section className="fl-auth-panel rounded-[2rem] p-6 md:p-8 lg:p-10">
-              <div className="space-y-8">
-                <div className="space-y-5 lg:hidden">
+            <section className="fl-auth-panel rounded-[1.5rem] p-5 md:p-6 lg:p-7">
+              <div className="space-y-6">
+                <div className="space-y-4 lg:hidden">
                   <span className="fl-auth-chip">
                     <Shield className="h-4 w-4" />
                     Arena de evolucao
                   </span>
-                  <div className="space-y-3">
-                    <h2 className="fl-auth-display text-4xl font-bold leading-none">
-                      Entre para continuar sua jornada.
+
+                  <div className="space-y-2">
+                    <h2 className="fl-auth-display text-4xl font-bold leading-[1.02]">
+                      Entre e{" "}
+                      <span className="italic text-[var(--fl-color-accent)]">suba de nivel</span>{" "}
+                      na vida real.
                     </h2>
                     <p className="text-sm leading-6 text-[var(--fl-color-text-muted)]">
-                      Visual novo, mesma autenticacao e mesmo fluxo. Tudo continua 100% funcional.
+                      Transforme exercicios em conquistas epicas com XP.
                     </p>
-                  </div>
-
-                  <div className="grid grid-cols-3 gap-3">
-                    {HERO_STATS.map((stat) => (
-                      <div
-                        key={stat.label}
-                        className="fl-auth-stat-card rounded-[1.25rem] px-3 py-4 text-center"
-                      >
-                        <p className="text-lg font-bold text-[var(--fl-color-accent)]">{stat.value}</p>
-                        <p className="mt-1 text-[0.6rem] uppercase tracking-[0.16em] text-[var(--fl-color-text-soft)]">
-                          {stat.label}
-                        </p>
-                      </div>
-                    ))}
                   </div>
                 </div>
 
-                <div className="space-y-3">
+                <div className="space-y-2">
                   <div className="space-y-2">
                     <p className="text-[0.72rem] font-bold uppercase tracking-[0.2em] text-[var(--fl-color-accent)]">
                       Login
@@ -253,17 +187,6 @@ const Home: FC = () => {
                     <p className="text-sm leading-6 text-[var(--fl-color-text-muted)]">
                       Acesse sua conta para retomar missoes, streaks e recompensas.
                     </p>
-                  </div>
-
-                  <div className="flex flex-wrap items-center gap-3 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--fl-color-text-soft)]">
-                    <span className="inline-flex items-center gap-2">
-                      <Shield className="h-4 w-4 text-[var(--fl-color-accent)]" />
-                      Sessao segura
-                    </span>
-                    <span className="inline-flex items-center gap-2">
-                      <Zap className="h-4 w-4 text-[var(--fl-color-accent)]" />
-                      Entrada instantanea
-                    </span>
                   </div>
                 </div>
 
@@ -325,7 +248,7 @@ const Home: FC = () => {
                         ref={passwordRef}
                         id="login-password"
                         type={showPassword ? "text" : "password"}
-                        placeholder="••••••••"
+                        placeholder="********"
                         value={form.password}
                         onChange={handleChange("password")}
                         autoComplete="current-password"
@@ -368,34 +291,21 @@ const Home: FC = () => {
                   </button>
                 </form>
 
-                <div className="space-y-5 border-t border-[var(--fl-border-soft)] pt-6">
-                  <div className="flex items-center justify-between gap-3 rounded-[1.35rem] border border-[var(--fl-border-soft)] bg-[var(--fl-surface-muted)] px-4 py-4">
-                    <div>
-                      <p className="text-sm font-semibold text-[var(--fl-color-text)]">
-                        Ainda nao tem uma conta?
-                      </p>
-                      <p className="text-sm text-[var(--fl-color-text-muted)]">
-                        Crie seu perfil e entre no onboarding sem perder o email preenchido.
-                      </p>
-                    </div>
+                <div className="space-y-4 border-t border-[var(--fl-border-soft)] pt-5 text-center">
+                  <p className="text-sm text-[var(--fl-color-text-muted)]">
+                    Nao tem uma conta?{" "}
                     <button
                       type="button"
                       onClick={goToOnboarding}
-                      className="inline-flex shrink-0 items-center gap-2 rounded-full border border-[var(--fl-auth-chip-border)] bg-[var(--fl-auth-chip-bg)] px-4 py-2 text-sm font-semibold text-[var(--fl-color-accent)] transition hover:opacity-85"
+                      className="fl-auth-inline-link"
                     >
                       Criar conta
                     </button>
-                  </div>
+                  </p>
 
-                  <div className="flex flex-wrap items-center gap-3 text-xs font-semibold uppercase tracking-[0.14em] text-[var(--fl-color-text-soft)]">
-                    <span className="inline-flex items-center gap-2">
-                      <Check className="h-4 w-4 text-[var(--fl-color-accent)]" />
-                      7 dias gratis
-                    </span>
-                    <span className="inline-flex items-center gap-2">
-                      <Check className="h-4 w-4 text-[var(--fl-color-accent)]" />
-                      Cancele quando quiser
-                    </span>
+                  <div className="inline-flex items-center gap-2 rounded-full border border-[var(--fl-auth-chip-border)] bg-[var(--fl-auth-chip-bg)] px-4 py-2 text-[0.72rem] font-semibold uppercase tracking-[0.14em] text-[var(--fl-color-text-soft)]">
+                    <Check className="h-4 w-4 text-[var(--fl-color-accent)]" />
+                    7 dias gratis - Cancele quando quiser
                   </div>
                 </div>
               </div>
