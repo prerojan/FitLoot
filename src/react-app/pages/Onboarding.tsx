@@ -1,11 +1,13 @@
-import {
+﻿import {
   useCallback,
   useEffect,
   useRef,
   useState,
   type ChangeEvent,
   type FormEvent,
-  type KeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
+  type ReactNode,
+  type TouchEvent as ReactTouchEvent,
 } from "react";
 import { useNavigate } from "react-router";
 import { useAuth } from "@/react-app/App";
@@ -13,26 +15,33 @@ import { api } from "@/react-app/utils/api";
 import { safeGet } from "@/utils/typeHelpers";
 import { Button } from "@/react-app/components/ui/button";
 import { Input } from "@/react-app/components/ui/input";
+import { AuthThemeHeader, useAuthColorScheme } from "@/react-app/components/AuthThemeHeader";
 import {
   Activity,
   ArrowRight,
   CheckCircle2,
   ChevronRight,
-  CreditCard,
+  Download,
   Dumbbell,
+  Eye,
+  EyeOff,
+  Flame,
   Gauge,
+  HeartHandshake,
   HeartPulse,
+  Lock,
+  Mail,
   Monitor,
-  QrCode,
   Ruler,
+  Scale,
   Shield,
+  Sparkles,
   Target,
+  TrendingUp,
   User,
   UserRound,
   Weight,
   Zap,
-  Eye,
-  EyeOff
 } from "lucide-react";
 
 type ScrollPickerProps = {
@@ -44,199 +53,201 @@ type ScrollPickerProps = {
   label: string;
 };
 
-const FIELD_WRAP =
-  "flex h-11 items-center rounded-xl border-2 border-gray-200 bg-white px-3 transition " +
-  "[&:has(input:focus)]:border-emerald-500 " +
-  "[&:has(input:focus)]:ring-2 " +
-  "[&:has(input:focus)]:ring-emerald-500/20";
-
+const FIELD_WRAP = "fl-auth-input-shell min-h-[3.5rem] rounded-[1.3rem]";
 const FIELD_INPUT =
-  "h-full w-full !border-0 !bg-transparent !p-0 !shadow-none !ring-0 " +
-  "focus-visible:!ring-0 focus-visible:!ring-offset-0";
-
+  "h-full w-full !border-0 !bg-transparent !p-0 text-base text-[var(--fl-auth-ink)] !shadow-none !ring-0 " +
+  "placeholder:text-[var(--fl-auth-subtle)] focus-visible:!ring-0 focus-visible:!ring-offset-0";
 const FIELD_TEXTAREA =
-  "w-full resize-none !border-0 !bg-transparent !p-0 text-sm outline-none !shadow-none !ring-0 " +
-  "focus-visible:!ring-0 focus-visible:!ring-offset-0";
+  "w-full resize-none !border-0 !bg-transparent !p-0 text-sm text-[var(--fl-auth-ink)] outline-none !shadow-none !ring-0 " +
+  "placeholder:text-[var(--fl-auth-subtle)] focus-visible:!ring-0 focus-visible:!ring-offset-0";
 
 function Field({
   label,
+  hint,
   leftIcon,
   rightSlot,
   children,
 }: {
   label: string;
-  leftIcon?: React.ReactNode;
-  rightSlot?: React.ReactNode;
-  children: React.ReactNode;
+  hint?: string;
+  leftIcon?: ReactNode;
+  rightSlot?: ReactNode;
+  children: ReactNode;
 }) {
   return (
-    <div>
-      <label className="mb-1 block text-sm font-medium text-gray-700">{label}</label>
-      <div className={`${FIELD_WRAP} ${rightSlot ? "pr-2" : ""}`}>
-        {leftIcon ? <span className="mr-2 flex items-center text-gray-400">{leftIcon}</span> : null}
-        <div className="flex-1">{children}</div>
-        {rightSlot ? <div className="ml-2 flex items-center">{rightSlot}</div> : null}
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-3">
+        <label className="text-xs font-semibold uppercase tracking-[0.24em] text-[var(--fl-auth-subtle)]">
+          {label}
+        </label>
+        {hint ? <span className="text-xs text-[var(--fl-auth-subtle)]">{hint}</span> : null}
+      </div>
+      <div className={FIELD_WRAP}>
+        {leftIcon ? <span className="text-[var(--fl-auth-subtle)]">{leftIcon}</span> : null}
+        <div className="min-w-0 flex-1">{children}</div>
+        {rightSlot ? <div className="flex items-center">{rightSlot}</div> : null}
       </div>
     </div>
   );
 }
 
 function ScrollPicker({ value, onChange, min, max, unit, label }: ScrollPickerProps) {
-  const [isEditing, setIsEditing] = useState(false);
-  const [inputStr, setInputStr] = useState(String(value));
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  const rootRef = useRef<HTMLDivElement>(null);
-  const isPointerInsideRef = useRef(false);
-
+  const trackRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<{ mouseActive: boolean; touchId: number | null }>({
+    mouseActive: false,
+    touchId: null,
+  });
   const clamped = Math.min(max, Math.max(min, value));
-  const prevVal = clamped > min ? clamped - 1 : min;
-  const nextVal = clamped < max ? clamped + 1 : max;
+  const percentage = max === min ? 0 : ((clamped - min) / (max - min)) * 100;
+
+  const updateFromClientX = useCallback(
+    (clientX: number) => {
+      const track = trackRef.current;
+      if (!track) return;
+      const rect = track.getBoundingClientRect();
+      const ratio = (clientX - rect.left) / rect.width;
+      const boundedRatio = Math.min(1, Math.max(0, ratio));
+      const nextValue = Math.round(min + boundedRatio * (max - min));
+      onChange(Math.min(max, Math.max(min, nextValue)));
+    },
+    [max, min, onChange],
+  );
 
   useEffect(() => {
-    setInputStr(String(clamped));
-  }, [clamped]);
-
-  useEffect(() => {
-    if (isEditing) inputRef.current?.focus();
-  }, [isEditing]);
-
-  const commit = useCallback(() => {
-    const n = parseInt(inputStr, 10);
-    if (!Number.isFinite(n)) {
-      setInputStr(String(clamped));
-      setIsEditing(false);
-      return;
-    }
-
-    const next = Math.min(max, Math.max(min, n));
-    setInputStr(String(next));
-    onChange(next);
-    setIsEditing(false);
-  }, [clamped, inputStr, max, min, onChange]);
-
-  const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter") commit();
-    if (e.key === "Escape") {
-      setInputStr(String(clamped));
-      setIsEditing(false);
-    }
-  };
-
-  const handleWheelChangeValue = useCallback((deltaY: number) => {
-    if (deltaY < 0 && clamped < max) onChange(clamped + 1);
-    else if (deltaY > 0 && clamped > min) onChange(clamped - 1);
-  }, [clamped, max, min, onChange]);
-
-  const getScrollParent = (el: HTMLElement | null): HTMLElement | null => {
-    let cur: HTMLElement | null = el;
-    while (cur) {
-      const style = window.getComputedStyle(cur);
-      const overflowY = style.overflowY;
-      const canScroll =
-        (overflowY === "auto" || overflowY === "scroll") && cur.scrollHeight > cur.clientHeight;
-      if (canScroll) return cur;
-      cur = cur.parentElement;
-    }
-    return null;
-  };
-
-  useEffect(() => {
-    const root = rootRef.current;
-    if (!root) return;
-
-    const scrollParent = getScrollParent(root);
-
-    const onWheelNative = (ev: globalThis.WheelEvent) => {
-      if (isEditing) return;
-      if (!isPointerInsideRef.current) return;
-
-      ev.preventDefault();
-      ev.stopPropagation();
-      handleWheelChangeValue(ev.deltaY);
+    const handleMouseMove = (event: MouseEvent) => {
+      if (!dragRef.current.mouseActive) return;
+      updateFromClientX(event.clientX);
     };
-
-    root.addEventListener("wheel", onWheelNative, { passive: false });
-    if (scrollParent) scrollParent.addEventListener("wheel", onWheelNative, { passive: false });
-
+    const handleMouseUp = () => {
+      dragRef.current.mouseActive = false;
+    };
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
     return () => {
-      root.removeEventListener("wheel", onWheelNative as EventListener);
-      if (scrollParent) scrollParent.removeEventListener("wheel", onWheelNative as EventListener);
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
     };
-  }, [isEditing, handleWheelChangeValue]);
+  }, [updateFromClientX]);
 
-  const disableLock = () => {
-    isPointerInsideRef.current = false;
+  const handleMouseDown = (event: ReactMouseEvent<HTMLDivElement>) => {
+    dragRef.current.mouseActive = true;
+    updateFromClientX(event.clientX);
+  };
+
+  const handleTouchStart = (event: ReactTouchEvent<HTMLDivElement>) => {
+    const touch = event.changedTouches[0];
+    if (!touch) return;
+    dragRef.current.touchId = touch.identifier;
+    updateFromClientX(touch.clientX);
+  };
+
+  const handleTouchMove = (event: ReactTouchEvent<HTMLDivElement>) => {
+    const activeTouch = Array.from(event.changedTouches).find(
+      (touch) => touch.identifier === dragRef.current.touchId,
+    );
+    if (!activeTouch) return;
+    updateFromClientX(activeTouch.clientX);
+    event.preventDefault();
+  };
+
+  const handleTouchEnd = (event: ReactTouchEvent<HTMLDivElement>) => {
+    const activeTouch = Array.from(event.changedTouches).find(
+      (touch) => touch.identifier === dragRef.current.touchId,
+    );
+    if (!activeTouch) return;
+    dragRef.current.touchId = null;
   };
 
   return (
-    <div
-      ref={rootRef}
-      className="flex w-full flex-col items-center overscroll-contain"
-      onPointerEnter={() => {
-        isPointerInsideRef.current = true;
-      }}
-      onPointerLeave={disableLock}
-      onPointerCancel={disableLock}
-      onBlurCapture={disableLock}
-    >
-      <p className="mb-2 text-xs font-medium text-gray-500">{label}</p>
-
-      <div className="w-full max-w-[154px] select-none py-2 overscroll-contain">
-        <button
-          type="button"
-          onClick={() => onChange(prevVal)}
-          className="w-full py-1 text-sm text-gray-400 transition hover:text-gray-600"
-        >
-          {prevVal} {unit}
-        </button>
-
-        <div className="flex items-center justify-center py-3">
-          {isEditing ? (
-            <span className="flex items-center gap-1">
-              <input
-                ref={inputRef}
-                type="number"
-                min={min}
-                max={max}
-                value={inputStr}
-                onChange={(e) => setInputStr(e.target.value)}
-                onBlur={commit}
-                onKeyDown={handleKeyDown}
-                className="w-16 bg-transparent text-center text-3xl font-bold text-emerald-700 outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-              />
-              <span className="text-emerald-700">{unit}</span>
-            </span>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setIsEditing(true)}
-              className="text-3xl font-bold text-emerald-700"
-            >
-              {clamped}
-              <span className="ml-1 text-lg font-medium">{unit}</span>
-            </button>
-          )}
+    <div className="fl-auth-substep rounded-[1.6rem] p-4 sm:p-5">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.28em] text-[var(--fl-auth-subtle)]">
+            {label}
+          </p>
+          <p className="mt-2 text-sm leading-6 text-[var(--fl-auth-muted)]">
+            Deslize com o dedo para ajustar sem usar o controle nativo.
+          </p>
         </div>
-
-        <button
-          type="button"
-          onClick={() => onChange(nextVal)}
-          className="w-full py-1 text-sm text-gray-400 transition hover:text-gray-600"
+        <div className="rounded-[1.35rem] bg-[var(--fl-auth-card-selected)] px-4 py-3 text-right">
+          <p className="text-3xl font-bold leading-none text-[var(--fl-auth-ink)] sm:text-4xl">
+            {clamped}
+          </p>
+          <p className="mt-1 text-xs font-semibold uppercase tracking-[0.28em] text-[var(--fl-auth-subtle)]">
+            {unit}
+          </p>
+        </div>
+      </div>
+      <div className="mt-5 space-y-3">
+        <div
+          ref={trackRef}
+          className="relative h-12 touch-none select-none"
+          onMouseDown={handleMouseDown}
+          onTouchStart={handleTouchStart}
+          onTouchMove={handleTouchMove}
+          onTouchEnd={handleTouchEnd}
+          onTouchCancel={handleTouchEnd}
         >
-          {nextVal} {unit}
-        </button>
+          <div className="absolute inset-x-0 top-1/2 h-2 -translate-y-1/2 rounded-full bg-[var(--fl-auth-track)]" />
+          <div
+            className="absolute left-0 top-1/2 h-2 -translate-y-1/2 rounded-full bg-gradient-to-r from-emerald-500 to-teal-500"
+            style={{ width: `${percentage}%` }}
+          />
+          <div
+            className="absolute top-1/2 h-6 w-6 -translate-y-1/2 rounded-full border-4 border-white bg-[var(--app-primary-color)] shadow-[0_0_24px_color-mix(in_srgb,var(--app-primary-color)_38%,transparent)]"
+            style={{ left: `calc(${percentage}% - 12px)` }}
+          />
+        </div>
+        <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.24em] text-[var(--fl-auth-subtle)]">
+          <button type="button" onClick={() => onChange(Math.max(min, clamped - 1))}>
+            {min} {unit}
+          </button>
+          <span>Deslize</span>
+          <button type="button" onClick={() => onChange(Math.min(max, clamped + 1))}>
+            {max} {unit}
+          </button>
+        </div>
       </div>
     </div>
   );
 }
 
-type CredentialsStep = {
-  email: string;
-  password: string;
-  confirmPassword: string;
-};
+function ExerciseValueRow({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  onChange: (value: number) => void;
+}) {
+  const safeValue = Math.max(0, value);
+  return (
+    <div className="fl-auth-option rounded-[1.4rem] p-4" data-selected="false">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <p className="text-base font-semibold">{label}</p>
+          <p className="text-xs uppercase tracking-[0.22em] text-[var(--fl-auth-subtle)]">
+            Toque nos valores laterais para ajustar
+          </p>
+        </div>
+        <div className="grid min-w-[220px] grid-cols-3 gap-2 text-center">
+          <button type="button" onClick={() => onChange(Math.max(0, safeValue - 1))} className="fl-auth-ghost-button rounded-[1rem] px-3 py-3 text-lg font-semibold transition">
+            {Math.max(0, safeValue - 1)}
+          </button>
+          <button type="button" className="rounded-[1rem] bg-[var(--fl-auth-card-selected)] px-3 py-3 text-2xl font-bold text-[var(--app-primary-color)] shadow-[0_12px_30px_color-mix(in_srgb,var(--app-primary-color)_12%,transparent)]">
+            {safeValue}
+          </button>
+          <button type="button" onClick={() => onChange(safeValue + 1)} className="fl-auth-ghost-button rounded-[1rem] px-3 py-3 text-lg font-semibold transition">
+            {safeValue + 1}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
+type CredentialsStep = { email: string; password: string; confirmPassword: string };
 type ProfileStep = {
   username: string;
   full_name: string;
@@ -252,13 +263,13 @@ type ProfileStep = {
   gender: "homem" | "mulher" | "outro";
   age: string;
 };
-
-const INITIAL_CREDENTIALS: CredentialsStep = {
-  email: "",
-  password: "",
-  confirmPassword: "",
+type GoalValue = ProfileStep["main_goal"];
+type AvailabilityState = {
+  status: "idle" | "checking" | "available" | "unavailable" | "invalid";
+  message?: string | undefined;
 };
 
+const INITIAL_CREDENTIALS: CredentialsStep = { email: "", password: "", confirmPassword: "" };
 const INITIAL_PROFILE: ProfileStep = {
   username: "",
   full_name: "",
@@ -274,56 +285,63 @@ const INITIAL_PROFILE: ProfileStep = {
   gender: "homem",
   age: "25",
 };
-
-const STEP_NAMES = ["Identidade", "Corpo", "Objetivos", "Condicionamento", "Plano e conta"] as const;
+const STEP_NAMES = ["Identidade", "Perfil fisico", "Objetivo", "Capacidade", "Conta"] as const;
 const STEP_ICONS = [UserRound, Ruler, Target, Activity, Shield];
-
-type GoalValue = ProfileStep["main_goal"];
-
-type AvailabilityState = {
-  status: "idle" | "checking" | "available" | "unavailable" | "invalid";
-  message?: string | undefined;
-};
-
-
-
-const GOAL_OPTIONS: { value: GoalValue; label: string; icon: typeof Target }[] = [
-  { value: "perder_peso", label: "Perder peso", icon: Zap },
-  { value: "ganhar_massa", label: "Ganhar massa muscular", icon: Dumbbell },
-  { value: "resistencia", label: "Melhorar condicionamento", icon: Activity },
-  { value: "saude_geral", label: "Saúde e qualidade de vida", icon: HeartPulse },
-  { value: "calistenia", label: "Estética e definição", icon: Gauge },
+const GOAL_OPTIONS = [
+  { value: "perder_peso" as const, label: "Perder peso", description: "Circuitos mais dinamicos para acelerar gasto calorico.", icon: Flame },
+  { value: "ganhar_massa" as const, label: "Ganhar massa muscular", description: "Foco em progressao de forca e construcao muscular.", icon: Dumbbell },
+  { value: "resistencia" as const, label: "Melhorar condicionamento", description: "Treinos para ganhar folego, ritmo e recuperacao.", icon: Activity },
+  { value: "saude_geral" as const, label: "Saude e qualidade de vida", description: "Plano equilibrado para movimento diario e bem-estar.", icon: HeartPulse },
+  { value: "calistenia" as const, label: "Estetica e definicao", description: "Combina controle corporal, presenca visual e definicao.", icon: Gauge },
 ];
-
-const EQUIPMENT_OPTIONS: { id: string; label: string; icon: typeof Dumbbell }[] = [
+const CONDITIONING_OPTIONS = [
+  { value: "sedentario" as const, label: "Sedentario", description: "Comeco seguro e progressivo.", icon: HeartHandshake },
+  { value: "iniciante" as const, label: "Iniciante", description: "Quer estrutura guiada e previsivel.", icon: Zap },
+  { value: "intermediario" as const, label: "Intermediario", description: "Tolera mais volume e ritmo.", icon: TrendingUp },
+  { value: "avancado" as const, label: "Avancado", description: "Busca intensidade, variacao e metas mais altas.", icon: Shield },
+];
+const EQUIPMENT_OPTIONS = [
   { id: "halteres", label: "Halteres", icon: Dumbbell },
   { id: "barra", label: "Barra", icon: Monitor },
-  { id: "anilhas", label: "Anilhas", icon: Gauge },
+  { id: "anilhas", label: "Anilhas", icon: Scale },
   { id: "corda", label: "Corda", icon: Activity },
-  { id: "elastico", label: "Elástico", icon: Zap },
+  { id: "elastico", label: "Elastico", icon: Zap },
   { id: "kettlebell", label: "Kettlebell", icon: Weight },
-];
+] as const;
+const INJURY_OPTIONS = [
+  { id: "joelho", label: "Joelho" },
+  { id: "lombar", label: "Lombar" },
+  { id: "ombro", label: "Ombro" },
+  { id: "punho", label: "Punho" },
+  { id: "tornozelo", label: "Tornozelo" },
+  { id: "quadril", label: "Quadril" },
+] as const;
 
 function availabilityMessage(state: AvailabilityState): { tone: "green" | "red" | "muted"; text: string } | null {
-  if (state.status === "available") return { tone: "green", text: "✅ Disponível" };
-  if (state.status === "unavailable") return { tone: "red", text: `❌ ${state.message || "Já cadastrado"}` };
-  if (state.status === "invalid") return { tone: "red", text: `❌ ${state.message || "Valor inválido"}` };
+  if (state.status === "available") return { tone: "green", text: "Disponivel" };
+  if (state.status === "unavailable") return { tone: "red", text: state.message || "Ja cadastrado" };
+  if (state.status === "invalid") return { tone: "red", text: state.message || "Valor invalido" };
   if (state.status === "checking") return { tone: "muted", text: "Validando..." };
   return null;
 }
 
+function parseDelimitedValues(value: string): string[] {
+  return value.split(",").map((item) => item.trim()).filter(Boolean);
+}
 
+function toneClass(tone: "green" | "red" | "muted") {
+  if (tone === "green") return "text-emerald-500";
+  if (tone === "red") return "text-red-500";
+  return "text-[var(--fl-auth-subtle)]";
+}
 export default function Onboarding() {
   const { user, loading: authLoading, checkAuth } = useAuth();
   const navigate = useNavigate();
+  const { colorScheme, toggleColorScheme } = useAuthColorScheme();
 
   const [currentStep, setCurrentStep] = useState(0);
   const [credentials, setCredentials] = useState(INITIAL_CREDENTIALS);
   const [profile, setProfile] = useState(INITIAL_PROFILE);
-
-  const [selectedPlan, setSelectedPlan] = useState<"free" | "pro" | "annual">("free");
-  const [paymentTab, setPaymentTab] = useState<"card" | "pix">("card");
-
   const [stepError, setStepError] = useState<string | null>(null);
   const [stepLoading, setStepLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
@@ -334,25 +352,28 @@ export default function Onboarding() {
 
   const usernameReqRef = useRef(0);
   const emailReqRef = useRef(0);
+  const checkoutRedirectRef = useRef(false);
+  const conditioningSectionRefs = useRef<Array<HTMLElement | null>>([]);
+  const conditioningSubmitRef = useRef<HTMLButtonElement | null>(null);
 
   const totalSteps = 5;
 
   useEffect(() => {
     const email = sessionStorage.getItem("onboarding_email");
     if (email) {
-      setCredentials((c) => ({ ...c, email }));
+      setCredentials((currentCredentials) => ({ ...currentCredentials, email }));
       sessionStorage.removeItem("onboarding_email");
     }
   }, []);
 
   useEffect(() => {
     if (authLoading) return;
-    if (user?.onboarding_completed === 1) navigate("/home");
+    if (user?.onboarding_completed === 1 && !checkoutRedirectRef.current) navigate("/home");
   }, [authLoading, navigate, user]);
 
   const setCredential = (field: keyof CredentialsStep) => (e: ChangeEvent<HTMLInputElement>) => {
     const nextValue = e.target.value;
-    setCredentials((c) => ({ ...c, [field]: nextValue }));
+    setCredentials((currentCredentials) => ({ ...currentCredentials, [field]: nextValue }));
     if (field === "email") {
       setEmailAvailability({ status: "idle" });
     }
@@ -361,7 +382,7 @@ export default function Onboarding() {
   const setProfileField =
     (field: keyof ProfileStep) => (e: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
       const nextValue = e.target.value;
-      setProfile((p) => ({ ...p, [field]: nextValue }));
+      setProfile((currentProfile) => ({ ...currentProfile, [field]: nextValue }));
       if (field === "username") {
         setUsernameAvailability({ status: "idle" });
       }
@@ -373,9 +394,8 @@ export default function Onboarding() {
       setUsernameAvailability({ status: "idle" });
       return true;
     }
-
     if (username.length < 3) {
-      setUsernameAvailability({ status: "invalid", message: "Mínimo de 3 caracteres." });
+      setUsernameAvailability({ status: "invalid", message: "Minimo de 3 caracteres." });
       return false;
     }
 
@@ -387,14 +407,12 @@ export default function Onboarding() {
       const payload = (await response.json().catch(() => null)) as { usernameAvailable?: boolean | undefined } | null;
 
       if (requestId !== usernameReqRef.current) return false;
-
       if (!response.ok || payload?.usernameAvailable === undefined) {
-        setUsernameAvailability({ status: "invalid", message: "Não foi possível validar agora." });
+        setUsernameAvailability({ status: "invalid", message: "Nao foi possivel validar agora." });
         return false;
       }
-
       if (!payload.usernameAvailable) {
-        setUsernameAvailability({ status: "unavailable", message: "Nome de usuário já está em uso." });
+        setUsernameAvailability({ status: "unavailable", message: "Nome de usuario ja esta em uso." });
         return false;
       }
 
@@ -402,7 +420,7 @@ export default function Onboarding() {
       return true;
     } catch {
       if (requestId === usernameReqRef.current) {
-        setUsernameAvailability({ status: "invalid", message: "Erro de conexão ao validar." });
+        setUsernameAvailability({ status: "invalid", message: "Erro de conexao ao validar." });
       }
       return false;
     }
@@ -417,7 +435,7 @@ export default function Onboarding() {
 
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
-      setEmailAvailability({ status: "invalid", message: "E-mail inválido." });
+      setEmailAvailability({ status: "invalid", message: "E-mail invalido." });
       return false;
     }
 
@@ -429,14 +447,12 @@ export default function Onboarding() {
       const payload = (await response.json().catch(() => null)) as { emailAvailable?: boolean | undefined } | null;
 
       if (requestId !== emailReqRef.current) return false;
-
       if (!response.ok || payload?.emailAvailable === undefined) {
-        setEmailAvailability({ status: "invalid", message: "Não foi possível validar agora." });
+        setEmailAvailability({ status: "invalid", message: "Nao foi possivel validar agora." });
         return false;
       }
-
       if (!payload.emailAvailable) {
-        setEmailAvailability({ status: "unavailable", message: "E-mail já está cadastrado." });
+        setEmailAvailability({ status: "unavailable", message: "E-mail ja esta cadastrado." });
         return false;
       }
 
@@ -444,7 +460,7 @@ export default function Onboarding() {
       return true;
     } catch {
       if (requestId === emailReqRef.current) {
-        setEmailAvailability({ status: "invalid", message: "Erro de conexão ao validar." });
+        setEmailAvailability({ status: "invalid", message: "Erro de conexao ao validar." });
       }
       return false;
     }
@@ -474,18 +490,20 @@ export default function Onboarding() {
     return () => clearTimeout(timer);
   }, [credentials.email, validateEmail]);
 
-
   const handleIdentityNext = (e: FormEvent) => {
     e.preventDefault();
     setStepError(null);
 
     if (!profile.full_name.trim() || !profile.username.trim() || profile.username.length < 3) {
-      setStepError("Preencha nome completo e nome de usuário (mín. 3 caracteres).");
+      setStepError("Preencha nome completo e nome de usuario (min. 3 caracteres).");
       return;
     }
-
-    if (usernameAvailability.status === "checking" || usernameAvailability.status === "unavailable" || usernameAvailability.status === "invalid") {
-      setStepError(usernameAvailability.message ?? "Escolha um nome de usuário disponível.");
+    if (
+      usernameAvailability.status === "checking" ||
+      usernameAvailability.status === "unavailable" ||
+      usernameAvailability.status === "invalid"
+    ) {
+      setStepError(usernameAvailability.message ?? "Escolha um nome de usuario disponivel.");
       return;
     }
 
@@ -513,7 +531,7 @@ export default function Onboarding() {
       height < 140 ||
       height > 220
     ) {
-      setStepError("Altura (140–220 cm) e peso (40–200 kg) devem estar no intervalo válido.");
+      setStepError("Altura (140-220 cm) e peso (40-200 kg) devem estar no intervalo valido.");
       return;
     }
 
@@ -529,7 +547,10 @@ export default function Onboarding() {
       return;
     }
 
-    setProfile((p) => ({ ...p, main_goal: safeGet(selectedGoals, 0) ?? p.main_goal }));
+    setProfile((currentProfile) => ({
+      ...currentProfile,
+      main_goal: safeGet(selectedGoals, 0) ?? currentProfile.main_goal,
+    }));
     setCurrentStep(3);
   };
 
@@ -542,13 +563,12 @@ export default function Onboarding() {
     const squats = Number(profile.initial_squats) || 0;
 
     if (pushups < 0 || situps < 0 || squats < 0) {
-      setStepError("Valores dos contadores não podem ser negativos.");
+      setStepError("Valores dos contadores nao podem ser negativos.");
       return;
     }
 
     setCurrentStep(4);
   };
-
   const handlePlanAndCredentialsSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setStepError(null);
@@ -563,7 +583,7 @@ export default function Onboarding() {
         credentials.password.length < 8
           ? "A senha deve ter pelo menos 8 caracteres"
           : credentials.password !== credentials.confirmPassword
-            ? "As senhas não coincidem"
+            ? "As senhas nao coincidem"
             : "Preencha e-mail e senha.",
       );
       return;
@@ -574,8 +594,12 @@ export default function Onboarding() {
       return;
     }
 
-    if (emailAvailability.status === "checking" || emailAvailability.status === "unavailable" || emailAvailability.status === "invalid") {
-      setStepError(emailAvailability.message ?? "Use um e-mail disponível para criar a conta.");
+    if (
+      emailAvailability.status === "checking" ||
+      emailAvailability.status === "unavailable" ||
+      emailAvailability.status === "invalid"
+    ) {
+      setStepError(emailAvailability.message ?? "Use um e-mail disponivel para criar a conta.");
       return;
     }
 
@@ -592,11 +616,10 @@ export default function Onboarding() {
       });
 
       if (registerRes.status === 409) {
-        setStepError("Este e-mail já está cadastrado.");
+        setStepError("Este e-mail ja esta cadastrado.");
         setStepLoading(false);
         return;
       }
-
       if (!registerRes.ok) {
         setStepError("Erro ao criar conta.");
         setStepLoading(false);
@@ -609,7 +632,7 @@ export default function Onboarding() {
       });
 
       if (!loginRes.ok) {
-        setStepError("Conta criada. Faça login em /app");
+        setStepError("Conta criada. Faca login em /app");
         setStepLoading(false);
         return;
       }
@@ -655,580 +678,787 @@ export default function Onboarding() {
         return;
       }
 
-      const paymentMethod = paymentTab === "card" ? "card" : "pix";
-      const status = paymentTab === "card" ? "active" : "pending";
-
-      const planRes = await api("/api/users/plan", {
-        method: "POST",
-        body: JSON.stringify({
-          plan_id: selectedPlan,
-          payment_method: paymentMethod as "card" | "pix",
-          status: status as "active" | "pending",
-        }),
-      });
-
-      if (!planRes.ok) {
-        setStepError("Erro ao salvar plano.");
-        setStepLoading(false);
-        return;
-      }
-
+      checkoutRedirectRef.current = true;
       await checkAuth();
-      navigate("/home");
+      navigate("/checkout");
     } catch {
-      setStepError("Não foi possível conectar ao servidor.");
+      setStepError("Nao foi possivel conectar ao servidor.");
     } finally {
       setStepLoading(false);
     }
   };
 
+  const toggleInjurySelection = (injuryId: string) => {
+    setProfile((currentProfile) => {
+      const existing = new Set(parseDelimitedValues(currentProfile.injuries.toLowerCase()));
+      if (existing.has(injuryId)) existing.delete(injuryId);
+      else existing.add(injuryId);
+      return { ...currentProfile, injuries: Array.from(existing).join(", ") };
+    });
+  };
+
+  const scrollToConditioningSection = (index: number) => {
+    const targetNode =
+      index >= conditioningSectionRefs.current.length
+        ? conditioningSubmitRef.current
+        : conditioningSectionRefs.current[index];
+    targetNode?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
   if (authLoading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50">
-        <div className="text-emerald-600">Carregando...</div>
+      <div className="fl-auth-page fl-auth-funnel-page">
+        <div className="mx-auto flex min-h-screen max-w-7xl flex-col px-4 py-4 sm:px-6 lg:px-8">
+          <AuthThemeHeader colorScheme={colorScheme} onToggleColorScheme={toggleColorScheme} />
+          <div className="flex flex-1 items-center justify-center">
+            <div className="fl-auth-panel rounded-[2rem] px-6 py-12 text-center">
+              <div className="text-sm font-semibold uppercase tracking-[0.3em] text-[var(--app-primary-color)]">
+                Carregando onboarding
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     );
   }
 
   const progress = ((currentStep + 1) / totalSteps) * 100;
   const ActiveStepIcon = STEP_ICONS[currentStep] ?? Shield;
+  const activeGoals = selectedGoals.length > 0 ? selectedGoals : [profile.main_goal];
+  const activeGoalLabels = activeGoals
+    .map((goal) => GOAL_OPTIONS.find((option) => option.value === goal)?.label)
+    .filter(Boolean) as string[];
+  const conditioningLabel =
+    ({ sedentario: "Sedentario", iniciante: "Iniciante", intermediario: "Intermediario", avancado: "Avancado" } as const)[profile.initial_conditioning];
+  const heroName = profile.full_name.trim().split(" ")[0] || "Voce";
+  const injuryTokens = parseDelimitedValues(profile.injuries.toLowerCase());
+  const usernameStatusMessage = availabilityMessage(usernameAvailability);
+  const emailStatusMessage = availabilityMessage(emailAvailability);
+  const cadenceSuggestion =
+    profile.initial_conditioning === "sedentario"
+      ? { focus: "2x / semana", text: "Comece com sessoes curtas para construir consistencia sem sobrecarga." }
+      : profile.initial_conditioning === "iniciante"
+        ? { focus: "3x / semana", text: "Uma rotina moderada ajuda a ganhar ritmo e manter recuperacao." }
+        : profile.initial_conditioning === "intermediario"
+          ? { focus: "4x / semana", text: "Voce ja tolera mais volume, entao a progressao pode acelerar." }
+          : { focus: "5x / semana", text: "Intensidade alta com distribuicao inteligente para sustentar performance." };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 px-4 py-8 pb-24">
-      <div className="mx-auto max-w-3xl">
-        <div className="mb-6 rounded-2xl border border-white/50 bg-white/70 p-4 shadow-lg backdrop-blur-lg">
-          <div className="mb-3 flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 text-white shadow-md">
-              <ActiveStepIcon className="h-5 w-5" />
-            </div>
-            <div>
-              <p className="text-sm font-semibold text-gray-700">
-                Etapa {currentStep + 1} de {totalSteps}
-              </p>
-              <p className="text-xs text-gray-500">{STEP_NAMES[currentStep]}</p>
-            </div>
-            <p className="ml-auto text-xs font-semibold text-emerald-700">{Math.round(progress)}%</p>
-          </div>
-          <div className="h-2 overflow-hidden rounded-full bg-white/80">
-            <div
-              className="h-full bg-gradient-to-r from-emerald-500 to-teal-600 transition-all duration-300"
-              style={{ width: `${progress}%` }}
-            />
-          </div>
+    <div className="fl-auth-page fl-auth-funnel-page">
+      <div className="pointer-events-none absolute inset-0 -z-10 overflow-hidden">
+        <div className="absolute -left-24 top-20 h-72 w-72 rounded-full bg-[var(--fl-auth-primary-soft)] blur-3xl" />
+        <div className="absolute right-[-4rem] top-[18%] h-96 w-96 rounded-full bg-[var(--fl-auth-secondary-soft)] blur-3xl" />
+        <div className="absolute bottom-[-8rem] left-1/3 h-72 w-72 rounded-full bg-[var(--fl-auth-primary-soft)] blur-3xl" />
+      </div>
+
+      {currentStep === 4 && (
+        <div className="pointer-events-none fixed inset-x-0 top-20 z-40 flex justify-center px-4 animate-slideDown lg:top-6 lg:justify-end lg:px-8">
+          <a href="/app-release.apk" download="app-release (1).apk" className="pointer-events-auto fl-auth-pill rounded-full px-4 py-2 text-[11px] tracking-[0.18em]">
+            <Download className="h-4 w-4" />
+            Baixar app Android
+          </a>
         </div>
+      )}
 
-        <div className="rounded-3xl border border-white/70 bg-white/80 p-6 shadow-xl backdrop-blur-xl md:p-8">
-          {stepError && (
-            <div className="mb-5 rounded-xl border border-red-400/30 bg-red-50 px-4 py-3 text-sm text-red-600">
-              <div className="mb-2">{stepError}</div>
-              {stepError.includes("já está cadastrado") && (
-                <Button type="button" onClick={() => navigate("/app")} className="w-full">
-                  Fazer login
-                </Button>
-              )}
-            </div>
-          )}
-
-          {currentStep === 0 && (
-            <form onSubmit={handleIdentityNext} className="space-y-5 animate-stepIn">
-              <div className="mb-2 text-center">
-                <h2 className="text-2xl font-bold text-gray-900">Sua identidade</h2>
-                <p className="mt-1 text-sm text-gray-600">
-                  Vamos configurar um perfil rápido para personalizar sua experiência.
-                </p>
-              </div>
-
-              <Field label="Nome completo">
-                <Input
-                  value={profile.full_name}
-                  onChange={setProfileField("full_name")}
-                  placeholder="Seu nome completo"
-                  className={FIELD_INPUT}
-                />
-              </Field>
-
-              <Field
-                label="Nome de usuário"
-                leftIcon={<User className="h-4 w-4" />}
-                rightSlot={
-                  usernameAvailability.status === "checking"
-                    ? <span className="text-xs text-gray-500">...</span>
-                    : usernameAvailability.status === "available"
-                      ? <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-                      : null
-                }
-              >
-                <Input
-                  value={profile.username}
-                  onChange={setProfileField("username")}
-                  onBlur={() => { void validateUsername(profile.username); }}
-                  placeholder="nome_de_usuario"
-                  minLength={3}
-                  className={FIELD_INPUT}
-                />
-              </Field>
-              {availabilityMessage(usernameAvailability) && (
-                <p className={`-mt-3 text-xs ${availabilityMessage(usernameAvailability)?.tone === "green" ? "text-emerald-600" : availabilityMessage(usernameAvailability)?.tone === "red" ? "text-red-600" : "text-gray-500"}`}>
-                  {availabilityMessage(usernameAvailability)?.text}
-                </p>
-              )}
-
-              <div>
-                <label className="mb-2 block text-sm font-medium text-gray-700">Gênero</label>
-                <div className="grid grid-cols-3 gap-2">
-                  {([
-                    { value: "homem", label: "Masculino" },
-                    { value: "mulher", label: "Feminino" },
-                    { value: "outro", label: "Prefiro não dizer" },
-                  ] as const).map((opt) => (
-                    <button
-                      key={opt.value}
-                      type="button"
-                      onClick={() => setProfile((p) => ({ ...p, gender: opt.value }))}
-                      className={`rounded-xl border-2 px-3 py-3 text-sm font-medium transition ${profile.gender === opt.value
-                          ? "border-emerald-500 bg-emerald-50 text-emerald-800"
-                          : "border-gray-200 bg-white text-gray-700 hover:border-emerald-200"
-                        }`}
-                    >
-                      {opt.label}
-                    </button>
-                  ))}
+      <div className="mx-auto flex min-h-screen max-w-7xl flex-col px-4 py-4 sm:px-6 lg:px-8">
+        <AuthThemeHeader colorScheme={colorScheme} onToggleColorScheme={toggleColorScheme} />
+        <div className="flex flex-1 items-center justify-center py-4 lg:py-8">
+          <div className="fl-auth-shell">
+            <aside className="fl-auth-panel fl-auth-hero order-1 rounded-[2rem] p-6 sm:p-8 lg:p-10">
+              <div className="space-y-4 lg:hidden">
+                <div className="flex items-center justify-between gap-4">
+                  <span className="fl-auth-pill"><ActiveStepIcon className="h-3.5 w-3.5" />Etapa {currentStep + 1}/{totalSteps}</span>
+                  <span className="text-xs font-semibold uppercase tracking-[0.24em] text-[var(--fl-auth-subtle)]">{Math.round(progress)}%</span>
+                </div>
+                <div className="fl-auth-progress-track"><div className="fl-auth-progress-fill" style={{ width: `${progress}%` }} /></div>
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.34em] text-[var(--app-primary-color)]">{STEP_NAMES[currentStep]}</p>
+                  <h1 className="mt-2 text-3xl font-bold tracking-tight">{currentStep === 2 ? "Escolha seu objetivo." : currentStep === 4 ? "Sua conta esta quase pronta." : "Configure sua jornada."}</h1>
+                  <p className="mt-2 text-sm leading-6 text-[var(--fl-auth-muted)]">{heroName}, os mesmos dados e validacoes agora aparecem dentro do mesmo shell visual do login.</p>
                 </div>
               </div>
 
-              <ScrollPicker
-                label="Idade"
-                value={Math.min(80, Math.max(13, parseInt(profile.age, 10) || 25))}
-                onChange={(v) => setProfile((p) => ({ ...p, age: String(v) }))}
-                min={13}
-                max={80}
-                unit="anos"
-              />
-
-              <Button
-                type="submit"
-                size="lg"
-                className="mt-6 w-full rounded-xl"
-                disabled={usernameAvailability.status === "checking" || usernameAvailability.status === "unavailable" || usernameAvailability.status === "invalid"}
-              >
-                Continuar <ChevronRight className="ml-1 h-4 w-4" />
-              </Button>
-            </form>
-          )}
-
-          {currentStep === 1 && (
-            <form onSubmit={handleBodyNext} className="space-y-6 animate-stepIn">
-              <div className="text-center">
-                <h2 className="text-2xl font-bold text-gray-900">Medidas do corpo</h2>
-                <p className="mt-1 text-sm text-gray-600">
-                  Isso nos ajuda a criar metas mais inteligentes para você.
-                </p>
+              <div className="hidden h-full flex-col justify-between lg:flex">
+                <div className="space-y-6">
+                  <div className="flex items-center justify-between gap-4">
+                    <span className="fl-auth-pill"><ActiveStepIcon className="h-3.5 w-3.5" />Step {String(currentStep + 1).padStart(2, "0")}/{String(totalSteps).padStart(2, "0")}</span>
+                    <span className="text-xs font-semibold uppercase tracking-[0.24em] text-[var(--fl-auth-subtle)]">{Math.round(progress)}%</span>
+                  </div>
+                  <div className="fl-auth-progress-track"><div className="fl-auth-progress-fill" style={{ width: `${progress}%` }} /></div>
+                  <div>
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.34em] text-[var(--app-primary-color)]">{STEP_NAMES[currentStep]}</p>
+                    <h1 className="mt-3 max-w-[12ch] text-5xl font-bold leading-[1.02] tracking-tight xl:text-6xl">{currentStep === 2 ? "Escolha seu objetivo." : currentStep === 3 ? "Mapeie sua capacidade." : currentStep === 4 ? "Sua conta esta quase pronta." : "Configure sua jornada."}</h1>
+                    <p className="mt-4 max-w-xl text-base leading-7 text-[var(--fl-auth-muted)] xl:text-lg">O onboarding agora acompanha o login com o mesmo header, o mesmo toggle de tema e a mesma linguagem de cards, botoes e tipografia.</p>
+                  </div>
+                  <div className="space-y-3">
+                    {[
+                      { icon: Sparkles, title: "Visual continuo", text: "Logo e toggle ficam na mesma posicao do login redesenhado." },
+                      { icon: Target, title: "Foco atual", text: activeGoalLabels.length > 0 ? activeGoalLabels.join(" • ") : "Objetivo ainda nao definido" },
+                      { icon: Activity, title: "Condicionamento", text: conditioningLabel },
+                    ].map((item) => {
+                      const Icon = item.icon;
+                      return (
+                        <article key={item.title} className="fl-auth-option rounded-[1.5rem] p-4" data-selected="false">
+                          <div className="flex items-start gap-4">
+                            <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-2xl bg-[var(--fl-auth-primary-soft)] text-[var(--app-primary-color)]"><Icon className="h-5 w-5" strokeWidth={2.2} /></div>
+                            <div className="space-y-1"><h2 className="text-lg font-semibold">{item.title}</h2><p className="text-sm leading-6 text-[var(--fl-auth-muted)]">{item.text}</p></div>
+                          </div>
+                        </article>
+                      );
+                    })}
+                  </div>
+                </div>
+                <div className="grid grid-cols-3 gap-3">
+                  {[
+                    { value: activeGoalLabels.length > 0 ? activeGoalLabels.length : 0, label: "Objetivos" },
+                    { value: profile.height || "170", label: "Altura" },
+                    { value: profile.age || "25", label: "Idade" },
+                  ].map((item) => (
+                    <div key={item.label} className="fl-auth-option rounded-[1.35rem] p-4 text-center" data-selected="false">
+                      <p className="text-xl font-bold text-[var(--app-primary-color)]">{item.value}</p>
+                      <p className="mt-1 text-[10px] font-semibold uppercase tracking-[0.3em] text-[var(--fl-auth-subtle)]">{item.label}</p>
+                    </div>
+                  ))}
+                </div>
               </div>
+            </aside>
 
-              <div className="grid grid-cols-2 gap-6 justify-items-center">
-                <ScrollPicker
-                  label="Altura"
-                  value={Math.min(220, Math.max(140, Number(profile.height) || 170))}
-                  onChange={(v) => setProfile((p) => ({ ...p, height: String(v) }))}
-                  min={140}
-                  max={220}
-                  unit="cm"
-                />
-                <ScrollPicker
-                  label="Peso"
-                  value={Math.min(200, Math.max(40, Number(profile.weight) || 70))}
-                  onChange={(v) => setProfile((p) => ({ ...p, weight: String(v) }))}
-                  min={40}
-                  max={200}
-                  unit="kg"
-                />
-              </div>
+            <main className="fl-auth-panel order-2 rounded-[2rem] p-5 sm:p-7 lg:p-8">
+              {stepError && (
+                <div className="mb-5 space-y-3 rounded-[1.35rem] border border-red-400/25 bg-red-500/10 px-4 py-3 text-sm text-red-600">
+                  <p>{stepError}</p>
+                  {stepError.includes("ja esta cadastrado") && <Button type="button" onClick={() => navigate("/app")} className="w-full">Fazer login</Button>}
+                </div>
+              )}
+              {currentStep === 0 && (
+                <form onSubmit={handleIdentityNext} className="space-y-6 animate-authStepEnter">
+                  <div className="space-y-3">
+                    <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[var(--app-primary-color)]">Identidade inicial</p>
+                    <div>
+                      <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">Configure a base do seu perfil.</h2>
+                      <p className="mt-2 text-sm leading-6 text-[var(--fl-auth-muted)]">Os mesmos campos continuam sendo coletados, agora com hierarquia visual mais forte e leitura mais clara em qualquer tema.</p>
+                    </div>
+                  </div>
 
-              <Button type="submit" size="lg" className="w-full rounded-xl">
-                Continuar <ChevronRight className="ml-1 h-4 w-4" />
-              </Button>
-            </form>
-          )}
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <Field label="Nome completo" leftIcon={<UserRound className="h-4 w-4" />}>
+                      <Input value={profile.full_name} onChange={setProfileField("full_name")} placeholder="Seu nome completo" className={FIELD_INPUT} />
+                    </Field>
 
-          {currentStep === 2 && (
-            <form onSubmit={handleGoalsNext} className="space-y-5 animate-stepIn">
-              <div className="text-center">
-                <h2 className="text-2xl font-bold text-gray-900">Objetivos</h2>
-                <p className="mt-1 text-sm text-gray-600">
-                  Selecione os objetivos que melhor representam seu foco atual.
-                </p>
-              </div>
+                    <div className="space-y-2">
+                      <Field
+                        label="Nome de usuario"
+                        leftIcon={<User className="h-4 w-4" />}
+                        rightSlot={
+                          usernameAvailability.status === "checking" ? (
+                            <span className="text-xs text-[var(--fl-auth-subtle)]">...</span>
+                          ) : usernameAvailability.status === "available" ? (
+                            <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                          ) : null
+                        }
+                      >
+                        <Input value={profile.username} onChange={setProfileField("username")} onBlur={() => { void validateUsername(profile.username); }} placeholder="nome_de_usuario" minLength={3} className={FIELD_INPUT} />
+                      </Field>
+                      {availabilityMessage(usernameAvailability) && <p className={`text-xs ${toneClass(availabilityMessage(usernameAvailability)?.tone ?? "muted")}`}>{availabilityMessage(usernameAvailability)?.text}</p>}
+                    </div>
+                  </div>
 
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                {GOAL_OPTIONS.map((opt) => {
-                  const Icon = opt.icon;
-                  const isSelected = selectedGoals.includes(opt.value);
-                  return (
-                    <button
-                      key={opt.value}
-                      type="button"
-                      onClick={() =>
-                        setSelectedGoals((prev) =>
-                          isSelected ? prev.filter((g) => g !== opt.value) : [...prev, opt.value],
-                        )
-                      }
-                      className={`flex items-center gap-3 rounded-xl border-2 px-4 py-3 text-left text-sm font-medium transition ${isSelected
-                          ? "border-emerald-500 bg-emerald-50 text-emerald-800"
-                          : "border-gray-200 bg-white text-gray-700 hover:border-emerald-200"
-                        }`}
-                    >
-                      <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700">
-                        <Icon className="h-4 w-4" />
-                      </span>
-                      <span className="flex-1">{opt.label}</span>
-                      {isSelected && <CheckCircle2 className="h-4 w-4 text-emerald-600" />}
-                    </button>
-                  );
-                })}
-              </div>
+                  <div>
+                    <div className="mb-3">
+                      <label className="text-xs font-semibold uppercase tracking-[0.24em] text-[var(--fl-auth-subtle)]">Genero</label>
+                      <p className="mt-2 text-sm leading-6 text-[var(--fl-auth-muted)]">Esse dado ajuda a calibrar o plano inicial sem mexer na logica existente.</p>
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-3">
+                      {([
+                        { value: "homem", label: "Masculino", icon: Shield },
+                        { value: "mulher", label: "Feminino", icon: Sparkles },
+                        { value: "outro", label: "Prefiro nao dizer", icon: HeartHandshake },
+                      ] as const).map((option) => {
+                        const Icon = option.icon;
+                        return (
+                          <button key={option.value} type="button" onClick={() => setProfile((currentProfile) => ({ ...currentProfile, gender: option.value }))} className="fl-auth-option rounded-[1.4rem] px-4 py-4 text-left transition" data-selected={profile.gender === option.value}>
+                            <div className="flex items-center gap-3">
+                              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[var(--fl-auth-primary-soft)] text-[var(--app-primary-color)]"><Icon className="h-4 w-4" strokeWidth={2.2} /></div>
+                              <div><p className="font-semibold">{option.label}</p><p className="text-xs uppercase tracking-[0.22em] text-[var(--fl-auth-subtle)]">Selecao ativa</p></div>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
 
-              <Button
-                type="submit"
-                disabled={selectedGoals.length === 0}
-                size="lg"
-                className="w-full rounded-xl disabled:opacity-50"
-              >
-                Continuar <ChevronRight className="ml-1 h-4 w-4" />
-              </Button>
-            </form>
-          )}
+                  <ScrollPicker label="Idade" value={Math.min(80, Math.max(13, parseInt(profile.age, 10) || 25))} onChange={(nextValue) => setProfile((currentProfile) => ({ ...currentProfile, age: String(nextValue) }))} min={13} max={80} unit="anos" />
 
-          {currentStep === 3 && (
-            <form onSubmit={handleConditioningNext} className="space-y-6 animate-stepIn">
-              <div className="text-center">
-                <h2 className="text-2xl font-bold text-gray-900">Condicionamento</h2>
-                <p className="mt-1 text-sm text-gray-600">Um retrato rápido do seu nível atual.</p>
-              </div>
+                  <Button type="submit" size="lg" className="fl-auth-cta h-14 w-full rounded-[1.15rem] text-base font-semibold disabled:opacity-50" disabled={usernameAvailability.status === "checking" || usernameAvailability.status === "unavailable" || usernameAvailability.status === "invalid"}>
+                    Continuar
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                </form>
+              )}
 
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                {([
-                  { value: "sedentario", label: "Sedentário" },
-                  { value: "iniciante", label: "Iniciante" },
-                  { value: "intermediario", label: "Intermediário" },
-                  { value: "avancado", label: "Avançado" },
-                ] as const).map((c) => (
-                  <button
-                    key={c.value}
-                    type="button"
-                    onClick={() => setProfile((p) => ({ ...p, initial_conditioning: c.value }))}
-                    className={`rounded-xl border-2 px-3 py-3 text-sm font-medium transition ${profile.initial_conditioning === c.value
-                        ? "border-emerald-500 bg-emerald-50 text-emerald-800"
-                        : "border-gray-200 bg-white text-gray-700"
-                      }`}
+              {currentStep === 1 && (
+                <form onSubmit={handleBodyNext} className="space-y-6 animate-authStepEnter">
+                  <div className="space-y-3">
+                    <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[var(--app-primary-color)]">Perfil fisico</p>
+                    <div>
+                      <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">Ajuste altura e peso com o dedo.</h2>
+                      <p className="mt-2 text-sm leading-6 text-[var(--fl-auth-muted)]">A etapa continua validando os mesmos intervalos de antes, agora com sliders customizados para toque.</p>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-4 xl:grid-cols-2">
+                    <ScrollPicker label="Altura" value={Math.min(220, Math.max(140, Number(profile.height) || 170))} onChange={(nextValue) => setProfile((currentProfile) => ({ ...currentProfile, height: String(nextValue) }))} min={140} max={220} unit="cm" />
+                    <ScrollPicker label="Peso" value={Math.min(200, Math.max(40, Number(profile.weight) || 70))} onChange={(nextValue) => setProfile((currentProfile) => ({ ...currentProfile, weight: String(nextValue) }))} min={40} max={200} unit="kg" />
+                  </div>
+
+                  <div className="fl-auth-option rounded-[1.45rem] p-4" data-selected="false">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[var(--fl-auth-primary-soft)] text-[var(--app-primary-color)]"><Scale className="h-4 w-4" strokeWidth={2.2} /></div>
+                      <div><p className="font-semibold">Faixa ativa</p><p className="text-sm text-[var(--fl-auth-muted)]">Altura entre 140-220 cm e peso entre 40-200 kg continuam sendo a regra.</p></div>
+                    </div>
+                  </div>
+
+                  <Button type="submit" size="lg" className="fl-auth-cta h-14 w-full rounded-[1.15rem] text-base font-semibold">
+                    Continuar
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                </form>
+              )}
+
+              {currentStep === 2 && (
+                <form onSubmit={handleGoalsNext} className="space-y-6 animate-authStepEnter">
+                  <div className="space-y-3">
+                    <div className="flex items-end justify-between gap-4">
+                      <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[var(--app-primary-color)]">Objective selection</p>
+                      <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[var(--fl-auth-subtle)]">escolha um ou mais</p>
+                    </div>
+                    <div>
+                      <h2 className="text-4xl font-bold leading-tight tracking-tight sm:text-5xl">Escolha seu <span className="text-[var(--app-primary-color)]">objetivo.</span></h2>
+                      <p className="mt-3 max-w-2xl text-sm leading-7 text-[var(--fl-auth-muted)] sm:text-base">As opcoes continuam alimentando o mesmo estado atual, mas com cards grandes e legibilidade mais proxima da referencia visual.</p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    {GOAL_OPTIONS.map((option) => {
+                      const Icon = option.icon;
+                      const isSelected = selectedGoals.includes(option.value);
+                      return (
+                        <button key={option.value} type="button" onClick={() => setSelectedGoals((currentGoals) => isSelected ? currentGoals.filter((goal) => goal !== option.value) : [...currentGoals, option.value])} className="fl-auth-option flex w-full items-center gap-4 rounded-[1.55rem] px-5 py-5 text-left transition" data-selected={isSelected}>
+                          <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-2xl bg-[var(--fl-auth-primary-soft)] text-[var(--app-primary-color)]"><Icon className="h-5 w-5" strokeWidth={2.2} /></div>
+                          <div className="min-w-0 flex-1"><p className="text-lg font-semibold sm:text-xl">{option.label}</p><p className="mt-1 text-sm leading-6 text-[var(--fl-auth-muted)]">{option.description}</p></div>
+                          <div className="flex h-8 w-8 items-center justify-center rounded-full border border-white/20 bg-white/5">{isSelected ? <CheckCircle2 className="h-5 w-5 text-[var(--app-primary-color)]" /> : <span className="h-3 w-3 rounded-full border border-[var(--fl-auth-subtle)]" />}</div>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <Button type="submit" disabled={selectedGoals.length === 0} size="lg" className="fl-auth-cta h-14 w-full rounded-[1.15rem] text-base font-semibold disabled:opacity-50">
+                    Continuar
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                </form>
+              )}
+
+              {currentStep === 3 && (
+                <form onSubmit={handleConditioningNext} className="space-y-6 animate-authStepEnter">
+                  <div className="space-y-3">
+                    <div className="flex items-end justify-between gap-4">
+                      <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[var(--app-primary-color)]">Perfil fisico detalhado</p>
+                      <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[var(--fl-auth-subtle)]">sub-etapas 2.1 a 2.9</p>
+                    </div>
+                    <div>
+                      <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">Mapeie sua capacidade atual.</h2>
+                      <p className="mt-2 text-sm leading-6 text-[var(--fl-auth-muted)]">As mesmas informacoes continuam indo para o mesmo payload, mas agora organizadas em blocos claros, com progresso e acoes de toque mais legiveis.</p>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    {[
+                      { code: "2.1", label: "Condicionamento" },
+                      { code: "2.3", label: "Exercicios" },
+                      { code: "2.5", label: "Lesoes" },
+                      { code: "2.7", label: "Equipamentos" },
+                      { code: "2.9", label: "Cadencia" },
+                    ].map((item, index) => (
+                      <button
+                        key={item.code}
+                        type="button"
+                        onClick={() => scrollToConditioningSection(index)}
+                        className="fl-auth-pill"
+                      >
+                        <span>{item.code}</span>
+                        <span>{item.label}</span>
+                      </button>
+                    ))}
+                  </div>
+
+                  <section
+                    ref={(node) => {
+                      conditioningSectionRefs.current[0] = node;
+                    }}
+                    className="fl-auth-substep rounded-[1.7rem] p-5 sm:p-6"
                   >
-                    {c.label}
-                  </button>
-                ))}
-              </div>
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="space-y-2">
+                        <p className="text-xs font-semibold uppercase tracking-[0.28em] text-[var(--app-primary-color)]">Sub-etapa 2.1</p>
+                        <h3 className="text-2xl font-bold tracking-tight">Condicionamento atual</h3>
+                        <p className="text-sm leading-6 text-[var(--fl-auth-muted)]">Escolha a base que mais representa seu momento fisico.</p>
+                      </div>
+                      <button type="button" onClick={() => scrollToConditioningSection(1)} className="fl-auth-skip">
+                        Pular
+                      </button>
+                    </div>
 
-              <div className="grid grid-cols-3 gap-3">
-                {([
-                  { key: "initial_pushups" as const, label: "Flexões" },
-                  { key: "initial_situps" as const, label: "Abdominais" },
-                  { key: "initial_squats" as const, label: "Agachamentos" },
-                ] as const).map(({ key, label }) => {
-                  const val = Number(profile[key]) || 0;
-                  return (
-                    <div key={key} className="rounded-xl border border-gray-200 bg-white p-3 text-center">
-                      <p className="mb-2 text-xs font-medium text-gray-600">{label}</p>
-                      <div className="flex items-center justify-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setProfile((p) => ({ ...p, [key]: String(Math.max(0, val - 1)) }))}
-                          className="h-8 w-8 rounded-lg bg-gray-100 font-bold"
-                        >
-                          −
-                        </button>
-                        <span className="w-8 font-bold text-emerald-700">{val}</span>
-                        <button
-                          type="button"
-                          onClick={() => setProfile((p) => ({ ...p, [key]: String(val + 1) }))}
-                          className="h-8 w-8 rounded-lg bg-gray-100 font-bold"
-                        >
-                          +
-                        </button>
+                    <div className="mt-5 grid gap-3 md:grid-cols-2">
+                      {CONDITIONING_OPTIONS.map((option) => {
+                        const Icon = option.icon;
+                        return (
+                          <button
+                            key={option.value}
+                            type="button"
+                            onClick={() =>
+                              setProfile((currentProfile) => ({
+                                ...currentProfile,
+                                initial_conditioning: option.value,
+                              }))
+                            }
+                            className="fl-auth-option rounded-[1.45rem] p-4 text-left transition"
+                            data-selected={profile.initial_conditioning === option.value}
+                          >
+                            <div className="flex items-start gap-4">
+                              <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-2xl bg-[var(--fl-auth-primary-soft)] text-[var(--app-primary-color)]">
+                                <Icon className="h-5 w-5" strokeWidth={2.2} />
+                              </div>
+                              <div className="space-y-1">
+                                <p className="text-lg font-semibold">{option.label}</p>
+                                <p className="text-sm leading-6 text-[var(--fl-auth-muted)]">{option.description}</p>
+                              </div>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </section>
+
+                  <section
+                    ref={(node) => {
+                      conditioningSectionRefs.current[1] = node;
+                    }}
+                    className="fl-auth-substep rounded-[1.7rem] p-5 sm:p-6"
+                  >
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="space-y-2">
+                        <p className="text-xs font-semibold uppercase tracking-[0.28em] text-[var(--app-primary-color)]">Sub-etapa 2.3</p>
+                        <h3 className="text-2xl font-bold tracking-tight">Capacidade inicial</h3>
+                        <p className="text-sm leading-6 text-[var(--fl-auth-muted)]">Cada linha mostra tres valores, com o valor central em destaque e suporte a toque nos laterais.</p>
+                      </div>
+                      <button type="button" onClick={() => scrollToConditioningSection(2)} className="fl-auth-skip">
+                        Pular
+                      </button>
+                    </div>
+
+                    <div className="mt-5 space-y-3">
+                      <ExerciseValueRow
+                        label="Flexoes"
+                        value={Number(profile.initial_pushups) || 0}
+                        onChange={(nextValue) =>
+                          setProfile((currentProfile) => ({
+                            ...currentProfile,
+                            initial_pushups: String(nextValue),
+                          }))
+                        }
+                      />
+                      <ExerciseValueRow
+                        label="Abdominais"
+                        value={Number(profile.initial_situps) || 0}
+                        onChange={(nextValue) =>
+                          setProfile((currentProfile) => ({
+                            ...currentProfile,
+                            initial_situps: String(nextValue),
+                          }))
+                        }
+                      />
+                      <ExerciseValueRow
+                        label="Agachamentos"
+                        value={Number(profile.initial_squats) || 0}
+                        onChange={(nextValue) =>
+                          setProfile((currentProfile) => ({
+                            ...currentProfile,
+                            initial_squats: String(nextValue),
+                          }))
+                        }
+                      />
+                    </div>
+                  </section>
+
+                  <section
+                    ref={(node) => {
+                      conditioningSectionRefs.current[2] = node;
+                    }}
+                    className="fl-auth-substep rounded-[1.7rem] p-5 sm:p-6"
+                  >
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="space-y-2">
+                        <p className="text-xs font-semibold uppercase tracking-[0.28em] text-[var(--app-primary-color)]">Sub-etapa 2.5</p>
+                        <h3 className="text-2xl font-bold tracking-tight">Lesoes e limitacoes</h3>
+                        <p className="text-sm leading-6 text-[var(--fl-auth-muted)]">Use a grade para selecao multipla e complemente com observacoes livres se precisar.</p>
+                      </div>
+                      <button type="button" onClick={() => scrollToConditioningSection(3)} className="fl-auth-skip">
+                        Pular
+                      </button>
+                    </div>
+
+                    <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                      {INJURY_OPTIONS.map((injury) => {
+                        const isSelected = injuryTokens.includes(injury.id);
+                        return (
+                          <button
+                            key={injury.id}
+                            type="button"
+                            onClick={() => toggleInjurySelection(injury.id)}
+                            className="fl-auth-option rounded-[1.2rem] px-4 py-3 text-left transition"
+                            data-selected={isSelected}
+                          >
+                            <span className="text-sm font-semibold">{injury.label}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    <div className="mt-4">
+                      <Field label="Observacoes adicionais" hint="Opcional">
+                        <textarea
+                          value={profile.injuries}
+                          onChange={(event) =>
+                            setProfile((currentProfile) => ({
+                              ...currentProfile,
+                              injuries: event.target.value,
+                            }))
+                          }
+                          placeholder="Ex: incomodo no joelho ao descer escadas, lombar sensivel..."
+                          rows={3}
+                          className={FIELD_TEXTAREA}
+                        />
+                      </Field>
+                    </div>
+                  </section>
+
+                  <section
+                    ref={(node) => {
+                      conditioningSectionRefs.current[3] = node;
+                    }}
+                    className="fl-auth-substep rounded-[1.7rem] p-5 sm:p-6"
+                  >
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="space-y-2">
+                        <p className="text-xs font-semibold uppercase tracking-[0.28em] text-[var(--app-primary-color)]">Sub-etapa 2.7</p>
+                        <h3 className="text-2xl font-bold tracking-tight">Equipamentos disponiveis</h3>
+                        <p className="text-sm leading-6 text-[var(--fl-auth-muted)]">Selecao multipla em grade, mantendo o campo livre para itens extras que nao aparecem na lista.</p>
+                      </div>
+                      <button type="button" onClick={() => scrollToConditioningSection(4)} className="fl-auth-skip">
+                        Pular
+                      </button>
+                    </div>
+
+                    <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                      {EQUIPMENT_OPTIONS.map((equipmentOption) => {
+                        const Icon = equipmentOption.icon;
+                        const isSelected = selectedEquipment.includes(equipmentOption.id);
+                        return (
+                          <button
+                            key={equipmentOption.id}
+                            type="button"
+                            onClick={() =>
+                              setSelectedEquipment((currentEquipment) =>
+                                isSelected
+                                  ? currentEquipment.filter((item) => item !== equipmentOption.id)
+                                  : [...currentEquipment, equipmentOption.id],
+                              )
+                            }
+                            className="fl-auth-option rounded-[1.2rem] px-4 py-4 text-left transition"
+                            data-selected={isSelected}
+                          >
+                            <div className="flex items-center gap-3">
+                              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[var(--fl-auth-primary-soft)] text-[var(--app-primary-color)]">
+                                <Icon className="h-4 w-4" strokeWidth={2.2} />
+                              </div>
+                              <span className="font-semibold">{equipmentOption.label}</span>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    <div className="mt-4">
+                      <Field label="Outros equipamentos" hint="Opcional">
+                        <Input
+                          value={profile.equipment}
+                          onChange={setProfileField("equipment")}
+                          placeholder="Ex: banco, colchonete, paralelas..."
+                          className={FIELD_INPUT}
+                        />
+                      </Field>
+                    </div>
+                  </section>
+
+                  <section
+                    ref={(node) => {
+                      conditioningSectionRefs.current[4] = node;
+                    }}
+                    className="fl-auth-substep rounded-[1.7rem] p-5 sm:p-6"
+                  >
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="space-y-2">
+                        <p className="text-xs font-semibold uppercase tracking-[0.28em] text-[var(--app-primary-color)]">Sub-etapa 2.9</p>
+                        <h3 className="text-2xl font-bold tracking-tight">Cadencia semanal sugerida</h3>
+                        <p className="text-sm leading-6 text-[var(--fl-auth-muted)]">Sem alterar o payload atual, a interface mostra uma recomendacao dinamica baseada no condicionamento escolhido.</p>
+                      </div>
+                      <button type="button" onClick={() => conditioningSubmitRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })} className="fl-auth-skip">
+                        Pular
+                      </button>
+                    </div>
+
+                    <div className="mt-5 space-y-4">
+                      <div className="grid gap-3 sm:grid-cols-4">
+                        {[
+                          "2x / semana",
+                          "3x / semana",
+                          "4x / semana",
+                          "5x / semana",
+                        ].map((slot) => (
+                          <div
+                            key={slot}
+                            className="fl-auth-option rounded-[1.2rem] px-4 py-4 text-center"
+                            data-selected={cadenceSuggestion.focus === slot}
+                          >
+                            <p className="text-sm font-semibold">{slot}</p>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="fl-auth-option rounded-[1.35rem] p-4" data-selected="true">
+                        <p className="text-lg font-semibold text-[var(--app-primary-color)]">{cadenceSuggestion.focus}</p>
+                        <p className="mt-2 text-sm leading-6 text-[var(--fl-auth-muted)]">{cadenceSuggestion.text}</p>
                       </div>
                     </div>
-                  );
-                })}
-              </div>
+                  </section>
 
-              <div>
-                <label className="mb-1 block text-sm font-medium text-gray-700">
-                  Lesões ou limitações (opcional)
-                </label>
-                <div className={`${FIELD_WRAP} h-auto items-start py-2`}>
-                  <textarea
-                    value={profile.injuries}
-                    onChange={(e) => setProfile((p) => ({ ...p, injuries: e.target.value }))}
-                    placeholder="Ex: joelho, lombar..."
-                    rows={2}
-                    className={FIELD_TEXTAREA}
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="mb-2 block text-sm font-medium text-gray-700">Equipamentos disponíveis</label>
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                  {EQUIPMENT_OPTIONS.map((eq) => {
-                    const Icon = eq.icon;
-                    const isSelected = selectedEquipment.includes(eq.id);
-                    return (
-                      <button
-                        key={eq.id}
-                        type="button"
-                        onClick={() =>
-                          setSelectedEquipment((prev) =>
-                            isSelected ? prev.filter((v) => v !== eq.id) : [...prev, eq.id],
-                          )
-                        }
-                        className={`flex items-center gap-2 rounded-xl border-2 px-3 py-2 text-sm transition ${isSelected
-                            ? "border-emerald-500 bg-emerald-50 text-emerald-800"
-                            : "border-gray-200 bg-white text-gray-700"
-                          }`}
-                      >
-                        <Icon className="h-4 w-4" />
-                        <span>{eq.label}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-
-                <div className="mt-2">
-                  <Field label="Outros equipamentos">
-                    <Input
-                      value={profile.equipment}
-                      onChange={setProfileField("equipment")}
-                      placeholder="Ex: banco, colchonete..."
-                      className={FIELD_INPUT}
-                    />
-                  </Field>
-                </div>
-              </div>
-
-              <Button type="submit" size="lg" className="w-full rounded-xl">
-                Continuar <ChevronRight className="ml-1 h-4 w-4" />
-              </Button>
-            </form>
-          )}
-
-          {currentStep === 4 && (
-            <form onSubmit={handlePlanAndCredentialsSubmit} className="space-y-6 animate-stepIn">
-              <div className="text-center">
-                <h2 className="text-2xl font-bold text-gray-900">Plano e conta</h2>
-                <p className="mt-1 text-sm text-gray-600">Finalize seu acesso ao FitLoot em poucos passos.</p>
-              </div>
-
-              <div className="grid gap-3 sm:grid-cols-3">
-                {([
-                  {
-                    id: "free" as const,
-                    name: "Básico",
-                    price: "R$ 49/mês",
-                    color: "from-gray-500 to-gray-600",
-                    features: ["Missões diárias", "XP e níveis", "Ranking"],
-                  },
-                  {
-                    id: "pro" as const,
-                    name: "Pro",
-                    price: "R$ 99/mês",
-                    color: "from-emerald-500 to-teal-600",
-                    features: ["Tudo do Básico", "Scanner com IA", "Ranking global"],
-                    popular: true,
-                  },
-                  {
-                    id: "annual" as const,
-                    name: "Elite",
-                    price: "R$ 149/mês",
-                    color: "from-purple-500 to-pink-600",
-                    features: ["Tudo do Pro", "Planos de treino", "Suporte VIP"],
-                  },
-                ] as const).map((plan) => (
-                  <button
-                    key={plan.id}
-                    type="button"
-                    onClick={() => setSelectedPlan(plan.id)}
-                    className={`relative rounded-2xl border-2 p-4 text-left transition ${selectedPlan === plan.id ? "border-emerald-500 bg-emerald-50" : "border-gray-200 bg-white"
-                      }`}
+                  <Button
+                    ref={conditioningSubmitRef}
+                    type="submit"
+                    size="lg"
+                    className="fl-auth-cta h-14 w-full rounded-[1.15rem] text-base font-semibold"
                   >
-                    {("popular" in plan && plan.popular) && (
-                      <span className="absolute right-2 top-2 rounded-full bg-emerald-500 px-2 py-0.5 text-[10px] font-semibold text-white">
-                        Popular
-                      </span>
-                    )}
+                    Continuar
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                </form>
+              )}
 
-                    <div
-                      className={`mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-br ${plan.color} text-white`}
-                    >
-                      <Shield className="h-5 w-5" />
-                    </div>
-
-                    <h4 className="font-bold text-gray-900">{plan.name}</h4>
-                    <p className="mb-2 text-xl font-bold text-gray-900">{plan.price}</p>
-
-                    <ul className="space-y-1">
-                      {plan.features.map((f) => (
-                        <li key={f} className="flex items-center gap-1.5 text-xs text-gray-700">
-                          <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
-                          {f}
-                        </li>
-                      ))}
-                    </ul>
-                  </button>
-                ))}
-              </div>
-
-              <div className="space-y-3 border-t border-gray-200 pt-4">
-                <h3 className="font-bold text-gray-900">Crie sua conta</h3>
-
-                <Field
-                  label="E-mail"
-                  rightSlot={
-                    emailAvailability.status === "checking"
-                      ? <span className="text-xs text-gray-500">...</span>
-                      : emailAvailability.status === "available"
-                        ? <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-                        : null
-                  }
-                >
-                  <Input
-                    type="email"
-                    value={credentials.email}
-                    onChange={setCredential("email")}
-                    onBlur={() => { void validateEmail(credentials.email); }}
-                    placeholder="E-mail"
-                    required
-                    className={FIELD_INPUT}
-                  />
-                </Field>
-                {availabilityMessage(emailAvailability) && (
-                  <p className={`-mt-2 text-xs ${availabilityMessage(emailAvailability)?.tone === "green" ? "text-emerald-600" : availabilityMessage(emailAvailability)?.tone === "red" ? "text-red-600" : "text-gray-500"}`}>
-                    {availabilityMessage(emailAvailability)?.text}
-                  </p>
-                )}
-
-                <Field
-                  label="Senha"
-                  rightSlot={
-                    <button
-                      type="button"
-                      onMouseDown={(e) => {
-                        e.preventDefault();
-                      }}
-                      onClick={(e) => {
-                        setShowPassword((v) => !v);
-                        e.currentTarget.blur();
-                      }}
-                      className="rounded-lg p-2 text-gray-500 transition hover:bg-gray-50 hover:text-gray-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/30"
-                      aria-label={showPassword ? "Ocultar senha" : "Mostrar senha"}
-                      title={showPassword ? "Ocultar senha" : "Mostrar senha"}
-                    >
-                      {showPassword ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
-                    </button>
-                  }
-                >
-                  <Input
-                    type={showPassword ? "text" : "password"}
-                    value={credentials.password}
-                    onChange={setCredential("password")}
-                    placeholder="Senha (mín. 8)"
-                    minLength={8}
-                    required
-                    className={FIELD_INPUT}
-                  />
-                </Field>
-
-                <Field label="Confirmar senha">
-                  <Input
-                    type={showPassword ? "text" : "password"}
-                    value={credentials.confirmPassword}
-                    onChange={setCredential("confirmPassword")}
-                    placeholder="Confirmar senha"
-                    required
-                    className={FIELD_INPUT}
-                  />
-                </Field>
-              </div>
-
-              <div className="space-y-3 border-t border-gray-200 pt-4">
-                <h3 className="font-bold text-gray-900">Pagamento</h3>
-
-                <div className="flex flex-wrap gap-2">
-                  {([
-                    { tab: "card", label: "Cartão", icon: CreditCard },
-                    { tab: "pix", label: "PIX", icon: QrCode },
-                  ] as const).map(({ tab, label, icon: Icon }) => (
-                    <button
-                      key={tab}
-                      type="button"
-                      onClick={() => setPaymentTab(tab)}
-                      className={`flex items-center gap-1.5 rounded-xl border-2 px-3 py-2 text-sm ${paymentTab === tab
-                          ? "border-emerald-500 bg-emerald-50 text-emerald-800"
-                          : "border-gray-200 bg-white text-gray-700"
-                        }`}
-                    >
-                      <Icon className="h-4 w-4" /> {label}
-                    </button>
-                  ))}
-                </div>
-
-                {paymentTab === "card" && (
+              {currentStep === 4 && (
+                <form onSubmit={handlePlanAndCredentialsSubmit} className="space-y-6 animate-authStepEnter">
                   <div className="space-y-3">
-                    <Field label="Número do cartão">
-                      <Input placeholder="Número do cartão" className={FIELD_INPUT} />
-                    </Field>
-
-                    <Field label="Nome no cartão">
-                      <Input placeholder="Nome no cartão" className={FIELD_INPUT} />
-                    </Field>
-
-                    <div className="grid grid-cols-2 gap-3">
-                      <Field label="Validade">
-                        <Input placeholder="MM/AA" className={FIELD_INPUT} />
-                      </Field>
-                      <Field label="CVV">
-                        <Input placeholder="CVV" className={FIELD_INPUT} />
-                      </Field>
+                    <div className="flex items-end justify-between gap-4">
+                      <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[var(--app-primary-color)]">Criacao da conta</p>
+                      <span className="fl-auth-pill">
+                        <Shield className="h-3.5 w-3.5" />
+                        pronto para finalizar
+                      </span>
+                    </div>
+                    <div>
+                      <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">Finalize sua conta e siga para o checkout.</h2>
+                      <p className="mt-2 text-sm leading-6 text-[var(--fl-auth-muted)]">O onboarding termina aqui com a criacao da conta. A escolha de plano e o pagamento seguem em uma tela separada.</p>
                     </div>
                   </div>
-                )}
 
-                {paymentTab === "pix" && (
-                  <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 text-center text-sm text-gray-600">
-                    QR Code de demonstração será exibido após criar a conta.
+                  <section className="grid gap-3 lg:grid-cols-[minmax(0,1.15fr)_minmax(280px,0.85fr)]">
+                    <div className="fl-auth-option rounded-[1.6rem] p-5" data-selected="true">
+                      <div className="flex items-start gap-4">
+                        <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-2xl bg-[var(--fl-auth-primary-soft)] text-[var(--app-primary-color)]">
+                          <Sparkles className="h-5 w-5" strokeWidth={2.2} />
+                        </div>
+                        <div className="space-y-2">
+                          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[var(--app-primary-color)]">Resumo do funil</p>
+                          <h3 className="text-2xl font-bold tracking-tight">{heroName}, sua jornada inicial ja foi configurada.</h3>
+                          <p className="text-sm leading-6 text-[var(--fl-auth-muted)]">Objetivo, condicionamento, capacidade, equipamentos e limitacoes ja estao prontos para alimentar o plano. O proximo passo e apenas concluir a conta e seguir para o checkout.</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-1">
+                      {[
+                        { icon: CheckCircle2, title: "Validacao em tempo real", text: "Username e e-mail seguem com feedback visual imediato." },
+                        { icon: TrendingUp, title: "Dados preservados", text: "Nada do que foi preenchido no onboarding se perde ao seguir para o checkout." },
+                        { icon: Shield, title: "Checkout separado", text: "Plano e pagamento saem do onboarding e seguem em uma rota propria." },
+                      ].map((item) => {
+                        const Icon = item.icon;
+                        return (
+                          <article key={item.title} className="fl-auth-option rounded-[1.35rem] p-4" data-selected="false">
+                            <div className="flex items-start gap-3">
+                              <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-2xl bg-[var(--fl-auth-primary-soft)] text-[var(--app-primary-color)]">
+                                <Icon className="h-4 w-4" strokeWidth={2.2} />
+                              </div>
+                              <div>
+                                <p className="font-semibold">{item.title}</p>
+                                <p className="mt-1 text-sm leading-6 text-[var(--fl-auth-muted)]">{item.text}</p>
+                              </div>
+                            </div>
+                          </article>
+                        );
+                      })}
+                    </div>
+                  </section>
+
+                  <section className="space-y-4 border-t border-[var(--fl-auth-card-border)] pt-5">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[var(--fl-auth-subtle)]">Criacao de conta</p>
+                      <h3 className="text-2xl font-bold tracking-tight">Revise seus dados e finalize o acesso.</h3>
+                    </div>
+
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <Field label="Nome completo" leftIcon={<UserRound className="h-4 w-4" />}>
+                        <Input
+                          value={profile.full_name}
+                          onChange={setProfileField("full_name")}
+                          placeholder="Seu nome completo"
+                          className={FIELD_INPUT}
+                        />
+                      </Field>
+
+                      <div className="space-y-2">
+                        <Field
+                          label="Nome de usuario"
+                          leftIcon={<User className="h-4 w-4" />}
+                          rightSlot={
+                            usernameAvailability.status === "checking" ? (
+                              <span className="text-xs text-[var(--fl-auth-subtle)]">...</span>
+                            ) : usernameAvailability.status === "available" ? (
+                              <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                            ) : null
+                          }
+                        >
+                          <Input
+                            value={profile.username}
+                            onChange={setProfileField("username")}
+                            onBlur={() => {
+                              void validateUsername(profile.username);
+                            }}
+                            placeholder="nome_de_usuario"
+                            minLength={3}
+                            className={FIELD_INPUT}
+                          />
+                        </Field>
+                        {usernameStatusMessage ? (
+                          <p className={`text-xs ${toneClass(usernameStatusMessage.tone)}`}>{usernameStatusMessage.text}</p>
+                        ) : null}
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Field
+                        label="Email"
+                        leftIcon={<Mail className="h-4 w-4" />}
+                        rightSlot={
+                          emailAvailability.status === "checking" ? (
+                            <span className="text-xs text-[var(--fl-auth-subtle)]">...</span>
+                          ) : emailAvailability.status === "available" ? (
+                            <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                          ) : null
+                        }
+                      >
+                        <Input
+                          type="email"
+                          value={credentials.email}
+                          onChange={setCredential("email")}
+                          onBlur={() => {
+                            void validateEmail(credentials.email);
+                          }}
+                          placeholder="seu@email.com"
+                          className={FIELD_INPUT}
+                        />
+                      </Field>
+                      {emailStatusMessage ? (
+                        <p className={`text-xs ${toneClass(emailStatusMessage.tone)}`}>{emailStatusMessage.text}</p>
+                      ) : null}
+                    </div>
+
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <Field
+                        label="Senha"
+                        leftIcon={<Lock className="h-4 w-4" />}
+                        hint="minimo 8 caracteres"
+                        rightSlot={
+                          <button
+                            type="button"
+                            onMouseDown={(event) => {
+                              event.preventDefault();
+                            }}
+                            onClick={() => setShowPassword((currentValue) => !currentValue)}
+                            className="rounded-full p-2 text-[var(--fl-auth-subtle)] transition hover:bg-white/10 hover:text-[var(--fl-auth-ink)] focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/30"
+                            aria-label={showPassword ? "Ocultar senha" : "Mostrar senha"}
+                            title={showPassword ? "Ocultar senha" : "Mostrar senha"}
+                          >
+                            {showPassword ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+                          </button>
+                        }
+                      >
+                        <Input
+                          type={showPassword ? "text" : "password"}
+                          value={credentials.password}
+                          onChange={setCredential("password")}
+                          placeholder="Senha segura"
+                          minLength={8}
+                          className={FIELD_INPUT}
+                        />
+                      </Field>
+
+                      <Field label="Confirmar senha" leftIcon={<Lock className="h-4 w-4" />}>
+                        <Input
+                          type={showPassword ? "text" : "password"}
+                          value={credentials.confirmPassword}
+                          onChange={setCredential("confirmPassword")}
+                          placeholder="Repita a senha"
+                          className={FIELD_INPUT}
+                        />
+                      </Field>
+                    </div>
+                  </section>
+
+                  <div className="fl-auth-option rounded-[1.45rem] p-4" data-selected="false">
+                    <p className="font-semibold">Proximo passo: checkout separado.</p>
+                    <p className="mt-1 text-sm leading-6 text-[var(--fl-auth-muted)]">Depois de criar a conta, o funil segue para `/checkout`, onde a escolha do plano e o pagamento continuam sem misturar a cobranca ao onboarding.</p>
                   </div>
-                )}
-              </div>
 
-              <Button
-                type="submit"
-                disabled={
-                  stepLoading ||
-                  !credentials.email ||
-                  !credentials.password ||
-                  credentials.password.length < 8 ||
-                  credentials.password !== credentials.confirmPassword ||
-                  emailAvailability.status === "checking" ||
-                  emailAvailability.status === "unavailable" ||
-                  emailAvailability.status === "invalid"
-                }
-                size="lg"
-                className="w-full rounded-xl disabled:opacity-50"
-              >
-                {stepLoading ? "Criando conta..." : "Criar conta e finalizar"}
-                {!stepLoading && <ArrowRight className="ml-2 h-4 w-4" />}
-              </Button>
-            </form>
-          )}
+                  <Button
+                    type="submit"
+                    disabled={
+                      stepLoading ||
+                      !credentials.email ||
+                      !credentials.password ||
+                      credentials.password.length < 8 ||
+                      credentials.password !== credentials.confirmPassword ||
+                      emailAvailability.status === "checking" ||
+                      emailAvailability.status === "unavailable" ||
+                      emailAvailability.status === "invalid" ||
+                      usernameAvailability.status === "checking" ||
+                      usernameAvailability.status === "unavailable" ||
+                      usernameAvailability.status === "invalid"
+                    }
+                    size="lg"
+                    className="fl-auth-cta h-14 w-full rounded-[1.15rem] text-base font-semibold disabled:opacity-50"
+                  >
+                    {stepLoading ? "Criando conta..." : "Criar conta e ir para checkout"}
+                    {!stepLoading ? <ArrowRight className="h-4 w-4" /> : null}
+                  </Button>
+                </form>
+              )}
+            </main>
+          </div>
         </div>
+
+        <footer className="hidden justify-center pb-6 text-[10px] font-semibold uppercase tracking-[0.42em] text-[var(--fl-auth-subtle)] lg:flex">
+          Precision • Progression • Rewards
+        </footer>
       </div>
     </div>
   );
 }
-

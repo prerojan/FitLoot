@@ -6,6 +6,7 @@ export const ROUTE_PATHS = {
   app: "/app",
   home: "/home",
   onboarding: "/onboarding",
+  checkout: "/checkout",
   dashboard: "/dashboard",
   profile: "/profile",
   shop: "/shop",

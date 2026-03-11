@@ -6,6 +6,7 @@ import { useAuthBootstrap } from "@/react-app/hooks/useAuthBootstrap";
 import HomePage from "@/react-app/pages/Home";
 import LandingPage from "@/react-app/pages/Landing";
 import Onboarding from "@/react-app/pages/Onboarding";
+import Checkout from "@/react-app/pages/Checkout";
 import { prefetchCoreRoutes, resolveAuthenticatedStartRoute } from "@/react-app/services/authService";
 import type { AuthContextType, User } from "@/react-app/types/auth";
 
@@ -77,6 +78,7 @@ export default function App() {
             <Route path={ROUTE_PATHS.app} element={appRouteElement} />
             <Route path={ROUTE_PATHS.home} element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
             <Route path={ROUTE_PATHS.onboarding} element={<Onboarding />} />
+            <Route path={ROUTE_PATHS.checkout} element={<ProtectedRoute><Checkout /></ProtectedRoute>} />
             <Route path={ROUTE_PATHS.dashboard} element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
             <Route path={ROUTE_PATHS.profile} element={<ProtectedRoute><Profile /></ProtectedRoute>} />
             <Route path={ROUTE_PATHS.shop} element={<ProtectedRoute><Shop /></ProtectedRoute>} />
