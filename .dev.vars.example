@@ -1,6 +1,0 @@
-# Código VIP: uso exclusivo em ambiente de testes/local.
-# O Worker lê este valor diretamente do env (nunca do frontend).
-VIP_ACTIVATION_CODE=maderaaichefe
-
-# Segredo para validar assinatura HMAC do webhook de pagamento.
-WEBHOOK_SECRET=bedbc587-0090-4037-ba43-efedf138e57d
