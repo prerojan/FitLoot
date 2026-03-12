@@ -132,40 +132,27 @@ export default function App({ initialThemeMode = DEFAULT_APP_THEME_MODE }: AppPr
   }, [themeMode]);
 
   return (
-    <ThemeContext.Provider value={{ themeMode, setThemeMode, toggleThemeMode }}>
-      <AuthContext.Provider value={{ user, loading, checkAuth, logout }}>
-        <Router>
-          <Suspense fallback={<PageLoader />}>
-            <InitialRedirectController
-              user={user}
-              loading={loading}
-              initialRedirectDone={initialRedirectDone}
-              onInitialRedirectHandled={markInitialRedirectHandled}
-            />
-            <Routes>
-              <Route path={ROUTE_PATHS.landing} element={<LandingPage />} />
-              <Route path={ROUTE_PATHS.publicLanding} element={<LandingPage />} />
-              <Route path={ROUTE_PATHS.login} element={<HomePage />} />
-              <Route path={ROUTE_PATHS.app} element={<AppRoute />} />
-              <Route path={ROUTE_PATHS.paymentPending} element={<AuthRoute><PaymentPending /></AuthRoute>} />
-              <Route path={ROUTE_PATHS.payment} element={<AuthRoute><PaymentRequired /></AuthRoute>} />
-              <Route path={ROUTE_PATHS.home} element={<AuthRoute><Dashboard /></AuthRoute>} />
-              <Route path={ROUTE_PATHS.onboarding} element={<Onboarding />} />
-              <Route path={ROUTE_PATHS.dashboard} element={<AuthRoute><Dashboard /></AuthRoute>} />
-              <Route path={ROUTE_PATHS.profile} element={<AuthRoute><Profile /></AuthRoute>} />
-              <Route path={ROUTE_PATHS.shop} element={<AuthRoute><Shop /></AuthRoute>} />
-              <Route path={ROUTE_PATHS.ranking} element={<AuthRoute><Ranking /></AuthRoute>} />
-              <Route path={ROUTE_PATHS.friends} element={<AuthRoute><Arena /></AuthRoute>} />
-              <Route path={ROUTE_PATHS.minigames} element={<AuthRoute><MiniGames /></AuthRoute>} />
-              <Route path={ROUTE_PATHS.aiChat} element={<AuthRoute><AIChat /></AuthRoute>} />
-              <Route path={ROUTE_PATHS.foodAnalysis} element={<AuthRoute><FoodAnalysis /></AuthRoute>} />
-              <Route path={ROUTE_PATHS.wildcard} element={<NotFoundPage />} />
-            </Routes>
-          </Suspense>
-          <Analytics />
-          <SpeedInsights />
-        </Router>
-      </AuthContext.Provider>
-    </ThemeContext.Provider>
+    <AuthContext.Provider value={{ user, loading, checkAuth, logout }}>
+      <Router>
+        <Suspense fallback={<PageLoader />}>
+          <Routes>
+            <Route path={ROUTE_PATHS.landing} element={<LandingPage />} />
+            <Route path={ROUTE_PATHS.app} element={appRouteElement} />
+            <Route path={ROUTE_PATHS.home} element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+            <Route path={ROUTE_PATHS.onboarding} element={<Onboarding />} />
+            <Route path={ROUTE_PATHS.checkout} element={<ProtectedRoute><Checkout /></ProtectedRoute>} />
+            <Route path={ROUTE_PATHS.dashboard} element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+            <Route path={ROUTE_PATHS.profile} element={<ProtectedRoute><Profile /></ProtectedRoute>} />
+            <Route path={ROUTE_PATHS.shop} element={<ProtectedRoute><Shop /></ProtectedRoute>} />
+            <Route path={ROUTE_PATHS.ranking} element={<ProtectedRoute><Ranking /></ProtectedRoute>} />
+            <Route path={ROUTE_PATHS.friends} element={<ProtectedRoute><Friends /></ProtectedRoute>} />
+            <Route path={ROUTE_PATHS.minigames} element={<ProtectedRoute><MiniGames /></ProtectedRoute>} />
+            <Route path={ROUTE_PATHS.aiChat} element={<ProtectedRoute><AIChat /></ProtectedRoute>} />
+            <Route path={ROUTE_PATHS.foodAnalysis} element={<ProtectedRoute><FoodAnalysis /></ProtectedRoute>} />
+            <Route path={ROUTE_PATHS.wildcard} element={<NotFoundPage />} />
+          </Routes>
+        </Suspense>
+      </Router>
+    </AuthContext.Provider>
   );
 }
