@@ -1,20 +1,30 @@
-// ====================================
+﻿// ====================================
 // src/react-app/components/AIMissionGenerator.tsx
 // Botão para gerar missões personalizadas com IA
 // ====================================
 
 import { useState } from "react";
-import { Wand2, Loader2, CheckCircle, XCircle } from "lucide-react";
+import { Wand2, CheckCircle, XCircle } from "lucide-react";
 import { api } from "@/react-app/utils/api";
+import LoadingBall from "@/react-app/components/LoadingBall";
+import { formatMissionGoal } from "@/constants/missionMetrics";
+import type { Mission, MissionMetricType } from "@/shared/types";
 
-interface GeneratedMission {
-  title: string;
-  description: string;
-  skill_name: string;
-  target_reps: number;
-  xp_reward: number;
-  points_reward: number;
-  difficulty: string;
+type GeneratedMission = Mission & { difficulty?: string | undefined };
+
+function resolveMetricType(mission: GeneratedMission): MissionMetricType {
+  if (
+    mission.metric_type === "repetitions" ||
+    mission.metric_type === "duration_seconds" ||
+    mission.metric_type === "duration_minutes" ||
+    mission.metric_type === "sets_reps" ||
+    mission.metric_type === "steps" ||
+    mission.metric_type === "distance_meters" ||
+    mission.metric_type === "circuit_tasks"
+  ) {
+    return mission.metric_type;
+  }
+  return "sets_reps";
 }
 
 export default function AIMissionGenerator({ onMissionsGenerated, conditioning }: { onMissionsGenerated?: () => void; conditioning?: string | undefined }) {
@@ -34,15 +44,46 @@ export default function AIMissionGenerator({ onMissionsGenerated, conditioning }
         body: JSON.stringify({ conditioning }),
       });
 
-      const data = await response.json();
+      const data = (await response.json()) as {
+        status?: string | undefined;
+        job_id?: string | undefined;
+        missions?: GeneratedMission[] | undefined;
+        error?: string | undefined;
+      };
       if (!response.ok) {
         throw new Error(data?.error || "Failed to generate missions");
       }
-      setGeneratedMissions(data.missions);
-      setSuccess(true);
 
-      // Notify parent component to refresh missions list
-      setTimeout(() => {
+      if (Array.isArray(data.missions)) {
+        setGeneratedMissions(data.missions);
+        setSuccess(true);
+      } else if (typeof data.job_id === "string" && data.job_id.length > 0) {
+        await new Promise<void>((resolve) => {
+          window.setTimeout(() => resolve(), 2500);
+        });
+
+        const statusResponse = await api(`/api/ai/generate-missions/status?job_id=${encodeURIComponent(data.job_id)}`);
+        const statusData = (await statusResponse.json()) as {
+          status?: string | undefined;
+          missions?: GeneratedMission[] | undefined;
+          error?: string | undefined;
+        };
+
+        if (statusResponse.ok && statusData.status === "completed") {
+          setGeneratedMissions(Array.isArray(statusData.missions) ? statusData.missions : []);
+          setSuccess(true);
+        } else if (statusResponse.status === 202 || statusData.status === "processing") {
+          setGeneratedMissions([]);
+          setSuccess(true);
+        } else {
+          throw new Error(statusData.error || "Falha ao concluir geração de missões.");
+        }
+      } else {
+        setGeneratedMissions([]);
+        setSuccess(true);
+      }
+
+      window.setTimeout(() => {
         if (onMissionsGenerated) {
           onMissionsGenerated();
         }
@@ -57,7 +98,7 @@ export default function AIMissionGenerator({ onMissionsGenerated, conditioning }
     }
   };
 
-  const getDifficultyColor = (difficulty: string) => {
+  const getDifficultyColor = (difficulty?: string) => {
     switch (difficulty) {
       case "easy":
         return "text-green-600 bg-green-100";
@@ -70,7 +111,7 @@ export default function AIMissionGenerator({ onMissionsGenerated, conditioning }
     }
   };
 
-  const getDifficultyLabel = (difficulty: string) => {
+  const getDifficultyLabel = (difficulty?: string) => {
     switch (difficulty) {
       case "easy":
         return "Fácil";
@@ -79,7 +120,7 @@ export default function AIMissionGenerator({ onMissionsGenerated, conditioning }
       case "hard":
         return "Difícil";
       default:
-        return difficulty;
+        return difficulty ?? "Médio";
     }
   };
 
@@ -88,37 +129,47 @@ export default function AIMissionGenerator({ onMissionsGenerated, conditioning }
       <div className="bg-green-50 border-2 border-green-200 rounded-2xl p-4 space-y-3">
         <div className="flex items-center gap-2 text-green-600">
           <CheckCircle className="w-5 h-5" />
-          <span className="font-medium">Missões geradas com sucesso!</span>
+          <span className="font-medium">
+            {generatedMissions.length > 0
+              ? "Missões geradas com sucesso!"
+              : "Geração iniciada. As missões serão exibidas no dashboard em instantes."}
+          </span>
         </div>
 
-        <div className="space-y-2">
-          {generatedMissions.map((mission, index) => (
-            <div key={index} className="bg-white rounded-lg p-3 border border-green-200">
-              <div className="flex items-start justify-between gap-2 mb-2">
-                <h4 className="font-bold text-sm text-gray-900">{mission.title}</h4>
-                <span
-                  className={`px-2 py-1 rounded-full text-xs font-medium ${getDifficultyColor(
-                    mission.difficulty
-                  )}`}
-                >
-                  {getDifficultyLabel(mission.difficulty)}
-                </span>
+        {generatedMissions.length > 0 ? (
+          <div className="space-y-2">
+            {generatedMissions.map((mission, index) => (
+              <div key={index} className="bg-white rounded-lg p-3 border border-green-200">
+                <div className="flex items-start justify-between gap-2 mb-2">
+                  <h4 className="font-bold text-sm text-gray-900">{mission.title}</h4>
+                  <span
+                    className={`px-2 py-1 rounded-full text-xs font-medium ${getDifficultyColor(
+                      mission.difficulty
+                    )}`}
+                  >
+                    {getDifficultyLabel(mission.difficulty)}
+                  </span>
+                </div>
+                <p className="text-xs text-gray-600 mb-2">{mission.description}</p>
+                <div className="flex items-center gap-3 text-xs">
+                  <span className="text-purple-600 font-medium">
+                    {mission.xp_reward} XP
+                  </span>
+                  <span className="text-yellow-600 font-medium">
+                    {mission.points_reward} pts
+                  </span>
+                  <span className="text-emerald-600 font-medium">
+                    {formatMissionGoal(
+                      resolveMetricType(mission),
+                      Number(mission.metric_value ?? mission.target_reps ?? 1),
+                      mission.sets ?? undefined
+                    )}
+                  </span>
+                </div>
               </div>
-              <p className="text-xs text-gray-600 mb-2">{mission.description}</p>
-              <div className="flex items-center gap-3 text-xs">
-                <span className="text-purple-600 font-medium">
-                  {mission.xp_reward} XP
-                </span>
-                <span className="text-yellow-600 font-medium">
-                  {mission.points_reward} pts
-                </span>
-                <span className="text-emerald-600 font-medium">
-                  {mission.target_reps} reps
-                </span>
-              </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        ) : null}
       </div>
     );
   }
@@ -161,7 +212,7 @@ export default function AIMissionGenerator({ onMissionsGenerated, conditioning }
       >
         {loading ? (
           <div className="flex items-center justify-center gap-2">
-            <Loader2 className="w-4 h-4 animate-spin" />
+            <LoadingBall size="sm" />
             <span>Gerando missões...</span>
           </div>
         ) : (

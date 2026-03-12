@@ -1,9 +1,10 @@
-import { useMemo, useRef, useState, useEffect, type ChangeEventHandler } from "react";
+﻿import { useMemo, useRef, useState, useEffect, type ChangeEventHandler } from "react";
 import { useNavigate } from "react-router";
-import { Camera, ImagePlus, Loader2, RefreshCw, Save, AlertTriangle, CheckCircle2 } from "lucide-react";
+import { Camera, ImagePlus, RefreshCw, Save, AlertTriangle, CheckCircle2 } from "lucide-react";
 import BottomNav from "@/react-app/components/BottomNav";
 import { Card } from "@/react-app/components/ui/card";
 import { Button } from "@/react-app/components/ui/button";
+import LoadingBall from "@/react-app/components/LoadingBall";
 import { api } from "@/react-app/utils/api";
 import { assertString, safeGet } from "@/utils/typeHelpers";
 
@@ -46,9 +47,8 @@ type MediaPipeClassifier = {
       categories?: Array<{ categoryName?: string | undefined; score?: number | undefined }>;
     }>;
   };
+  close: () => void;
 };
-
-let classifierPromise: Promise<MediaPipeClassifier> | null = null;
 
 type MediaPipeVisionModule = {
   FilesetResolver: {
@@ -62,28 +62,6 @@ type MediaPipeVisionModule = {
 async function loadVisionModule(): Promise<MediaPipeVisionModule> {
   const moduleUrl = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/+esm";
   return (await import(/* @vite-ignore */ moduleUrl)) as MediaPipeVisionModule;
-}
-
-async function getFoodClassifier() {
-  if (!classifierPromise) {
-    classifierPromise = (async () => {
-      const visionModule = await loadVisionModule();
-      const vision = await visionModule.FilesetResolver.forVisionTasks(
-        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
-      );
-
-      return visionModule.ImageClassifier.createFromOptions(vision, {
-        baseOptions: {
-          modelAssetPath:
-            "https://storage.googleapis.com/mediapipe-models/image_classifier/efficientnet_lite0/int8/1/efficientnet_lite0.tflite",
-        },
-        maxResults: 5,
-        runningMode: "IMAGE",
-      });
-    })();
-  }
-
-  return classifierPromise;
 }
 
 function toIdentifiedItems(result: { classifications?: Array<{ categories?: Array<{ categoryName?: string | undefined; score?: number | undefined }> }> }): IdentifiedItem[] {
@@ -102,6 +80,11 @@ export default function FoodAnalysis() {
   const navigate = useNavigate();
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const classifierRef = useRef<MediaPipeClassifier | null>(null);
+  const classifierInitRef = useRef<Promise<void> | null>(null);
+  const mountedRef = useRef(true);
+  const classifierClosingRef = useRef(false);
+
   const [streamActive, setStreamActive] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
@@ -109,6 +92,126 @@ export default function FoodAnalysis() {
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [saving, setSaving] = useState(false);
+
+  const [mediaPipeReady, setMediaPipeReady] = useState(false);
+  const [mediaPipeLoading, setMediaPipeLoading] = useState(true);
+  const [mediaPipeError, setMediaPipeError] = useState<string | null>(null);
+
+  const stopCamera = (updateState = true) => {
+    const stream = videoRef.current?.srcObject as MediaStream | null;
+    stream?.getTracks().forEach((track) => track.stop());
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+    if (updateState && mountedRef.current) {
+      setStreamActive(false);
+    }
+  };
+
+  const destroyMediaPipe = () => {
+    if (classifierClosingRef.current) return;
+    classifierClosingRef.current = true;
+    const classifier = classifierRef.current;
+    if (classifier) {
+      try {
+        classifier.close();
+      } catch {
+        // no-op: evita crash em desmontagem concorrente
+      }
+      classifierRef.current = null;
+    }
+    if (mountedRef.current) {
+      setMediaPipeReady(false);
+    }
+    classifierClosingRef.current = false;
+  };
+
+  const initializeMediaPipe = async () => {
+    if (classifierRef.current) {
+      if (mountedRef.current) {
+        setMediaPipeReady(true);
+        setMediaPipeError(null);
+        setMediaPipeLoading(false);
+      }
+      return;
+    }
+
+    if (classifierInitRef.current) {
+      await classifierInitRef.current;
+      return;
+    }
+
+    if (mountedRef.current) {
+      setMediaPipeLoading(true);
+    }
+    const initPromise = (async () => {
+      try {
+        const visionModule = await loadVisionModule();
+        const vision = await visionModule.FilesetResolver.forVisionTasks(
+          "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
+        );
+
+        classifierRef.current = await visionModule.ImageClassifier.createFromOptions(vision, {
+          baseOptions: {
+            modelAssetPath:
+              "https://storage.googleapis.com/mediapipe-models/image_classifier/efficientnet_lite0/int8/1/efficientnet_lite0.tflite",
+          },
+          maxResults: 5,
+          runningMode: "IMAGE",
+        });
+
+        if (mountedRef.current) {
+          setMediaPipeReady(true);
+          setMediaPipeError(null);
+        }
+      } catch {
+        if (mountedRef.current) {
+          setMediaPipeReady(false);
+          setMediaPipeError("Não foi possível inicializar o MediaPipe. Verifique sua conexão e tente novamente.");
+        }
+      } finally {
+        if (mountedRef.current) {
+          setMediaPipeLoading(false);
+        }
+      }
+    })();
+
+    classifierInitRef.current = initPromise;
+    await initPromise;
+    classifierInitRef.current = null;
+  };
+
+  useEffect(() => {
+    mountedRef.current = true;
+    void initializeMediaPipe();
+
+    return () => {
+      mountedRef.current = false;
+      stopCamera(false);
+      destroyMediaPipe();
+      classifierInitRef.current = null;
+    };
+  }, []);
+
+  const identifyFoodWithMediaPipe = async (image: HTMLImageElement) => {
+    if (!classifierRef.current) {
+      await initializeMediaPipe();
+    }
+
+    const classifier = classifierRef.current;
+    if (!classifier) {
+      throw new Error("MediaPipe não está disponível para análise no momento.");
+    }
+
+    const prediction = classifier.classify(image);
+    const items = toIdentifiedItems(prediction);
+
+    if (items.length === 0) {
+      throw new Error("Não foi possível identificar alimentos com o modelo local. Tente outra foto.");
+    }
+
+    return items;
+  };
 
   const startCamera = async () => {
     try {
@@ -122,55 +225,6 @@ export default function FoodAnalysis() {
     } catch {
       setCameraError("Permissão de câmera negada ou indisponível neste dispositivo.");
     }
-  };
-
-  const stopCamera = () => {
-    const stream = videoRef.current?.srcObject as MediaStream | null;
-    stream?.getTracks().forEach((track) => track.stop());
-    if (videoRef.current) {
-      videoRef.current.srcObject = null;
-    }
-    setStreamActive(false);
-  };
-
-  const [mediaPipeReady, setMediaPipeReady] = useState(false);
-  const [mediaPipeLoading, setMediaPipeLoading] = useState(true);
-  const [mediaPipeError, setMediaPipeError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let active = true;
-    const bootstrap = async () => {
-      try {
-        setMediaPipeLoading(true);
-        await getFoodClassifier();
-        if (!active) return;
-        setMediaPipeReady(true);
-        setMediaPipeError(null);
-      } catch {
-        if (!active) return;
-        setMediaPipeReady(false);
-        setMediaPipeError("Não foi possível inicializar o MediaPipe. Verifique sua conexão e tente novamente.");
-      } finally {
-        if (active) setMediaPipeLoading(false);
-      }
-    };
-
-    void bootstrap();
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  const identifyFoodWithMediaPipe = async (image: HTMLImageElement) => {
-    const classifier = await getFoodClassifier();
-    const prediction = classifier.classify(image);
-    const items = toIdentifiedItems(prediction);
-
-    if (items.length === 0) {
-      throw new Error("Não foi possível identificar alimentos com o modelo local. Tente outra foto.");
-    }
-
-    return items;
   };
 
   const runAnalysis = async (base64: string) => {
@@ -213,8 +267,8 @@ export default function FoodAnalysis() {
         throw new Error((data as { error?: string | undefined } | null)?.error || "Falha ao analisar alimento");
       }
       setResult(data as AnalysisResult);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Não foi possível analisar a foto.");
+    } catch (analysisError) {
+      setError(analysisError instanceof Error ? analysisError.message : "Não foi possível analisar a foto.");
     } finally {
       setLoading(false);
     }
@@ -227,9 +281,9 @@ export default function FoodAnalysis() {
 
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const context = canvas.getContext("2d");
+    if (!context) return;
+    context.drawImage(video, 0, 0, canvas.width, canvas.height);
 
     const image = canvas.toDataURL("image/jpeg", 0.85);
     setPreview(image);
@@ -322,7 +376,10 @@ export default function FoodAnalysis() {
           )}
 
           {mediaPipeLoading && (
-            <div className="bg-gray-50 border border-gray-200 rounded-xl p-3 text-gray-600 text-sm">Inicializando MediaPipe...</div>
+            <div className="bg-gray-50 border border-gray-200 rounded-xl p-3 text-gray-600 text-sm flex items-center gap-2">
+              <LoadingBall size="sm" />
+              Inicializando MediaPipe...
+            </div>
           )}
 
           {mediaPipeError && (
@@ -330,14 +387,22 @@ export default function FoodAnalysis() {
           )}
 
           {streamActive && <video ref={videoRef} className="w-full rounded-2xl" autoPlay playsInline muted />}
-          {preview && <img src={preview} alt="Prévia do alimento" className="w-full rounded-2xl" />}
+          {preview && (
+            <img
+              src={preview}
+              alt="Prévia do alimento"
+              loading="lazy"
+              decoding="async"
+              className="w-full rounded-2xl"
+            />
+          )}
           <canvas ref={canvasRef} className="hidden" />
         </Card>
 
         {loading && (
           <Card tone="soft" className="p-6">
             <div className="flex items-center justify-center gap-2 text-emerald-700">
-              <Loader2 className="w-5 h-5 animate-spin" />
+              <LoadingBall size="md" />
               Processando imagem e calculando nutrientes...
             </div>
           </Card>
@@ -363,11 +428,11 @@ export default function FoodAnalysis() {
             <Card className="p-5 space-y-4">
               <h2 className="fl-title-card">Resumo nutricional</h2>
               <div className="grid grid-cols-2 gap-3 text-sm">
-                <Metric label="🔥 Calorias" value={`${result.totals.calories} kcal`} />
-                <Metric label="⚡ Energia" value={`${result.totals.energy_kj} kJ`} />
-                <Metric label="💪 Proteínas" value={`${result.totals.protein} g`} />
-                <Metric label="🌾 Carboidratos" value={`${result.totals.carbs} g`} />
-                <Metric label="🥑 Gorduras" value={`${result.totals.fats} g`} />
+                <Metric label="Calorias" value={`${result.totals.calories} kcal`} />
+                <Metric label="Energia" value={`${result.totals.energy_kj} kJ`} />
+                <Metric label="Proteínas" value={`${result.totals.protein} g`} />
+                <Metric label="Carboidratos" value={`${result.totals.carbs} g`} />
+                <Metric label="Gorduras" value={`${result.totals.fats} g`} />
               </div>
 
               <MacroBar label={`Proteínas ${macroBars.protein}%`} value={macroBars.protein} color="bg-blue-500" />
@@ -377,8 +442,8 @@ export default function FoodAnalysis() {
 
             <Card className="p-5 space-y-3">
               <h3 className="font-semibold text-gray-900">Itens identificados</h3>
-              {result.items.map((item, idx) => (
-                <div key={`${item.food_name}-${idx}`} className="rounded-xl border border-gray-200 p-3 text-sm">
+              {result.items.map((item, index) => (
+                <div key={`${item.food_name}-${index}`} className="rounded-xl border border-gray-200 p-3 text-sm">
                   <p className="font-semibold text-gray-900">{item.food_name}</p>
                   <p className="text-gray-600">{item.portion_description}</p>
                   <p className="text-gray-700 mt-1">{item.calories ?? "-"} kcal • P {item.protein ?? "-"}g • C {item.carbs ?? "-"}g • G {item.fats ?? "-"}g</p>
@@ -393,7 +458,7 @@ export default function FoodAnalysis() {
                 Refazer foto
               </Button>
               <Button onClick={saveMeal} disabled={saving} className="w-full">
-                <Save className="w-4 h-4" />
+                {saving ? <LoadingBall size="sm" /> : <Save className="w-4 h-4" />}
                 {saving ? "Salvando..." : "Salvar refeição"}
               </Button>
             </div>

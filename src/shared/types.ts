@@ -14,6 +14,9 @@ export const UserProfileSchema = z.object({
   injuries: z.string().nullable(),
   equipment: z.string().nullable(),
   main_goal: z.string().nullable(),
+  age: z.number().nullable().optional(),
+  gender: z.string().nullable().optional(),
+  goals_json: z.string().nullable().optional(),
   custom_color: z.string().nullable(),
   custom_font: z.string().nullable(),
   custom_border: z.string().nullable(),
@@ -97,6 +100,29 @@ export const UserSkillSchema = z.object({
 
 export type UserSkill = z.infer<typeof UserSkillSchema>;
 
+export const MissionMetricTypeSchema = z.enum([
+  "repetitions",
+  "duration_seconds",
+  "sets_reps",
+  "steps",
+  "distance_meters",
+  "duration_minutes",
+  "circuit_tasks",
+]);
+
+export type MissionMetricType = z.infer<typeof MissionMetricTypeSchema>;
+
+export const CircuitTaskSchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  mission_type: z.string(),
+  required_count: z.number(),
+  current_count: z.number(),
+  completed: z.boolean(),
+});
+
+export type CircuitTask = z.infer<typeof CircuitTaskSchema>;
+
 // Mission Schema
 export const MissionSchema = z.object({
   id: z.number(),
@@ -107,6 +133,35 @@ export const MissionSchema = z.object({
   skill_id: z.number().nullable(),
   target_reps: z.number().nullable(),
   target_time: z.number().nullable(),
+  metric_type: MissionMetricTypeSchema.optional(),
+  metric_value: z.number().optional(),
+  progress_value: z.number().optional(),
+  metric_unit: z.string().optional(),
+  sets: z.number().nullable().optional(),
+  rest_seconds: z.number().nullable().optional(),
+  instructions: z.array(z.string()).optional(),
+  exercise_instructions_en: z.array(z.string()).optional(),
+  exercise_instructions_pt: z.array(z.string()).optional(),
+  image_url: z.string().nullable().optional(),
+  exercise_db_gif_url: z.string().nullable().optional(),
+  exercise_db_image_url: z.string().nullable().optional(),
+  muscle_groups: z.array(z.string()).optional(),
+  exercise_secondary_muscles: z.array(z.string()).optional(),
+  exercise_name: z.string().nullable().optional(),
+  exercise_equipment: z.string().nullable().optional(),
+  exercise_body_part: z.string().nullable().optional(),
+  exercise_target: z.string().nullable().optional(),
+  exercise_type: z.string().optional(),
+  body_area: z.enum(["upper", "lower", "core", "full_body"]).optional(),
+  attributes_benefited: z.array(z.string()).optional(),
+  duration_estimate_minutes: z.number().optional(),
+  exercise_category: z.string().optional(),
+  mission_origin: z.enum(["regular", "ai"]).optional(),
+  circuit_tasks: z.array(CircuitTaskSchema).optional(),
+  safety_tips: z.array(z.string()).optional(),
+  difficulty_level: z.string().optional(),
+  video_url: z.string().nullable().optional(),
+  thumbnail_url: z.string().nullable().optional(),
   xp_reward: z.number(),
   points_reward: z.number(),
   deadline: z.string().nullable(),
@@ -218,6 +273,8 @@ export const OnboardingRequestSchema = z.object({
   full_name: z.string().min(1),
   weight: z.number().positive(),
   height: z.number().positive(),
+  age: z.number().int().min(13).max(80),
+  gender: z.enum(["homem", "mulher", "outro"]),
   initial_conditioning: z.enum(['sedentario', 'iniciante', 'intermediario', 'avancado']),
   initial_pushups: z.number().min(0),
   initial_situps: z.number().min(0),
@@ -225,6 +282,14 @@ export const OnboardingRequestSchema = z.object({
   injuries: z.string().optional(),
   equipment: z.string().optional(),
   main_goal: z.enum(['perder_peso', 'ganhar_massa', 'resistencia', 'calistenia', 'saude_geral']),
+  goals: z.array(z.enum(['perder_peso', 'ganhar_massa', 'resistencia', 'calistenia', 'saude_geral'])).min(1),
+  training_frequency: z.number().int().min(1).max(7),
+  plan_id: z.enum(["free", "pro", "annual"]),
+  payment_method: z.enum(["card", "pix"]),
+  card_number: z.string().min(8).max(32).optional(),
+  card_holder_name: z.string().min(1).max(120).optional(),
+  card_expiry: z.string().min(3).max(8).optional(),
+  card_cvv: z.string().min(1).max(32).optional(),
 });
 
 export type OnboardingRequest = z.infer<typeof OnboardingRequestSchema>;
@@ -234,6 +299,7 @@ export const CompleteMissionRequestSchema = z.object({
   mission_id: z.number(),
   reps_completed: z.number().min(0).optional(),
   time_completed: z.number().min(0).optional(),
+  metric_completed: z.number().min(0).optional(),
   sensor_verified: z.boolean(),
 });
 
@@ -324,9 +390,19 @@ export type LoginRequest = z.infer<typeof LoginRequestSchema>;
 export const UserPlanRequestSchema = z.object({
   plan_id: z.enum(["free", "pro", "annual"]),
   payment_method: z.enum(["none", "card", "pix"]),
-  status: z.enum(["active", "pending"]),
+  status: z.enum(["pending", "active", "cancelled", "failed", "expired"]),
 });
 export type UserPlanRequest = z.infer<typeof UserPlanRequestSchema>;
+
+export const CheckoutStartRequestSchema = z.object({
+  plan_id: z.enum(["free", "pro", "annual"]),
+  payment_method: z.enum(["card", "pix"]),
+  card_number: z.string().min(8).max(32).optional(),
+  card_holder_name: z.string().min(1).max(120).optional(),
+  card_expiry: z.string().min(3).max(8).optional(),
+  card_cvv: z.string().min(1).max(32).optional(),
+});
+export type CheckoutStartRequest = z.infer<typeof CheckoutStartRequestSchema>;
 
 // PATCH /api/users/me (optional profile fields)
 export const UpdateMeRequestSchema = z.object({

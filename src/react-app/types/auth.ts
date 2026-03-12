@@ -4,6 +4,9 @@ export interface User {
   name: string;
   avatar_url?: string | undefined;
   onboarding_completed: number;
+  plan_id: "free" | "pro" | "annual" | "vip";
+  plan_status: "pending" | "active" | "cancelled" | "failed" | "expired";
+  payment_method: "none" | "card" | "pix";
 }
 
 export interface AuthContextType {

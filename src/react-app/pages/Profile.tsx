@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEventHandler } from "react";
+import { useCallback, useEffect, useRef, useState, type ChangeEventHandler } from "react";
 import { useNavigate } from "react-router";
-import { useAuth } from "@/react-app/App";
+import { useAuth } from "@/react-app/contexts/auth";
 import BottomNav from "@/react-app/components/BottomNav";
-import { LogOut, Trophy, Award, Dumbbell, Target } from "lucide-react";
+import ProfileFriendsPanel from "@/react-app/components/ProfileFriendsPanel";
+import LoadingBall from "@/react-app/components/LoadingBall";
+import { LogOut, Trophy, Award, Dumbbell, Target, Settings } from "lucide-react";
 import type {
   UserProfile,
   UserAttributes,
@@ -11,10 +14,8 @@ import type {
   AchievementWithUnlock,
   TitleWithUnlock,
 } from "@/shared/types";
-import { api } from "@/react-app/utils/api";
+import { ApiRequestError, api, clearJsonCache, fetchAndCacheJson, readCachedJson } from "@/react-app/utils/api";
 import { applyProfileTheme } from "@/react-app/utils/theme";
-
-
 
 const FONT_OPTIONS = [
   { label: "Rajdhani", value: "rajdhani", family: "Rajdhani, sans-serif" },
@@ -35,21 +36,31 @@ const DEFAULT_SECONDARY_COLOR = "#14b8a6";
 export default function Profile() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [attributes, setAttributes] = useState<UserAttributes | null>(null);
   const [progression, setProgression] = useState<UserProgression | null>(null);
   const [skills, setSkills] = useState<SkillWithProgress[]>([]);
   const [achievements, setAchievements] = useState<AchievementWithUnlock[]>([]);
   const [titles, setTitles] = useState<TitleWithUnlock[]>([]);
-  const [activeTab, setActiveTab] = useState<'attributes' | 'skills' | 'achievements' | 'titles'>('attributes');
+  const [profileSection, setProfileSection] = useState<"profile" | "friends">("profile");
+  const [activeTab, setActiveTab] = useState<"attributes" | "skills" | "achievements" | "titles">("attributes");
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isMobile, setIsMobile] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
   const [customizationSaving, setCustomizationSaving] = useState(false);
   const [bgPreview, setBgPreview] = useState<string | null>(null);
   const [primaryColor, setPrimaryColor] = useState(DEFAULT_PRIMARY_COLOR);
   const [secondaryColor, setSecondaryColor] = useState(DEFAULT_SECONDARY_COLOR);
   const [customFont, setCustomFont] = useState<string>("rajdhani");
+  const [feedbackType, setFeedbackType] = useState<"Sugestao" | "Bug" | "Elogio" | "Outro">("Sugestao");
+  const [feedbackMessage, setFeedbackMessage] = useState("");
+  const [feedbackSending, setFeedbackSending] = useState(false);
+  const [feedbackStatus, setFeedbackStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
+
   const primaryColorInputRef = useRef<HTMLInputElement>(null);
   const secondaryColorInputRef = useRef<HTMLInputElement>(null);
 
@@ -65,7 +76,29 @@ export default function Profile() {
       window.removeEventListener("resize", updateViewport);
     };
   }, []);
+    const updateViewport = () => {
+      setIsMobile(window.innerWidth <= 768);
+    };
 
+    updateViewport();
+    window.addEventListener("resize", updateViewport);
+    return () => {
+      window.removeEventListener("resize", updateViewport);
+    };
+  }, []);
+
+  const loadData = useCallback(async () => {
+    setError(null);
+
+    const cacheProfile = readCachedJson<UserProfile>("/api/profile");
+    const cacheAttributes = readCachedJson<UserAttributes>("/api/attributes");
+    const cacheProgression = readCachedJson<UserProgression>("/api/progression");
+    const cacheSkills = readCachedJson<SkillWithProgress[]>("/api/skills");
+    const cacheAchievements = readCachedJson<AchievementWithUnlock[]>("/api/achievements");
+    const cacheTitles = readCachedJson<TitleWithUnlock[]>("/api/titles");
+
+    if (cacheProfile) {
+      const profileData = cacheProfile.data;
   const loadData = useCallback(async () => {
     try {
       setError(null);
@@ -93,6 +126,54 @@ export default function Profile() {
       setPrimaryColor(profileData?.custom_primary_color ?? DEFAULT_PRIMARY_COLOR);
       setSecondaryColor(profileData?.custom_secondary_color ?? DEFAULT_SECONDARY_COLOR);
       setCustomFont(profileData?.custom_font ?? "rajdhani");
+      applyProfileTheme(profileData);
+    }
+    if (cacheAttributes) setAttributes(cacheAttributes.data);
+    if (cacheProgression) setProgression(cacheProgression.data);
+    if (cacheSkills) setSkills(Array.isArray(cacheSkills.data) ? cacheSkills.data : []);
+    if (cacheAchievements) setAchievements(Array.isArray(cacheAchievements.data) ? cacheAchievements.data : []);
+    if (cacheTitles) setTitles(Array.isArray(cacheTitles.data) ? cacheTitles.data : []);
+
+    const hasAnyCache = Boolean(cacheProfile || cacheAttributes || cacheProgression || cacheSkills || cacheAchievements || cacheTitles);
+    if (hasAnyCache) {
+      setLoading(false);
+    }
+
+    const runSection = async <T,>(
+      path: string,
+      cacheState: { stale: boolean } | null,
+      onSuccess: (value: T) => void,
+    ) => {
+      const shouldFetch = !cacheState || cacheState.stale;
+      if (!shouldFetch) return;
+      const payload = await fetchAndCacheJson<T>(path);
+      onSuccess(payload);
+    };
+
+    try {
+      await Promise.all([
+        runSection<UserProfile>("/api/profile", cacheProfile, (profileData) => {
+          setProfile(profileData);
+          setBgPreview(profileData?.custom_background_type === "image" ? profileData?.custom_background_value ?? null : null);
+          setPrimaryColor(profileData?.custom_primary_color ?? DEFAULT_PRIMARY_COLOR);
+          setSecondaryColor(profileData?.custom_secondary_color ?? DEFAULT_SECONDARY_COLOR);
+          setCustomFont(profileData?.custom_font ?? "rajdhani");
+          applyProfileTheme(profileData);
+        }),
+        runSection<UserAttributes>("/api/attributes", cacheAttributes, (payload) => setAttributes(payload)),
+        runSection<UserProgression>("/api/progression", cacheProgression, (payload) => setProgression(payload)),
+        runSection<SkillWithProgress[]>("/api/skills", cacheSkills, (payload) => setSkills(Array.isArray(payload) ? payload : [])),
+        runSection<AchievementWithUnlock[]>("/api/achievements", cacheAchievements, (payload) => setAchievements(Array.isArray(payload) ? payload : [])),
+        runSection<TitleWithUnlock[]>("/api/titles", cacheTitles, (payload) => setTitles(Array.isArray(payload) ? payload : [])),
+      ]);
+    } catch (loadError) {
+      if (loadError instanceof ApiRequestError && (loadError.status === 401 || loadError.status === 403)) {
+        navigate("/app");
+        return;
+      }
+      if (!hasAnyCache) {
+        setError("Não foi possível carregar o perfil agora.");
+      }
       setAttributes(await attrsRes.json());
       setProgression(await progRes.json());
       setSkills(await skillsRes.json());
@@ -100,7 +181,7 @@ export default function Profile() {
       setTitles(await titlesRes.json());
     } catch (loadError) {
       console.error("Error loading profile:", loadError);
-      setError("N�o foi poss�vel carregar o perfil agora.");
+      setError("N�o foi poss�vel carregar o perfil agora.");
     } finally {
       setLoading(false);
     }
@@ -111,77 +192,110 @@ export default function Profile() {
       navigate("/app");
       return;
     }
+
+    void loadData();
+  }, [user, navigate, loadData]);
+  }, [navigate]);
+
+  useEffect(() => {
+    if (!user) {
+      navigate("/app");
+      return;
+    }
     void loadData();
   }, [user, navigate, loadData]);
 
-  const handleLogout = () => {
-    logout();
-    navigate("/app", { replace: true });
-    api("/api/logout", { credentials: "include" }).catch(() => {});
+  const handleLogout = async () => {
+    try {
+      await api("/api/logout", { credentials: "include" });
+    } catch {
+      // ignore: local cleanup still proceeds
+    } finally {
+      logout();
+      clearJsonCache();
+      navigate("/app", { replace: true });
+    }
   };
+
   const handleActivateTitle = async (titleId: number) => {
     try {
       await api(`/api/titles/${titleId}/activate`, { method: "POST" });
+      clearJsonCache("/api/titles");
       await loadData();
-    } catch (error) {
-      console.error("Error activating title:", error);
+    } catch {
+      setError("Não foi possível ativar o título agora.");
     }
+  };
+
+  const applyThemePreview = (changes: {
+    custom_primary_color?: string | null | undefined;
+    custom_secondary_color?: string | null | undefined;
+    custom_font?: string | null | undefined;
+    custom_background_type?: string | null | undefined;
+    custom_background_value?: string | null | undefined;
+  }) => {
+    applyProfileTheme({
+      custom_primary_color: changes.custom_primary_color ?? profile?.custom_primary_color ?? primaryColor,
+      custom_secondary_color: changes.custom_secondary_color ?? profile?.custom_secondary_color ?? secondaryColor,
+      custom_font: changes.custom_font ?? profile?.custom_font ?? customFont,
+      custom_background_type: changes.custom_background_type ?? profile?.custom_background_type ?? "color",
+      custom_background_value: changes.custom_background_value ?? profile?.custom_background_value ?? "#f8fafc",
+    });
   };
 
   const saveCustomization = async (payload: Record<string, unknown>) => {
     try {
       setCustomizationSaving(true);
-      const res = await api('/api/profile/customization', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      const response = await api("/api/profile/customization", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      if (res.ok) {
-        applyProfileTheme({
-          custom_primary_color: typeof payload.custom_primary_color === "string" ? payload.custom_primary_color : profile?.custom_primary_color ?? null,
-          custom_secondary_color: typeof payload.custom_secondary_color === "string" ? payload.custom_secondary_color : profile?.custom_secondary_color ?? null,
-          custom_font: typeof payload.custom_font === "string" ? payload.custom_font : profile?.custom_font ?? null,
-          custom_background_type: typeof payload.custom_background_type === "string" ? payload.custom_background_type : profile?.custom_background_type ?? null,
-          custom_background_value: typeof payload.custom_background_value === "string" ? payload.custom_background_value : profile?.custom_background_value ?? null,
-        });
-        await loadData();
+
+      if (!response.ok) {
+        throw new Error("Falha ao salvar personalização.");
       }
-    } catch (error) {
-      console.error('Error saving customization', error);
+
+      const responseData = (await response.json()) as { profile?: UserProfile | undefined };
+      if (responseData.profile) {
+        setProfile(responseData.profile);
+        applyProfileTheme(responseData.profile);
+      }
+    } catch {
+      setError("Não foi possível salvar personalização agora.");
     } finally {
       setCustomizationSaving(false);
     }
   };
 
-  const setSkillFocus = async (focus: 'calistenia' | 'yoga') => {
+  const setSkillFocus = async (focus: "calistenia" | "yoga") => {
     try {
-      await api('/api/profile/skill-focus', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      await api("/api/profile/skill-focus", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ active_skill_focus: focus }),
       });
-      await loadData();
-    } catch (error) {
-      console.error('Error changing focus', error);
+      setProfile((currentProfile) => currentProfile ? { ...currentProfile, active_skill_focus: focus } : currentProfile);
+    } catch {
+      setError("Não foi possível alterar o foco agora.");
     }
   };
 
   const applyPrimaryColor = async (nextColor: string) => {
     setPrimaryColor(nextColor);
-    const root = document.documentElement;
-    root.style.setProperty("--app-primary-color", nextColor);
+    applyThemePreview({ custom_primary_color: nextColor });
     await saveCustomization({ custom_primary_color: nextColor });
   };
 
   const applySecondaryColor = async (nextColor: string) => {
     setSecondaryColor(nextColor);
-    const root = document.documentElement;
-    root.style.setProperty("--app-secondary-color", nextColor);
+    applyThemePreview({ custom_secondary_color: nextColor });
     await saveCustomization({ custom_secondary_color: nextColor });
   };
 
   const applyFont = async (font: string) => {
     setCustomFont(font);
+    applyThemePreview({ custom_font: font });
     await saveCustomization({ custom_font: font });
   };
 
@@ -194,18 +308,70 @@ export default function Profile() {
       const value = String(reader.result || "");
       if (!value.includes(",")) return;
       setBgPreview(value);
-      const root = document.documentElement;
-      root.style.setProperty('--app-bg-image', `url(${value})`);
-      root.style.setProperty('--app-bg-color', 'transparent');
-      await saveCustomization({ custom_background_type: 'image', custom_background_value: value });
+      applyThemePreview({ custom_background_type: "image", custom_background_value: value });
+      await saveCustomization({ custom_background_type: "image", custom_background_value: value });
     };
     reader.readAsDataURL(file);
   };
 
-  if (loading) {
+  const applySolidBackground = async () => {
+    applyThemePreview({ custom_background_type: "color", custom_background_value: "#0f172a" });
+    await saveCustomization({ custom_background_type: "color", custom_background_value: "#0f172a" });
+  };
+
+  const sendFeedback = async () => {
+    if (feedbackMessage.trim().length < 5) {
+      setFeedbackStatus({ type: "error", message: "Escreva pelo menos 5 caracteres." });
+      return;
+    }
+
+    try {
+      setFeedbackSending(true);
+      setFeedbackStatus(null);
+      const response = await api("/api/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: feedbackType,
+          message: feedbackMessage.trim(),
+        }),
+      });
+
+      if (response.status === 401 || response.status === 403) {
+        navigate("/app");
+        return;
+      }
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as { error?: string | undefined } | null;
+        throw new Error(payload?.error ?? "Falha ao enviar feedback.");
+      }
+
+      setFeedbackMessage("");
+      setFeedbackType("Sugestao");
+      setFeedbackStatus({ type: "success", message: "Feedback enviado! Obrigado." });
+    } catch (submitError) {
+      setFeedbackStatus({
+        type: "error",
+        message: submitError instanceof Error ? submitError.message : "Nao foi possivel enviar feedback agora.",
+      });
+    } finally {
+      setFeedbackSending(false);
+    }
+  };
+
+  if (loading && !profile && !attributes && !progression) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 flex items-center justify-center">
-        <div className="text-emerald-600">Carregando...</div>
+      <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 pb-24">
+        <div className="px-6 py-10 space-y-4">
+          <div className="fl-card p-6 flex items-center justify-center">
+            <LoadingBall size="md" />
+          </div>
+          <div className="fl-card p-6 flex items-center justify-center">
+            <LoadingBall size="sm" />
+          </div>
+        </div>
+        <BottomNav active="profile" />
       </div>
     );
   }
@@ -224,13 +390,26 @@ export default function Profile() {
     );
   }
 
-  const activeTitle = titles.find(t => t.is_active === 1);
+  if (error) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 pb-24">
+        <div className="px-6 py-12 text-center">
+          <p className="text-red-600 mb-4">{error}</p>
+          <button onClick={() => { setLoading(true); void loadData(); }} className="fl-btn-primary rounded-xl px-4 py-2">
+            Tentar novamente
+          </button>
+        </div>
+        <BottomNav active="profile" />
+      </div>
+    );
+  }
+
+  const activeTitle = titles.find((title) => title.is_active === 1);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 pb-24">
-      {/* Header */}
       <div className="text-white px-6 pt-8 pb-8 rounded-b-3xl shadow-xl" style={{ background: "linear-gradient(90deg, var(--app-primary-color), var(--app-secondary-color))" }}>
-        <div className="flex items-start justify-between mb-4">
+        <div className="flex items-start justify-between mb-4 gap-3">
           <div>
             <h1 className="text-3xl font-bold fl-profile-title">{profile?.full_name}</h1>
             <p className="text-emerald-100">@{profile?.username}</p>
@@ -240,12 +419,24 @@ export default function Profile() {
               </div>
             )}
           </div>
-          <button
-            onClick={handleLogout}
-            className="text-white/80 hover:text-white transition-colors"
-          >
-            <LogOut className="w-6 h-6" />
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setSettingsOpen(true)}
+              className="text-white/80 hover:text-white transition-colors"
+              aria-label="Abrir configurações"
+            >
+              <Settings className="w-6 h-6" />
+            </button>
+            <button
+                onClick={() => {
+                  void handleLogout();
+                }}
+              className="text-white/80 hover:text-white transition-colors"
+              aria-label="Sair"
+            >
+              <LogOut className="w-6 h-6" />
+            </button>
+          </div>
         </div>
 
         <div className="grid grid-cols-3 gap-4 mt-6">
@@ -255,148 +446,233 @@ export default function Profile() {
         </div>
       </div>
 
-      {/* Tabs */}
       <div className="px-6 mt-6">
         <div className="bg-white/80 backdrop-blur-sm rounded-2xl p-1 shadow-lg flex gap-1">
-          <TabButton
-            icon={<Target className="w-4 h-4" />}
-            label="Atributos"
-            active={activeTab === 'attributes'}
-            onClick={() => setActiveTab('attributes')}
-          />
-          <TabButton
-            icon={<Dumbbell className="w-4 h-4" />}
-            label="Habilidades"
-            active={activeTab === 'skills'}
-            onClick={() => setActiveTab('skills')}
-          />
-          <TabButton
-            icon={<Trophy className="w-4 h-4" />}
-            label="Conquistas"
-            active={activeTab === 'achievements'}
-            onClick={() => setActiveTab('achievements')}
-          />
-          <TabButton
-            icon={<Award className="w-4 h-4" />}
-            label="Títulos"
-            active={activeTab === 'titles'}
-            onClick={() => setActiveTab('titles')}
-          />
+          <button
+            onClick={() => setProfileSection("profile")}
+            className={`flex-1 py-3 rounded-xl font-medium transition-all text-sm ${
+              profileSection === "profile"
+                ? "bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-md"
+                : "text-gray-600 hover:bg-gray-50"
+            }`}
+          >
+            Perfil
+          </button>
+          <button
+            onClick={() => setProfileSection("friends")}
+            className={`flex-1 py-3 rounded-xl font-medium transition-all text-sm ${
+              profileSection === "friends"
+                ? "bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-md"
+                : "text-gray-600 hover:bg-gray-50"
+            }`}
+          >
+            Amigos
+          </button>
         </div>
       </div>
 
-      {/* Content */}
-      <div className="px-6 mt-6 pb-6">
-        {activeTab === 'attributes' && attributes && (
-          <div className="space-y-4">
-            <AttributeBar label="FOR (Força)" value={attributes.strength} color="from-red-500 to-orange-500" />
-            <AttributeBar label="CON (Constituição)" value={attributes.constitution} color="from-blue-500 to-cyan-500" />
-            <AttributeBar label="VIT (Vitalidade)" value={attributes.vitality} color="from-green-500 to-emerald-500" />
-            <AttributeBar label="DES (Destreza)" value={attributes.dexterity} color="from-purple-500 to-pink-500" />
-            <AttributeBar label="FOCO" value={attributes.focus} color="from-yellow-500 to-amber-500" />
+      {profileSection === "profile" ? (
+        <>
+          <div className="px-6 mt-4">
+            <div className="bg-white/80 backdrop-blur-sm rounded-2xl p-1 shadow-lg flex gap-1">
+              <TabButton icon={<Target className="w-4 h-4" />} label="Atributos" active={activeTab === "attributes"} onClick={() => setActiveTab("attributes")} />
+              <TabButton icon={<Dumbbell className="w-4 h-4" />} label="Habilidades" active={activeTab === "skills"} onClick={() => setActiveTab("skills")} />
+              <TabButton icon={<Trophy className="w-4 h-4" />} label="Conquistas" active={activeTab === "achievements"} onClick={() => setActiveTab("achievements")} />
+              <TabButton icon={<Award className="w-4 h-4" />} label="Títulos" active={activeTab === "titles"} onClick={() => setActiveTab("titles")} />
+            </div>
           </div>
-        )}
 
-        {activeTab === 'skills' && (
-          <div className="space-y-3">
-            {skills.length === 0 ? (
-              <p className="text-center text-gray-500 py-8">Nenhuma habilidade desbloqueada ainda</p>
-            ) : (
-              skills.map((skill) => (
-                <SkillCard key={skill.id} skill={skill} />
-              ))
+          <div className="px-6 mt-6 pb-6">
+            {activeTab === "attributes" && attributes && (
+              <div className="space-y-4">
+                <AttributeBar label="FOR (Força)" value={attributes.strength} color="from-red-500 to-orange-500" />
+                <AttributeBar label="CON (Constituição)" value={attributes.constitution} color="from-blue-500 to-cyan-500" />
+                <AttributeBar label="VIT (Vitalidade)" value={attributes.vitality} color="from-green-500 to-emerald-500" />
+                <AttributeBar label="DES (Destreza)" value={attributes.dexterity} color="from-purple-500 to-pink-500" />
+                <AttributeBar label="FOCO" value={attributes.focus} color="from-yellow-500 to-amber-500" />
+              </div>
             )}
-          </div>
-        )}
 
-        {activeTab === 'achievements' && (
-          <div className="grid grid-cols-2 gap-3">
-            {achievements.map((achievement) => (
-              <AchievementCard key={achievement.id} achievement={achievement} />
-            ))}
-          </div>
-        )}
+            {activeTab === "skills" && (
+              <div className="space-y-3">
+                {skills.length === 0 ? (
+                  <p className="text-center text-gray-500 py-8">Nenhuma habilidade desbloqueada ainda</p>
+                ) : (
+                  skills.map((skill) => (
+                    <SkillCard key={skill.id} skill={skill} />
+                  ))
+                )}
+              </div>
+            )}
 
-        {activeTab === 'titles' && (
-          <div className="space-y-3">
-            {titles.map((title) => (
-              <TitleCard
-                key={title.id}
-                title={title}
-                onActivate={handleActivateTitle}
-              />
-            ))}
-          </div>
-        )}
-      </div>
-
-      {isMobile && (
-        <div className="px-6 pb-6">
-          <div className="bg-white/80 backdrop-blur-sm rounded-2xl p-4 shadow-lg space-y-3">
-            <h3 className="font-bold text-gray-900">Personalização (mobile)</h3>
-            <div className="space-y-3">
+            {activeTab === "achievements" && (
               <div className="grid grid-cols-2 gap-3">
-                <button
-                  onClick={() => primaryColorInputRef.current?.click()}
-                  className="h-12 rounded-lg border-2 border-white/20 shadow-inner"
-                  style={{ backgroundColor: primaryColor }}
-                  type="button"
-                  aria-label="Selecionar cor primária"
-                />
-                <button
-                  onClick={() => secondaryColorInputRef.current?.click()}
-                  className="h-12 rounded-lg border-2 border-white/20 shadow-inner"
-                  style={{ backgroundColor: secondaryColor }}
-                  type="button"
-                  aria-label="Selecionar cor secundária"
-                />
-              </div>
-              <div className="flex justify-between text-xs text-gray-500">
-                <span>Cor primária</span>
-                <span>Cor secundária</span>
-              </div>
-              <input
-                ref={primaryColorInputRef}
-                type="color"
-                value={primaryColor}
-                onChange={(event) => { void applyPrimaryColor(event.target.value); }}
-                className="sr-only"
-              />
-              <input
-                ref={secondaryColorInputRef}
-                type="color"
-                value={secondaryColor}
-                onChange={(event) => { void applySecondaryColor(event.target.value); }}
-                className="sr-only"
-              />
-
-              <label className="block text-sm font-medium text-gray-700">Fonte do título</label>
-              <div className="grid grid-cols-2 gap-2">
-                {FONT_OPTIONS.map((fontOption) => (
-                  <button
-                    key={fontOption.value}
-                    type="button"
-                    onClick={() => { void applyFont(fontOption.value); }}
-                    className={`rounded-xl border px-3 py-2 text-left text-sm transition-colors ${customFont === fontOption.value ? "border-emerald-500 bg-emerald-50" : "border-gray-200 bg-white hover:border-emerald-200"}`}
-                    style={{ fontFamily: fontOption.family }}
-                  >
-                    {fontOption.label}
-                  </button>
+                {achievements.map((achievement) => (
+                  <AchievementCard key={achievement.id} achievement={achievement} />
                 ))}
               </div>
+            )}
 
-              <button onClick={() => saveCustomization({ custom_background_type: 'color', custom_background_value: '#0f172a' })} className="fl-btn-secondary rounded-xl py-2 w-full">Fundo sólido</button>
-              <label className="fl-btn-secondary rounded-xl py-2 text-center cursor-pointer block">
-                Escolher foto
-                <input type="file" accept="image/*" className="hidden" onChange={onPickBackgroundImage} />
-              </label>
+            {activeTab === "titles" && (
+              <div className="space-y-3">
+                {titles.map((title) => (
+                  <TitleCard key={title.id} title={title} onActivate={handleActivateTitle} />
+                ))}
+              </div>
+            )}
+          </div>
+        </>
+      ) : (
+        <div className="px-6 mt-6 pb-6">
+          <ProfileFriendsPanel />
+        </div>
+      )}
+
+      {settingsOpen && (
+        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-end sm:items-center justify-center">
+          <div className="w-full sm:max-w-2xl bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl p-6 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-bold text-gray-900">Configurações</h2>
+              <button onClick={() => setSettingsOpen(false)} className="fl-btn-secondary rounded-lg px-3 py-1">Fechar</button>
             </div>
-            <div className="grid grid-cols-2 gap-2">
-              <button onClick={() => setSkillFocus('calistenia')} className={`rounded-xl py-2 ${profile?.active_skill_focus === 'calistenia' ? 'fl-btn-primary' : 'fl-btn-secondary'}`}>Foco Calistenia</button>
-              <button onClick={() => setSkillFocus('yoga')} className={`rounded-xl py-2 ${profile?.active_skill_focus === 'yoga' ? 'fl-btn-primary' : 'fl-btn-secondary'}`}>Foco Yoga</button>
+
+            <div className="space-y-4">
+              <div className="rounded-2xl border border-gray-200 p-4">
+                <h3 className="font-semibold text-gray-900 mb-3">Informações da conta</h3>
+                <p className="text-sm text-gray-700">Nome: {profile?.full_name ?? "-"}</p>
+                <p className="text-sm text-gray-700">Email: {user?.email ?? "-"}</p>
+                <p className="text-sm text-gray-700">Username: @{profile?.username ?? "-"}</p>
+              </div>
+
+              <div className="rounded-2xl border border-gray-200 p-4">
+                <h3 className="font-semibold text-gray-900 mb-3">Foco atual</h3>
+                <div className="grid grid-cols-2 gap-2">
+                  <button onClick={() => { void setSkillFocus("calistenia"); }} className={`rounded-xl py-2 ${profile?.active_skill_focus === "calistenia" ? "fl-btn-primary" : "fl-btn-secondary"}`}>Foco Calistenia</button>
+                  <button onClick={() => { void setSkillFocus("yoga"); }} className={`rounded-xl py-2 ${profile?.active_skill_focus === "yoga" ? "fl-btn-primary" : "fl-btn-secondary"}`}>Foco Yoga</button>
+                </div>
+              </div>
+
+              {isMobile ? (
+                <div className="rounded-2xl border border-gray-200 p-4 space-y-4">
+                  <h3 className="font-semibold text-gray-900">Personalização (mobile)</h3>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <button
+                      onClick={() => primaryColorInputRef.current?.click()}
+                      className="h-12 rounded-lg border-2 border-white/20 shadow-inner"
+                      style={{ backgroundColor: primaryColor }}
+                      type="button"
+                      aria-label="Selecionar cor primária"
+                    />
+                    <button
+                      onClick={() => secondaryColorInputRef.current?.click()}
+                      className="h-12 rounded-lg border-2 border-white/20 shadow-inner"
+                      style={{ backgroundColor: secondaryColor }}
+                      type="button"
+                      aria-label="Selecionar cor secundária"
+                    />
+                  </div>
+                  <div className="flex justify-between text-xs text-gray-500">
+                    <span>Cor primária</span>
+                    <span>Cor secundária</span>
+                  </div>
+                  <input
+                    ref={primaryColorInputRef}
+                    type="color"
+                    value={primaryColor}
+                    onChange={(event) => { void applyPrimaryColor(event.target.value); }}
+                    className="sr-only"
+                  />
+                  <input
+                    ref={secondaryColorInputRef}
+                    type="color"
+                    value={secondaryColor}
+                    onChange={(event) => { void applySecondaryColor(event.target.value); }}
+                    className="sr-only"
+                  />
+
+                  <label className="block text-sm font-medium text-gray-700">Fonte do título</label>
+                  <select
+                    value={customFont}
+                    onChange={(event) => { void applyFont(event.target.value); }}
+                    className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm"
+                    style={{ fontFamily: FONT_OPTIONS.find((font) => font.value === customFont)?.family ?? "inherit" }}
+                  >
+                    {FONT_OPTIONS.map((font) => (
+                      <option key={font.value} value={font.value} style={{ fontFamily: font.family }}>
+                        {font.label}
+                      </option>
+                    ))}
+                  </select>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <button onClick={() => { void applySolidBackground(); }} className="fl-btn-secondary rounded-xl py-2 w-full">Fundo sólido</button>
+                    <label className="fl-btn-secondary rounded-xl py-2 text-center cursor-pointer block">
+                      Escolher foto
+                      <input type="file" accept="image/*" className="hidden" onChange={onPickBackgroundImage} />
+                    </label>
+                  </div>
+
+                  {bgPreview && (
+                    <img
+                      src={bgPreview}
+                      alt="Prévia do fundo"
+                      loading="lazy"
+                      decoding="async"
+                      className="w-full h-28 object-cover rounded-xl border border-gray-200"
+                    />
+                  )}
+
+                  {customizationSaving && (
+                    <div className="text-xs text-gray-500 flex items-center gap-2">
+                      <LoadingBall size="sm" />
+                      Salvando personalização...
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="rounded-2xl border border-gray-200 p-4 text-sm text-gray-600">
+                  Personalização visual disponível apenas no mobile (largura até 768px).
+                </div>
+              )}
+
+              <div className="rounded-2xl border border-gray-200 p-4 space-y-3">
+                <h3 className="font-semibold text-gray-900">Enviar Feedback</h3>
+                <select
+                  value={feedbackType}
+                  onChange={(event) => setFeedbackType(event.target.value as "Sugestao" | "Bug" | "Elogio" | "Outro")}
+                  className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm"
+                >
+                  <option value="Sugestao">Sugestao</option>
+                  <option value="Bug">Bug</option>
+                  <option value="Elogio">Elogio</option>
+                  <option value="Outro">Outro</option>
+                </select>
+                <textarea
+                  value={feedbackMessage}
+                  onChange={(event) => setFeedbackMessage(event.target.value)}
+                  className="w-full min-h-[110px] rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm resize-y"
+                  placeholder="Escreva seu feedback aqui..."
+                />
+                {feedbackStatus && (
+                  <p
+                    className={`text-sm ${
+                      feedbackStatus.type === "success" ? "text-emerald-700" : "text-red-600"
+                    }`}
+                  >
+                    {feedbackStatus.message}
+                  </p>
+                )}
+                <button
+                  onClick={() => { void sendFeedback(); }}
+                  disabled={feedbackSending}
+                  className="fl-btn-primary rounded-xl px-4 py-2 min-w-[120px] inline-flex items-center justify-center gap-2 disabled:opacity-70"
+                >
+                  {feedbackSending ? <LoadingBall size="sm" /> : null}
+                  {feedbackSending ? "Enviando..." : "Enviar"}
+                </button>
+              </div>
             </div>
-            {bgPreview && <img src={bgPreview} alt="Prévia do fundo" className="w-full h-28 object-cover rounded-xl border border-gray-200" />}
-            {customizationSaving && <p className="text-xs text-gray-500">Salvando...</p>}
           </div>
         </div>
       )}
@@ -476,7 +752,7 @@ function SkillCard({ skill }: { skill: SkillWithProgress }) {
           <h3 className="font-semibold text-gray-900">{skill.name}</h3>
           <p className="text-sm text-gray-600">{skill.description}</p>
         </div>
-        <span className={`px-3 py-1 rounded-full text-xs font-medium ${difficultyColors[skill.difficulty as keyof typeof difficultyColors] || 'bg-gray-100'}`}>
+        <span className={`px-3 py-1 rounded-full text-xs font-medium ${difficultyColors[skill.difficulty as keyof typeof difficultyColors] || "bg-gray-100"}`}>
           {skill.difficulty}
         </span>
       </div>
@@ -489,24 +765,54 @@ function SkillCard({ skill }: { skill: SkillWithProgress }) {
 }
 
 function AchievementCard({ achievement }: { achievement: AchievementWithUnlock }) {
-  const rarityColors = {
-    Comum: "from-gray-400 to-gray-500",
-    Raro: "from-blue-400 to-blue-600",
-    Épico: "from-purple-400 to-purple-600",
-    Lendário: "from-yellow-400 to-orange-500",
+  const unlocked = achievement.unlocked === 1;
+  const isSecret = Number(achievement.secret ?? 0) === 1;
+  const isSecretLocked = isSecret && !unlocked;
+
+  const rarityColorByLabel = {
+    Comum: "#D1D5DB",
+    Incomum: "#22C55E",
+    Raro: "#3B82F6",
+    "Mítico": "#EF4444",
+    Secreto: "#F59E0B",
+  } as const;
+
+  const normalizeRarity = (value: string | undefined) => {
+    if (!value) return undefined;
+    const normalized = value
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase();
+
+    if (normalized.includes("incomum")) return "Incomum" as const;
+    if (normalized.includes("comum")) return "Comum" as const;
+    if (normalized.includes("raro")) return "Raro" as const;
+    if (normalized.includes("mitico")) return "Mítico" as const;
+    if (normalized.includes("secreto")) return "Secreto" as const;
+    return undefined;
   };
 
-  const unlocked = achievement.unlocked === 1;
+  const normalizedRarity = normalizeRarity(achievement.rarity);
+  const rarityColor = unlocked
+    ? (achievement.color || (normalizedRarity ? rarityColorByLabel[normalizedRarity] : undefined) || "#D1D5DB")
+    : null;
+  const displayName = isSecretLocked ? "?" : achievement.name;
+  const displayDescription = isSecretLocked ? "?" : achievement.description;
+  const cardClassName = unlocked
+    ? "bg-white/90 text-gray-700 border-2"
+    : "bg-gray-200 text-gray-500 border-2 border-gray-300 grayscale opacity-70";
+  const icon = isSecretLocked ? "?" : unlocked ? "🏆" : "🔒";
 
   return (
-    <div className={`rounded-2xl p-4 shadow-lg text-center ${
-      unlocked
-        ? `bg-gradient-to-br ${rarityColors[achievement.rarity as keyof typeof rarityColors] || 'from-gray-400 to-gray-500'} text-white`
-        : "bg-gray-200 text-gray-400"
-    }`}>
-      <div className="text-3xl mb-2">{unlocked ? "🏆" : "🔒"}</div>
-      <h3 className="font-bold text-sm mb-1">{achievement.name}</h3>
-      <p className="text-xs opacity-90">{achievement.description}</p>
+    <div
+      className={`rounded-2xl p-4 shadow-lg text-center ${cardClassName}`}
+      style={unlocked && rarityColor ? { borderColor: rarityColor } : undefined}
+    >
+      <div className="text-3xl mb-2" style={unlocked && rarityColor ? { color: rarityColor } : undefined}>{icon}</div>
+      <h3 className="font-bold text-sm mb-1" style={unlocked && rarityColor ? { color: rarityColor } : undefined}>
+        {displayName}
+      </h3>
+      <p className="text-xs opacity-90">{displayDescription}</p>
       {unlocked && achievement.unlocked_at && (
         <p className="text-xs opacity-75 mt-2">
           {new Date(achievement.unlocked_at).toLocaleDateString()}
@@ -529,12 +835,12 @@ function TitleCard({ title, onActivate }: { title: TitleWithUnlock; onActivate: 
 
   return (
     <div className={`bg-white/80 backdrop-blur-sm rounded-2xl p-4 shadow-lg border-2 ${
-      unlocked ? rarityColors[title.rarity as keyof typeof rarityColors] || 'border-gray-400' : 'border-gray-200'
-    } ${active ? 'ring-2 ring-emerald-500' : ''}`}>
+      unlocked ? rarityColors[title.rarity as keyof typeof rarityColors] || "border-gray-400" : "border-gray-200"
+    } ${active ? "ring-2 ring-emerald-500" : ""}`}>
       <div className="flex items-center justify-between">
         <div className="flex-1">
-          <h3 className={`font-bold ${unlocked ? 'text-gray-900' : 'text-gray-400'}`}>
-            {unlocked ? title.name : '🔒 Bloqueado'}
+          <h3 className={`font-bold ${unlocked ? "text-gray-900" : "text-gray-400"}`}>
+            {unlocked ? title.name : "🔒 Bloqueado"}
           </h3>
           <p className="text-xs text-gray-500">{title.rarity}</p>
         </div>

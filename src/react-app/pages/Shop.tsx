@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useState } from "react";
+﻿import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router";
-import { useAuth } from "@/react-app/App";
+import { useAuth } from "@/react-app/contexts/auth";
 import BottomNav from "@/react-app/components/BottomNav";
+import LoadingBall from "@/react-app/components/LoadingBall";
 import { ShoppingBag, Coins, QrCode, Package } from "lucide-react";
 import type { UserProgression } from "@/shared/types";
-import { api } from "@/react-app/utils/api";
+import { ApiRequestError, api, fetchAndCacheJson, readCachedJson } from "@/react-app/utils/api";
 
 type ShopProductView = {
   id: number;
@@ -40,33 +41,46 @@ export default function Shop() {
 
 
   const loadData = useCallback(async () => {
-    try {
-      setError(null);
-      const [productsRes, ordersRes, progressionRes] = await Promise.all([
-        api("/api/shop/products"),
-        api("/api/shop/orders"),
-        api("/api/progression"),
-      ]);
+    setError(null);
 
-      if (productsRes.status === 401 || productsRes.status === 403 || ordersRes.status === 401 || ordersRes.status === 403 || progressionRes.status === 401 || progressionRes.status === 403) {
+    const cacheProducts = readCachedJson<ShopProductView[]>("/api/shop/products");
+    const cacheOrders = readCachedJson<ShopOrderView[]>("/api/shop/orders");
+    const cacheProgression = readCachedJson<UserProgression>("/api/progression");
+
+    if (cacheProducts) setProducts(Array.isArray(cacheProducts.data) ? cacheProducts.data : []);
+    if (cacheOrders) setOrders(Array.isArray(cacheOrders.data) ? cacheOrders.data : []);
+    if (cacheProgression) setProgression(cacheProgression.data);
+
+    const hasAnyCache = Boolean(cacheProducts || cacheOrders || cacheProgression);
+    if (hasAnyCache) {
+      setLoading(false);
+    }
+
+    const runSection = async <T,>(
+      path: string,
+      cacheState: { stale: boolean } | null,
+      onSuccess: (value: T) => void,
+    ) => {
+      if (cacheState && !cacheState.stale) return;
+      const payload = await fetchAndCacheJson<T>(path);
+      onSuccess(payload);
+    };
+
+    try {
+      await Promise.all([
+        runSection<ShopProductView[]>("/api/shop/products", cacheProducts, (payload) => setProducts(Array.isArray(payload) ? payload : [])),
+        runSection<ShopOrderView[]>("/api/shop/orders", cacheOrders, (payload) => setOrders(Array.isArray(payload) ? payload : [])),
+        runSection<UserProgression>("/api/progression", cacheProgression, (payload) => setProgression(payload)),
+      ]);
+    } catch (loadError) {
+      if (loadError instanceof ApiRequestError && (loadError.status === 401 || loadError.status === 403)) {
         navigate("/app");
         return;
       }
-
-      if (!productsRes.ok || !ordersRes.ok || !progressionRes.ok) {
-        throw new Error("Falha ao carregar dados da loja.");
-      }
-
-      const productsData = await productsRes.json();
-      const ordersData = await ordersRes.json();
-      const progressionData = await progressionRes.json();
-
-      setProducts(Array.isArray(productsData) ? productsData : []);
-      setOrders(Array.isArray(ordersData) ? ordersData : []);
-      setProgression(progressionData);
-    } catch (loadError) {
       console.error("Error loading shop data:", loadError);
-      setError("N�o foi poss�vel carregar a loja agora.");
+      if (!hasAnyCache) {
+        setError("Não foi possível carregar a loja agora.");
+      }
     } finally {
       setLoading(false);
     }
@@ -108,8 +122,27 @@ export default function Shop() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 flex items-center justify-center">
-        <div className="text-emerald-600">Carregando...</div>
+      <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 pb-24">
+        <div className="px-6 py-10">
+          <div className="fl-card p-6 flex items-center justify-center">
+            <LoadingBall size="md" />
+          </div>
+        </div>
+        <BottomNav active="shop" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 pb-24">
+        <div className="px-6 py-12 text-center">
+          <p className="text-red-600 mb-4">{error}</p>
+          <button onClick={() => { setLoading(true); void loadData(); }} className="fl-btn-primary rounded-xl px-4 py-2">
+            Tentar novamente
+          </button>
+        </div>
+        <BottomNav active="shop" />
       </div>
     );
   }
@@ -263,6 +296,8 @@ function ProductCard({
           <img
             src={product.image_url}
             alt={product.name}
+            loading="lazy"
+            decoding="async"
             className="w-full h-full object-cover"
           />
         ) : (
@@ -317,7 +352,13 @@ function OrderCard({ order }: { order: ShopOrderView }) {
       <div className="flex gap-4">
         <div className="w-20 h-20 bg-gradient-to-br from-emerald-100 to-teal-100 rounded-2xl flex-shrink-0 overflow-hidden">
           {order.image_url ? (
-            <img src={order.image_url} alt={order.product_name} className="w-full h-full object-cover" />
+            <img
+              src={order.image_url}
+              alt={order.product_name}
+              loading="lazy"
+              decoding="async"
+              className="w-full h-full object-cover"
+            />
           ) : (
             <div className="flex items-center justify-center h-full">
               <Package className="w-8 h-8 text-emerald-500" />
@@ -332,7 +373,7 @@ function OrderCard({ order }: { order: ShopOrderView }) {
             <span>{order.points_spent ?? 0} pontos</span>
           </div>
           <p className="text-xs text-gray-500">
-            {order.created_at ? new Date(order.created_at).toLocaleDateString('pt-BR') : '—'}
+            {order.created_at ? new Date(order.created_at).toLocaleDateString('pt-BR') : '-'}
           </p>
         </div>
 
