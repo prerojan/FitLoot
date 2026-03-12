@@ -10,12 +10,7 @@
   type TouchEvent as ReactTouchEvent,
 } from "react";
 import { useNavigate } from "react-router";
-import { ROUTE_PATHS } from "@/react-app/constants/auth";
-import { useAuth } from "@/react-app/contexts/auth";
-import PaymentStatusPopup from "@/react-app/components/PaymentStatusPopup";
-import PageLoader from "@/react-app/components/PageLoader";
-import LoadingBall from "@/react-app/components/LoadingBall";
-import { resolveAuthenticatedStartRoute } from "@/react-app/services/authService";
+import { useAuth } from "@/react-app/App";
 import { api } from "@/react-app/utils/api";
 import { Input } from "@/react-app/components/ui/input";
 import { AuthThemeHeader, useAuthColorScheme } from "@/react-app/components/AuthThemeHeader";
@@ -403,23 +398,6 @@ type ProfileStep = {
   main_goal: "perder_peso" | "ganhar_massa" | "resistencia" | "calistenia" | "saude_geral";
   gender: "homem" | "mulher" | "outro";
   age: string;
-  training_frequency: string;
-};
-
-type PaymentTab = "card" | "pix";
-
-type CardPaymentForm = {
-  number: string;
-  holderName: string;
-  expiry: string;
-  cvv: string;
-};
-
-type CheckoutResult = {
-  checkout_status?: "pending" | "vip_active" | undefined;
-  message?: string | undefined;
-  amount?: number | undefined;
-  checkout_url?: string | null | undefined;
 };
 type GoalValue = ProfileStep["main_goal"];
 type AvailabilityState = {
@@ -442,14 +420,6 @@ const INITIAL_PROFILE: ProfileStep = {
   main_goal: "saude_geral",
   gender: "homem",
   age: "25",
-  training_frequency: "4",
-};
-
-const INITIAL_CARD_PAYMENT: CardPaymentForm = {
-  number: "",
-  holderName: "",
-  expiry: "",
-  cvv: "",
 };
 const GENDER_OPTIONS = [
   {
@@ -544,34 +514,6 @@ const INJURY_OPTIONS = [
   { id: "punho", label: "Punho" },
   { id: "tornozelo", label: "Tornozelo" },
   { id: "quadril", label: "Quadril" },
-] as const;
-
-const PLAN_OPTIONS = [
-  {
-    id: "free" as const,
-    name: "Básico",
-    price: "R$ 49/mês",
-    amountCents: 4900,
-    color: "from-gray-500 to-gray-600",
-    features: ["Missões diárias", "XP e níveis", "Ranking"],
-  },
-  {
-    id: "pro" as const,
-    name: "Premium",
-    price: "R$ 99/mês",
-    amountCents: 9900,
-    color: "from-emerald-500 to-teal-600",
-    features: ["Tudo do Básico", "Scanner com IA", "Ranking global"],
-    popular: true,
-  },
-  {
-    id: "annual" as const,
-    name: "Elite",
-    price: "R$ 149/mês",
-    amountCents: 14900,
-    color: "from-purple-500 to-pink-600",
-    features: ["Tudo do Premium", "Planos de treino", "Suporte VIP"],
-  },
 ] as const;
 
 function availabilityMessage(state: AvailabilityState): { tone: "green" | "red" | "muted"; text: string } | null {
@@ -705,11 +647,6 @@ export default function Onboarding() {
         setUsernameAvailability({ status: "idle" });
       }
     };
-
-  const setCardField = (field: keyof CardPaymentForm) => (e: ChangeEvent<HTMLInputElement>) => {
-    const nextValue = e.target.value;
-    setCardPayment((current) => ({ ...current, [field]: nextValue }));
-  };
 
   const validateUsername = useCallback(async (rawUsername: string) => {
     const username = rawUsername.trim();
@@ -867,10 +804,6 @@ export default function Onboarding() {
       setStepError("Os valores de capacidade nao podem ser negativos.");
       return;
     }
-    if (!Number.isFinite(trainingFrequency) || trainingFrequency < 1 || trainingFrequency > 7) {
-      setStepError("Frequência semanal deve ser entre 1 e 7 dias.");
-      return;
-    }
 
     advanceToStep(8);
   };
@@ -909,11 +842,6 @@ export default function Onboarding() {
       return;
     }
 
-    if (paymentTab === "card" && !cardPayment.cvv.trim()) {
-      setStepError("Informe o CVV para continuar.");
-      return;
-    }
-
     setStepLoading(true);
 
     try {
@@ -949,6 +877,7 @@ export default function Onboarding() {
       }
 
       localStorage.setItem("fitloot_authenticated_hint", "1");
+      await checkAuth();
 
       const patchRes = await api("/api/users/me", {
         method: "PATCH",
@@ -970,8 +899,6 @@ export default function Onboarding() {
           full_name: profile.full_name.trim(),
           weight: Number(profile.weight),
           height: Number(profile.height),
-          age: Number.isFinite(age) ? age : 25,
-          gender: profile.gender,
           initial_conditioning: profile.initial_conditioning,
           initial_pushups: Number(profile.initial_pushups) || 0,
           initial_situps: Number(profile.initial_situps) || 0,
@@ -982,10 +909,9 @@ export default function Onboarding() {
         }),
       });
 
-      const payload = (await res.json().catch(() => null)) as CheckoutResult | { error?: string | undefined } | null;
-
       if (!res.ok) {
-        setStepError((payload as { error?: string | undefined } | null)?.error ?? "Erro ao salvar perfil.");
+        const data = await res.json().catch(() => ({}));
+        setStepError((data as { error?: string | undefined }).error ?? "Erro ao salvar perfil.");
         setStepLoading(false);
         return;
       }
@@ -1864,15 +1790,6 @@ export default function Onboarding() {
           </div>
         </footer>
       </div>
-
-      <PaymentStatusPopup
-        open={statusPopup !== null}
-        title={statusPopup?.title ?? ""}
-        message={statusPopup?.message ?? ""}
-        tone={statusPopup?.tone ?? "warning"}
-        onClose={() => setStatusPopup(null)}
-      />
     </div>
   );
 }
-
