@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState } from "react";
-import { useAuth } from "@/react-app/App";
+ï»¿import { useCallback, useEffect, useState } from "react";
+import { useAuth } from "@/react-app/contexts/auth";
 import { useNavigate, useSearchParams } from "react-router";
 import BottomNav from "@/react-app/components/BottomNav";
-import { Swords, Trophy, Clock, Zap, Target, Users, Loader2, ChevronRight } from "lucide-react";
-import { api } from "@/react-app/utils/api";
+import LoadingBall from "@/react-app/components/LoadingBall";
+import { Swords, Trophy, Clock, Zap, Target, Users, ChevronRight } from "lucide-react";
+import { ApiRequestError, api, fetchAndCacheJson, readCachedJson } from "@/react-app/utils/api";
 
 interface MiniGame {
   id: number;
@@ -48,49 +49,57 @@ export default function MiniGames() {
 
 
   const loadGames = useCallback(async () => {
-    try {
-      setError(null);
-      const response = await api("/api/mini-games/active");
+    setError(null);
+    const cacheGames = readCachedJson<MiniGame[]>("/api/mini-games/active");
 
-      if (response.status === 401 || response.status === 403) {
+    if (cacheGames) {
+      const list = Array.isArray(cacheGames.data) ? cacheGames.data : [];
+      setActiveGames(list.filter((game) => game.status !== "completed"));
+      setCompletedGames(list.filter((game) => game.status === "completed").slice(0, 10));
+      setLoading(false);
+      if (!cacheGames.stale) {
+        return;
+      }
+    }
+
+    try {
+      const data = await fetchAndCacheJson<MiniGame[]>("/api/mini-games/active");
+      const list = Array.isArray(data) ? data : [];
+      setActiveGames(list.filter((game) => game.status !== "completed"));
+      setCompletedGames(list.filter((game) => game.status === "completed").slice(0, 10));
+    } catch (loadError) {
+      if (loadError instanceof ApiRequestError && (loadError.status === 401 || loadError.status === 403)) {
         navigate("/app");
         return;
       }
-
-      if (!response.ok) {
-        throw new Error("Falha ao carregar mini-games.");
-      }
-
-      const data = (await response.json()) as MiniGame[];
-      const list = Array.isArray(data) ? data : [];
-      setActiveGames(list.filter((g: MiniGame) => g.status !== 'completed'));
-      setCompletedGames(list.filter((g: MiniGame) => g.status === 'completed').slice(0, 10));
-    } catch (loadError) {
       console.error("Error loading games:", loadError);
-      setError("Não foi possível carregar os mini-games agora.");
+      if (!cacheGames) {
+        setError("NÃ£o foi possÃ­vel carregar os mini-games agora.");
+      }
     } finally {
       setLoading(false);
     }
   }, [navigate]);
 
   const loadSkills = useCallback(async () => {
-    try {
-      const response = await api("/api/skills");
+    const cacheSkills = readCachedJson<MiniGameSkill[]>("/api/skills");
+    if (cacheSkills) {
+      setSkills(Array.isArray(cacheSkills.data) ? cacheSkills.data : []);
+      if (!cacheSkills.stale) return;
+    }
 
-      if (response.status === 401 || response.status === 403) {
+    try {
+      const data = await fetchAndCacheJson<MiniGameSkill[]>("/api/skills");
+      setSkills(Array.isArray(data) ? data : []);
+    } catch (loadError) {
+      if (loadError instanceof ApiRequestError && (loadError.status === 401 || loadError.status === 403)) {
         navigate("/app");
         return;
       }
-
-      if (!response.ok) {
-        throw new Error("Falha ao carregar habilidades.");
-      }
-
-      const data = (await response.json()) as MiniGameSkill[];
-      setSkills(Array.isArray(data) ? data : []);
-    } catch (loadError) {
       console.error("Error loading skills:", loadError);
-      setError("Não foi possível carregar habilidades para desafio.");
+      if (!cacheSkills) {
+        setError("NÃ£o foi possÃ­vel carregar habilidades para desafio.");
+      }
     }
   }, [navigate]);
 
@@ -155,7 +164,7 @@ export default function MiniGames() {
         void loadGames();
       } else {
         const responseError = (await response.json().catch(() => null)) as { error?: string | undefined } | null;
-        setError(responseError?.error || "Não foi possível aceitar o desafio.");
+        setError(responseError?.error || "NÃ£o foi possÃ­vel aceitar o desafio.");
       }
     } catch (acceptError) {
       console.error("Error accepting challenge:", acceptError);
@@ -181,12 +190,12 @@ export default function MiniGames() {
       if (response.ok) {
         const result = await response.json();
         if (result.winner) {
-          alert(result.winner === user?.id ? "Você venceu!" : "Desafio finalizado.");
+          alert(result.winner === user?.id ? "VocÃª venceu!" : "Desafio finalizado.");
         }
         void loadGames();
       } else {
         const responseError = (await response.json().catch(() => null)) as { error?: string | undefined } | null;
-        setError(responseError?.error || "Não foi possível concluir o desafio.");
+        setError(responseError?.error || "NÃ£o foi possÃ­vel concluir o desafio.");
       }
     } catch (error) {
       console.error("Error completing challenge:", error);
@@ -195,8 +204,13 @@ export default function MiniGames() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-purple-50 via-pink-50 to-red-50">
-        <Loader2 className="w-10 h-10 text-purple-600 animate-spin" />
+      <div className="min-h-screen bg-gradient-to-br from-purple-50 via-pink-50 to-red-50 pb-24">
+        <div className="px-6 py-10">
+          <div className="fl-card p-6 flex items-center justify-center">
+            <LoadingBall size="md" />
+          </div>
+        </div>
+        <BottomNav active="arena" />
       </div>
     );
   }
@@ -210,7 +224,7 @@ export default function MiniGames() {
             Tentar novamente
           </button>
         </div>
-        <BottomNav active="friends" />
+        <BottomNav active="arena" />
       </div>
     );
   }
@@ -462,9 +476,10 @@ export default function MiniGames() {
         )}
       </div>
 
-      <BottomNav active="friends" />
+      <BottomNav active="arena" />
     </div>
   );
 }
+
 
 

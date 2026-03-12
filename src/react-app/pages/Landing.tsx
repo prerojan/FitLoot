@@ -147,7 +147,7 @@ export default function Landing() {
   return <div className="min-h-screen bg-white">
       {/* Hero Section */}
       <div className="relative overflow-hidden bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50">
-        <div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1534438327276-14e5300c3a48?w=1920')] bg-cover bg-center opacity-5" />
+        <div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1534438327276-14e5300c3a48?auto=format&fit=crop&w=1200&q=45')] bg-cover bg-center opacity-5" />
         
         <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16 md:py-24">
           <div className="text-center">
@@ -246,7 +246,15 @@ export default function Landing() {
             
             <div className="relative">
               <div className="bg-gradient-to-br from-emerald-100 to-teal-100 rounded-3xl p-8 shadow-2xl">
-                <img src="https://images.unsplash.com/photo-1571019614242-c5c5dee9f50b?w=600&h=600&fit=crop" alt="Avatar fitness" className="w-full h-auto rounded-2xl shadow-lg" />
+                <img
+                  src="https://images.unsplash.com/photo-1571019614242-c5c5dee9f50b?auto=format&fit=crop&w=600&h=600&q=60"
+                  alt="Avatar fitness"
+                  width={600}
+                  height={600}
+                  loading="lazy"
+                  decoding="async"
+                  className="w-full h-auto rounded-2xl shadow-lg"
+                />
                 <div className="absolute -top-4 -right-4 bg-white rounded-full p-4 shadow-xl">
                   <div className="text-center">
                     <div className="text-3xl font-bold text-emerald-600">42</div>
@@ -384,7 +392,15 @@ Transforme Hábitos em XP!</h3>
 
           {/* Smartphone mockup */}
           <div className="text-center">
-            <img src="https://images.unsplash.com/photo-1512941937669-90a1b58e7e9c?w=800&h=600&fit=crop" alt="App Interface" className="mx-auto rounded-3xl shadow-2xl max-w-2xl w-full" />
+            <img
+              src="https://images.unsplash.com/photo-1512941937669-90a1b58e7e9c?auto=format&fit=crop&w=800&h=600&q=60"
+              alt="App Interface"
+              width={800}
+              height={600}
+              loading="lazy"
+              decoding="async"
+              className="mx-auto rounded-3xl shadow-2xl max-w-2xl w-full"
+            />
           </div>
         </div>
       </div>

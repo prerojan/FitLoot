@@ -1,14 +1,15 @@
-// ====================================
+﻿// ====================================
 // src/react-app/pages/AIChat.tsx
 // Componente de Chatbot com IA
 // ====================================
 
 import { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router";
-import { useAuth } from '@/react-app/App';
+import { useAuth } from "@/react-app/contexts/auth";
 import BottomNav from "@/react-app/components/BottomNav";
-import { Send, Bot, User, Sparkles, Loader2 } from "lucide-react";
+import { Send, Bot, User, Sparkles } from "lucide-react";
 import { api } from "@/react-app/utils/api";
+import LoadingBall from "@/react-app/components/LoadingBall";
 
 interface Message {
   role: "user" | "assistant";
@@ -228,7 +229,7 @@ export default function AIChat() {
               <Bot className="w-5 h-5 text-emerald-600" />
             </div>
             <div className="bg-white shadow-md p-4 rounded-2xl rounded-tl-none">
-              <Loader2 className="w-5 h-5 animate-spin text-emerald-600" />
+              <LoadingBall size="md" />
             </div>
           </div>
         )}

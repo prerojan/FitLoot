@@ -3,10 +3,13 @@ export const PENDING_404_ACHIEVEMENT_KEY = "fitloot_pending_404_achievement";
 
 export const ROUTE_PATHS = {
   landing: "/",
+  publicLanding: "/landing",
+  login: "/login",
   app: "/app",
   home: "/home",
   onboarding: "/onboarding",
-  checkout: "/checkout",
+  payment: "/payment",
+  paymentPending: "/payment/pending",
   dashboard: "/dashboard",
   profile: "/profile",
   shop: "/shop",
