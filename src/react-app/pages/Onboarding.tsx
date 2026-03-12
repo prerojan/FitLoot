@@ -12,16 +12,13 @@
 import { useNavigate } from "react-router";
 import { useAuth } from "@/react-app/App";
 import { api } from "@/react-app/utils/api";
-import { safeGet } from "@/utils/typeHelpers";
-import { Button } from "@/react-app/components/ui/button";
 import { Input } from "@/react-app/components/ui/input";
 import { AuthThemeHeader, useAuthColorScheme } from "@/react-app/components/AuthThemeHeader";
 import {
   Activity,
   ArrowRight,
+  CalendarDays,
   CheckCircle2,
-  ChevronRight,
-  Download,
   Dumbbell,
   Eye,
   EyeOff,
@@ -32,11 +29,12 @@ import {
   Lock,
   Mail,
   Monitor,
-  Ruler,
   Scale,
   Shield,
   Sparkles,
+  Star,
   Target,
+  Trophy,
   TrendingUp,
   User,
   UserRound,
@@ -51,15 +49,18 @@ type ScrollPickerProps = {
   max: number;
   unit: string;
   label: string;
+  description?: string;
 };
 
-const FIELD_WRAP = "fl-auth-input-shell min-h-[3.5rem] rounded-[1.3rem]";
+const FIELD_WRAP = "fl-onboarding-input-shell";
 const FIELD_INPUT =
-  "h-full w-full !border-0 !bg-transparent !p-0 text-base text-[var(--fl-auth-ink)] !shadow-none !ring-0 " +
-  "placeholder:text-[var(--fl-auth-subtle)] focus-visible:!ring-0 focus-visible:!ring-offset-0";
+  "h-full w-full !border-0 !bg-transparent !p-0 text-base text-[var(--fl-onboarding-ink)] !shadow-none !ring-0 " +
+  "placeholder:text-[var(--fl-onboarding-subtle)] focus-visible:!ring-0 focus-visible:!ring-offset-0";
 const FIELD_TEXTAREA =
-  "w-full resize-none !border-0 !bg-transparent !p-0 text-sm text-[var(--fl-auth-ink)] outline-none !shadow-none !ring-0 " +
-  "placeholder:text-[var(--fl-auth-subtle)] focus-visible:!ring-0 focus-visible:!ring-offset-0";
+  "w-full resize-none !border-0 !bg-transparent !p-0 text-sm text-[var(--fl-onboarding-ink)] outline-none !shadow-none !ring-0 " +
+  "placeholder:text-[var(--fl-onboarding-subtle)] focus-visible:!ring-0 focus-visible:!ring-offset-0";
+
+const TOTAL_STEPS = 13;
 
 function Field({
   label,
@@ -77,13 +78,13 @@ function Field({
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between gap-3">
-        <label className="text-xs font-semibold uppercase tracking-[0.24em] text-[var(--fl-auth-subtle)]">
+        <label className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--fl-onboarding-subtle)]">
           {label}
         </label>
-        {hint ? <span className="text-xs text-[var(--fl-auth-subtle)]">{hint}</span> : null}
+        {hint ? <span className="text-xs text-[var(--fl-onboarding-subtle)]">{hint}</span> : null}
       </div>
       <div className={FIELD_WRAP}>
-        {leftIcon ? <span className="text-[var(--fl-auth-subtle)]">{leftIcon}</span> : null}
+        {leftIcon ? <span className="text-[var(--fl-onboarding-subtle)]">{leftIcon}</span> : null}
         <div className="min-w-0 flex-1">{children}</div>
         {rightSlot ? <div className="flex items-center">{rightSlot}</div> : null}
       </div>
@@ -91,23 +92,134 @@ function Field({
   );
 }
 
-function ScrollPicker({ value, onChange, min, max, unit, label }: ScrollPickerProps) {
-  const trackRef = useRef<HTMLDivElement>(null);
-  const dragRef = useRef<{ mouseActive: boolean; touchId: number | null }>({
+const STEP_META = [
+  { eyebrow: "Gancho emocional", label: "Step 01/13" },
+  { eyebrow: "Objective selection", label: "Step 02/13" },
+  { eyebrow: "Nivel atual", label: "Step 03/13" },
+  { eyebrow: "Genero", label: "Step 04/13" },
+  { eyebrow: "Idade", label: "Step 05/13" },
+  { eyebrow: "Altura", label: "Step 06/13" },
+  { eyebrow: "Peso", label: "Step 07/13" },
+  { eyebrow: "Capacidade inicial", label: "Step 08/13" },
+  { eyebrow: "Limitacoes", label: "Step 09/13" },
+  { eyebrow: "Equipamentos", label: "Step 10/13" },
+  { eyebrow: "Rotina semanal", label: "Step 11/13" },
+  { eyebrow: "Plano pronto", label: "Step 12/13" },
+  { eyebrow: "Criacao da conta", label: "Step 13/13" },
+] as const;
+
+function StepIntro({
+  step,
+  title,
+  description,
+}: {
+  step: number;
+  title: ReactNode;
+  description: string;
+}) {
+  const meta = STEP_META[step] ?? {
+    eyebrow: "Onboarding",
+    label: `Step ${String(step + 1).padStart(2, "0")}`,
+  };
+  const progress = ((step + 1) / TOTAL_STEPS) * 100;
+
+  return (
+    <div className="space-y-4">
+      <div className="space-y-3">
+        <div className="flex items-end justify-between gap-4">
+          <span className="text-[10px] font-bold uppercase tracking-[0.22em] text-[var(--app-primary-color)]">
+            {meta.eyebrow}
+          </span>
+          <span className="text-[10px] font-bold uppercase tracking-[0.22em] text-[var(--fl-onboarding-subtle)]">
+            {meta.label}
+          </span>
+        </div>
+        <div className="fl-onboarding-progress-track">
+          <div className="fl-onboarding-progress-fill" style={{ width: `${progress}%` }} />
+        </div>
+      </div>
+
+      <div className="space-y-3">
+        <h1 className="fl-onboarding-title">{title}</h1>
+        <p className="fl-onboarding-subtitle">{description}</p>
+      </div>
+    </div>
+  );
+}
+
+function PrimaryButton({
+  label,
+  type = "button",
+  disabled,
+  onClick,
+}: {
+  label: string;
+  type?: "button" | "submit";
+  disabled?: boolean;
+  onClick?: () => void;
+}) {
+  return (
+    <button
+      type={type}
+      disabled={disabled}
+      onClick={onClick}
+      className="fl-onboarding-primary-button"
+    >
+      <span>{label}</span>
+      <ArrowRight className="h-5 w-5" />
+    </button>
+  );
+}
+
+function SecondaryButton({
+  label,
+  onClick,
+}: {
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button type="button" onClick={onClick} className="fl-onboarding-secondary-button">
+      {label}
+    </button>
+  );
+}
+
+function StatusMessage({ message }: { message: string | null }) {
+  if (!message) return null;
+
+  return (
+    <div className="fl-onboarding-error">
+      <p>{message}</p>
+    </div>
+  );
+}
+
+function ScrollPicker({ value, onChange, min, max, unit, label, description }: ScrollPickerProps) {
+  const dragRef = useRef<{
+    mouseActive: boolean;
+    touchId: number | null;
+    startY: number;
+    startValue: number;
+  }>({
     mouseActive: false,
     touchId: null,
+    startY: 0,
+    startValue: value,
   });
   const clamped = Math.min(max, Math.max(min, value));
-  const percentage = max === min ? 0 : ((clamped - min) / (max - min)) * 100;
+  const visibleValues = [-2, -1, 0, 1, 2].map((offset) => {
+    const nextValue = clamped + offset;
+    return {
+      offset,
+      value: nextValue >= min && nextValue <= max ? nextValue : null,
+    };
+  });
 
-  const updateFromClientX = useCallback(
-    (clientX: number) => {
-      const track = trackRef.current;
-      if (!track) return;
-      const rect = track.getBoundingClientRect();
-      const ratio = (clientX - rect.left) / rect.width;
-      const boundedRatio = Math.min(1, Math.max(0, ratio));
-      const nextValue = Math.round(min + boundedRatio * (max - min));
+  const updateFromClientY = useCallback(
+    (clientY: number) => {
+      const delta = dragRef.current.startY - clientY;
+      const nextValue = Math.round(dragRef.current.startValue + delta / 36);
       onChange(Math.min(max, Math.max(min, nextValue)));
     },
     [max, min, onChange],
@@ -116,7 +228,7 @@ function ScrollPicker({ value, onChange, min, max, unit, label }: ScrollPickerPr
   useEffect(() => {
     const handleMouseMove = (event: MouseEvent) => {
       if (!dragRef.current.mouseActive) return;
-      updateFromClientX(event.clientX);
+      updateFromClientY(event.clientY);
     };
     const handleMouseUp = () => {
       dragRef.current.mouseActive = false;
@@ -127,18 +239,20 @@ function ScrollPicker({ value, onChange, min, max, unit, label }: ScrollPickerPr
       window.removeEventListener("mousemove", handleMouseMove);
       window.removeEventListener("mouseup", handleMouseUp);
     };
-  }, [updateFromClientX]);
+  }, [updateFromClientY]);
 
   const handleMouseDown = (event: ReactMouseEvent<HTMLDivElement>) => {
     dragRef.current.mouseActive = true;
-    updateFromClientX(event.clientX);
+    dragRef.current.startY = event.clientY;
+    dragRef.current.startValue = clamped;
   };
 
   const handleTouchStart = (event: ReactTouchEvent<HTMLDivElement>) => {
     const touch = event.changedTouches[0];
     if (!touch) return;
     dragRef.current.touchId = touch.identifier;
-    updateFromClientX(touch.clientX);
+    dragRef.current.startY = touch.clientY;
+    dragRef.current.startValue = clamped;
   };
 
   const handleTouchMove = (event: ReactTouchEvent<HTMLDivElement>) => {
@@ -146,7 +260,7 @@ function ScrollPicker({ value, onChange, min, max, unit, label }: ScrollPickerPr
       (touch) => touch.identifier === dragRef.current.touchId,
     );
     if (!activeTouch) return;
-    updateFromClientX(activeTouch.clientX);
+    updateFromClientY(activeTouch.clientY);
     event.preventDefault();
   };
 
@@ -159,54 +273,68 @@ function ScrollPicker({ value, onChange, min, max, unit, label }: ScrollPickerPr
   };
 
   return (
-    <div className="fl-auth-substep rounded-[1.6rem] p-4 sm:p-5">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.28em] text-[var(--fl-auth-subtle)]">
-            {label}
-          </p>
-          <p className="mt-2 text-sm leading-6 text-[var(--fl-auth-muted)]">
-            Deslize com o dedo para ajustar sem usar o controle nativo.
-          </p>
+    <div className="fl-onboarding-surface-card space-y-8">
+      <div className="space-y-3 text-center">
+        <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--app-primary-color)]">
+          {label}
+        </p>
+        {description ? (
+          <p className="mx-auto max-w-sm text-sm leading-7 text-[var(--fl-onboarding-muted)]">{description}</p>
+        ) : null}
+      </div>
+
+      <div
+        className="fl-onboarding-wheel-shell"
+        onMouseDown={handleMouseDown}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        onTouchCancel={handleTouchEnd}
+      >
+        <div className="fl-onboarding-wheel-frame" aria-hidden="true" />
+
+        <div className="fl-onboarding-wheel-ruler is-left" aria-hidden="true">
+          {Array.from({ length: 9 }, (_, index) => (
+            <span key={`left-${index}`} className={index % 4 === 0 ? "is-major" : ""} />
+          ))}
         </div>
-        <div className="rounded-[1.35rem] bg-[var(--fl-auth-card-selected)] px-4 py-3 text-right">
-          <p className="text-3xl font-bold leading-none text-[var(--fl-auth-ink)] sm:text-4xl">
-            {clamped}
-          </p>
-          <p className="mt-1 text-xs font-semibold uppercase tracking-[0.28em] text-[var(--fl-auth-subtle)]">
-            {unit}
-          </p>
+
+        <div className="fl-onboarding-wheel-ruler is-right" aria-hidden="true">
+          {Array.from({ length: 9 }, (_, index) => (
+            <span key={`right-${index}`} className={index % 4 === 0 ? "is-major" : ""} />
+          ))}
+        </div>
+
+        <div className="fl-onboarding-wheel-values touch-none select-none">
+          {visibleValues.map((item) => {
+            const isActive = item.offset === 0;
+            const isAdjacent = Math.abs(item.offset) === 1;
+            return (
+              <button
+                key={`${label}-${item.offset}`}
+                type="button"
+                onClick={() => {
+                  if (item.value !== null) onChange(item.value);
+                }}
+                disabled={item.value === null}
+                className={`fl-onboarding-wheel-value ${isActive ? "is-active" : ""} ${isAdjacent ? "is-adjacent" : ""} ${item.value === null ? "is-empty" : ""}`}
+              >
+                <span>{item.value ?? ""}</span>
+                {isActive ? <small>{unit}</small> : null}
+              </button>
+            );
+          })}
         </div>
       </div>
-      <div className="mt-5 space-y-3">
-        <div
-          ref={trackRef}
-          className="relative h-12 touch-none select-none"
-          onMouseDown={handleMouseDown}
-          onTouchStart={handleTouchStart}
-          onTouchMove={handleTouchMove}
-          onTouchEnd={handleTouchEnd}
-          onTouchCancel={handleTouchEnd}
-        >
-          <div className="absolute inset-x-0 top-1/2 h-2 -translate-y-1/2 rounded-full bg-[var(--fl-auth-track)]" />
-          <div
-            className="absolute left-0 top-1/2 h-2 -translate-y-1/2 rounded-full bg-gradient-to-r from-emerald-500 to-teal-500"
-            style={{ width: `${percentage}%` }}
-          />
-          <div
-            className="absolute top-1/2 h-6 w-6 -translate-y-1/2 rounded-full border-4 border-white bg-[var(--app-primary-color)] shadow-[0_0_24px_color-mix(in_srgb,var(--app-primary-color)_38%,transparent)]"
-            style={{ left: `calc(${percentage}% - 12px)` }}
-          />
-        </div>
-        <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.24em] text-[var(--fl-auth-subtle)]">
-          <button type="button" onClick={() => onChange(Math.max(min, clamped - 1))}>
-            {min} {unit}
-          </button>
-          <span>Deslize</span>
-          <button type="button" onClick={() => onChange(Math.min(max, clamped + 1))}>
-            {max} {unit}
-          </button>
-        </div>
+
+      <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.24em] text-[var(--fl-onboarding-subtle)]">
+        <button type="button" onClick={() => onChange(Math.max(min, clamped - 1))}>
+          - 1
+        </button>
+        <span>Deslize verticalmente</span>
+        <button type="button" onClick={() => onChange(Math.min(max, clamped + 1))}>
+          + 1
+        </button>
       </div>
     </div>
   );
@@ -222,26 +350,34 @@ function ExerciseValueRow({
   onChange: (value: number) => void;
 }) {
   const safeValue = Math.max(0, value);
+  const previousValue = Math.max(0, safeValue - 1);
+  const nextValue = safeValue + 1;
   return (
-    <div className="fl-auth-option rounded-[1.4rem] p-4" data-selected="false">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <div>
-          <p className="text-base font-semibold">{label}</p>
-          <p className="text-xs uppercase tracking-[0.22em] text-[var(--fl-auth-subtle)]">
-            Toque nos valores laterais para ajustar
-          </p>
-        </div>
-        <div className="grid min-w-[220px] grid-cols-3 gap-2 text-center">
-          <button type="button" onClick={() => onChange(Math.max(0, safeValue - 1))} className="fl-auth-ghost-button rounded-[1rem] px-3 py-3 text-lg font-semibold transition">
-            {Math.max(0, safeValue - 1)}
-          </button>
-          <button type="button" className="rounded-[1rem] bg-[var(--fl-auth-card-selected)] px-3 py-3 text-2xl font-bold text-[var(--app-primary-color)] shadow-[0_12px_30px_color-mix(in_srgb,var(--app-primary-color)_12%,transparent)]">
-            {safeValue}
-          </button>
-          <button type="button" onClick={() => onChange(safeValue + 1)} className="fl-auth-ghost-button rounded-[1rem] px-3 py-3 text-lg font-semibold transition">
-            {safeValue + 1}
-          </button>
-        </div>
+    <div className="fl-onboarding-surface-card space-y-4">
+      <div>
+        <p className="text-lg font-bold text-[var(--fl-onboarding-ink)]">{label}</p>
+        <p className="text-sm text-[var(--fl-onboarding-muted)]">
+          Toque nos valores laterais para ajustar.
+        </p>
+      </div>
+      <div className="grid grid-cols-3 gap-3 text-center">
+        <button
+          type="button"
+          onClick={() => onChange(previousValue)}
+          className="fl-onboarding-value-button"
+        >
+          {previousValue}
+        </button>
+        <button type="button" className="fl-onboarding-value-button is-active">
+          {safeValue}
+        </button>
+        <button
+          type="button"
+          onClick={() => onChange(nextValue)}
+          className="fl-onboarding-value-button"
+        >
+          {nextValue}
+        </button>
       </div>
     </div>
   );
@@ -285,20 +421,83 @@ const INITIAL_PROFILE: ProfileStep = {
   gender: "homem",
   age: "25",
 };
-const STEP_NAMES = ["Identidade", "Perfil fisico", "Objetivo", "Capacidade", "Conta"] as const;
-const STEP_ICONS = [UserRound, Ruler, Target, Activity, Shield];
+const GENDER_OPTIONS = [
+  {
+    value: "homem" as const,
+    label: "Masculino",
+    description: "Plano otimizado para homens.",
+    icon: UserRound,
+  },
+  {
+    value: "mulher" as const,
+    label: "Feminino",
+    description: "Plano otimizado para mulheres.",
+    icon: HeartPulse,
+  },
+  {
+    value: "outro" as const,
+    label: "Prefiro nao dizer",
+    description: "Plano neutro e balanceado.",
+    icon: Sparkles,
+  },
+];
 const GOAL_OPTIONS = [
-  { value: "perder_peso" as const, label: "Perder peso", description: "Circuitos mais dinamicos para acelerar gasto calorico.", icon: Flame },
-  { value: "ganhar_massa" as const, label: "Ganhar massa muscular", description: "Foco em progressao de forca e construcao muscular.", icon: Dumbbell },
-  { value: "resistencia" as const, label: "Melhorar condicionamento", description: "Treinos para ganhar folego, ritmo e recuperacao.", icon: Activity },
-  { value: "saude_geral" as const, label: "Saude e qualidade de vida", description: "Plano equilibrado para movimento diario e bem-estar.", icon: HeartPulse },
-  { value: "calistenia" as const, label: "Estetica e definicao", description: "Combina controle corporal, presenca visual e definicao.", icon: Gauge },
+  {
+    value: "perder_peso" as const,
+    label: "Perda de gordura",
+    description: "Circuitos mais dinamicos para acelerar o gasto calorico.",
+    icon: Flame,
+  },
+  {
+    value: "ganhar_massa" as const,
+    label: "Hipertrofia",
+    description: "Progressao de forca e construcao muscular com mais volume.",
+    icon: Dumbbell,
+  },
+  {
+    value: "resistencia" as const,
+    label: "Resistencia",
+    description: "Mais folego, ritmo e recuperacao para treinar com constancia.",
+    icon: Activity,
+  },
+  {
+    value: "saude_geral" as const,
+    label: "Manutencao",
+    description: "Movimento diario e bem-estar com plano equilibrado.",
+    icon: HeartPulse,
+  },
+  {
+    value: "calistenia" as const,
+    label: "Estetica",
+    description: "Controle corporal, definicao e presenca fisica mais forte.",
+    icon: Gauge,
+  },
 ];
 const CONDITIONING_OPTIONS = [
-  { value: "sedentario" as const, label: "Sedentario", description: "Comeco seguro e progressivo.", icon: HeartHandshake },
-  { value: "iniciante" as const, label: "Iniciante", description: "Quer estrutura guiada e previsivel.", icon: Zap },
-  { value: "intermediario" as const, label: "Intermediario", description: "Tolera mais volume e ritmo.", icon: TrendingUp },
-  { value: "avancado" as const, label: "Avancado", description: "Busca intensidade, variacao e metas mais altas.", icon: Shield },
+  {
+    value: "sedentario" as const,
+    label: "Sedentario",
+    description: "Quer um recomeco seguro, leve e progressivo.",
+    icon: HeartHandshake,
+  },
+  {
+    value: "iniciante" as const,
+    label: "Iniciante",
+    description: "Precisa de estrutura simples para criar consistencia.",
+    icon: Zap,
+  },
+  {
+    value: "intermediario" as const,
+    label: "Intermediario",
+    description: "Ja tolera mais volume e consegue acelerar a progressao.",
+    icon: TrendingUp,
+  },
+  {
+    value: "avancado" as const,
+    label: "Avancado",
+    description: "Busca intensidade alta e metas mais agressivas.",
+    icon: Shield,
+  },
 ];
 const EQUIPMENT_OPTIONS = [
   { id: "halteres", label: "Halteres", icon: Dumbbell },
@@ -329,10 +528,75 @@ function parseDelimitedValues(value: string): string[] {
   return value.split(",").map((item) => item.trim()).filter(Boolean);
 }
 
+function splitCatalogValues(
+  value: string,
+  catalog: readonly { id: string }[],
+): { selected: string[]; notes: string } {
+  const catalogIds = new Set(catalog.map((item) => item.id));
+  const selected: string[] = [];
+  const notes: string[] = [];
+
+  for (const token of parseDelimitedValues(value)) {
+    const normalizedToken = token.toLowerCase();
+    if (catalogIds.has(normalizedToken)) {
+      selected.push(normalizedToken);
+    } else {
+      notes.push(token);
+    }
+  }
+
+  return { selected, notes: notes.join(", ") };
+}
+
+function mergeCatalogValues(selected: string[], notes: string) {
+  return [...selected, ...parseDelimitedValues(notes)].join(", ");
+}
+
 function toneClass(tone: "green" | "red" | "muted") {
-  if (tone === "green") return "text-emerald-500";
-  if (tone === "red") return "text-red-500";
-  return "text-[var(--fl-auth-subtle)]";
+  if (tone === "green") return "text-emerald-400";
+  if (tone === "red") return "text-red-400";
+  return "text-[var(--fl-onboarding-subtle)]";
+}
+
+function frequencyMessage(days: number) {
+  if (days <= 2) {
+    return "Plano leve e realista para criar consistencia sem estourar sua rotina.";
+  }
+  if (days <= 4) {
+    return "Volume equilibrado para progredir sem comprometer a recuperacao.";
+  }
+  if (days <= 6) {
+    return "Estrutura forte para evoluir rapido com distribuicao inteligente dos treinos.";
+  }
+  return "Rotina intensa para quem quer viver o jogo todos os dias com progressao maxima.";
+}
+
+function goalPlanCopy(goal: ProfileStep["main_goal"]) {
+  switch (goal) {
+    case "perder_peso":
+      return "missoes de gasto calorico, streaks de constancia e marcos de perda de gordura";
+    case "ganhar_massa":
+      return "blocos de forca, metas de progressao e recompensas por consistencia de volume";
+    case "resistencia":
+      return "desafios de ritmo, condicionamento e recuperacao cada vez mais forte";
+    case "calistenia":
+      return "desbloqueios de controle corporal, definicao e progressao tecnica";
+    default:
+      return "uma rotina equilibrada com missoes diarias, progresso e recompensas de bem-estar";
+  }
+}
+
+function conditioningPlanCopy(conditioning: ProfileStep["initial_conditioning"]) {
+  switch (conditioning) {
+    case "sedentario":
+      return "comecando leve para criar confianca desde a primeira semana";
+    case "iniciante":
+      return "guiando os primeiros ganhos com estrutura simples e segura";
+    case "intermediario":
+      return "aproveitando sua base atual para acelerar a evolucao";
+    default:
+      return "mantendo intensidade alta sem perder consistencia e controle";
+  }
 }
 export default function Onboarding() {
   const { user, loading: authLoading, checkAuth } = useAuth();
@@ -342,10 +606,10 @@ export default function Onboarding() {
   const [currentStep, setCurrentStep] = useState(0);
   const [credentials, setCredentials] = useState(INITIAL_CREDENTIALS);
   const [profile, setProfile] = useState(INITIAL_PROFILE);
+  const [weeklyFrequency, setWeeklyFrequency] = useState(3);
   const [stepError, setStepError] = useState<string | null>(null);
   const [stepLoading, setStepLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
-  const [selectedGoals, setSelectedGoals] = useState<GoalValue[]>([]);
   const [selectedEquipment, setSelectedEquipment] = useState<string[]>([]);
   const [usernameAvailability, setUsernameAvailability] = useState<AvailabilityState>({ status: "idle" });
   const [emailAvailability, setEmailAvailability] = useState<AvailabilityState>({ status: "idle" });
@@ -353,10 +617,6 @@ export default function Onboarding() {
   const usernameReqRef = useRef(0);
   const emailReqRef = useRef(0);
   const checkoutRedirectRef = useRef(false);
-  const conditioningSectionRefs = useRef<Array<HTMLElement | null>>([]);
-  const conditioningSubmitRef = useRef<HTMLButtonElement | null>(null);
-
-  const totalSteps = 5;
 
   useEffect(() => {
     const email = sessionStorage.getItem("onboarding_email");
@@ -490,86 +750,65 @@ export default function Onboarding() {
     return () => clearTimeout(timer);
   }, [credentials.email, validateEmail]);
 
-  const handleIdentityNext = (e: FormEvent) => {
-    e.preventDefault();
+  const advanceToStep = useCallback((nextStep: number) => {
     setStepError(null);
-
-    if (!profile.full_name.trim() || !profile.username.trim() || profile.username.length < 3) {
-      setStepError("Preencha nome completo e nome de usuario (min. 3 caracteres).");
-      return;
+    setCurrentStep(nextStep);
+    if (typeof window !== "undefined") {
+      window.scrollTo({ top: 0, behavior: "smooth" });
     }
-    if (
-      usernameAvailability.status === "checking" ||
-      usernameAvailability.status === "unavailable" ||
-      usernameAvailability.status === "invalid"
-    ) {
-      setStepError(usernameAvailability.message ?? "Escolha um nome de usuario disponivel.");
-      return;
-    }
+  }, []);
 
-    const ageNum = parseInt(profile.age, 10);
-    if (!Number.isFinite(ageNum) || ageNum < 13 || ageNum > 80) {
-      setStepError("Idade deve ser entre 13 e 80 anos.");
-      return;
-    }
-
-    setCurrentStep(1);
+  const handleGoalSelection = (goal: GoalValue) => {
+    setProfile((currentProfile) => ({ ...currentProfile, main_goal: goal }));
+    advanceToStep(2);
   };
 
-  const handleBodyNext = (e: FormEvent) => {
-    e.preventDefault();
-    setStepError(null);
-
-    const weight = Number(profile.weight);
-    const height = Number(profile.height);
-
-    if (
-      !Number.isFinite(weight) ||
-      weight < 40 ||
-      weight > 200 ||
-      !Number.isFinite(height) ||
-      height < 140 ||
-      height > 220
-    ) {
-      setStepError("Altura (140-220 cm) e peso (40-200 kg) devem estar no intervalo valido.");
-      return;
-    }
-
-    setCurrentStep(2);
-  };
-
-  const handleGoalsNext = (e: FormEvent) => {
-    e.preventDefault();
-    setStepError(null);
-
-    if (selectedGoals.length === 0) {
-      setStepError("Escolha pelo menos um objetivo.");
-      return;
-    }
+  const handleConditioningSelection = (conditioning: ProfileStep["initial_conditioning"]) => {
+    const suggestedFrequency =
+      conditioning === "sedentario" ? 2 : conditioning === "iniciante" ? 3 : conditioning === "intermediario" ? 4 : 5;
 
     setProfile((currentProfile) => ({
       ...currentProfile,
-      main_goal: safeGet(selectedGoals, 0) ?? currentProfile.main_goal,
+      initial_conditioning: conditioning,
     }));
-    setCurrentStep(3);
+    setWeeklyFrequency(suggestedFrequency);
+    advanceToStep(3);
   };
 
-  const handleConditioningNext = (e: FormEvent) => {
-    e.preventDefault();
+  const handleCapacityContinue = () => {
     setStepError(null);
 
+    const age = Number(profile.age);
+    const height = Number(profile.height);
+    const weight = Number(profile.weight);
     const pushups = Number(profile.initial_pushups) || 0;
     const situps = Number(profile.initial_situps) || 0;
     const squats = Number(profile.initial_squats) || 0;
 
-    if (pushups < 0 || situps < 0 || squats < 0) {
-      setStepError("Valores dos contadores nao podem ser negativos.");
+    if (!Number.isFinite(age) || age < 13 || age > 80) {
+      setStepError("Idade deve ser entre 13 e 80 anos.");
       return;
     }
 
-    setCurrentStep(4);
+    if (!Number.isFinite(height) || height < 140 || height > 220) {
+      setStepError("Altura deve ficar entre 140 e 220 cm.");
+      return;
+    }
+
+    if (!Number.isFinite(weight) || weight < 40 || weight > 200) {
+      setStepError("Peso deve ficar entre 40 e 200 kg.");
+      return;
+    }
+
+    if (pushups < 0 || situps < 0 || squats < 0) {
+      setStepError("Os valores de capacidade nao podem ser negativos.");
+      return;
+    }
+
+    advanceToStep(8);
   };
-  const handlePlanAndCredentialsSubmit = async (e: FormEvent) => {
+
+  const handleAccountSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setStepError(null);
 
@@ -652,7 +891,6 @@ export default function Onboarding() {
       }
 
       const equipmentStr = [...selectedEquipment, profile.equipment].filter(Boolean).join(", ");
-      const mainGoal = safeGet(selectedGoals, 0) ?? profile.main_goal;
 
       const res = await api("/api/onboarding", {
         method: "POST",
@@ -667,7 +905,7 @@ export default function Onboarding() {
           initial_squats: Number(profile.initial_squats) || 0,
           injuries: profile.injuries || undefined,
           equipment: equipmentStr || undefined,
-          main_goal: mainGoal,
+          main_goal: profile.main_goal,
         }),
       });
 
@@ -690,19 +928,26 @@ export default function Onboarding() {
 
   const toggleInjurySelection = (injuryId: string) => {
     setProfile((currentProfile) => {
-      const existing = new Set(parseDelimitedValues(currentProfile.injuries.toLowerCase()));
-      if (existing.has(injuryId)) existing.delete(injuryId);
-      else existing.add(injuryId);
-      return { ...currentProfile, injuries: Array.from(existing).join(", ") };
+      const { selected, notes } = splitCatalogValues(currentProfile.injuries, INJURY_OPTIONS);
+      const nextSelected = selected.includes(injuryId)
+        ? selected.filter((item) => item !== injuryId)
+        : [...selected, injuryId];
+
+      return {
+        ...currentProfile,
+        injuries: mergeCatalogValues(nextSelected, notes),
+      };
     });
   };
 
-  const scrollToConditioningSection = (index: number) => {
-    const targetNode =
-      index >= conditioningSectionRefs.current.length
-        ? conditioningSubmitRef.current
-        : conditioningSectionRefs.current[index];
-    targetNode?.scrollIntoView({ behavior: "smooth", block: "start" });
+  const setInjuryNotes = (notes: string) => {
+    setProfile((currentProfile) => {
+      const { selected } = splitCatalogValues(currentProfile.injuries, INJURY_OPTIONS);
+      return {
+        ...currentProfile,
+        injuries: mergeCatalogValues(selected, notes),
+      };
+    });
   };
 
   if (authLoading) {
@@ -711,7 +956,7 @@ export default function Onboarding() {
         <div className="mx-auto flex min-h-screen max-w-7xl flex-col px-4 py-4 sm:px-6 lg:px-8">
           <AuthThemeHeader colorScheme={colorScheme} onToggleColorScheme={toggleColorScheme} />
           <div className="flex flex-1 items-center justify-center">
-            <div className="fl-auth-panel rounded-[2rem] px-6 py-12 text-center">
+            <div className="fl-onboarding-loading-card px-6 py-12 text-center">
               <div className="text-sm font-semibold uppercase tracking-[0.3em] text-[var(--app-primary-color)]">
                 Carregando onboarding
               </div>
@@ -722,743 +967,830 @@ export default function Onboarding() {
     );
   }
 
-  const progress = ((currentStep + 1) / totalSteps) * 100;
-  const ActiveStepIcon = STEP_ICONS[currentStep] ?? Shield;
-  const activeGoals = selectedGoals.length > 0 ? selectedGoals : [profile.main_goal];
-  const activeGoalLabels = activeGoals
-    .map((goal) => GOAL_OPTIONS.find((option) => option.value === goal)?.label)
-    .filter(Boolean) as string[];
-  const conditioningLabel =
-    ({ sedentario: "Sedentario", iniciante: "Iniciante", intermediario: "Intermediario", avancado: "Avancado" } as const)[profile.initial_conditioning];
+  const selectedGoal = GOAL_OPTIONS.find((option) => option.value === profile.main_goal) ?? {
+    value: "saude_geral" as const,
+    label: "Manutencao",
+    description: "Movimento diario e bem-estar com plano equilibrado.",
+    icon: HeartPulse,
+  };
+  const selectedConditioning =
+    CONDITIONING_OPTIONS.find((option) => option.value === profile.initial_conditioning) ?? {
+      value: "iniciante" as const,
+      label: "Iniciante",
+      description: "Precisa de estrutura simples para criar consistencia.",
+      icon: Zap,
+    };
+  const conditioningLabel = selectedConditioning.label;
   const heroName = profile.full_name.trim().split(" ")[0] || "Voce";
-  const injuryTokens = parseDelimitedValues(profile.injuries.toLowerCase());
+  const { selected: injuryTokens, notes: injuryNotes } = splitCatalogValues(profile.injuries, INJURY_OPTIONS);
   const usernameStatusMessage = availabilityMessage(usernameAvailability);
   const emailStatusMessage = availabilityMessage(emailAvailability);
-  const cadenceSuggestion =
-    profile.initial_conditioning === "sedentario"
-      ? { focus: "2x / semana", text: "Comece com sessoes curtas para construir consistencia sem sobrecarga." }
-      : profile.initial_conditioning === "iniciante"
-        ? { focus: "3x / semana", text: "Uma rotina moderada ajuda a ganhar ritmo e manter recuperacao." }
-        : profile.initial_conditioning === "intermediario"
-          ? { focus: "4x / semana", text: "Voce ja tolera mais volume, entao a progressao pode acelerar." }
-          : { focus: "5x / semana", text: "Intensidade alta com distribuicao inteligente para sustentar performance." };
+  const isExistingAccountError = stepError?.includes("cadastrado") ?? false;
+  const planHighlights = [
+    {
+      icon: Trophy,
+      title: "Missoes desbloqueadas",
+      text: `Vamos ativar ${goalPlanCopy(profile.main_goal)} logo nas primeiras semanas.`,
+    },
+    {
+      icon: TrendingUp,
+      title: "Progressao realista",
+      text: `Seu nivel atual entra no plano ${conditioningPlanCopy(profile.initial_conditioning)}.`,
+    },
+    {
+      icon: CalendarDays,
+      title: "Rotina que encaixa",
+      text: `A estrutura inicial considera ${weeklyFrequency} dias por semana para manter aderencia.`,
+    },
+  ];
+  const accountSubmitDisabled =
+    stepLoading ||
+    !profile.full_name.trim() ||
+    !profile.username.trim() ||
+    !credentials.email ||
+    !credentials.password ||
+    credentials.password.length < 8 ||
+    credentials.password !== credentials.confirmPassword ||
+    emailAvailability.status === "checking" ||
+    emailAvailability.status === "unavailable" ||
+    emailAvailability.status === "invalid" ||
+    usernameAvailability.status === "checking" ||
+    usernameAvailability.status === "unavailable" ||
+    usernameAvailability.status === "invalid";
+
+  let stepContent: ReactNode;
+
+  if (currentStep === 0) {
+    stepContent = (
+      <section className="space-y-8">
+        <StepIntro
+          step={0}
+          title={
+            <>
+              Transforme seu treino em <span className="text-[var(--app-primary-color)]">um jogo.</span>
+            </>
+          }
+          description="O FitLoot mistura treino, progresso e recompensa para fazer sua rotina render mais e parecer mais viciante."
+        />
+
+        <div className="fl-onboarding-hero-panel">
+          <div className="fl-onboarding-badge-row">
+            <span className="fl-onboarding-chip">
+              <Sparkles className="h-4 w-4" />
+              Loot diario
+            </span>
+            <span className="fl-onboarding-chip">
+              <Trophy className="h-4 w-4" />
+              Metas claras
+            </span>
+          </div>
+
+          <h2 className="fl-onboarding-section-title">
+            Antes de pedir qualquer dado, a ideia e simples: treinar com mais constancia porque cada semana vira uma progressao visivel.
+          </h2>
+
+          <div className="grid gap-3 sm:grid-cols-3">
+            {[
+              {
+                icon: Target,
+                title: "Missoes objetivas",
+                text: "Cada fase do plano vira uma meta curta e facil de entender.",
+              },
+              {
+                icon: TrendingUp,
+                title: "Progressao guiada",
+                text: "O app adapta carga e ritmo conforme sua realidade de hoje.",
+              },
+              {
+                icon: CalendarDays,
+                title: "Rotina sustentavel",
+                text: "Seu plano nasce para caber na semana que voce realmente consegue cumprir.",
+              },
+            ].map((item) => {
+              const Icon = item.icon;
+              return (
+                <article key={item.title} className="fl-onboarding-surface-card">
+                  <div className="fl-onboarding-feature-icon">
+                    <Icon className="h-5 w-5" strokeWidth={2.2} />
+                  </div>
+                  <p className="mt-4 text-lg font-bold text-[var(--fl-onboarding-ink)]">{item.title}</p>
+                  <p className="mt-2 text-sm leading-6 text-[var(--fl-onboarding-muted)]">{item.text}</p>
+                </article>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          <PrimaryButton label="Comecar" onClick={() => advanceToStep(1)} />
+          <p className="fl-onboarding-helper-copy">Sem formulario agora. Primeiro montamos o seu caminho ideal.</p>
+        </div>
+      </section>
+    );
+  } else if (currentStep === 1) {
+    stepContent = (
+      <section className="space-y-8">
+        <StepIntro
+          step={1}
+          title={
+            <>
+              Qual e o seu <span className="text-[var(--app-primary-color)]">objetivo?</span>
+            </>
+          }
+          description="Toque em uma opcao e a jornada continua na hora. O FitLoot ja comeca a se ajustar a voce."
+        />
+
+        <div className="space-y-3">
+          {GOAL_OPTIONS.map((option) => {
+            const Icon = option.icon;
+            const isSelected = profile.main_goal === option.value;
+
+            return (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => handleGoalSelection(option.value)}
+                className={`fl-onboarding-option-card ${isSelected ? "is-selected" : ""}`}
+              >
+                <div className="fl-onboarding-option-icon">
+                  <Icon className="h-6 w-6" strokeWidth={2.1} />
+                </div>
+                <div className="min-w-0 flex-1 text-left">
+                  <p className="text-lg font-bold text-[var(--fl-onboarding-ink)]">{option.label}</p>
+                  <p className="mt-1 text-sm leading-6 text-[var(--fl-onboarding-muted)]">{option.description}</p>
+                </div>
+                <span className={`fl-onboarding-radio-indicator ${isSelected ? "is-active" : ""}`} aria-hidden="true" />
+              </button>
+            );
+          })}
+        </div>
+
+        <p className="fl-onboarding-helper-copy">Selecionar uma opcao ja avanca para a proxima tela.</p>
+      </section>
+    );
+  } else if (currentStep === 2) {
+    stepContent = (
+      <section className="space-y-8">
+        <StepIntro
+          step={2}
+          title={
+            <>
+              Qual e o seu <span className="text-[var(--app-primary-color)]">nivel hoje?</span>
+            </>
+          }
+          description="Escolha a descricao que mais combina com sua realidade atual. Um toque e o suficiente para seguir."
+        />
+
+        <div className="space-y-3">
+          {CONDITIONING_OPTIONS.map((option) => {
+            const Icon = option.icon;
+            const isSelected = profile.initial_conditioning === option.value;
+
+            return (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => handleConditioningSelection(option.value)}
+                className={`fl-onboarding-option-card ${isSelected ? "is-selected" : ""}`}
+              >
+                <div className="fl-onboarding-option-icon">
+                  <Icon className="h-6 w-6" strokeWidth={2.1} />
+                </div>
+                <div className="min-w-0 flex-1 text-left">
+                  <p className="text-lg font-bold text-[var(--fl-onboarding-ink)]">{option.label}</p>
+                  <p className="mt-1 text-sm leading-6 text-[var(--fl-onboarding-muted)]">{option.description}</p>
+                </div>
+                <span className={`fl-onboarding-radio-indicator ${isSelected ? "is-active" : ""}`} aria-hidden="true" />
+              </button>
+            );
+          })}
+        </div>
+
+        <p className="fl-onboarding-helper-copy">Toque para continuar e calibrar a intensidade do plano.</p>
+      </section>
+    );
+  } else if (currentStep === 3) {
+    stepContent = (
+      <section className="space-y-8">
+        <StepIntro
+          step={3}
+          title={
+            <>
+              Qual o seu <span className="text-[var(--app-primary-color)]">genero?</span>
+            </>
+          }
+          description="Isso ajuda a calibrar o plano inicial com um contexto mais adequado, mantendo o fluxo simples e direto."
+        />
+
+        <div className="space-y-3">
+          {GENDER_OPTIONS.map((option) => {
+            const Icon = option.icon;
+            const isSelected = profile.gender === option.value;
+
+            return (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => setProfile((currentProfile) => ({ ...currentProfile, gender: option.value }))}
+                className={`fl-onboarding-option-card ${isSelected ? "is-selected" : ""}`}
+              >
+                <div className="fl-onboarding-option-icon">
+                  <Icon className="h-5 w-5" strokeWidth={2.1} />
+                </div>
+                <div className="min-w-0 flex-1 text-left">
+                  <p className="text-lg font-bold text-[var(--fl-onboarding-ink)]">{option.label}</p>
+                  <p className="mt-1 text-sm leading-6 text-[var(--fl-onboarding-muted)]">
+                    {option.description}
+                  </p>
+                </div>
+                <span className={`fl-onboarding-radio-indicator ${isSelected ? "is-active" : ""}`} aria-hidden="true" />
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="grid gap-3">
+          <PrimaryButton label="Continuar" onClick={() => advanceToStep(4)} />
+          <SecondaryButton label="Voltar" onClick={() => advanceToStep(2)} />
+        </div>
+      </section>
+    );
+  } else if (currentStep === 4) {
+    stepContent = (
+      <section className="space-y-8">
+        <StepIntro
+          step={4}
+          title={
+            <>
+              Quantos <span className="text-[var(--app-primary-color)]">anos</span> voce tem?
+            </>
+          }
+          description="A idade ajuda a ajustar intensidade, recuperacao e ritmo de progressao desde a primeira semana."
+        />
+
+        <ScrollPicker
+          label="Idade"
+          description="Deslize para escolher sua idade real. O plano fica mais preciso e continua 100% custom."
+          value={Number(profile.age) || 25}
+          onChange={(nextValue) =>
+            setProfile((currentProfile) => ({ ...currentProfile, age: String(nextValue) }))
+          }
+          min={13}
+          max={80}
+          unit="anos"
+        />
+
+        <div className="grid gap-3">
+          <PrimaryButton label="Continuar" onClick={() => advanceToStep(5)} />
+          <SecondaryButton label="Voltar" onClick={() => advanceToStep(3)} />
+        </div>
+      </section>
+    );
+  } else if (currentStep === 5) {
+    stepContent = (
+      <section className="space-y-8">
+        <StepIntro
+          step={5}
+          title={
+            <>
+              Qual e a sua <span className="text-[var(--app-primary-color)]">altura?</span>
+            </>
+          }
+          description="Esse dado entra na calibragem do seu perfil fisico e ajuda a deixar o plano mais coerente."
+        />
+
+        <ScrollPicker
+          label="Altura"
+          description="Use o seletor vertical para ajustar com toque customizado, sem usar range nativo."
+          value={Number(profile.height) || 170}
+          onChange={(nextValue) =>
+            setProfile((currentProfile) => ({ ...currentProfile, height: String(nextValue) }))
+          }
+          min={140}
+          max={220}
+          unit="cm"
+        />
+
+        <div className="grid gap-3">
+          <PrimaryButton label="Continuar" onClick={() => advanceToStep(6)} />
+          <SecondaryButton label="Voltar" onClick={() => advanceToStep(4)} />
+        </div>
+      </section>
+    );
+  } else if (currentStep === 6) {
+    stepContent = (
+      <section className="space-y-8">
+        <StepIntro
+          step={6}
+          title={
+            <>
+              Qual e o seu <span className="text-[var(--app-primary-color)]">peso?</span>
+            </>
+          }
+          description="Com esse ajuste, a personalizacao do plano nasce mais proxima da sua realidade atual."
+        />
+
+        <ScrollPicker
+          label="Peso"
+          description="Ajuste em quilos com o mesmo seletor vertical do fluxo para manter consistencia e toque fluido."
+          value={Number(profile.weight) || 70}
+          onChange={(nextValue) =>
+            setProfile((currentProfile) => ({ ...currentProfile, weight: String(nextValue) }))
+          }
+          min={40}
+          max={200}
+          unit="kg"
+        />
+
+        <div className="grid gap-3">
+          <PrimaryButton label="Continuar" onClick={() => advanceToStep(7)} />
+          <SecondaryButton label="Voltar" onClick={() => advanceToStep(5)} />
+        </div>
+      </section>
+    );
+  } else if (currentStep === 7) {
+    stepContent = (
+      <section className="space-y-8">
+        <StepIntro
+          step={7}
+          title={
+            <>
+              O que voce consegue fazer <span className="text-[var(--app-primary-color)]">hoje?</span>
+            </>
+          }
+          description="Agora sim medimos sua capacidade base por exercicio para que o plano inicial nao comece nem leve demais nem pesado demais."
+        />
+
+        <div className="fl-onboarding-badge-row">
+          <span className="fl-onboarding-chip">{GENDER_OPTIONS.find((option) => option.value === profile.gender)?.label ?? "Perfil"}</span>
+          <span className="fl-onboarding-chip">{profile.age} anos</span>
+          <span className="fl-onboarding-chip">{profile.height} cm</span>
+          <span className="fl-onboarding-chip">{profile.weight} kg</span>
+        </div>
+
+        <div className="space-y-4">
+          <ExerciseValueRow
+            label="Flexoes"
+            value={Number(profile.initial_pushups) || 0}
+            onChange={(nextValue) =>
+              setProfile((currentProfile) => ({
+                ...currentProfile,
+                initial_pushups: String(nextValue),
+              }))
+            }
+          />
+          <ExerciseValueRow
+            label="Abdominais"
+            value={Number(profile.initial_situps) || 0}
+            onChange={(nextValue) =>
+              setProfile((currentProfile) => ({
+                ...currentProfile,
+                initial_situps: String(nextValue),
+              }))
+            }
+          />
+          <ExerciseValueRow
+            label="Agachamentos"
+            value={Number(profile.initial_squats) || 0}
+            onChange={(nextValue) =>
+              setProfile((currentProfile) => ({
+                ...currentProfile,
+                initial_squats: String(nextValue),
+              }))
+            }
+          />
+        </div>
+
+        <div className="grid gap-3">
+          <PrimaryButton label="Continuar" onClick={handleCapacityContinue} />
+          <SecondaryButton label="Voltar" onClick={() => advanceToStep(6)} />
+        </div>
+      </section>
+    );
+  } else if (currentStep === 8) {
+    stepContent = (
+      <section className="space-y-8">
+        <div className="flex justify-end">
+          <button type="button" onClick={() => advanceToStep(9)} className="fl-onboarding-skip-button">
+            Pular
+          </button>
+        </div>
+
+        <StepIntro
+          step={8}
+          title={
+            <>
+              Alguma <span className="text-[var(--app-primary-color)]">limitacao?</span>
+            </>
+          }
+          description="Selecione lesoes ou restricoes que precisam ser respeitadas. Se nao houver nada, marque nenhuma e siga."
+        />
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          <button
+            type="button"
+            onClick={() => setProfile((currentProfile) => ({ ...currentProfile, injuries: "" }))}
+            className={`fl-onboarding-chip-card ${injuryTokens.length === 0 && !injuryNotes ? "is-active" : ""}`}
+          >
+            Nenhuma
+          </button>
+          {INJURY_OPTIONS.map((injury) => (
+            <button
+              key={injury.id}
+              type="button"
+              onClick={() => toggleInjurySelection(injury.id)}
+              className={`fl-onboarding-chip-card ${injuryTokens.includes(injury.id) ? "is-active" : ""}`}
+            >
+              {injury.label}
+            </button>
+          ))}
+        </div>
+
+        <Field label="Observacoes extras" hint="Opcional">
+          <textarea
+            value={injuryNotes}
+            onChange={(event) => setInjuryNotes(event.target.value)}
+            placeholder="Ex: dor lombar ao flexionar, sensibilidade no ombro..."
+            rows={3}
+            className={FIELD_TEXTAREA}
+          />
+        </Field>
+
+        <div className="grid gap-3">
+          <PrimaryButton label="Continuar" onClick={() => advanceToStep(9)} />
+          <SecondaryButton label="Voltar" onClick={() => advanceToStep(7)} />
+        </div>
+      </section>
+    );
+  } else if (currentStep === 9) {
+    stepContent = (
+      <section className="space-y-8">
+        <div className="flex justify-end">
+          <button type="button" onClick={() => advanceToStep(10)} className="fl-onboarding-skip-button">
+            Pular
+          </button>
+        </div>
+
+        <StepIntro
+          step={9}
+          title={
+            <>
+              O que voce tem <span className="text-[var(--app-primary-color)]">disponivel?</span>
+            </>
+          }
+          description="Monte o setup do seu plano com os equipamentos que ja estao por perto. Se quiser, complemente com itens extras."
+        />
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          {EQUIPMENT_OPTIONS.map((equipmentOption) => {
+            const Icon = equipmentOption.icon;
+            const isSelected = selectedEquipment.includes(equipmentOption.id);
+
+            return (
+              <button
+                key={equipmentOption.id}
+                type="button"
+                onClick={() =>
+                  setSelectedEquipment((currentEquipment) =>
+                    isSelected
+                      ? currentEquipment.filter((item) => item !== equipmentOption.id)
+                      : [...currentEquipment, equipmentOption.id],
+                  )
+                }
+                className={`fl-onboarding-option-card ${isSelected ? "is-selected" : ""}`}
+              >
+                <div className="fl-onboarding-option-icon">
+                  <Icon className="h-5 w-5" strokeWidth={2.2} />
+                </div>
+                <div className="min-w-0 flex-1 text-left">
+                  <p className="text-lg font-bold text-[var(--fl-onboarding-ink)]">{equipmentOption.label}</p>
+                  <p className="mt-1 text-sm leading-6 text-[var(--fl-onboarding-muted)]">
+                    Entra no calculo do seu plano inicial.
+                  </p>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+
+        <Field label="Outros equipamentos" hint="Opcional">
+          <Input
+            value={profile.equipment}
+            onChange={setProfileField("equipment")}
+            placeholder="Ex: banco, colchonete, paralelas..."
+            className={FIELD_INPUT}
+          />
+        </Field>
+
+        <div className="grid gap-3">
+          <PrimaryButton label="Continuar" onClick={() => advanceToStep(10)} />
+          <SecondaryButton label="Voltar" onClick={() => advanceToStep(8)} />
+        </div>
+      </section>
+    );
+  } else if (currentStep === 10) {
+    stepContent = (
+      <section className="space-y-8">
+        <StepIntro
+          step={10}
+          title={
+            <>
+              Quantos dias por <span className="text-[var(--app-primary-color)]">semana?</span>
+            </>
+          }
+          description="Escolha sua frequencia real. O plano vai nascer com isso em mente para manter aderencia desde o comeco."
+        />
+
+        <ScrollPicker
+          label="Frequencia semanal"
+          description="Use o mesmo gesto do seletor de idade para ajustar uma rotina que voce realmente consegue sustentar."
+          value={weeklyFrequency}
+          onChange={setWeeklyFrequency}
+          min={1}
+          max={7}
+          unit="dias"
+        />
+
+        <div className="fl-onboarding-surface-card">
+          <div className="flex items-start gap-4">
+            <div className="fl-onboarding-feature-icon">
+              <CalendarDays className="h-5 w-5" strokeWidth={2.2} />
+            </div>
+            <div>
+              <p className="text-lg font-bold text-[var(--fl-onboarding-ink)]">
+                {weeklyFrequency} {weeklyFrequency === 1 ? "dia" : "dias"} por semana
+              </p>
+              <p className="mt-2 text-sm leading-6 text-[var(--fl-onboarding-muted)]">
+                {frequencyMessage(weeklyFrequency)}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid gap-3">
+          <PrimaryButton label="Continuar" onClick={() => advanceToStep(11)} />
+          <SecondaryButton label="Voltar" onClick={() => advanceToStep(9)} />
+        </div>
+      </section>
+    );
+  } else if (currentStep === 11) {
+    stepContent = (
+      <section className="space-y-8">
+        <StepIntro
+          step={11}
+          title={
+            <>
+              Seu plano esta <span className="text-[var(--app-primary-color)]">pronto.</span>
+            </>
+          }
+          description="Antes do cadastro, voce ja enxerga o valor do que vai desbloquear. O funil vende o produto antes de pedir seus dados."
+        />
+
+        <div className="fl-onboarding-hero-panel space-y-5">
+          <div className="fl-onboarding-badge-row">
+            <span className="fl-onboarding-chip">{selectedGoal.label}</span>
+            <span className="fl-onboarding-chip">{conditioningLabel}</span>
+            <span className="fl-onboarding-chip">{weeklyFrequency}x por semana</span>
+          </div>
+
+          <div>
+            <h2 className="fl-onboarding-section-title">
+              {heroName}, seu plano vai combinar {selectedGoal.label.toLowerCase()} com uma progressao {conditioningLabel.toLowerCase()}.
+            </h2>
+            <p className="mt-3 text-sm leading-7 text-[var(--fl-onboarding-muted)]">
+              Nas proximas semanas voce desbloqueia {goalPlanCopy(profile.main_goal)}. O ritmo inicial foi desenhado para {conditioningPlanCopy(profile.initial_conditioning)} e respeitar sua rotina de {weeklyFrequency} dias por semana.
+            </p>
+          </div>
+        </div>
+
+        <div className="grid gap-3">
+          {planHighlights.map((item) => {
+            const Icon = item.icon;
+            return (
+              <article key={item.title} className="fl-onboarding-surface-card">
+                <div className="flex items-start gap-4">
+                  <div className="fl-onboarding-feature-icon">
+                    <Icon className="h-5 w-5" strokeWidth={2.2} />
+                  </div>
+                  <div>
+                    <p className="text-lg font-bold text-[var(--fl-onboarding-ink)]">{item.title}</p>
+                    <p className="mt-2 text-sm leading-6 text-[var(--fl-onboarding-muted)]">{item.text}</p>
+                  </div>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+
+        <div className="fl-onboarding-surface-card">
+          <div className="flex items-center gap-1 text-[var(--app-primary-color)]">
+            {Array.from({ length: 5 }).map((_, index) => (
+              <Star key={index} className="h-4 w-4 fill-current" strokeWidth={1.8} />
+            ))}
+          </div>
+          <p className="mt-4 text-lg font-bold text-[var(--fl-onboarding-ink)]">4.9/5 de satisfacao nas primeiras semanas</p>
+          <p className="mt-2 text-sm leading-6 text-[var(--fl-onboarding-muted)]">
+            Prova social, senso de progresso e missoes curtas ajudam o usuario a continuar mesmo nos dias mais corridos.
+          </p>
+        </div>
+
+        <div className="grid gap-3">
+          <PrimaryButton label="Quero comecar" onClick={() => advanceToStep(12)} />
+          <SecondaryButton label="Voltar" onClick={() => advanceToStep(10)} />
+        </div>
+      </section>
+    );
+  } else {
+    stepContent = (
+      <section className="space-y-8">
+        <StepIntro
+          step={12}
+          title={
+            <>
+              Crie sua <span className="text-[var(--app-primary-color)]">conta.</span>
+            </>
+          }
+          description="Agora sim faz sentido pedir seus dados: o plano ja foi apresentado e o proximo passo leva para um checkout separado."
+        />
+
+        <div className="fl-onboarding-surface-card">
+          <div className="flex items-start gap-4">
+            <div className="fl-onboarding-feature-icon">
+              <CheckCircle2 className="h-5 w-5" strokeWidth={2.2} />
+            </div>
+            <div>
+              <p className="text-lg font-bold text-[var(--fl-onboarding-ink)]">Cadastro primeiro, checkout depois</p>
+              <p className="mt-2 text-sm leading-6 text-[var(--fl-onboarding-muted)]">
+                O onboarding termina com a criacao da conta. Em seguida, voce segue para o checkout em uma rota separada, sem misturar cobranca com o funil.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <form onSubmit={handleAccountSubmit} className="space-y-6">
+          <Field label="Nome completo" leftIcon={<UserRound className="h-4 w-4" />}>
+            <Input
+              value={profile.full_name}
+              onChange={setProfileField("full_name")}
+              placeholder="Seu nome completo"
+              className={FIELD_INPUT}
+            />
+          </Field>
+
+          <div className="space-y-2">
+            <Field
+              label="Nome de usuario"
+              leftIcon={<User className="h-4 w-4" />}
+              rightSlot={
+                usernameAvailability.status === "checking" ? (
+                  <span className="text-xs text-[var(--fl-onboarding-subtle)]">...</span>
+                ) : usernameAvailability.status === "available" ? (
+                  <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+                ) : null
+              }
+            >
+              <Input
+                value={profile.username}
+                onChange={setProfileField("username")}
+                onBlur={() => {
+                  void validateUsername(profile.username);
+                }}
+                placeholder="nome_de_usuario"
+                minLength={3}
+                className={FIELD_INPUT}
+              />
+            </Field>
+            {usernameStatusMessage ? (
+              <p className={`text-sm ${toneClass(usernameStatusMessage.tone)}`}>{usernameStatusMessage.text}</p>
+            ) : null}
+          </div>
+
+          <div className="space-y-2">
+            <Field
+              label="Email"
+              leftIcon={<Mail className="h-4 w-4" />}
+              rightSlot={
+                emailAvailability.status === "checking" ? (
+                  <span className="text-xs text-[var(--fl-onboarding-subtle)]">...</span>
+                ) : emailAvailability.status === "available" ? (
+                  <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+                ) : null
+              }
+            >
+              <Input
+                type="email"
+                value={credentials.email}
+                onChange={setCredential("email")}
+                onBlur={() => {
+                  void validateEmail(credentials.email);
+                }}
+                placeholder="seu@email.com"
+                className={FIELD_INPUT}
+              />
+            </Field>
+            {emailStatusMessage ? (
+              <p className={`text-sm ${toneClass(emailStatusMessage.tone)}`}>{emailStatusMessage.text}</p>
+            ) : null}
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <Field
+              label="Senha"
+              leftIcon={<Lock className="h-4 w-4" />}
+              hint="minimo 8 caracteres"
+              rightSlot={
+                <button
+                  type="button"
+                  onMouseDown={(event) => {
+                    event.preventDefault();
+                  }}
+                  onClick={() => setShowPassword((currentValue) => !currentValue)}
+                  className="rounded-full p-2 text-[var(--fl-onboarding-subtle)] transition hover:bg-white/10 hover:text-[var(--fl-onboarding-ink)]"
+                  aria-label={showPassword ? "Ocultar senha" : "Mostrar senha"}
+                  title={showPassword ? "Ocultar senha" : "Mostrar senha"}
+                >
+                  {showPassword ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+                </button>
+              }
+            >
+              <Input
+                type={showPassword ? "text" : "password"}
+                value={credentials.password}
+                onChange={setCredential("password")}
+                placeholder="Senha segura"
+                minLength={8}
+                className={FIELD_INPUT}
+              />
+            </Field>
+
+            <Field label="Confirmar senha" leftIcon={<Lock className="h-4 w-4" />}>
+              <Input
+                type={showPassword ? "text" : "password"}
+                value={credentials.confirmPassword}
+                onChange={setCredential("confirmPassword")}
+                placeholder="Repita a senha"
+                className={FIELD_INPUT}
+              />
+            </Field>
+          </div>
+
+          {isExistingAccountError ? (
+            <button
+              type="button"
+              onClick={() => navigate("/app")}
+              className="fl-onboarding-secondary-button"
+            >
+              Fazer login
+            </button>
+          ) : null}
+
+          <PrimaryButton
+            type="submit"
+            disabled={accountSubmitDisabled}
+            label={stepLoading ? "Criando conta..." : "Criar conta e ir para checkout"}
+          />
+          <SecondaryButton label="Voltar" onClick={() => advanceToStep(11)} />
+        </form>
+      </section>
+    );
+  }
 
   return (
     <div className="fl-auth-page fl-auth-funnel-page">
       <div className="pointer-events-none absolute inset-0 -z-10 overflow-hidden">
-        <div className="absolute -left-24 top-20 h-72 w-72 rounded-full bg-[var(--fl-auth-primary-soft)] blur-3xl" />
-        <div className="absolute right-[-4rem] top-[18%] h-96 w-96 rounded-full bg-[var(--fl-auth-secondary-soft)] blur-3xl" />
-        <div className="absolute bottom-[-8rem] left-1/3 h-72 w-72 rounded-full bg-[var(--fl-auth-primary-soft)] blur-3xl" />
+        <div className="absolute -left-20 top-12 h-72 w-72 rounded-full bg-[var(--fl-auth-primary-soft)] blur-3xl" />
+        <div className="absolute right-[-6rem] top-[14%] h-[28rem] w-[28rem] rounded-full bg-[var(--fl-auth-secondary-soft)] blur-[130px]" />
+        <div className="absolute bottom-[-8rem] left-1/3 h-80 w-80 rounded-full bg-[var(--fl-auth-primary-soft)] blur-[120px]" />
       </div>
-
-      {currentStep === 4 && (
-        <div className="pointer-events-none fixed inset-x-0 top-20 z-40 flex justify-center px-4 animate-slideDown lg:top-6 lg:justify-end lg:px-8">
-          <a href="/app-release.apk" download="app-release (1).apk" className="pointer-events-auto fl-auth-pill rounded-full px-4 py-2 text-[11px] tracking-[0.18em]">
-            <Download className="h-4 w-4" />
-            Baixar app Android
-          </a>
-        </div>
-      )}
 
       <div className="mx-auto flex min-h-screen max-w-7xl flex-col px-4 py-4 sm:px-6 lg:px-8">
         <AuthThemeHeader colorScheme={colorScheme} onToggleColorScheme={toggleColorScheme} />
-        <div className="flex flex-1 items-center justify-center py-4 lg:py-8">
-          <div className="fl-auth-shell">
-            <aside className="fl-auth-panel fl-auth-hero order-1 rounded-[2rem] p-6 sm:p-8 lg:p-10">
-              <div className="space-y-4 lg:hidden">
-                <div className="flex items-center justify-between gap-4">
-                  <span className="fl-auth-pill"><ActiveStepIcon className="h-3.5 w-3.5" />Etapa {currentStep + 1}/{totalSteps}</span>
-                  <span className="text-xs font-semibold uppercase tracking-[0.24em] text-[var(--fl-auth-subtle)]">{Math.round(progress)}%</span>
-                </div>
-                <div className="fl-auth-progress-track"><div className="fl-auth-progress-fill" style={{ width: `${progress}%` }} /></div>
-                <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.34em] text-[var(--app-primary-color)]">{STEP_NAMES[currentStep]}</p>
-                  <h1 className="mt-2 text-3xl font-bold tracking-tight">{currentStep === 2 ? "Escolha seu objetivo." : currentStep === 4 ? "Sua conta esta quase pronta." : "Configure sua jornada."}</h1>
-                  <p className="mt-2 text-sm leading-6 text-[var(--fl-auth-muted)]">{heroName}, os mesmos dados e validacoes agora aparecem dentro do mesmo shell visual do login.</p>
-                </div>
+
+        <main className="relative z-10 flex flex-1 flex-col items-center justify-start px-0 pb-12 pt-6">
+          <div className="w-full max-w-[540px]">
+            {stepError ? (
+              <div className="mb-6">
+                <StatusMessage message={stepError} />
               </div>
+            ) : null}
 
-              <div className="hidden h-full flex-col justify-between lg:flex">
-                <div className="space-y-6">
-                  <div className="flex items-center justify-between gap-4">
-                    <span className="fl-auth-pill"><ActiveStepIcon className="h-3.5 w-3.5" />Step {String(currentStep + 1).padStart(2, "0")}/{String(totalSteps).padStart(2, "0")}</span>
-                    <span className="text-xs font-semibold uppercase tracking-[0.24em] text-[var(--fl-auth-subtle)]">{Math.round(progress)}%</span>
-                  </div>
-                  <div className="fl-auth-progress-track"><div className="fl-auth-progress-fill" style={{ width: `${progress}%` }} /></div>
-                  <div>
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.34em] text-[var(--app-primary-color)]">{STEP_NAMES[currentStep]}</p>
-                    <h1 className="mt-3 max-w-[12ch] text-5xl font-bold leading-[1.02] tracking-tight xl:text-6xl">{currentStep === 2 ? "Escolha seu objetivo." : currentStep === 3 ? "Mapeie sua capacidade." : currentStep === 4 ? "Sua conta esta quase pronta." : "Configure sua jornada."}</h1>
-                    <p className="mt-4 max-w-xl text-base leading-7 text-[var(--fl-auth-muted)] xl:text-lg">O onboarding agora acompanha o login com o mesmo header, o mesmo toggle de tema e a mesma linguagem de cards, botoes e tipografia.</p>
-                  </div>
-                  <div className="space-y-3">
-                    {[
-                      { icon: Sparkles, title: "Visual continuo", text: "Logo e toggle ficam na mesma posicao do login redesenhado." },
-                      { icon: Target, title: "Foco atual", text: activeGoalLabels.length > 0 ? activeGoalLabels.join(" • ") : "Objetivo ainda nao definido" },
-                      { icon: Activity, title: "Condicionamento", text: conditioningLabel },
-                    ].map((item) => {
-                      const Icon = item.icon;
-                      return (
-                        <article key={item.title} className="fl-auth-option rounded-[1.5rem] p-4" data-selected="false">
-                          <div className="flex items-start gap-4">
-                            <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-2xl bg-[var(--fl-auth-primary-soft)] text-[var(--app-primary-color)]"><Icon className="h-5 w-5" strokeWidth={2.2} /></div>
-                            <div className="space-y-1"><h2 className="text-lg font-semibold">{item.title}</h2><p className="text-sm leading-6 text-[var(--fl-auth-muted)]">{item.text}</p></div>
-                          </div>
-                        </article>
-                      );
-                    })}
-                  </div>
-                </div>
-                <div className="grid grid-cols-3 gap-3">
-                  {[
-                    { value: activeGoalLabels.length > 0 ? activeGoalLabels.length : 0, label: "Objetivos" },
-                    { value: profile.height || "170", label: "Altura" },
-                    { value: profile.age || "25", label: "Idade" },
-                  ].map((item) => (
-                    <div key={item.label} className="fl-auth-option rounded-[1.35rem] p-4 text-center" data-selected="false">
-                      <p className="text-xl font-bold text-[var(--app-primary-color)]">{item.value}</p>
-                      <p className="mt-1 text-[10px] font-semibold uppercase tracking-[0.3em] text-[var(--fl-auth-subtle)]">{item.label}</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </aside>
-
-            <main className="fl-auth-panel order-2 rounded-[2rem] p-5 sm:p-7 lg:p-8">
-              {stepError && (
-                <div className="mb-5 space-y-3 rounded-[1.35rem] border border-red-400/25 bg-red-500/10 px-4 py-3 text-sm text-red-600">
-                  <p>{stepError}</p>
-                  {stepError.includes("ja esta cadastrado") && <Button type="button" onClick={() => navigate("/app")} className="w-full">Fazer login</Button>}
-                </div>
-              )}
-              {currentStep === 0 && (
-                <form onSubmit={handleIdentityNext} className="space-y-6 animate-authStepEnter">
-                  <div className="space-y-3">
-                    <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[var(--app-primary-color)]">Identidade inicial</p>
-                    <div>
-                      <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">Configure a base do seu perfil.</h2>
-                      <p className="mt-2 text-sm leading-6 text-[var(--fl-auth-muted)]">Os mesmos campos continuam sendo coletados, agora com hierarquia visual mais forte e leitura mais clara em qualquer tema.</p>
-                    </div>
-                  </div>
-
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <Field label="Nome completo" leftIcon={<UserRound className="h-4 w-4" />}>
-                      <Input value={profile.full_name} onChange={setProfileField("full_name")} placeholder="Seu nome completo" className={FIELD_INPUT} />
-                    </Field>
-
-                    <div className="space-y-2">
-                      <Field
-                        label="Nome de usuario"
-                        leftIcon={<User className="h-4 w-4" />}
-                        rightSlot={
-                          usernameAvailability.status === "checking" ? (
-                            <span className="text-xs text-[var(--fl-auth-subtle)]">...</span>
-                          ) : usernameAvailability.status === "available" ? (
-                            <CheckCircle2 className="h-4 w-4 text-emerald-500" />
-                          ) : null
-                        }
-                      >
-                        <Input value={profile.username} onChange={setProfileField("username")} onBlur={() => { void validateUsername(profile.username); }} placeholder="nome_de_usuario" minLength={3} className={FIELD_INPUT} />
-                      </Field>
-                      {availabilityMessage(usernameAvailability) && <p className={`text-xs ${toneClass(availabilityMessage(usernameAvailability)?.tone ?? "muted")}`}>{availabilityMessage(usernameAvailability)?.text}</p>}
-                    </div>
-                  </div>
-
-                  <div>
-                    <div className="mb-3">
-                      <label className="text-xs font-semibold uppercase tracking-[0.24em] text-[var(--fl-auth-subtle)]">Genero</label>
-                      <p className="mt-2 text-sm leading-6 text-[var(--fl-auth-muted)]">Esse dado ajuda a calibrar o plano inicial sem mexer na logica existente.</p>
-                    </div>
-                    <div className="grid gap-3 sm:grid-cols-3">
-                      {([
-                        { value: "homem", label: "Masculino", icon: Shield },
-                        { value: "mulher", label: "Feminino", icon: Sparkles },
-                        { value: "outro", label: "Prefiro nao dizer", icon: HeartHandshake },
-                      ] as const).map((option) => {
-                        const Icon = option.icon;
-                        return (
-                          <button key={option.value} type="button" onClick={() => setProfile((currentProfile) => ({ ...currentProfile, gender: option.value }))} className="fl-auth-option rounded-[1.4rem] px-4 py-4 text-left transition" data-selected={profile.gender === option.value}>
-                            <div className="flex items-center gap-3">
-                              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[var(--fl-auth-primary-soft)] text-[var(--app-primary-color)]"><Icon className="h-4 w-4" strokeWidth={2.2} /></div>
-                              <div><p className="font-semibold">{option.label}</p><p className="text-xs uppercase tracking-[0.22em] text-[var(--fl-auth-subtle)]">Selecao ativa</p></div>
-                            </div>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  <ScrollPicker label="Idade" value={Math.min(80, Math.max(13, parseInt(profile.age, 10) || 25))} onChange={(nextValue) => setProfile((currentProfile) => ({ ...currentProfile, age: String(nextValue) }))} min={13} max={80} unit="anos" />
-
-                  <Button type="submit" size="lg" className="fl-auth-cta h-14 w-full rounded-[1.15rem] text-base font-semibold disabled:opacity-50" disabled={usernameAvailability.status === "checking" || usernameAvailability.status === "unavailable" || usernameAvailability.status === "invalid"}>
-                    Continuar
-                    <ChevronRight className="h-4 w-4" />
-                  </Button>
-                </form>
-              )}
-
-              {currentStep === 1 && (
-                <form onSubmit={handleBodyNext} className="space-y-6 animate-authStepEnter">
-                  <div className="space-y-3">
-                    <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[var(--app-primary-color)]">Perfil fisico</p>
-                    <div>
-                      <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">Ajuste altura e peso com o dedo.</h2>
-                      <p className="mt-2 text-sm leading-6 text-[var(--fl-auth-muted)]">A etapa continua validando os mesmos intervalos de antes, agora com sliders customizados para toque.</p>
-                    </div>
-                  </div>
-
-                  <div className="grid gap-4 xl:grid-cols-2">
-                    <ScrollPicker label="Altura" value={Math.min(220, Math.max(140, Number(profile.height) || 170))} onChange={(nextValue) => setProfile((currentProfile) => ({ ...currentProfile, height: String(nextValue) }))} min={140} max={220} unit="cm" />
-                    <ScrollPicker label="Peso" value={Math.min(200, Math.max(40, Number(profile.weight) || 70))} onChange={(nextValue) => setProfile((currentProfile) => ({ ...currentProfile, weight: String(nextValue) }))} min={40} max={200} unit="kg" />
-                  </div>
-
-                  <div className="fl-auth-option rounded-[1.45rem] p-4" data-selected="false">
-                    <div className="flex items-center gap-3">
-                      <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[var(--fl-auth-primary-soft)] text-[var(--app-primary-color)]"><Scale className="h-4 w-4" strokeWidth={2.2} /></div>
-                      <div><p className="font-semibold">Faixa ativa</p><p className="text-sm text-[var(--fl-auth-muted)]">Altura entre 140-220 cm e peso entre 40-200 kg continuam sendo a regra.</p></div>
-                    </div>
-                  </div>
-
-                  <Button type="submit" size="lg" className="fl-auth-cta h-14 w-full rounded-[1.15rem] text-base font-semibold">
-                    Continuar
-                    <ChevronRight className="h-4 w-4" />
-                  </Button>
-                </form>
-              )}
-
-              {currentStep === 2 && (
-                <form onSubmit={handleGoalsNext} className="space-y-6 animate-authStepEnter">
-                  <div className="space-y-3">
-                    <div className="flex items-end justify-between gap-4">
-                      <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[var(--app-primary-color)]">Objective selection</p>
-                      <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[var(--fl-auth-subtle)]">escolha um ou mais</p>
-                    </div>
-                    <div>
-                      <h2 className="text-4xl font-bold leading-tight tracking-tight sm:text-5xl">Escolha seu <span className="text-[var(--app-primary-color)]">objetivo.</span></h2>
-                      <p className="mt-3 max-w-2xl text-sm leading-7 text-[var(--fl-auth-muted)] sm:text-base">As opcoes continuam alimentando o mesmo estado atual, mas com cards grandes e legibilidade mais proxima da referencia visual.</p>
-                    </div>
-                  </div>
-
-                  <div className="space-y-3">
-                    {GOAL_OPTIONS.map((option) => {
-                      const Icon = option.icon;
-                      const isSelected = selectedGoals.includes(option.value);
-                      return (
-                        <button key={option.value} type="button" onClick={() => setSelectedGoals((currentGoals) => isSelected ? currentGoals.filter((goal) => goal !== option.value) : [...currentGoals, option.value])} className="fl-auth-option flex w-full items-center gap-4 rounded-[1.55rem] px-5 py-5 text-left transition" data-selected={isSelected}>
-                          <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-2xl bg-[var(--fl-auth-primary-soft)] text-[var(--app-primary-color)]"><Icon className="h-5 w-5" strokeWidth={2.2} /></div>
-                          <div className="min-w-0 flex-1"><p className="text-lg font-semibold sm:text-xl">{option.label}</p><p className="mt-1 text-sm leading-6 text-[var(--fl-auth-muted)]">{option.description}</p></div>
-                          <div className="flex h-8 w-8 items-center justify-center rounded-full border border-white/20 bg-white/5">{isSelected ? <CheckCircle2 className="h-5 w-5 text-[var(--app-primary-color)]" /> : <span className="h-3 w-3 rounded-full border border-[var(--fl-auth-subtle)]" />}</div>
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  <Button type="submit" disabled={selectedGoals.length === 0} size="lg" className="fl-auth-cta h-14 w-full rounded-[1.15rem] text-base font-semibold disabled:opacity-50">
-                    Continuar
-                    <ChevronRight className="h-4 w-4" />
-                  </Button>
-                </form>
-              )}
-
-              {currentStep === 3 && (
-                <form onSubmit={handleConditioningNext} className="space-y-6 animate-authStepEnter">
-                  <div className="space-y-3">
-                    <div className="flex items-end justify-between gap-4">
-                      <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[var(--app-primary-color)]">Perfil fisico detalhado</p>
-                      <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[var(--fl-auth-subtle)]">sub-etapas 2.1 a 2.9</p>
-                    </div>
-                    <div>
-                      <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">Mapeie sua capacidade atual.</h2>
-                      <p className="mt-2 text-sm leading-6 text-[var(--fl-auth-muted)]">As mesmas informacoes continuam indo para o mesmo payload, mas agora organizadas em blocos claros, com progresso e acoes de toque mais legiveis.</p>
-                    </div>
-                  </div>
-
-                  <div className="flex flex-wrap gap-2">
-                    {[
-                      { code: "2.1", label: "Condicionamento" },
-                      { code: "2.3", label: "Exercicios" },
-                      { code: "2.5", label: "Lesoes" },
-                      { code: "2.7", label: "Equipamentos" },
-                      { code: "2.9", label: "Cadencia" },
-                    ].map((item, index) => (
-                      <button
-                        key={item.code}
-                        type="button"
-                        onClick={() => scrollToConditioningSection(index)}
-                        className="fl-auth-pill"
-                      >
-                        <span>{item.code}</span>
-                        <span>{item.label}</span>
-                      </button>
-                    ))}
-                  </div>
-
-                  <section
-                    ref={(node) => {
-                      conditioningSectionRefs.current[0] = node;
-                    }}
-                    className="fl-auth-substep rounded-[1.7rem] p-5 sm:p-6"
-                  >
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="space-y-2">
-                        <p className="text-xs font-semibold uppercase tracking-[0.28em] text-[var(--app-primary-color)]">Sub-etapa 2.1</p>
-                        <h3 className="text-2xl font-bold tracking-tight">Condicionamento atual</h3>
-                        <p className="text-sm leading-6 text-[var(--fl-auth-muted)]">Escolha a base que mais representa seu momento fisico.</p>
-                      </div>
-                      <button type="button" onClick={() => scrollToConditioningSection(1)} className="fl-auth-skip">
-                        Pular
-                      </button>
-                    </div>
-
-                    <div className="mt-5 grid gap-3 md:grid-cols-2">
-                      {CONDITIONING_OPTIONS.map((option) => {
-                        const Icon = option.icon;
-                        return (
-                          <button
-                            key={option.value}
-                            type="button"
-                            onClick={() =>
-                              setProfile((currentProfile) => ({
-                                ...currentProfile,
-                                initial_conditioning: option.value,
-                              }))
-                            }
-                            className="fl-auth-option rounded-[1.45rem] p-4 text-left transition"
-                            data-selected={profile.initial_conditioning === option.value}
-                          >
-                            <div className="flex items-start gap-4">
-                              <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-2xl bg-[var(--fl-auth-primary-soft)] text-[var(--app-primary-color)]">
-                                <Icon className="h-5 w-5" strokeWidth={2.2} />
-                              </div>
-                              <div className="space-y-1">
-                                <p className="text-lg font-semibold">{option.label}</p>
-                                <p className="text-sm leading-6 text-[var(--fl-auth-muted)]">{option.description}</p>
-                              </div>
-                            </div>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </section>
-
-                  <section
-                    ref={(node) => {
-                      conditioningSectionRefs.current[1] = node;
-                    }}
-                    className="fl-auth-substep rounded-[1.7rem] p-5 sm:p-6"
-                  >
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="space-y-2">
-                        <p className="text-xs font-semibold uppercase tracking-[0.28em] text-[var(--app-primary-color)]">Sub-etapa 2.3</p>
-                        <h3 className="text-2xl font-bold tracking-tight">Capacidade inicial</h3>
-                        <p className="text-sm leading-6 text-[var(--fl-auth-muted)]">Cada linha mostra tres valores, com o valor central em destaque e suporte a toque nos laterais.</p>
-                      </div>
-                      <button type="button" onClick={() => scrollToConditioningSection(2)} className="fl-auth-skip">
-                        Pular
-                      </button>
-                    </div>
-
-                    <div className="mt-5 space-y-3">
-                      <ExerciseValueRow
-                        label="Flexoes"
-                        value={Number(profile.initial_pushups) || 0}
-                        onChange={(nextValue) =>
-                          setProfile((currentProfile) => ({
-                            ...currentProfile,
-                            initial_pushups: String(nextValue),
-                          }))
-                        }
-                      />
-                      <ExerciseValueRow
-                        label="Abdominais"
-                        value={Number(profile.initial_situps) || 0}
-                        onChange={(nextValue) =>
-                          setProfile((currentProfile) => ({
-                            ...currentProfile,
-                            initial_situps: String(nextValue),
-                          }))
-                        }
-                      />
-                      <ExerciseValueRow
-                        label="Agachamentos"
-                        value={Number(profile.initial_squats) || 0}
-                        onChange={(nextValue) =>
-                          setProfile((currentProfile) => ({
-                            ...currentProfile,
-                            initial_squats: String(nextValue),
-                          }))
-                        }
-                      />
-                    </div>
-                  </section>
-
-                  <section
-                    ref={(node) => {
-                      conditioningSectionRefs.current[2] = node;
-                    }}
-                    className="fl-auth-substep rounded-[1.7rem] p-5 sm:p-6"
-                  >
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="space-y-2">
-                        <p className="text-xs font-semibold uppercase tracking-[0.28em] text-[var(--app-primary-color)]">Sub-etapa 2.5</p>
-                        <h3 className="text-2xl font-bold tracking-tight">Lesoes e limitacoes</h3>
-                        <p className="text-sm leading-6 text-[var(--fl-auth-muted)]">Use a grade para selecao multipla e complemente com observacoes livres se precisar.</p>
-                      </div>
-                      <button type="button" onClick={() => scrollToConditioningSection(3)} className="fl-auth-skip">
-                        Pular
-                      </button>
-                    </div>
-
-                    <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                      {INJURY_OPTIONS.map((injury) => {
-                        const isSelected = injuryTokens.includes(injury.id);
-                        return (
-                          <button
-                            key={injury.id}
-                            type="button"
-                            onClick={() => toggleInjurySelection(injury.id)}
-                            className="fl-auth-option rounded-[1.2rem] px-4 py-3 text-left transition"
-                            data-selected={isSelected}
-                          >
-                            <span className="text-sm font-semibold">{injury.label}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
-
-                    <div className="mt-4">
-                      <Field label="Observacoes adicionais" hint="Opcional">
-                        <textarea
-                          value={profile.injuries}
-                          onChange={(event) =>
-                            setProfile((currentProfile) => ({
-                              ...currentProfile,
-                              injuries: event.target.value,
-                            }))
-                          }
-                          placeholder="Ex: incomodo no joelho ao descer escadas, lombar sensivel..."
-                          rows={3}
-                          className={FIELD_TEXTAREA}
-                        />
-                      </Field>
-                    </div>
-                  </section>
-
-                  <section
-                    ref={(node) => {
-                      conditioningSectionRefs.current[3] = node;
-                    }}
-                    className="fl-auth-substep rounded-[1.7rem] p-5 sm:p-6"
-                  >
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="space-y-2">
-                        <p className="text-xs font-semibold uppercase tracking-[0.28em] text-[var(--app-primary-color)]">Sub-etapa 2.7</p>
-                        <h3 className="text-2xl font-bold tracking-tight">Equipamentos disponiveis</h3>
-                        <p className="text-sm leading-6 text-[var(--fl-auth-muted)]">Selecao multipla em grade, mantendo o campo livre para itens extras que nao aparecem na lista.</p>
-                      </div>
-                      <button type="button" onClick={() => scrollToConditioningSection(4)} className="fl-auth-skip">
-                        Pular
-                      </button>
-                    </div>
-
-                    <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                      {EQUIPMENT_OPTIONS.map((equipmentOption) => {
-                        const Icon = equipmentOption.icon;
-                        const isSelected = selectedEquipment.includes(equipmentOption.id);
-                        return (
-                          <button
-                            key={equipmentOption.id}
-                            type="button"
-                            onClick={() =>
-                              setSelectedEquipment((currentEquipment) =>
-                                isSelected
-                                  ? currentEquipment.filter((item) => item !== equipmentOption.id)
-                                  : [...currentEquipment, equipmentOption.id],
-                              )
-                            }
-                            className="fl-auth-option rounded-[1.2rem] px-4 py-4 text-left transition"
-                            data-selected={isSelected}
-                          >
-                            <div className="flex items-center gap-3">
-                              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[var(--fl-auth-primary-soft)] text-[var(--app-primary-color)]">
-                                <Icon className="h-4 w-4" strokeWidth={2.2} />
-                              </div>
-                              <span className="font-semibold">{equipmentOption.label}</span>
-                            </div>
-                          </button>
-                        );
-                      })}
-                    </div>
-
-                    <div className="mt-4">
-                      <Field label="Outros equipamentos" hint="Opcional">
-                        <Input
-                          value={profile.equipment}
-                          onChange={setProfileField("equipment")}
-                          placeholder="Ex: banco, colchonete, paralelas..."
-                          className={FIELD_INPUT}
-                        />
-                      </Field>
-                    </div>
-                  </section>
-
-                  <section
-                    ref={(node) => {
-                      conditioningSectionRefs.current[4] = node;
-                    }}
-                    className="fl-auth-substep rounded-[1.7rem] p-5 sm:p-6"
-                  >
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="space-y-2">
-                        <p className="text-xs font-semibold uppercase tracking-[0.28em] text-[var(--app-primary-color)]">Sub-etapa 2.9</p>
-                        <h3 className="text-2xl font-bold tracking-tight">Cadencia semanal sugerida</h3>
-                        <p className="text-sm leading-6 text-[var(--fl-auth-muted)]">Sem alterar o payload atual, a interface mostra uma recomendacao dinamica baseada no condicionamento escolhido.</p>
-                      </div>
-                      <button type="button" onClick={() => conditioningSubmitRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })} className="fl-auth-skip">
-                        Pular
-                      </button>
-                    </div>
-
-                    <div className="mt-5 space-y-4">
-                      <div className="grid gap-3 sm:grid-cols-4">
-                        {[
-                          "2x / semana",
-                          "3x / semana",
-                          "4x / semana",
-                          "5x / semana",
-                        ].map((slot) => (
-                          <div
-                            key={slot}
-                            className="fl-auth-option rounded-[1.2rem] px-4 py-4 text-center"
-                            data-selected={cadenceSuggestion.focus === slot}
-                          >
-                            <p className="text-sm font-semibold">{slot}</p>
-                          </div>
-                        ))}
-                      </div>
-                      <div className="fl-auth-option rounded-[1.35rem] p-4" data-selected="true">
-                        <p className="text-lg font-semibold text-[var(--app-primary-color)]">{cadenceSuggestion.focus}</p>
-                        <p className="mt-2 text-sm leading-6 text-[var(--fl-auth-muted)]">{cadenceSuggestion.text}</p>
-                      </div>
-                    </div>
-                  </section>
-
-                  <Button
-                    ref={conditioningSubmitRef}
-                    type="submit"
-                    size="lg"
-                    className="fl-auth-cta h-14 w-full rounded-[1.15rem] text-base font-semibold"
-                  >
-                    Continuar
-                    <ChevronRight className="h-4 w-4" />
-                  </Button>
-                </form>
-              )}
-
-              {currentStep === 4 && (
-                <form onSubmit={handlePlanAndCredentialsSubmit} className="space-y-6 animate-authStepEnter">
-                  <div className="space-y-3">
-                    <div className="flex items-end justify-between gap-4">
-                      <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[var(--app-primary-color)]">Criacao da conta</p>
-                      <span className="fl-auth-pill">
-                        <Shield className="h-3.5 w-3.5" />
-                        pronto para finalizar
-                      </span>
-                    </div>
-                    <div>
-                      <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">Finalize sua conta e siga para o checkout.</h2>
-                      <p className="mt-2 text-sm leading-6 text-[var(--fl-auth-muted)]">O onboarding termina aqui com a criacao da conta. A escolha de plano e o pagamento seguem em uma tela separada.</p>
-                    </div>
-                  </div>
-
-                  <section className="grid gap-3 lg:grid-cols-[minmax(0,1.15fr)_minmax(280px,0.85fr)]">
-                    <div className="fl-auth-option rounded-[1.6rem] p-5" data-selected="true">
-                      <div className="flex items-start gap-4">
-                        <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-2xl bg-[var(--fl-auth-primary-soft)] text-[var(--app-primary-color)]">
-                          <Sparkles className="h-5 w-5" strokeWidth={2.2} />
-                        </div>
-                        <div className="space-y-2">
-                          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[var(--app-primary-color)]">Resumo do funil</p>
-                          <h3 className="text-2xl font-bold tracking-tight">{heroName}, sua jornada inicial ja foi configurada.</h3>
-                          <p className="text-sm leading-6 text-[var(--fl-auth-muted)]">Objetivo, condicionamento, capacidade, equipamentos e limitacoes ja estao prontos para alimentar o plano. O proximo passo e apenas concluir a conta e seguir para o checkout.</p>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-1">
-                      {[
-                        { icon: CheckCircle2, title: "Validacao em tempo real", text: "Username e e-mail seguem com feedback visual imediato." },
-                        { icon: TrendingUp, title: "Dados preservados", text: "Nada do que foi preenchido no onboarding se perde ao seguir para o checkout." },
-                        { icon: Shield, title: "Checkout separado", text: "Plano e pagamento saem do onboarding e seguem em uma rota propria." },
-                      ].map((item) => {
-                        const Icon = item.icon;
-                        return (
-                          <article key={item.title} className="fl-auth-option rounded-[1.35rem] p-4" data-selected="false">
-                            <div className="flex items-start gap-3">
-                              <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-2xl bg-[var(--fl-auth-primary-soft)] text-[var(--app-primary-color)]">
-                                <Icon className="h-4 w-4" strokeWidth={2.2} />
-                              </div>
-                              <div>
-                                <p className="font-semibold">{item.title}</p>
-                                <p className="mt-1 text-sm leading-6 text-[var(--fl-auth-muted)]">{item.text}</p>
-                              </div>
-                            </div>
-                          </article>
-                        );
-                      })}
-                    </div>
-                  </section>
-
-                  <section className="space-y-4 border-t border-[var(--fl-auth-card-border)] pt-5">
-                    <div>
-                      <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[var(--fl-auth-subtle)]">Criacao de conta</p>
-                      <h3 className="text-2xl font-bold tracking-tight">Revise seus dados e finalize o acesso.</h3>
-                    </div>
-
-                    <div className="grid gap-4 md:grid-cols-2">
-                      <Field label="Nome completo" leftIcon={<UserRound className="h-4 w-4" />}>
-                        <Input
-                          value={profile.full_name}
-                          onChange={setProfileField("full_name")}
-                          placeholder="Seu nome completo"
-                          className={FIELD_INPUT}
-                        />
-                      </Field>
-
-                      <div className="space-y-2">
-                        <Field
-                          label="Nome de usuario"
-                          leftIcon={<User className="h-4 w-4" />}
-                          rightSlot={
-                            usernameAvailability.status === "checking" ? (
-                              <span className="text-xs text-[var(--fl-auth-subtle)]">...</span>
-                            ) : usernameAvailability.status === "available" ? (
-                              <CheckCircle2 className="h-4 w-4 text-emerald-500" />
-                            ) : null
-                          }
-                        >
-                          <Input
-                            value={profile.username}
-                            onChange={setProfileField("username")}
-                            onBlur={() => {
-                              void validateUsername(profile.username);
-                            }}
-                            placeholder="nome_de_usuario"
-                            minLength={3}
-                            className={FIELD_INPUT}
-                          />
-                        </Field>
-                        {usernameStatusMessage ? (
-                          <p className={`text-xs ${toneClass(usernameStatusMessage.tone)}`}>{usernameStatusMessage.text}</p>
-                        ) : null}
-                      </div>
-                    </div>
-
-                    <div className="space-y-2">
-                      <Field
-                        label="Email"
-                        leftIcon={<Mail className="h-4 w-4" />}
-                        rightSlot={
-                          emailAvailability.status === "checking" ? (
-                            <span className="text-xs text-[var(--fl-auth-subtle)]">...</span>
-                          ) : emailAvailability.status === "available" ? (
-                            <CheckCircle2 className="h-4 w-4 text-emerald-500" />
-                          ) : null
-                        }
-                      >
-                        <Input
-                          type="email"
-                          value={credentials.email}
-                          onChange={setCredential("email")}
-                          onBlur={() => {
-                            void validateEmail(credentials.email);
-                          }}
-                          placeholder="seu@email.com"
-                          className={FIELD_INPUT}
-                        />
-                      </Field>
-                      {emailStatusMessage ? (
-                        <p className={`text-xs ${toneClass(emailStatusMessage.tone)}`}>{emailStatusMessage.text}</p>
-                      ) : null}
-                    </div>
-
-                    <div className="grid gap-4 md:grid-cols-2">
-                      <Field
-                        label="Senha"
-                        leftIcon={<Lock className="h-4 w-4" />}
-                        hint="minimo 8 caracteres"
-                        rightSlot={
-                          <button
-                            type="button"
-                            onMouseDown={(event) => {
-                              event.preventDefault();
-                            }}
-                            onClick={() => setShowPassword((currentValue) => !currentValue)}
-                            className="rounded-full p-2 text-[var(--fl-auth-subtle)] transition hover:bg-white/10 hover:text-[var(--fl-auth-ink)] focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/30"
-                            aria-label={showPassword ? "Ocultar senha" : "Mostrar senha"}
-                            title={showPassword ? "Ocultar senha" : "Mostrar senha"}
-                          >
-                            {showPassword ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
-                          </button>
-                        }
-                      >
-                        <Input
-                          type={showPassword ? "text" : "password"}
-                          value={credentials.password}
-                          onChange={setCredential("password")}
-                          placeholder="Senha segura"
-                          minLength={8}
-                          className={FIELD_INPUT}
-                        />
-                      </Field>
-
-                      <Field label="Confirmar senha" leftIcon={<Lock className="h-4 w-4" />}>
-                        <Input
-                          type={showPassword ? "text" : "password"}
-                          value={credentials.confirmPassword}
-                          onChange={setCredential("confirmPassword")}
-                          placeholder="Repita a senha"
-                          className={FIELD_INPUT}
-                        />
-                      </Field>
-                    </div>
-                  </section>
-
-                  <div className="fl-auth-option rounded-[1.45rem] p-4" data-selected="false">
-                    <p className="font-semibold">Proximo passo: checkout separado.</p>
-                    <p className="mt-1 text-sm leading-6 text-[var(--fl-auth-muted)]">Depois de criar a conta, o funil segue para `/checkout`, onde a escolha do plano e o pagamento continuam sem misturar a cobranca ao onboarding.</p>
-                  </div>
-
-                  <Button
-                    type="submit"
-                    disabled={
-                      stepLoading ||
-                      !credentials.email ||
-                      !credentials.password ||
-                      credentials.password.length < 8 ||
-                      credentials.password !== credentials.confirmPassword ||
-                      emailAvailability.status === "checking" ||
-                      emailAvailability.status === "unavailable" ||
-                      emailAvailability.status === "invalid" ||
-                      usernameAvailability.status === "checking" ||
-                      usernameAvailability.status === "unavailable" ||
-                      usernameAvailability.status === "invalid"
-                    }
-                    size="lg"
-                    className="fl-auth-cta h-14 w-full rounded-[1.15rem] text-base font-semibold disabled:opacity-50"
-                  >
-                    {stepLoading ? "Criando conta..." : "Criar conta e ir para checkout"}
-                    {!stepLoading ? <ArrowRight className="h-4 w-4" /> : null}
-                  </Button>
-                </form>
-              )}
-            </main>
+            <div key={currentStep} className="animate-authStepEnter">
+              {stepContent}
+            </div>
           </div>
-        </div>
+        </main>
 
-        <footer className="hidden justify-center pb-6 text-[10px] font-semibold uppercase tracking-[0.42em] text-[var(--fl-auth-subtle)] lg:flex">
-          Precision • Progression • Rewards
+        <footer className="hidden justify-center pb-8 text-[10px] font-bold uppercase tracking-[0.34em] text-[var(--fl-onboarding-subtle)] md:flex">
+          <div className="flex items-center gap-6">
+            <span>Precision</span>
+            <span>•</span>
+            <span>Progression</span>
+            <span>•</span>
+            <span>Rewards</span>
+          </div>
         </footer>
       </div>
     </div>
   );
 }
+
