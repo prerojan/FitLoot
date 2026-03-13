@@ -633,7 +633,6 @@ export default function Onboarding() {
   const [selectedEquipment, setSelectedEquipment] = useState<string[]>([]);
   const [usernameAvailability, setUsernameAvailability] = useState<AvailabilityState>({ status: "idle" });
   const [emailAvailability, setEmailAvailability] = useState<AvailabilityState>({ status: "idle" });
-  const [passwordMismatchError, setPasswordMismatchError] = useState<string | null>(null);
 
   const usernameReqRef = useRef(0);
   const emailReqRef = useRef(0);
@@ -665,24 +664,13 @@ export default function Onboarding() {
 
   const setCredential = (field: keyof CredentialsStep) => (e: ChangeEvent<HTMLInputElement>) => {
     const nextValue = e.target.value;
-    let nextPasswordError: string | null = null;
 
     setCredentials((currentCredentials) => {
-      const nextCredentials = { ...currentCredentials, [field]: nextValue };
-      if (field === "password" || field === "confirmPassword") {
-        nextPasswordError = getPasswordMismatchMessage(
-          nextCredentials.password,
-          nextCredentials.confirmPassword,
-        );
-      }
-      return nextCredentials;
+      return { ...currentCredentials, [field]: nextValue };
     });
 
     if (field === "email") {
       setEmailAvailability({ status: "idle" });
-    }
-    if (field === "password" || field === "confirmPassword") {
-      setPasswordMismatchError(nextPasswordError);
     }
   };
 
@@ -1053,9 +1041,28 @@ export default function Onboarding() {
   const trimmedUsername = profile.username.trim();
   const normalizedEmail = credentials.email.trim().toLowerCase();
   const isPasswordValid = credentials.password.length >= 8;
+  const hasStartedPassword = credentials.password.length > 0;
+  const hasStartedConfirmPassword = credentials.confirmPassword.length > 0;
   const isEmailFormatValid = normalizedEmail.length > 0 && EMAIL_REGEX.test(normalizedEmail);
   const isUsernameFormatValid = trimmedUsername.length >= 3;
+  const passwordMismatchError = getPasswordMismatchMessage(
+    credentials.password,
+    credentials.confirmPassword,
+  );
   const hasPasswordMismatch = passwordMismatchError !== null;
+  const isConfirmPasswordInvalid = hasStartedConfirmPassword && hasPasswordMismatch;
+  const passwordFeedback: { tone: "green" | "red"; text: string } | null = hasStartedPassword
+    ? {
+        tone: isPasswordValid ? "green" : "red",
+        text: isPasswordValid ? "Senha valida" : "Minimo de 8 caracteres",
+      }
+    : null;
+  const confirmPasswordFeedback: { tone: "green" | "red"; text: string } | null = hasStartedConfirmPassword
+    ? {
+        tone: hasPasswordMismatch ? "red" : "green",
+        text: hasPasswordMismatch ? "As senhas nao coincidem" : "Senhas coincidem",
+      }
+    : null;
   const planHighlights = [
     {
       icon: Target,
@@ -1708,30 +1715,37 @@ export default function Onboarding() {
           </div>
 
           <div className="grid gap-4 md:grid-cols-2">
-            <Field label="Senha">
-              <Input
-                type="password"
-                value={credentials.password}
-                onChange={setCredential("password")}
-                placeholder="Senha segura"
-                minLength={8}
-                className={FIELD_INPUT}
-              />
-            </Field>
+            <div className="space-y-2">
+              <Field label="Senha">
+                <Input
+                  type="password"
+                  value={credentials.password}
+                  onChange={setCredential("password")}
+                  placeholder="Senha segura"
+                  minLength={8}
+                  className={FIELD_INPUT}
+                />
+              </Field>
+              {passwordFeedback ? (
+                <p className={`text-sm ${toneClass(passwordFeedback.tone)}`}>{passwordFeedback.text}</p>
+              ) : null}
+            </div>
 
             <div className="space-y-2">
-              <Field label="Confirmar senha" invalid={hasPasswordMismatch}>
+              <Field label="Confirmar senha" invalid={isConfirmPasswordInvalid}>
                 <Input
                   type="password"
                   value={credentials.confirmPassword}
                   onChange={setCredential("confirmPassword")}
                   placeholder="Repita a senha"
-                  aria-invalid={hasPasswordMismatch}
+                  aria-invalid={isConfirmPasswordInvalid}
                   className={FIELD_INPUT}
                 />
               </Field>
-              {passwordMismatchError ? (
-                <p className="text-sm text-red-400">{passwordMismatchError}</p>
+              {confirmPasswordFeedback ? (
+                <p className={`text-sm ${toneClass(confirmPasswordFeedback.tone)}`}>
+                  {confirmPasswordFeedback.text}
+                </p>
               ) : null}
             </div>
           </div>
