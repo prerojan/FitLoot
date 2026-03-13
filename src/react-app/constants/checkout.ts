@@ -1,4 +1,4 @@
-export type CheckoutPlanId = "free" | "pro" | "annual";
+export type CheckoutPlanId = "basic" | "pro" | "annual";
 export type BillingCycle = "monthly" | "annual";
 export type CheckoutPaymentMethod = "card" | "pix";
 
@@ -6,7 +6,7 @@ export const ANNUAL_DISCOUNT_RATE = 0.1;
 
 export const CHECKOUT_PLANS = [
   {
-    id: "free" as const,
+    id: "basic" as const,
     name: "Basico",
     monthlyPriceCents: 4900,
     checkoutUrl: "https://pay.cakto.com.br/gwr6dcu",
@@ -53,7 +53,7 @@ export const CHECKOUT_PLANS = [
   },
 ] as const;
 
-export const CHECKOUT_PLAN_DISPLAY_ORDER: CheckoutPlanId[] = ["free", "annual", "pro"];
+export const CHECKOUT_PLAN_DISPLAY_ORDER: CheckoutPlanId[] = ["basic", "annual", "pro"];
 
 export function getCheckoutPlan(planId: CheckoutPlanId) {
   return CHECKOUT_PLANS.find((plan) => plan.id === planId) ?? CHECKOUT_PLANS[0];

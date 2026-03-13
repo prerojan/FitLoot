@@ -1,4 +1,4 @@
-import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router";
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from "react-router";
 import { useState, useEffect, lazy, Suspense, useCallback, type ReactNode } from "react";
 import { Analytics } from "@vercel/analytics/react";
 import { SpeedInsights } from "@vercel/speed-insights/react";
@@ -16,7 +16,7 @@ import {
 } from "@/react-app/utils/appTheme";
 import { applyProfileTheme } from "@/react-app/utils/theme";
 import { clearJsonCache } from "@/react-app/utils/api";
-import { resolveAuthenticatedStartRoute } from "@/react-app/services/authService";
+import { hasPlanAccess, resolveAuthenticatedStartRoute } from "@/react-app/services/authService";
 import type { User } from "@/react-app/types/auth";
 
 const HomePage = lazy(() => import("@/react-app/pages/Home"));
@@ -33,6 +33,12 @@ const FoodAnalysis = lazy(() => import("@/react-app/pages/FoodAnalysis"));
 const LandingPage = lazy(() => import("@/react-app/pages/Landing"));
 const NotFoundPage = lazy(() => import("@/react-app/pages/NotFound"));
 
+const BILLING_ROUTE_PATHS = new Set<string>([
+  ROUTE_PATHS.payment,
+  ROUTE_PATHS.paymentPending,
+  ROUTE_PATHS.checkout,
+]);
+
 function RouteLoader() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 px-6 pt-20">
@@ -45,6 +51,7 @@ function RouteLoader() {
 
 function ProtectedRoute({ children }: { children: ReactNode }) {
   const { user, loading } = useAuth();
+  const location = useLocation();
 
   if (loading) {
     return <RouteLoader />;
@@ -52,6 +59,10 @@ function ProtectedRoute({ children }: { children: ReactNode }) {
 
   if (!user) {
     return <Navigate to={ROUTE_PATHS.login} replace />;
+  }
+
+  if (!hasPlanAccess(user) && !BILLING_ROUTE_PATHS.has(location.pathname)) {
+    return <Navigate to={ROUTE_PATHS.checkout} replace />;
   }
 
   return <>{children}</>;

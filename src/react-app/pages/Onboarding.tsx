@@ -15,7 +15,7 @@ import { AuthThemeHeader } from "@/react-app/components/AuthThemeHeader";
 import { ROUTE_PATHS } from "@/react-app/constants/auth";
 import { useAuth } from "@/react-app/contexts/auth";
 import { useTheme } from "@/react-app/contexts/theme";
-import { hasPlanAccess, resolveAuthenticatedStartRoute } from "@/react-app/services/authService";
+import { resolveAuthenticatedStartRoute } from "@/react-app/services/authService";
 import { api } from "@/react-app/utils/api";
 import { saveOnboardingDraft } from "@/react-app/utils/onboardingDraft";
 import { Input } from "@/react-app/components/ui/input";
@@ -649,9 +649,7 @@ export default function Onboarding() {
   useEffect(() => {
     if (authLoading) return;
     if (!user) return;
-    if (user.onboarding_completed === 1) {
-      navigate(hasPlanAccess(user) ? ROUTE_PATHS.home : resolveAuthenticatedStartRoute(user), { replace: true });
-    }
+    navigate(resolveAuthenticatedStartRoute(user), { replace: true });
   }, [authLoading, navigate, user]);
 
   useEffect(() => {

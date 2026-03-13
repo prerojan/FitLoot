@@ -10,7 +10,7 @@ import { api } from "@/react-app/utils/api";
 type PaymentMethod = "none" | "card" | "pix";
 
 type SubscriptionStatusPayload = {
-  plan_id: "free" | "pro" | "annual" | "vip";
+  plan_id: "basic" | "pro" | "annual" | "vip";
   plan_status: "pending" | "active" | "cancelled" | "failed" | "expired";
   payment_method: PaymentMethod;
   amount: number;
@@ -82,7 +82,7 @@ export default function PaymentPending() {
     }
     if (user.plan_status !== "pending") {
       clearScheduledPoll();
-      navigate(ROUTE_PATHS.payment, { replace: true });
+      navigate(ROUTE_PATHS.checkout, { replace: true });
     }
   }, [clearScheduledPoll, navigate, user]);
 
@@ -141,7 +141,7 @@ export default function PaymentPending() {
       setLastAmount(Number.isFinite(payload.amount) ? payload.amount : null);
       setCheckoutUrl(typeof payload.checkout_url === "string" ? payload.checkout_url : null);
 
-      if (payload.plan_id === "vip" || payload.plan_status === "active" || payload.has_access) {
+      if (payload.has_access) {
         clearScheduledPoll();
         setStatusPopup({
           title: "Pagamento aprovado",
@@ -174,7 +174,7 @@ export default function PaymentPending() {
         tone: "error",
       });
       window.setTimeout(() => {
-        navigate(ROUTE_PATHS.payment, { replace: true });
+        navigate(ROUTE_PATHS.checkout, { replace: true });
       }, 1300);
     } catch {
       scheduleNextPoll();

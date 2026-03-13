@@ -59,7 +59,7 @@ type AppContext = {
   };
 };
 
-type PublicPlanId = "free" | "pro" | "annual";
+type PublicPlanId = "basic" | "pro" | "annual";
 type PlanId = PublicPlanId | "vip";
 type PlanStatus = "pending" | "active" | "cancelled" | "failed" | "expired";
 type CheckoutPaymentMethod = "card" | "pix";
@@ -74,7 +74,7 @@ const CHECKOUT_PLAN_CATALOG: Record<
     product_id: string;
   }
 > = {
-  free: {
+  basic: {
     name: "basic",
     amount: 4900,
     checkout_url: "https://pay.cakto.com.br/gwr6dcu",
@@ -95,9 +95,9 @@ const CHECKOUT_PLAN_CATALOG: Record<
 };
 
 const CAKTO_PLAN_CATALOG: CaktoPlanCatalog = {
-  free: {
-    productId: CHECKOUT_PLAN_CATALOG.free.product_id,
-    checkoutUrl: CHECKOUT_PLAN_CATALOG.free.checkout_url,
+  basic: {
+    productId: CHECKOUT_PLAN_CATALOG.basic.product_id,
+    checkoutUrl: CHECKOUT_PLAN_CATALOG.basic.checkout_url,
   },
   pro: {
     productId: CHECKOUT_PLAN_CATALOG.pro.product_id,
@@ -351,7 +351,7 @@ type CheckoutStartResult = {
 };
 
 function isPublicPlanId(value: string): value is PublicPlanId {
-  return value === "free" || value === "pro" || value === "annual";
+  return value === "basic" || value === "pro" || value === "annual";
 }
 
 function isPlanStatus(value: string): value is PlanStatus {
@@ -369,12 +369,13 @@ function isUserPaymentMethod(value: string): value is UserPaymentMethod {
 function normalizePlanId(value: string | null | undefined): PlanId {
   if (value === "vip") return "vip";
   if (typeof value === "string" && isPublicPlanId(value)) return value;
-  return "free";
+  if (typeof value === "string" && value.trim().toLowerCase() === "free") return "basic";
+  return "basic";
 }
 
 function normalizePlanStatus(value: string | null | undefined): PlanStatus {
   if (typeof value === "string" && isPlanStatus(value)) return value;
-  return "active";
+  return "failed";
 }
 
 function normalizeUserPaymentMethod(value: string | null | undefined): UserPaymentMethod {
@@ -390,8 +391,9 @@ function shouldBypassPlanGuard(path: string): boolean {
   return PLAN_GUARD_EXEMPT_PATHS.has(path);
 }
 
-function resolvePlanRedirectPath(planStatus: PlanStatus): "/payment/pending" | "/payment" {
-  return planStatus === "pending" ? "/payment/pending" : "/payment";
+function resolvePlanRedirectPath(onboardingCompleted: number, planStatus: PlanStatus): "/checkout" | "/payment/pending" {
+  if (Number(onboardingCompleted) !== 1) return "/checkout";
+  return planStatus === "pending" ? "/payment/pending" : "/checkout";
 }
 
 function shouldPurgeUserOnLogout(user: UserAuthRecord): boolean {
@@ -436,7 +438,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function normalizePublicPlanIdFromValue(value: string | null | undefined): PublicPlanId | null {
   if (!value) return null;
   const normalized = value.trim().toLowerCase();
-  if (normalized === "free" || normalized === "basic") return "free";
+  if (normalized === "free" || normalized === "basic") return "basic";
   if (normalized === "pro" || normalized === "premium") return "pro";
   if (normalized === "annual" || normalized === "elite") return "annual";
   return null;
@@ -536,8 +538,8 @@ async function getUserAuthRecordById(db: D1Database, userId: string): Promise<Us
         name,
         avatar_url,
         ${onboardingColumnExists ? "COALESCE(onboarding_completed, 0)" : "0"} as onboarding_completed,
-        ${planIdColumnExists ? "COALESCE(plan_id, 'free')" : "'free'"} as plan_id,
-        ${planStatusColumnExists ? "COALESCE(plan_status, 'active')" : "'active'"} as plan_status,
+        ${planIdColumnExists ? "COALESCE(plan_id, 'basic')" : "'basic'"} as plan_id,
+        ${planStatusColumnExists ? "COALESCE(plan_status, 'failed')" : "'failed'"} as plan_status,
         ${paymentMethodColumnExists ? "COALESCE(payment_method, 'none')" : "'none'"} as payment_method
       FROM users
       WHERE id = ?`
@@ -653,7 +655,11 @@ async function authMiddleware(
       return c.json({ error: "UsuÃƒÂ¡rio nÃƒÂ£o encontrado", code: "USER_NOT_FOUND" }, 404);
     }
 
-    if (!shouldBypassPlanGuard(c.req.path) && !hasPlanAccess(userRecord.plan_id, userRecord.plan_status)) {
+    const hasUnlockedAccess =
+      Number(userRecord.onboarding_completed) === 1 &&
+      hasPlanAccess(userRecord.plan_id, userRecord.plan_status);
+
+    if (!shouldBypassPlanGuard(c.req.path) && !hasUnlockedAccess) {
       const isPending = userRecord.plan_status === "pending";
       return c.json(
         {
@@ -664,7 +670,7 @@ async function authMiddleware(
           plan_id: userRecord.plan_id,
           plan_status: userRecord.plan_status,
           payment_method: userRecord.payment_method,
-          redirect_to: resolvePlanRedirectPath(userRecord.plan_status),
+          redirect_to: resolvePlanRedirectPath(userRecord.onboarding_completed, userRecord.plan_status),
         },
         402
       );
@@ -2061,7 +2067,7 @@ async function startCheckoutForUser(
       planId: "vip",
       status: "active",
       paymentMethod: "card",
-      markOnboardingCompleted: params.markOnboardingCompleted,
+      markOnboardingCompleted: true,
     });
 
     return {
@@ -2113,14 +2119,7 @@ async function startCheckoutForUser(
       planId: params.planId,
       status: "pending",
       paymentMethod: params.paymentMethod,
-      markOnboardingCompleted: params.markOnboardingCompleted,
-    });
-  } else if (params.markOnboardingCompleted) {
-    await updateUserPlanState(db, params.userId, {
-      planId: currentUser.plan_id,
-      status: currentUser.plan_status,
-      paymentMethod: currentUser.payment_method,
-      markOnboardingCompleted: true,
+      markOnboardingCompleted: false,
     });
   }
 
@@ -2454,6 +2453,28 @@ app.post(
         .bind(userId, data.email, data.name ?? "", passwordHash, salt)
         .run();
 
+      const [planIdColumnExists, planStatusColumnExists, paymentMethodColumnExists, onboardingColumnExists] = await Promise.all([
+        hasTableColumn(c.env.fitloot_db, "users", "plan_id"),
+        hasTableColumn(c.env.fitloot_db, "users", "plan_status"),
+        hasTableColumn(c.env.fitloot_db, "users", "payment_method"),
+        hasTableColumn(c.env.fitloot_db, "users", "onboarding_completed"),
+      ]);
+
+      if (planIdColumnExists && planStatusColumnExists) {
+        const assignments = ["plan_id = 'basic'", "plan_status = 'failed'"];
+        if (paymentMethodColumnExists) {
+          assignments.push("payment_method = 'none'");
+        }
+        if (onboardingColumnExists) {
+          assignments.push("onboarding_completed = 0");
+        }
+
+        await c.env.fitloot_db
+          .prepare(`UPDATE users SET ${assignments.join(", ")} WHERE id = ?`)
+          .bind(userId)
+          .run();
+      }
+
       return c.json({ success: true }, 201);
     } catch (error) {
       console.error("[register]", error);
@@ -2741,7 +2762,7 @@ app.get("/api/subscription/status", authMiddleware, async (c) => {
     plan_id: refreshedUser.plan_id,
     plan_status: refreshedUser.plan_status,
     payment_method: refreshedUser.payment_method,
-    has_access: hasPlanAccess(refreshedUser.plan_id, refreshedUser.plan_status),
+    has_access: Number(refreshedUser.onboarding_completed) === 1 && hasPlanAccess(refreshedUser.plan_id, refreshedUser.plan_status),
     amount: latestSubscription ? Number(latestSubscription.amount) : currentPlanAmount,
     checkout_url: checkoutUrl,
     product_id: productId,
@@ -3305,12 +3326,12 @@ app.post("/api/onboarding", authMiddleware, zValidator("json", OnboardingRequest
         cardHolderName: data.card_holder_name,
         cardExpiry: data.card_expiry,
         cardCvv: data.card_cvv,
-        markOnboardingCompleted: true,
+        markOnboardingCompleted: false,
       });
 
       await ensureGoalStatsRow(c.env.fitloot_db, user.id, primaryGoal);
       await ensureUserCounterRow(c.env.fitloot_db, user.id);
-      await logUserEvent(c.env.fitloot_db, user.id, "onboarding_completed", {
+      await logUserEvent(c.env.fitloot_db, user.id, "onboarding_submitted", {
         conditioning,
         main_goal: primaryGoal,
         goals: selectedGoals,
@@ -7996,8 +8017,29 @@ Skills: ${skillRows.slice(0, 5).map((skill) => `${skill.name}:${skill.total_reps
       userId: user.id,
       message: getErrorMessage(error),
     });
-    const friendly = toFriendlyErrorResponse(error);
-    return c.json(friendly.payload, toStatusCode(friendly.status));
+    return c.json({
+      success: true,
+      recommendations: buildFallbackRecommendations({
+        level: 1,
+        streak: 0,
+        goal: null,
+        attributes: {
+          strength: 0,
+          constitution: 0,
+          vitality: 0,
+          dexterity: 0,
+          focus: 0,
+        },
+        skills: [],
+      }),
+      user_stats: {
+        level: 1,
+        total_missions: 0,
+        streak: 0,
+      },
+      degraded: true,
+      source: "fallback",
+    });
   }
 });
 

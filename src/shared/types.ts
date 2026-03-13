@@ -284,7 +284,7 @@ export const OnboardingRequestSchema = z.object({
   main_goal: z.enum(['perder_peso', 'ganhar_massa', 'resistencia', 'calistenia', 'saude_geral']),
   goals: z.array(z.enum(['perder_peso', 'ganhar_massa', 'resistencia', 'calistenia', 'saude_geral'])).min(1),
   training_frequency: z.number().int().min(1).max(7),
-  plan_id: z.enum(["free", "pro", "annual"]),
+  plan_id: z.enum(["basic", "pro", "annual"]),
   payment_method: z.enum(["card", "pix"]),
   card_number: z.string().min(8).max(32).optional(),
   card_holder_name: z.string().min(1).max(120).optional(),
@@ -388,14 +388,14 @@ export type LoginRequest = z.infer<typeof LoginRequestSchema>;
 
 // User plan (subscription)
 export const UserPlanRequestSchema = z.object({
-  plan_id: z.enum(["free", "pro", "annual"]),
+  plan_id: z.enum(["basic", "pro", "annual"]),
   payment_method: z.enum(["none", "card", "pix"]),
   status: z.enum(["pending", "active", "cancelled", "failed", "expired"]),
 });
 export type UserPlanRequest = z.infer<typeof UserPlanRequestSchema>;
 
 export const CheckoutStartRequestSchema = z.object({
-  plan_id: z.enum(["free", "pro", "annual"]),
+  plan_id: z.enum(["basic", "pro", "annual"]),
   payment_method: z.enum(["card", "pix"]),
   card_number: z.string().min(8).max(32).optional(),
   card_holder_name: z.string().min(1).max(120).optional(),

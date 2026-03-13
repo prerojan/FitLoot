@@ -54,12 +54,13 @@ export function useAuthBootstrap({ setUser, setLoading }: UseAuthBootstrapParams
 
       localStorage.setItem(AUTHENTICATED_HINT_KEY, "1");
 
-      const profile = await fetchProfileTheme().catch(() => null);
-      applyProfileTheme(profile);
-
       setUser(user);
       if (user.onboarding_completed === 1 && hasPlanAccess(user)) {
+        const profile = await fetchProfileTheme().catch(() => null);
+        applyProfileTheme(profile);
         prefetchCoreRoutes();
+      } else {
+        applyProfileTheme(null);
       }
       void notifyAppOpen().catch(() => undefined);
 

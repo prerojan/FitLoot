@@ -51,11 +51,10 @@ export function prefetchCoreRoutes(): void {
 }
 
 export function hasPlanAccess(user: User): boolean {
-  return user.plan_id === "vip" || user.plan_status === "active";
+  return user.onboarding_completed === 1 && (user.plan_id === "vip" || user.plan_status === "active");
 }
 
 export function resolveAuthenticatedStartRoute(user: User): string {
-  if (user.onboarding_completed !== 1) return ROUTE_PATHS.onboarding;
   if (hasPlanAccess(user)) return ROUTE_PATHS.home;
-  return user.plan_status === "pending" ? ROUTE_PATHS.paymentPending : ROUTE_PATHS.payment;
+  return ROUTE_PATHS.checkout;
 }

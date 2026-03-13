@@ -72,6 +72,15 @@ function buildOnboardingCheckoutPayload(
   };
 }
 
+function hasStartedCheckoutFlow(user: {
+  plan_id: "basic" | "pro" | "annual" | "vip";
+  plan_status: "pending" | "active" | "cancelled" | "failed" | "expired";
+  payment_method: "none" | "card" | "pix";
+} | null): boolean {
+  if (!user) return false;
+  return user.plan_status === "pending" || user.plan_id !== "basic" || user.payment_method !== "none";
+}
+
 function PlanCard({
   planId,
   selected,
@@ -157,11 +166,11 @@ export default function Checkout() {
   const navigate = useNavigate();
   const { user, checkAuth, logout } = useAuth();
   const { themeMode, toggleThemeMode } = useTheme();
-  const requiresOnboardingCheckout = user?.onboarding_completed !== 1;
+  const requiresOnboardingCheckout = user ? !hasStartedCheckoutFlow(user) && user.onboarding_completed !== 1 : false;
   const [planId, setPlanId] = useState<CheckoutPlanId>(
     requiresOnboardingCheckout
       ? "pro"
-      : user?.plan_id === "free" || user?.plan_id === "pro" || user?.plan_id === "annual"
+      : user?.plan_id === "basic" || user?.plan_id === "pro" || user?.plan_id === "annual"
         ? user.plan_id
         : "pro",
   );
@@ -188,7 +197,7 @@ export default function Checkout() {
       navigate(ROUTE_PATHS.home, { replace: true });
       return;
     }
-    if (user.onboarding_completed === 1 && user.plan_status === "pending") {
+    if (user.plan_status === "pending") {
       navigate(ROUTE_PATHS.paymentPending, { replace: true });
     }
   }, [navigate, user]);

@@ -1,4 +1,4 @@
-type PublicPlanId = "free" | "pro" | "annual";
+type PublicPlanId = "basic" | "pro" | "annual";
 type UserPaymentMethod = "none" | "card" | "pix";
 
 export type CaktoPlanCatalog = Record<
@@ -137,7 +137,7 @@ function normalizePublicPlanId(value: unknown): PublicPlanId | null {
   if (!hasText(value)) return null;
 
   const normalized = value.trim().toLowerCase();
-  if (normalized === "free" || normalized === "basic" || normalized === "basico") return "free";
+  if (normalized === "free" || normalized === "basic" || normalized === "basico") return "basic";
   if (normalized === "pro" || normalized === "premium") return "pro";
   if (normalized === "annual" || normalized === "elite") return "annual";
   return null;
