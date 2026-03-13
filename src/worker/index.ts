@@ -12,11 +12,13 @@ import {
   AiAnalyzeFoodRequestSchema,
   AuthRegisterRequestSchema,
   LoginRequestSchema,
+  PromoCodeRequestSchema,
   UserPlanRequestSchema,
   UpdateMeRequestSchema,
   ConditioningLevel,
   MissionMetricType,
   CircuitTask,
+  type PromoCodeEffect,
 } from "../shared/types";
 import {
   MISSION_LIMITS,
@@ -140,6 +142,7 @@ const PLAN_GUARD_EXEMPT_PATHS = new Set<string>([
   "/api/events/route-not-found",
   "/api/onboarding",
   "/api/checkout/start",
+  "/api/promo/apply",
   "/api/subscription/status",
 ]);
 
@@ -334,6 +337,58 @@ type SubscriptionMetadata = {
   checkout_tracking_id?: string | undefined;
   checkout_tracking_user_id?: string | undefined;
   checkout_tracking_plan_id?: PublicPlanId | undefined;
+  promo_code?: string | undefined;
+  promo_description?: string | undefined;
+  promo_effect?: PromoCodeEffect | undefined;
+  promo_effect_value?: string | undefined;
+};
+
+type PromoCodeRecord = {
+  id: number;
+  code: string;
+  description: string;
+  effect: string;
+  effect_value: string | null;
+  max_uses: number | null;
+  uses_count: number;
+  active: number;
+  expires_at: string | null;
+  created_at: string;
+};
+
+type PromoCodeUsageRecord = {
+  id: number;
+  promo_code_id: number;
+  user_id: string;
+  subscription_id: string | null;
+  applied_effect: string;
+  applied_value: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type PromoValidationSuccess = {
+  promoCodeId: number;
+  code: string;
+  description: string;
+  effect: PromoCodeEffect;
+  effectValue: string | null;
+};
+
+type PromoApplyResult = {
+  applied: boolean;
+  already_used: boolean;
+  promo_code_id: number;
+  code: string;
+  description: string;
+  effect: PromoCodeEffect;
+  effect_value: string | null;
+  vip_activated: boolean;
+  message: string;
+  subscription_id?: string | undefined;
+  plan_id?: PlanId | undefined;
+  plan_status?: PlanStatus | undefined;
+  payment_method?: UserPaymentMethod | undefined;
 };
 
 type CaktoWebhookEventStatus = "received" | "processing" | "processed" | "ignored" | "failed";
@@ -364,6 +419,14 @@ function isCheckoutPaymentMethod(value: string): value is CheckoutPaymentMethod 
 
 function isUserPaymentMethod(value: string): value is UserPaymentMethod {
   return value === "none" || isCheckoutPaymentMethod(value);
+}
+
+function isPromoCodeEffect(value: string): value is PromoCodeEffect {
+  return value === "activate_vip"
+    || value === "discount_percent"
+    || value === "discount_fixed"
+    || value === "free_months"
+    || value === "unlock_feature";
 }
 
 function normalizePlanId(value: string | null | undefined): PlanId {
@@ -411,6 +474,276 @@ function parseInteger(value: unknown): number | null {
   }
 
   return null;
+}
+
+function normalizePromoCodeValue(value: string | null | undefined): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function parsePromoCodeExpiryTimestamp(value: string | null): number | null {
+  if (!value) return null;
+  const normalizedValue = /[zZ]|[+-]\d{2}:\d{2}$/.test(value)
+    ? value
+    : `${value.replace(" ", "T")}Z`;
+  const parsed = Date.parse(normalizedValue);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function isPromoCodeCurrentlyAvailable(record: PromoCodeRecord): boolean {
+  if (Number(record.active) !== 1) {
+    return false;
+  }
+
+  const expiresAt = parsePromoCodeExpiryTimestamp(record.expires_at);
+  if (record.expires_at && expiresAt !== null && expiresAt <= Date.now()) {
+    return false;
+  }
+
+  if (record.expires_at && expiresAt === null) {
+    return false;
+  }
+
+  return record.max_uses === null || Number(record.uses_count) < Number(record.max_uses);
+}
+
+function toPromoValidationSuccess(record: PromoCodeRecord): PromoValidationSuccess | null {
+  if (!isPromoCodeEffect(record.effect)) {
+    return null;
+  }
+
+  return {
+    promoCodeId: Number(record.id),
+    code: record.code,
+    description: record.description,
+    effect: record.effect,
+    effectValue: record.effect_value,
+  };
+}
+
+function matchesVipActivationCode(env: Env, code: string): boolean {
+  const configuredCode = normalizePromoCodeValue(env.VIP_ACTIVATION_CODE);
+  if (!configuredCode) return true;
+  return configuredCode.toUpperCase() === code.toUpperCase();
+}
+
+async function getPromoCodeByCode(db: D1Database, code: string): Promise<PromoCodeRecord | null> {
+  return db
+    .prepare(
+      `SELECT
+        id,
+        code,
+        description,
+        effect,
+        effect_value,
+        max_uses,
+        uses_count,
+        active,
+        expires_at,
+        created_at
+      FROM promo_codes
+      WHERE UPPER(code) = UPPER(?)
+      LIMIT 1`
+    )
+    .bind(code)
+    .first<PromoCodeRecord>();
+}
+
+async function validatePromoCodeRecord(db: D1Database, code: string): Promise<PromoValidationSuccess | null> {
+  const normalizedCode = normalizePromoCodeValue(code);
+  if (!normalizedCode) return null;
+
+  const promoCodeRecord = await getPromoCodeByCode(db, normalizedCode);
+  if (!promoCodeRecord || !isPromoCodeCurrentlyAvailable(promoCodeRecord)) {
+    return null;
+  }
+
+  return toPromoValidationSuccess(promoCodeRecord);
+}
+
+async function getPromoCodeUsageByUser(
+  db: D1Database,
+  promoCodeId: number,
+  userId: string,
+): Promise<PromoCodeUsageRecord | null> {
+  return db
+    .prepare(
+      `SELECT
+        id,
+        promo_code_id,
+        user_id,
+        subscription_id,
+        applied_effect,
+        applied_value,
+        created_at,
+        updated_at
+      FROM promo_code_usages
+      WHERE promo_code_id = ? AND user_id = ?
+      LIMIT 1`
+    )
+    .bind(promoCodeId, userId)
+    .first<PromoCodeUsageRecord>();
+}
+
+async function incrementPromoCodeUsesCount(db: D1Database, promoCodeId: number): Promise<boolean> {
+  const result = await db.prepare(
+    `UPDATE promo_codes
+      SET uses_count = uses_count + 1
+      WHERE id = ?
+        AND active = 1
+        AND (expires_at IS NULL OR datetime(expires_at) > datetime('now'))
+        AND (max_uses IS NULL OR uses_count < max_uses)`
+  ).bind(promoCodeId).run();
+
+  return Number(result.meta.changes ?? 0) > 0;
+}
+
+async function createPromoCodeUsage(
+  db: D1Database,
+  params: {
+    promoCodeId: number;
+    userId: string;
+    effect: PromoCodeEffect;
+    effectValue: string | null;
+    subscriptionId?: string | null;
+  },
+): Promise<void> {
+  await db.prepare(
+    `INSERT INTO promo_code_usages (
+      promo_code_id,
+      user_id,
+      subscription_id,
+      applied_effect,
+      applied_value,
+      created_at,
+      updated_at
+    ) VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))`
+  ).bind(
+    params.promoCodeId,
+    params.userId,
+    params.subscriptionId ?? null,
+    params.effect,
+    params.effectValue,
+  ).run();
+}
+
+async function attachPromoCodeUsageToSubscription(
+  db: D1Database,
+  promoCodeId: number,
+  userId: string,
+  subscriptionId: string,
+): Promise<void> {
+  await db.prepare(
+    `UPDATE promo_code_usages
+      SET subscription_id = COALESCE(subscription_id, ?),
+          updated_at = datetime('now')
+      WHERE promo_code_id = ? AND user_id = ?`
+  ).bind(subscriptionId, promoCodeId, userId).run();
+}
+
+async function applyPromoCodeForUser(
+  db: D1Database,
+  env: Env,
+  params: {
+    userId: string;
+    code: string;
+    markOnboardingCompleted?: boolean;
+  },
+): Promise<PromoApplyResult | null> {
+  const normalizedCode = normalizePromoCodeValue(params.code);
+  if (!normalizedCode) {
+    return null;
+  }
+
+  const promoValidation = await validatePromoCodeRecord(db, normalizedCode);
+  if (!promoValidation) {
+    return null;
+  }
+
+  if (promoValidation.effect === "activate_vip" && !matchesVipActivationCode(env, normalizedCode)) {
+    return null;
+  }
+
+  const existingUsage = await getPromoCodeUsageByUser(db, promoValidation.promoCodeId, params.userId);
+  const alreadyUsed = Boolean(existingUsage);
+
+  if (!alreadyUsed) {
+    const incremented = await incrementPromoCodeUsesCount(db, promoValidation.promoCodeId);
+    if (!incremented) {
+      return null;
+    }
+
+    await createPromoCodeUsage(db, {
+      promoCodeId: promoValidation.promoCodeId,
+      userId: params.userId,
+      effect: promoValidation.effect,
+      effectValue: promoValidation.effectValue,
+    });
+  }
+
+  if (promoValidation.effect === "activate_vip") {
+    const existingVipSubscription =
+      alreadyUsed && existingUsage?.subscription_id
+        ? await getSubscriptionById(db, existingUsage.subscription_id)
+        : null;
+    const vipSubscription = existingVipSubscription ?? await ensureSubscriptionRecord(db, {
+      id: crypto.randomUUID(),
+      userId: params.userId,
+      planId: "vip",
+      status: "active",
+      paymentMethod: "card",
+      amount: 0,
+      eventType: alreadyUsed ? "vip.activated.reused" : "vip.activated",
+      source: "checkout",
+      metadata: {
+        promo_code: promoValidation.code,
+        promo_description: promoValidation.description,
+        promo_effect: promoValidation.effect,
+        promo_effect_value: promoValidation.effectValue ?? undefined,
+      },
+    });
+
+    if (!vipSubscription) {
+      throw new Error("Failed to activate VIP promo code.");
+    }
+
+    if (!existingVipSubscription || !existingUsage?.subscription_id) {
+      await attachPromoCodeUsageToSubscription(db, promoValidation.promoCodeId, params.userId, vipSubscription.id);
+    }
+    await updateUserPlanState(db, params.userId, {
+      planId: "vip",
+      status: "active",
+      paymentMethod: "card",
+      markOnboardingCompleted: true,
+    });
+
+    return {
+      applied: true,
+      already_used: alreadyUsed,
+      promo_code_id: promoValidation.promoCodeId,
+      code: promoValidation.code,
+      description: promoValidation.description,
+      effect: promoValidation.effect,
+      effect_value: promoValidation.effectValue,
+      vip_activated: true,
+      message: "Plano VIP ativado com sucesso.",
+      subscription_id: vipSubscription.id,
+      plan_id: "vip",
+      plan_status: "active",
+      payment_method: "card",
+    };
+  }
+
+  return {
+    applied: true,
+    already_used: alreadyUsed,
+    promo_code_id: promoValidation.promoCodeId,
+    code: promoValidation.code,
+    description: promoValidation.description,
+    effect: promoValidation.effect,
+    effect_value: promoValidation.effectValue,
+    vip_activated: false,
+    message: "Código promocional aplicado ao checkout.",
+  };
 }
 
 async function withTransaction<T>(db: D1Database, run: () => Promise<T>): Promise<T> {
@@ -501,6 +834,16 @@ async function purgeUserAccountData(db: D1Database, userId: string): Promise<voi
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
+}
+
+const INVALID_PROMO_CODE_ERROR = "PROMO_CODE_INVALID";
+
+function createInvalidPromoCodeError(): Error {
+  return new Error(INVALID_PROMO_CODE_ERROR);
+}
+
+function isInvalidPromoCodeError(error: unknown): boolean {
+  return getErrorMessage(error) === INVALID_PROMO_CODE_ERROR;
 }
 
 function isMissingSchemaError(error: unknown) {
@@ -1723,6 +2066,12 @@ function parseSubscriptionMetadata(raw: string | null): SubscriptionMetadata {
     if (typeof parsed.checkout_tracking_plan_id === "string" && isPublicPlanId(parsed.checkout_tracking_plan_id)) {
       metadata.checkout_tracking_plan_id = parsed.checkout_tracking_plan_id;
     }
+    if (typeof parsed.promo_code === "string") metadata.promo_code = parsed.promo_code;
+    if (typeof parsed.promo_description === "string") metadata.promo_description = parsed.promo_description;
+    if (typeof parsed.promo_effect === "string" && isPromoCodeEffect(parsed.promo_effect)) {
+      metadata.promo_effect = parsed.promo_effect;
+    }
+    if (typeof parsed.promo_effect_value === "string") metadata.promo_effect_value = parsed.promo_effect_value;
     return metadata;
   } catch {
     return {};
@@ -2034,55 +2383,39 @@ async function startCheckoutForUser(
     cardNumber?: string | undefined;
     cardHolderName?: string | undefined;
     cardExpiry?: string | undefined;
-    cardCvv?: string | undefined;
+    promoCode?: string | undefined;
     markOnboardingCompleted: boolean;
   },
 ): Promise<CheckoutStartResult> {
-  const vipCode = typeof env.VIP_ACTIVATION_CODE === "string" ? env.VIP_ACTIVATION_CODE : "";
-  const isVipActivation =
-    params.paymentMethod === "card" &&
-    vipCode.length > 0 &&
-    typeof params.cardCvv === "string" &&
-    params.cardCvv === vipCode;
+  const normalizedPromoCode = normalizePromoCodeValue(params.promoCode);
+  const appliedPromo =
+    normalizedPromoCode.length > 0
+      ? await applyPromoCodeForUser(db, env, {
+        userId: params.userId,
+        code: normalizedPromoCode,
+        markOnboardingCompleted: params.markOnboardingCompleted,
+      })
+      : null;
 
-  const subscriptionId = crypto.randomUUID();
+  if (normalizedPromoCode.length > 0 && !appliedPromo) {
+    throw createInvalidPromoCodeError();
+  }
 
-  if (isVipActivation) {
-    const vipSubscription = await ensureSubscriptionRecord(db, {
-      id: subscriptionId,
-      userId: params.userId,
-      planId: "vip",
-      status: "active",
-      paymentMethod: "card",
-      amount: 0,
-      eventType: "vip.activated",
-      source: "checkout",
-    });
-
-    if (!vipSubscription) {
-      throw new Error("Failed to activate VIP checkout record.");
-    }
-
-    await updateUserPlanState(db, params.userId, {
-      planId: "vip",
-      status: "active",
-      paymentMethod: "card",
-      markOnboardingCompleted: true,
-    });
-
+  if (appliedPromo?.vip_activated) {
     return {
       checkout_status: "vip_active",
       plan_id: "vip",
       plan_status: "active",
-      payment_method: "card",
+      payment_method: appliedPromo.payment_method ?? "card",
       amount: 0,
       checkout_url: null,
       product_id: null,
-      subscription_id: subscriptionId,
-      message: "Pagamento confirmado. Seu acesso completo foi liberado.",
+      subscription_id: appliedPromo.subscription_id ?? crypto.randomUUID(),
+      message: "Código promocional aplicado. Seu acesso VIP foi liberado.",
     };
   }
 
+  const subscriptionId = crypto.randomUUID();
   const amount = resolveCheckoutAmount(params.planId);
   const checkoutUrl = buildTrackedCheckoutUrl(resolveCheckoutUrl(params.planId), {
     checkoutId: subscriptionId,
@@ -2106,11 +2439,19 @@ async function startCheckoutForUser(
       checkout_tracking_user_id: params.userId,
       checkout_tracking_plan_id: params.planId,
       last_event_type: "checkout.started",
+      promo_code: appliedPromo?.code,
+      promo_description: appliedPromo?.description,
+      promo_effect: appliedPromo?.effect,
+      promo_effect_value: appliedPromo?.effect_value ?? undefined,
     },
   });
 
   if (!pendingSubscription) {
     throw new Error("Failed to create pending checkout.");
+  }
+
+  if (appliedPromo) {
+    await attachPromoCodeUsageToSubscription(db, appliedPromo.promo_code_id, params.userId, pendingSubscription.id);
   }
 
   const currentUser = await getUserAuthRecordById(db, params.userId);
@@ -2705,6 +3046,82 @@ app.post(
 );
 
 app.post(
+  "/api/promo/validate",
+  zValidator("json", PromoCodeRequestSchema),
+  async (c) => {
+    const schemaReady = await hasCoreSchema(c.env.fitloot_db);
+    if (!schemaReady) {
+      return databaseNotInitializedResponse(c);
+    }
+
+    try {
+      const data = c.req.valid("json");
+      const promoValidation = await validatePromoCodeRecord(c.env.fitloot_db, data.code);
+
+      if (!promoValidation) {
+        return c.json({ valid: false, message: "Código inválido ou expirado" }, 200);
+      }
+
+      if (promoValidation.effect === "activate_vip" && !matchesVipActivationCode(c.env, normalizePromoCodeValue(data.code))) {
+        return c.json({ valid: false, message: "Código inválido ou expirado" }, 200);
+      }
+
+      return c.json({
+        valid: true,
+        description: promoValidation.description,
+        effect: promoValidation.effect,
+        effect_value: promoValidation.effectValue,
+      });
+    } catch (error) {
+      if (isMissingSchemaError(error)) {
+        return schemaMismatchResponse(c);
+      }
+
+      throw error;
+    }
+  }
+);
+
+app.post(
+  "/api/promo/apply",
+  authMiddleware,
+  zValidator("json", PromoCodeRequestSchema),
+  async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    try {
+      const data = c.req.valid("json");
+      const appliedPromo = await withTransaction(c.env.fitloot_db, async () => (
+        applyPromoCodeForUser(c.env.fitloot_db, c.env, {
+          userId: user.id,
+          code: data.code,
+          markOnboardingCompleted: Number(user.onboarding_completed) === 1,
+        })
+      ));
+
+      if (!appliedPromo) {
+        return c.json({ valid: false, message: "Código inválido ou expirado" }, 400);
+      }
+
+      const refreshedUser = await getUserAuthRecordById(c.env.fitloot_db, user.id);
+      return c.json({
+        success: true,
+        valid: true,
+        ...appliedPromo,
+        user: refreshedUser,
+      });
+    } catch (error) {
+      if (isMissingSchemaError(error)) {
+        return schemaMismatchResponse(c);
+      }
+
+      throw error;
+    }
+  }
+);
+
+app.post(
   "/api/checkout/start",
   authMiddleware,
   zValidator("json", CheckoutStartRequestSchema),
@@ -2712,25 +3129,38 @@ app.post(
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
 
-    const data = c.req.valid("json");
-    const checkoutResult = await startCheckoutForUser(c.env.fitloot_db, c.env, {
-      userId: user.id,
-      planId: data.plan_id,
-      paymentMethod: data.payment_method,
-      cardNumber: data.card_number,
-      cardHolderName: data.card_holder_name,
-      cardExpiry: data.card_expiry,
-      cardCvv: data.card_cvv,
-      markOnboardingCompleted: false,
-    });
+    try {
+      const data = c.req.valid("json");
+      const checkoutResult = await withTransaction(c.env.fitloot_db, async () => (
+        startCheckoutForUser(c.env.fitloot_db, c.env, {
+          userId: user.id,
+          planId: data.plan_id,
+          paymentMethod: data.payment_method,
+          cardNumber: data.card_number,
+          cardHolderName: data.card_holder_name,
+          cardExpiry: data.card_expiry,
+          promoCode: data.promo_code,
+          markOnboardingCompleted: false,
+        })
+      ));
 
-    const refreshedUser = await getUserAuthRecordById(c.env.fitloot_db, user.id);
+      const refreshedUser = await getUserAuthRecordById(c.env.fitloot_db, user.id);
 
-    return c.json({
-      success: true,
-      ...checkoutResult,
-      user: refreshedUser,
-    });
+      return c.json({
+        success: true,
+        ...checkoutResult,
+        user: refreshedUser,
+      });
+    } catch (error) {
+      if (isInvalidPromoCodeError(error)) {
+        return c.json({ error: "Código inválido ou expirado" }, 400);
+      }
+      if (isMissingSchemaError(error)) {
+        return schemaMismatchResponse(c);
+      }
+
+      throw error;
+    }
   }
 );
 
@@ -3241,7 +3671,8 @@ app.post("/api/onboarding", authMiddleware, zValidator("json", OnboardingRequest
   const conditioning = data.initial_conditioning as ConditioningLevel;
   const maxTier = conditioningOrder(conditioning);
   let checkoutResult: CheckoutStartResult | undefined;
-  await withTransaction(c.env.fitloot_db, async () => {
+  try {
+    await withTransaction(c.env.fitloot_db, async () => {
       await c.env.fitloot_db.prepare(
         `INSERT INTO user_profiles (
           user_id, username, full_name, weight, height, initial_conditioning, injuries, equipment, main_goal,
@@ -3325,7 +3756,7 @@ app.post("/api/onboarding", authMiddleware, zValidator("json", OnboardingRequest
         cardNumber: data.card_number,
         cardHolderName: data.card_holder_name,
         cardExpiry: data.card_expiry,
-        cardCvv: data.card_cvv,
+        promoCode: data.promo_code,
         markOnboardingCompleted: false,
       });
 
@@ -3342,6 +3773,16 @@ app.post("/api/onboarding", authMiddleware, zValidator("json", OnboardingRequest
       });
       await evaluateLevelTitles(c.env.fitloot_db, user.id, 1);
     });
+  } catch (error) {
+    if (isInvalidPromoCodeError(error)) {
+      return c.json({ error: "Código inválido ou expirado" }, 400);
+    }
+    if (isMissingSchemaError(error)) {
+      return schemaMismatchResponse(c);
+    }
+
+    throw error;
+  }
 
   if (!checkoutResult) {
     throw new Error("Checkout result missing after onboarding transaction.");

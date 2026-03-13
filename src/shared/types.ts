@@ -267,6 +267,22 @@ export type RankingPlayer = {
   current_streak: number;
 };
 
+export const PromoCodeEffectSchema = z.enum([
+  "activate_vip",
+  "discount_percent",
+  "discount_fixed",
+  "free_months",
+  "unlock_feature",
+]);
+
+export type PromoCodeEffect = z.infer<typeof PromoCodeEffectSchema>;
+
+export const PromoCodeRequestSchema = z.object({
+  code: z.string().trim().min(1).max(128),
+});
+
+export type PromoCodeRequest = z.infer<typeof PromoCodeRequestSchema>;
+
 // Onboarding Request Schema
 export const OnboardingRequestSchema = z.object({
   username: z.string().min(3).max(20),
@@ -289,7 +305,7 @@ export const OnboardingRequestSchema = z.object({
   card_number: z.string().min(8).max(32).optional(),
   card_holder_name: z.string().min(1).max(120).optional(),
   card_expiry: z.string().min(3).max(8).optional(),
-  card_cvv: z.string().min(1).max(32).optional(),
+  promo_code: z.string().trim().min(1).max(128).optional(),
 });
 
 export type OnboardingRequest = z.infer<typeof OnboardingRequestSchema>;
@@ -400,7 +416,7 @@ export const CheckoutStartRequestSchema = z.object({
   card_number: z.string().min(8).max(32).optional(),
   card_holder_name: z.string().min(1).max(120).optional(),
   card_expiry: z.string().min(3).max(8).optional(),
-  card_cvv: z.string().min(1).max(32).optional(),
+  promo_code: z.string().trim().min(1).max(128).optional(),
 });
 export type CheckoutStartRequest = z.infer<typeof CheckoutStartRequestSchema>;
 

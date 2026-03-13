@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import {
   ArrowRight,
@@ -11,6 +11,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import BillingCycleSwitch from "@/react-app/components/BillingCycleSwitch";
+import LoadingBall from "@/react-app/components/LoadingBall";
 import { AuthThemeHeader } from "@/react-app/components/AuthThemeHeader";
 import { Input } from "@/react-app/components/ui/input";
 import { ROUTE_PATHS } from "@/react-app/constants/auth";
@@ -42,13 +43,62 @@ type CheckoutFlowResponse = {
   error?: string | undefined;
 };
 
+type PromoCodeEffect =
+  | "activate_vip"
+  | "discount_percent"
+  | "discount_fixed"
+  | "free_months"
+  | "unlock_feature";
+
+type PromoValidationStatus = "idle" | "loading" | "valid" | "invalid";
+
+type PromoValidationResponse = {
+  valid?: boolean | undefined;
+  description?: string | undefined;
+  effect?: PromoCodeEffect | undefined;
+  effect_value?: string | null | undefined;
+  message?: string | undefined;
+};
+
+type PromoValidationResult = {
+  code: string;
+  description: string;
+  effect: PromoCodeEffect;
+  effectValue: string | null;
+  benefitLabel: string;
+};
+
+function normalizePromoCode(value: string): string {
+  return value.trim();
+}
+
+function buildPromoBenefitLabel(effect: PromoCodeEffect, effectValue: string | null | undefined): string {
+  const normalizedValue = typeof effectValue === "string" ? effectValue.trim() : "";
+
+  switch (effect) {
+    case "activate_vip":
+      return "Ativa o plano VIP imediatamente.";
+    case "discount_percent":
+      return normalizedValue ? `${normalizedValue}% de desconto no checkout.` : "Desconto percentual aplicado ao checkout.";
+    case "discount_fixed":
+      return normalizedValue ? `Desconto fixo de ${normalizedValue} aplicado ao checkout.` : "Desconto fixo aplicado ao checkout.";
+    case "free_months":
+      return normalizedValue ? `${normalizedValue} mes(es) gratis liberado(s) no beneficio.` : "Meses gratis liberados no beneficio.";
+    case "unlock_feature":
+      return normalizedValue ? `Recurso desbloqueado: ${normalizedValue}.` : "Recurso especial desbloqueado.";
+    default:
+      return "Beneficio promocional validado.";
+  }
+}
+
 function buildOnboardingCheckoutPayload(
   draft: OnboardingDraft,
   planId: CheckoutPlanId,
   paymentMethod: CheckoutPaymentMethod,
-  cardCvv: string,
+  promoCode: string,
 ) {
   const equipment = [...draft.selectedEquipment, draft.equipment].filter(Boolean).join(", ");
+  const normalizedPromoCode = normalizePromoCode(promoCode);
 
   return {
     username: draft.username.trim(),
@@ -68,7 +118,7 @@ function buildOnboardingCheckoutPayload(
     training_frequency: draft.weeklyFrequency,
     plan_id: planId,
     payment_method: paymentMethod,
-    card_cvv: paymentMethod === "card" && cardCvv.trim() ? cardCvv.trim() : undefined,
+    promo_code: normalizedPromoCode || undefined,
   };
 }
 
@@ -176,10 +226,15 @@ export default function Checkout() {
   );
   const [billingCycle, setBillingCycle] = useState<BillingCycle>("monthly");
   const [paymentMethod, setPaymentMethod] = useState<CheckoutPaymentMethod>("pix");
-  const [cardCvv, setCardCvv] = useState("");
+  const [promoCode, setPromoCode] = useState("");
+  const [promoValidationStatus, setPromoValidationStatus] = useState<PromoValidationStatus>("idle");
+  const [promoValidationResult, setPromoValidationResult] = useState<PromoValidationResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const onboardingDraft = useMemo(() => loadOnboardingDraft(), []);
+  const promoValidationRequestIdRef = useRef(0);
+  const promoValidationCodeRef = useRef("");
+  const promoValidationPromiseRef = useRef<Promise<boolean> | null>(null);
 
   const selectedPlan = useMemo(() => getCheckoutPlan(planId), [planId]);
   const pricing = useMemo(() => getPlanPricing(planId, billingCycle), [planId, billingCycle]);
@@ -220,6 +275,89 @@ export default function Checkout() {
     }
   };
 
+  const resetPromoValidationState = () => {
+    setPromoValidationStatus("idle");
+    setPromoValidationResult(null);
+    promoValidationCodeRef.current = "";
+    promoValidationPromiseRef.current = null;
+  };
+
+  const validatePromoCode = async (rawCode = promoCode, options?: { force?: boolean }): Promise<boolean> => {
+    const normalizedCode = normalizePromoCode(rawCode);
+
+    if (!normalizedCode) {
+      resetPromoValidationState();
+      return true;
+    }
+
+    if (!options?.force && promoValidationCodeRef.current === normalizedCode) {
+      if (promoValidationStatus === "valid") {
+        return true;
+      }
+      if (promoValidationStatus === "invalid") {
+        return false;
+      }
+      if (promoValidationStatus === "loading" && promoValidationPromiseRef.current) {
+        return promoValidationPromiseRef.current;
+      }
+    }
+
+    promoValidationCodeRef.current = normalizedCode;
+    setPromoValidationStatus("loading");
+    setPromoValidationResult(null);
+
+    const requestId = ++promoValidationRequestIdRef.current;
+    const validationPromise = (async () => {
+      try {
+        const response = await api("/api/promo/validate", {
+          method: "POST",
+          body: JSON.stringify({ code: normalizedCode }),
+        });
+        const payload = (await response.json().catch(() => null)) as PromoValidationResponse | null;
+        const promoDescription = typeof payload?.description === "string" ? payload.description.trim() : "";
+        const promoEffect = payload?.effect;
+        const isValidResponse =
+          response.ok &&
+          payload?.valid === true &&
+          promoDescription.length > 0 &&
+          typeof promoEffect === "string";
+
+        if (requestId !== promoValidationRequestIdRef.current) {
+          return isValidResponse;
+        }
+
+        if (isValidResponse) {
+          setPromoValidationStatus("valid");
+          setPromoValidationResult({
+            code: normalizedCode,
+            description: promoDescription,
+            effect: promoEffect,
+            effectValue: typeof payload.effect_value === "string" ? payload.effect_value : null,
+            benefitLabel: buildPromoBenefitLabel(promoEffect, payload.effect_value),
+          });
+          return true;
+        }
+
+        setPromoValidationStatus("invalid");
+        setPromoValidationResult(null);
+        return false;
+      } catch {
+        if (requestId === promoValidationRequestIdRef.current) {
+          setPromoValidationStatus("invalid");
+          setPromoValidationResult(null);
+        }
+        return false;
+      } finally {
+        if (requestId === promoValidationRequestIdRef.current) {
+          promoValidationPromiseRef.current = null;
+        }
+      }
+    })();
+
+    promoValidationPromiseRef.current = validationPromise;
+    return validationPromise;
+  };
+
   const handleCheckout = async () => {
     setError(null);
 
@@ -228,6 +366,7 @@ export default function Checkout() {
       return;
     }
 
+    const normalizedPromoCode = normalizePromoCode(promoCode);
     const checkoutWindow = window.open("about:blank", "_blank");
     if (checkoutWindow) {
       try {
@@ -237,15 +376,28 @@ export default function Checkout() {
       }
     }
 
+    if (normalizedPromoCode) {
+      const promoIsValid = await validatePromoCode(normalizedPromoCode, {
+        force: promoValidationStatus !== "valid" || promoValidationCodeRef.current !== normalizedPromoCode,
+      });
+
+      if (!promoIsValid) {
+        if (checkoutWindow && !checkoutWindow.closed) {
+          checkoutWindow.close();
+        }
+        return;
+      }
+    }
+
     setLoading(true);
     try {
       const endpoint = requiresOnboardingCheckout ? "/api/onboarding" : "/api/checkout/start";
       const payloadBody = requiresOnboardingCheckout && onboardingDraft
-        ? buildOnboardingCheckoutPayload(onboardingDraft, planId, paymentMethod, cardCvv)
+        ? buildOnboardingCheckoutPayload(onboardingDraft, planId, paymentMethod, normalizedPromoCode)
         : {
             plan_id: planId,
             payment_method: paymentMethod,
-            card_cvv: paymentMethod === "card" && cardCvv.trim() ? cardCvv.trim() : undefined,
+            promo_code: normalizedPromoCode || undefined,
           };
 
       const response = await api(endpoint, {
@@ -402,23 +554,73 @@ export default function Checkout() {
                         : "O checkout Cakto sera aberto com o plano selecionado para concluir o pagamento com cartao fora do app."}
                     </div>
 
-                    {paymentMethod === "card" ? (
+                    <div className="space-y-3">
                       <label className="block space-y-2">
-                        <span className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--fl-auth-subtle)]">
-                          CVV opcional
-                        </span>
-                        <Input
-                          value={cardCvv}
-                          onChange={(event) => setCardCvv(event.target.value)}
-                          type="password"
-                          inputMode="numeric"
-                          autoComplete="off"
-                          maxLength={32}
-                          placeholder="***"
-                          className="h-12 rounded-[1.2rem] border-[var(--fl-auth-card-border)] bg-[var(--fl-auth-panel)] px-4 text-[var(--fl-auth-ink)] placeholder:text-[var(--fl-auth-subtle)]"
-                        />
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--fl-auth-subtle)]">
+                            Código Promocional
+                          </span>
+                          <span className="text-xs text-[var(--fl-auth-subtle)]">Opcional</span>
+                        </div>
+                        <div className="flex flex-col gap-3 sm:flex-row">
+                          <Input
+                            value={promoCode}
+                            onBlur={() => {
+                              void validatePromoCode();
+                            }}
+                            onChange={(event) => {
+                              const nextPromoCode = event.target.value;
+                              const normalizedNextPromoCode = normalizePromoCode(nextPromoCode);
+
+                              setPromoCode(nextPromoCode);
+
+                              if (!normalizedNextPromoCode) {
+                                resetPromoValidationState();
+                                return;
+                              }
+
+                              if (normalizedNextPromoCode !== promoValidationCodeRef.current) {
+                                setPromoValidationStatus("idle");
+                                setPromoValidationResult(null);
+                              }
+                            }}
+                            type="text"
+                            autoComplete="off"
+                            maxLength={128}
+                            placeholder="Insira seu código"
+                            className="h-12 rounded-[1.2rem] border-[var(--fl-auth-card-border)] bg-[var(--fl-auth-panel)] px-4 text-[var(--fl-auth-ink)] placeholder:text-[var(--fl-auth-subtle)]"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              void validatePromoCode(promoCode, { force: true });
+                            }}
+                            disabled={promoValidationStatus === "loading"}
+                            className="h-12 rounded-[1.2rem] border border-[var(--fl-auth-card-border)] px-5 text-sm font-semibold text-[var(--fl-auth-ink)] transition hover:bg-[rgba(var(--fl-color-accent-rgb),0.08)] disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            Aplicar
+                          </button>
+                        </div>
                       </label>
-                    ) : null}
+
+                      {promoValidationStatus === "loading" ? (
+                        <div className="flex items-center gap-2 text-sm text-[var(--fl-auth-muted)]">
+                          <LoadingBall size="sm" />
+                          <span>Validando código...</span>
+                        </div>
+                      ) : null}
+
+                      {promoValidationStatus === "valid" && promoValidationResult ? (
+                        <div className="rounded-[1.2rem] border border-emerald-400/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-400">
+                          <p className="font-semibold">{promoValidationResult.description}</p>
+                          <p className="mt-1 text-emerald-300">{promoValidationResult.benefitLabel}</p>
+                        </div>
+                      ) : null}
+
+                      {promoValidationStatus === "invalid" ? (
+                        <p className="text-sm text-red-500">Código inválido</p>
+                      ) : null}
+                    </div>
                   </div>
                 </div>
 
