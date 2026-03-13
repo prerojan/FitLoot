@@ -991,6 +991,16 @@ body {
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--app-primary-color) 12%, transparent);
 }
 
+.fl-auth-page.fl-auth-funnel-page .fl-onboarding-input-shell.is-invalid {
+  border-color: rgba(248, 113, 113, 0.82);
+  box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.12);
+}
+
+.fl-auth-page.fl-auth-funnel-page .fl-onboarding-input-shell.is-invalid:focus-within {
+  border-color: rgba(248, 113, 113, 0.94);
+  box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.16);
+}
+
 .fl-auth-page.fl-auth-funnel-page .fl-onboarding-slider-card {
   padding: 0;
   border: 0;
