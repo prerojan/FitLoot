@@ -6,6 +6,7 @@ import { Avatar } from "@/react-app/components/ui/avatar";
 import { Badge } from "@/react-app/components/ui/badge";
 import { Button } from "@/react-app/components/ui/button";
 import { Card } from "@/react-app/components/ui/card";
+import { ROUTE_PATHS } from "@/react-app/constants/auth";
 import { api } from "@/react-app/utils/api";
 
 type Friend = {
@@ -265,7 +266,7 @@ export default function ProfileFriendsPanel() {
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <h3 className="text-lg font-bold text-gray-900">Meus amigos ({friends.length})</h3>
-          <Button variant="secondary" onClick={() => navigate("/friends")}>
+          <Button variant="secondary" onClick={() => navigate(ROUTE_PATHS.minigames)}>
             Ver Arena
           </Button>
         </div>

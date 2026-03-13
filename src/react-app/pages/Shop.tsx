@@ -96,8 +96,10 @@ export default function Shop() {
 
   const handlePurchase = async (productId: number) => {
     try {
+      const requestId = crypto.randomUUID();
       const response = await api(`/api/shop/purchase/${productId}`, {
         method: "POST",
+        body: JSON.stringify({ request_id: requestId }),
       });
 
       if (response.status === 401 || response.status === 403) {

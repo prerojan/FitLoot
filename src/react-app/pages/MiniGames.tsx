@@ -238,7 +238,7 @@ export default function MiniGames() {
             Tentar novamente
           </button>
         </div>
-        <BottomNav active="friends" />
+        <BottomNav active="arena" />
       </div>
     );
   }

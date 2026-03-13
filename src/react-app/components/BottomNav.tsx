@@ -1,16 +1,17 @@
 import { useNavigate } from "react-router";
 import { ShoppingBag, Swords, Target, TrendingUp, User } from "lucide-react";
+import { ROUTE_PATHS } from "@/react-app/constants/auth";
 
 interface BottomNavProps {
   active: "missions" | "shop" | "arena" | "ranking" | "profile";
 }
 
 const NAV_ITEMS = [
-  { id: "missions", label: "Missoes", icon: Target, path: "/dashboard" },
-  { id: "shop", label: "Loja", icon: ShoppingBag, path: "/shop" },
-  { id: "arena", label: "Arena", icon: Swords, path: "/friends" },
-  { id: "ranking", label: "Ranking", icon: TrendingUp, path: "/ranking" },
-  { id: "profile", label: "Perfil", icon: User, path: "/profile" },
+  { id: "missions", label: "Missoes", icon: Target, path: ROUTE_PATHS.dashboard },
+  { id: "shop", label: "Loja", icon: ShoppingBag, path: ROUTE_PATHS.shop },
+  { id: "arena", label: "Arena", icon: Swords, path: ROUTE_PATHS.minigames },
+  { id: "ranking", label: "Ranking", icon: TrendingUp, path: ROUTE_PATHS.ranking },
+  { id: "profile", label: "Perfil", icon: User, path: ROUTE_PATHS.profile },
 ] as const;
 
 export default function BottomNav({ active }: BottomNavProps) {

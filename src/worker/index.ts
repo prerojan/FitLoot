@@ -68,19 +68,19 @@ const CHECKOUT_PLAN_CATALOG: Record<
   free: {
     name: "basic",
     amount: 4900,
-    checkout_url: "https://pay.cakto.com.br/4n3jesa_800215",
+    checkout_url: "https://pay.cakto.com.br/gwr6dcu",
     product_id: "800215",
   },
   pro: {
     name: "premium",
     amount: 9900,
-    checkout_url: "https://pay.cakto.com.br/j3gia6c_800252",
+    checkout_url: "https://pay.cakto.com.br/m955o3f",
     product_id: "800252",
   },
   annual: {
     name: "elite",
     amount: 14900,
-    checkout_url: "https://pay.cakto.com.br/3635e8b_800255",
+    checkout_url: "https://pay.cakto.com.br/k9c5935",
     product_id: "800255",
   },
 };
@@ -379,6 +379,24 @@ function parseInteger(value: unknown): number | null {
   }
 
   return null;
+}
+
+async function withTransaction<T>(db: D1Database, run: () => Promise<T>): Promise<T> {
+  await db.exec("BEGIN TRANSACTION");
+  try {
+    const result = await run();
+    await db.exec("COMMIT");
+    return result;
+  } catch (error) {
+    try {
+      await db.exec("ROLLBACK");
+    } catch (rollbackError) {
+      console.error("[transaction][rollback]", {
+        message: rollbackError instanceof Error ? rollbackError.message : String(rollbackError),
+      });
+    }
+    throw error;
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -2771,95 +2789,111 @@ app.post("/api/onboarding", authMiddleware, zValidator("json", OnboardingRequest
   initialAttrs.constitution += Math.floor(data.initial_situps / 5);
   initialAttrs.vitality += Math.floor(data.initial_squats / 5);
 
-  await c.env.fitloot_db.prepare(
-    `INSERT INTO user_profiles (
-      user_id, username, full_name, weight, height, initial_conditioning, injuries, equipment, main_goal,
-      age, gender, goals_json, updated_at
-    )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-    ON CONFLICT(user_id) DO UPDATE SET
-      username = excluded.username,
-      full_name = excluded.full_name,
-      weight = excluded.weight,
-      height = excluded.height,
-      initial_conditioning = excluded.initial_conditioning,
-      injuries = excluded.injuries,
-      equipment = excluded.equipment,
-      main_goal = excluded.main_goal,
-      age = excluded.age,
-      gender = excluded.gender,
-      goals_json = excluded.goals_json,
-      updated_at = datetime('now')`
-  ).bind(
-    user.id,
-    username,
-    fullName,
-    data.weight,
-    data.height,
-    data.initial_conditioning,
-    data.injuries || "",
-    data.equipment || "",
-    primaryGoal,
-    data.age,
-    data.gender,
-    goalsJson,
-  ).run();
-
-  await c.env.fitloot_db.prepare(
-    `INSERT INTO user_attributes (user_id, strength, constitution, vitality, dexterity, focus, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
-    ON CONFLICT(user_id) DO UPDATE SET
-      strength = excluded.strength,
-      constitution = excluded.constitution,
-      vitality = excluded.vitality,
-      dexterity = excluded.dexterity,
-      focus = excluded.focus,
-      updated_at = datetime('now')`
-  ).bind(user.id, initialAttrs.strength, initialAttrs.constitution, initialAttrs.vitality, initialAttrs.dexterity, initialAttrs.focus).run();
-
-  await c.env.fitloot_db.prepare(
-    `INSERT OR IGNORE INTO user_progression (user_id, xp, level, points, current_streak, best_streak, updated_at)
-    VALUES (?, 0, 1, 0, 0, 0, datetime('now'))`
-  ).bind(user.id).run();
-
   const conditioning = data.initial_conditioning as ConditioningLevel;
   const maxTier = conditioningOrder(conditioning);
+  let checkoutResult: CheckoutStartResult | undefined;
 
-  const initialSkills = await c.env.fitloot_db.prepare(
-    `SELECT id, tier, level_required FROM skills`
-  ).all<{ id: number; tier: string; level_required: number }>();
-
-  for (const skill of initialSkills.results) {
-    if (skillTierOrder(skill.tier) <= Math.max(1, maxTier) && Number(skill.level_required ?? 1) <= 1) {
-      await c.env.fitloot_db.prepare(
-        `INSERT OR IGNORE INTO user_skills (user_id, skill_id, status, current_stage, total_reps, total_time, best_reps, unlocked_at, updated_at)
-        VALUES (?, ?, 'unlocked', 1, 0, 0, 0, datetime('now'), datetime('now'))`
-      ).bind(user.id, skill.id).run();
-    }
-  }
-
-  const plan = await buildInitialTrainingPlan(primaryGoal, conditioning, data.equipment ?? null, data.injuries ?? null);
-  await upsertTrainingPlan(
-    c.env.fitloot_db,
-    user.id,
-    plan,
-    primaryGoal,
-    conditioning,
-    data.equipment ?? null,
-    data.injuries ?? null,
-    trainingFrequency,
-  );
-  let checkoutResult: CheckoutStartResult;
   try {
-    checkoutResult = await startCheckoutForUser(c.env.fitloot_db, c.env, {
-      userId: user.id,
-      planId: data.plan_id,
-      paymentMethod: data.payment_method,
-      cardNumber: data.card_number,
-      cardHolderName: data.card_holder_name,
-      cardExpiry: data.card_expiry,
-      cardCvv: data.card_cvv,
-      markOnboardingCompleted: true,
+    await withTransaction(c.env.fitloot_db, async () => {
+      await c.env.fitloot_db.prepare(
+        `INSERT INTO user_profiles (
+          user_id, username, full_name, weight, height, initial_conditioning, injuries, equipment, main_goal,
+          age, gender, goals_json, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        ON CONFLICT(user_id) DO UPDATE SET
+          username = excluded.username,
+          full_name = excluded.full_name,
+          weight = excluded.weight,
+          height = excluded.height,
+          initial_conditioning = excluded.initial_conditioning,
+          injuries = excluded.injuries,
+          equipment = excluded.equipment,
+          main_goal = excluded.main_goal,
+          age = excluded.age,
+          gender = excluded.gender,
+          goals_json = excluded.goals_json,
+          updated_at = datetime('now')`
+      ).bind(
+        user.id,
+        username,
+        fullName,
+        data.weight,
+        data.height,
+        data.initial_conditioning,
+        data.injuries || "",
+        data.equipment || "",
+        primaryGoal,
+        data.age,
+        data.gender,
+        goalsJson,
+      ).run();
+
+      await c.env.fitloot_db.prepare(
+        `INSERT INTO user_attributes (user_id, strength, constitution, vitality, dexterity, focus, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+        ON CONFLICT(user_id) DO UPDATE SET
+          strength = excluded.strength,
+          constitution = excluded.constitution,
+          vitality = excluded.vitality,
+          dexterity = excluded.dexterity,
+          focus = excluded.focus,
+          updated_at = datetime('now')`
+      ).bind(user.id, initialAttrs.strength, initialAttrs.constitution, initialAttrs.vitality, initialAttrs.dexterity, initialAttrs.focus).run();
+
+      await c.env.fitloot_db.prepare(
+        `INSERT OR IGNORE INTO user_progression (user_id, xp, level, points, current_streak, best_streak, updated_at)
+        VALUES (?, 0, 1, 0, 0, 0, datetime('now'))`
+      ).bind(user.id).run();
+
+      const initialSkills = await c.env.fitloot_db.prepare(
+        `SELECT id, tier, level_required FROM skills`
+      ).all<{ id: number; tier: string; level_required: number }>();
+
+      for (const skill of initialSkills.results) {
+        if (skillTierOrder(skill.tier) <= Math.max(1, maxTier) && Number(skill.level_required ?? 1) <= 1) {
+          await c.env.fitloot_db.prepare(
+            `INSERT OR IGNORE INTO user_skills (user_id, skill_id, status, current_stage, total_reps, total_time, best_reps, unlocked_at, updated_at)
+            VALUES (?, ?, 'unlocked', 1, 0, 0, 0, datetime('now'), datetime('now'))`
+          ).bind(user.id, skill.id).run();
+        }
+      }
+
+      const plan = await buildInitialTrainingPlan(primaryGoal, conditioning, data.equipment ?? null, data.injuries ?? null);
+      await upsertTrainingPlan(
+        c.env.fitloot_db,
+        user.id,
+        plan,
+        primaryGoal,
+        conditioning,
+        data.equipment ?? null,
+        data.injuries ?? null,
+        trainingFrequency,
+      );
+
+      checkoutResult = await startCheckoutForUser(c.env.fitloot_db, c.env, {
+        userId: user.id,
+        planId: data.plan_id,
+        paymentMethod: data.payment_method,
+        cardNumber: data.card_number,
+        cardHolderName: data.card_holder_name,
+        cardExpiry: data.card_expiry,
+        cardCvv: data.card_cvv,
+        markOnboardingCompleted: true,
+      });
+
+      await ensureGoalStatsRow(c.env.fitloot_db, user.id, primaryGoal);
+      await ensureUserCounterRow(c.env.fitloot_db, user.id);
+      await logUserEvent(c.env.fitloot_db, user.id, "onboarding_completed", {
+        conditioning,
+        main_goal: primaryGoal,
+        goals: selectedGoals,
+        training_frequency: trainingFrequency,
+        plan_id: checkoutResult.plan_id,
+        plan_status: checkoutResult.plan_status,
+        amount: checkoutResult.amount,
+      });
+      await evaluateLevelTitles(c.env.fitloot_db, user.id, 1);
     });
   } catch (error) {
     if (isCheckoutValidationError(error)) {
@@ -2867,18 +2901,10 @@ app.post("/api/onboarding", authMiddleware, zValidator("json", OnboardingRequest
     }
     throw error;
   }
-  await ensureGoalStatsRow(c.env.fitloot_db, user.id, primaryGoal);
-  await ensureUserCounterRow(c.env.fitloot_db, user.id);
-  await logUserEvent(c.env.fitloot_db, user.id, "onboarding_completed", {
-    conditioning,
-    main_goal: primaryGoal,
-    goals: selectedGoals,
-    training_frequency: trainingFrequency,
-    plan_id: checkoutResult.plan_id,
-    plan_status: checkoutResult.plan_status,
-    amount: checkoutResult.amount,
-  });
-  await evaluateLevelTitles(c.env.fitloot_db, user.id, 1);
+
+  if (!checkoutResult) {
+    throw new Error("Checkout result missing after onboarding transaction.");
+  }
 
   c.executionCtx.waitUntil((async () => {
     try {
@@ -3791,6 +3817,12 @@ app.post("/api/missions/complete", authMiddleware, zValidator("json", CompleteMi
     return c.json({ error: "Mission not found" }, 404);
   }
 
+  let streakMultiplier = 1;
+  let xpGained = 0;
+  let pointsGained = 0;
+  let leveledUp = false;
+
+  await withTransaction(c.env.fitloot_db, async () => {
   // Update mission
   await c.env.fitloot_db.prepare(
     `UPDATE missions SET is_completed = 1, status = 'completed', completed_at = datetime('now'), 
@@ -3804,7 +3836,6 @@ app.post("/api/missions/complete", authMiddleware, zValidator("json", CompleteMi
   ).bind(user.id).first();
 
   const today = assertString(safeGet(new Date().toISOString().split('T'), 0));
-  let streakMultiplier = 1;
   let newStreak = Number(progression?.current_streak || 0);
 
   if (progression?.last_activity_date !== today) {
@@ -3827,14 +3858,13 @@ app.post("/api/missions/complete", authMiddleware, zValidator("json", CompleteMi
   }
 
   // Award XP and points
-  const xpGained = Math.floor(Number(mission.xp_reward || 0) * streakMultiplier);
-  const pointsGained = Number(mission.points_reward || 0);
+  xpGained = Math.floor(Number(mission.xp_reward || 0) * streakMultiplier);
+  pointsGained = Number(mission.points_reward || 0);
 
   await c.env.fitloot_db.prepare(
     `UPDATE user_progression SET xp = COALESCE(xp, 0) + ?, points = COALESCE(points, 0) + ?, updated_at = datetime('now')
     WHERE user_id = ?`
   ).bind(xpGained, pointsGained, user.id).run();
-  invalidateRankingCache();
 
   // Check for level up
   const updatedProgression = await c.env.fitloot_db.prepare(
@@ -3844,8 +3874,6 @@ app.post("/api/missions/complete", authMiddleware, zValidator("json", CompleteMi
   const currentXp = Number(updatedProgression?.xp || 0);
   const currentLevel = Number(updatedProgression?.level || 1);
   const xpForNextLevel = currentLevel * 100;
-  let leveledUp = false;
-
   if (currentXp >= xpForNextLevel) {
     await c.env.fitloot_db.prepare(
       `UPDATE user_progression SET level = COALESCE(level, 1) + 1, xp = COALESCE(xp, 0) - ?, points = COALESCE(points, 0) + 100, updated_at = datetime('now')
@@ -3881,7 +3909,6 @@ app.post("/api/missions/complete", authMiddleware, zValidator("json", CompleteMi
   await onMissionComplete(c.env.fitloot_db, user.id, Number(mission.id));
   await updateCircuitProgress(user.id, mission as Record<string, unknown>, c.env.fitloot_db);
   await updateMonthlyMissionProgress(user.id, c.env.fitloot_db);
-  invalidateMissionListCache(user.id);
   const relevance = await checkMissionRelevance(user.id, Number(mission.id), c.env.fitloot_db, 'completed');
   if (relevance.isGoalRelevant) {
     const gs = await c.env.fitloot_db.prepare("SELECT goal_completed_count FROM user_goal_stats WHERE user_id = ?").bind(user.id).first<{ goal_completed_count: number }>();
@@ -3933,6 +3960,10 @@ app.post("/api/missions/complete", authMiddleware, zValidator("json", CompleteMi
       ).run();
     }
   }
+  });
+
+  invalidateRankingCache();
+  invalidateMissionListCache(user.id);
 
   return c.json({
     success: true,
@@ -4076,6 +4107,17 @@ app.post("/api/shop/purchase/:id", authMiddleware, async (c) => {
   if (!user) return c.json({ error: "Unauthorized" }, 401);
 
   const productId = parseInt(c.req.param("id"));
+  const body = await c.req.json().catch(() => ({})) as { request_id?: string | undefined };
+  const requestId = typeof body.request_id === "string" ? body.request_id.trim() : "";
+
+  if (requestId) {
+    const existingOrder = await c.env.fitloot_db.prepare(
+      "SELECT qr_code FROM coupon_orders WHERE user_id = ? AND request_id = ? LIMIT 1"
+    ).bind(user.id, requestId).first<{ qr_code: string }>();
+    if (existingOrder?.qr_code) {
+      return c.json({ success: true, qr_code: existingOrder.qr_code, reused: true });
+    }
+  }
 
   const product = await c.env.fitloot_db.prepare(
     "SELECT * FROM shop_products WHERE id = ? AND is_available = 1"
@@ -4093,20 +4135,39 @@ app.post("/api/shop/purchase/:id", authMiddleware, async (c) => {
     return c.json({ error: "Insufficient points" }, 400);
   }
 
-  // Deduct points
-  await c.env.fitloot_db.prepare(
-    "UPDATE user_progression SET points = points - ?, updated_at = datetime('now') WHERE user_id = ?"
-  ).bind(product.points_cost, user.id).run();
+  const qrCode = `FITLOOT-${crypto.randomUUID()}`;
+
+  try {
+    await withTransaction(c.env.fitloot_db, async () => {
+      const deduction = await c.env.fitloot_db.prepare(
+        "UPDATE user_progression SET points = points - ?, updated_at = datetime('now') WHERE user_id = ? AND points >= ?"
+      ).bind(product.points_cost, user.id, product.points_cost).run();
+      if (Number(deduction.meta?.changes ?? 0) === 0) {
+        throw new Error("INSUFFICIENT_POINTS");
+      }
+
+      await c.env.fitloot_db.prepare(
+        `INSERT INTO coupon_orders (user_id, product_id, points_spent, qr_code, request_id, updated_at)
+        VALUES (?, ?, ?, ?, ?, datetime('now'))`
+      ).bind(user.id, productId, product.points_cost, qrCode, requestId || null).run();
+    });
+  } catch (error) {
+    const message = getErrorMessage(error).toLowerCase();
+    if (message.includes("insufficient_points")) {
+      return c.json({ error: "Insufficient points" }, 400);
+    }
+    if (requestId && message.includes("unique") && message.includes("coupon_orders.request_id")) {
+      const existingOrder = await c.env.fitloot_db.prepare(
+        "SELECT qr_code FROM coupon_orders WHERE user_id = ? AND request_id = ? LIMIT 1"
+      ).bind(user.id, requestId).first<{ qr_code: string }>();
+      if (existingOrder?.qr_code) {
+        return c.json({ success: true, qr_code: existingOrder.qr_code, reused: true });
+      }
+    }
+    throw error;
+  }
+
   invalidateRankingCache();
-
-  // Generate QR code
-  const qrCode = `FITLOOT-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-
-  // Create order
-  await c.env.fitloot_db.prepare(
-    `INSERT INTO coupon_orders (user_id, product_id, points_spent, qr_code, updated_at)
-    VALUES (?, ?, ?, ?, datetime('now'))`
-  ).bind(user.id, productId, product.points_cost, qrCode).run();
   invalidateShopProductsCache();
 
   return c.json({ success: true, qr_code: qrCode });
@@ -4337,7 +4398,9 @@ app.post("/api/friends/request", authMiddleware, async (c) => {
   if (targetUserId === user.id) return c.json({ error: "NÃƒÂ£o ÃƒÂ© possÃƒÂ­vel adicionar a si mesmo" }, 400);
 
   const existingFriend = await c.env.fitloot_db.prepare(
-    `SELECT id FROM friendships WHERE (user_id = ? AND friend_id = ?) OR (user_id = ? AND friend_id = ?)`
+    `SELECT id FROM friendships
+      WHERE (user_id = ? AND COALESCE(friend_id, friend_user_id) = ?)
+         OR (user_id = ? AND COALESCE(friend_id, friend_user_id) = ?)`
   ).bind(user.id, targetUserId, targetUserId, user.id).first();
   if (existingFriend) return c.json({ error: "JÃƒÂ¡ sÃƒÂ£o amigos" }, 400);
 
@@ -4366,11 +4429,19 @@ app.post("/api/friends/accept", authMiddleware, async (c) => {
   ).bind(requestId, user.id).first<{ id: number; from_user_id: string; to_user_id: string }>();
   if (!request) return c.json({ error: "SolicitaÃƒÂ§ÃƒÂ£o nÃƒÂ£o encontrada" }, 404);
 
-  await c.env.fitloot_db.prepare("UPDATE friend_requests SET status = 'accepted', updated_at = datetime('now') WHERE id = ?").bind(requestId).run();
-  await c.env.fitloot_db.prepare("INSERT OR IGNORE INTO friendships (user_id, friend_id, created_at, updated_at) VALUES (?, ?, datetime('now'), datetime('now'))")
-    .bind(request.from_user_id, request.to_user_id).run();
-  await c.env.fitloot_db.prepare("INSERT OR IGNORE INTO friendships (user_id, friend_id, created_at, updated_at) VALUES (?, ?, datetime('now'), datetime('now'))")
-    .bind(request.to_user_id, request.from_user_id).run();
+  await withTransaction(c.env.fitloot_db, async () => {
+    await c.env.fitloot_db.prepare(
+      "UPDATE friend_requests SET status = 'accepted', updated_at = datetime('now') WHERE id = ?"
+    ).bind(requestId).run();
+    await c.env.fitloot_db.prepare(
+      `INSERT OR IGNORE INTO friendships (user_id, friend_user_id, friend_id, status, created_at, updated_at)
+      VALUES (?, ?, ?, 'accepted', datetime('now'), datetime('now'))`
+    ).bind(request.from_user_id, request.to_user_id, request.to_user_id).run();
+    await c.env.fitloot_db.prepare(
+      `INSERT OR IGNORE INTO friendships (user_id, friend_user_id, friend_id, status, created_at, updated_at)
+      VALUES (?, ?, ?, 'accepted', datetime('now'), datetime('now'))`
+    ).bind(request.to_user_id, request.from_user_id, request.from_user_id).run();
+  });
 
   await onFriendAdded(c.env.fitloot_db, request.to_user_id);
   await onFriendAdded(c.env.fitloot_db, request.from_user_id);
@@ -4398,7 +4469,11 @@ app.delete("/api/friends/:friendId", authMiddleware, async (c) => {
   if (!user) return c.json({ error: "Unauthorized" }, 401);
 
   const friendId = c.req.param("friendId");
-  await c.env.fitloot_db.prepare(`DELETE FROM friendships WHERE (user_id = ? AND friend_id = ?) OR (user_id = ? AND friend_id = ?)`)
+  await c.env.fitloot_db.prepare(
+    `DELETE FROM friendships
+      WHERE (user_id = ? AND COALESCE(friend_id, friend_user_id) = ?)
+         OR (user_id = ? AND COALESCE(friend_id, friend_user_id) = ?)`
+  )
     .bind(user.id, friendId, friendId, user.id).run();
   return c.json({ success: true });
 });
@@ -4410,12 +4485,12 @@ app.get("/api/friends", authMiddleware, async (c) => {
   const offset = Math.max(Number(c.req.query("offset") ?? 0), 0);
 
   const friends = await c.env.fitloot_db.prepare(
-    `SELECT f.id, f.friend_id as friend_user_id, up.username as friend_username,
+    `SELECT f.id, COALESCE(f.friend_id, f.friend_user_id) as friend_user_id, up.username as friend_username,
       up.full_name as friend_full_name, pr.level as friend_level, pr.xp as friend_xp,
       pr.current_streak as friend_streak
     FROM friendships f
-    INNER JOIN user_profiles up ON f.friend_id = up.user_id
-    INNER JOIN user_progression pr ON f.friend_id = pr.user_id
+    INNER JOIN user_profiles up ON COALESCE(f.friend_id, f.friend_user_id) = up.user_id
+    INNER JOIN user_progression pr ON COALESCE(f.friend_id, f.friend_user_id) = pr.user_id
     WHERE f.user_id = ?
     ORDER BY friend_level DESC, friend_xp DESC
     LIMIT ? OFFSET ?`

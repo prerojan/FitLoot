@@ -10,33 +10,33 @@
   type TouchEvent as ReactTouchEvent,
 } from "react";
 import { useNavigate } from "react-router";
-import { useAuth } from "@/react-app/App";
+import AppLoader from "@/react-app/components/AppLoader";
+import { AuthThemeHeader } from "@/react-app/components/AuthThemeHeader";
+import { ROUTE_PATHS } from "@/react-app/constants/auth";
+import { useAuth } from "@/react-app/contexts/auth";
+import { useTheme } from "@/react-app/contexts/theme";
+import { hasPlanAccess, resolveAuthenticatedStartRoute } from "@/react-app/services/authService";
 import { api } from "@/react-app/utils/api";
+import { saveOnboardingDraft } from "@/react-app/utils/onboardingDraft";
 import { Input } from "@/react-app/components/ui/input";
-import { AuthThemeHeader, useAuthColorScheme } from "@/react-app/components/AuthThemeHeader";
 import {
   Activity,
   ArrowRight,
   CalendarDays,
-  CheckCircle2,
   Dumbbell,
-  Eye,
-  EyeOff,
   Flame,
   Gauge,
   HeartHandshake,
   HeartPulse,
-  Lock,
-  Mail,
   Monitor,
+  Minus,
   Scale,
   Shield,
   Sparkles,
   Star,
   Target,
-  Trophy,
   TrendingUp,
-  User,
+  Plus,
   UserRound,
   Weight,
   Zap,
@@ -61,6 +61,7 @@ const FIELD_TEXTAREA =
   "placeholder:text-[var(--fl-onboarding-subtle)] focus-visible:!ring-0 focus-visible:!ring-offset-0";
 
 const TOTAL_STEPS = 13;
+const PLAN_PREVIEW_LOADING_MS = 7400;
 
 function Field({
   label,
@@ -93,19 +94,19 @@ function Field({
 }
 
 const STEP_META = [
-  { eyebrow: "Gancho emocional", label: "Step 01/13" },
-  { eyebrow: "Objective selection", label: "Step 02/13" },
-  { eyebrow: "Nivel atual", label: "Step 03/13" },
-  { eyebrow: "Genero", label: "Step 04/13" },
-  { eyebrow: "Idade", label: "Step 05/13" },
-  { eyebrow: "Altura", label: "Step 06/13" },
-  { eyebrow: "Peso", label: "Step 07/13" },
-  { eyebrow: "Capacidade inicial", label: "Step 08/13" },
-  { eyebrow: "Limitacoes", label: "Step 09/13" },
-  { eyebrow: "Equipamentos", label: "Step 10/13" },
-  { eyebrow: "Rotina semanal", label: "Step 11/13" },
-  { eyebrow: "Plano pronto", label: "Step 12/13" },
-  { eyebrow: "Criacao da conta", label: "Step 13/13" },
+  { eyebrow: "Gancho emocional", label: "Etapa 01/13" },
+  { eyebrow: "Selecao de objetivo", label: "Etapa 02/13" },
+  { eyebrow: "Nivel atual", label: "Etapa 03/13" },
+  { eyebrow: "Genero", label: "Etapa 04/13" },
+  { eyebrow: "Idade", label: "Etapa 05/13" },
+  { eyebrow: "Altura", label: "Etapa 06/13" },
+  { eyebrow: "Peso", label: "Etapa 07/13" },
+  { eyebrow: "Capacidade inicial", label: "Etapa 08/13" },
+  { eyebrow: "Limitacoes", label: "Etapa 09/13" },
+  { eyebrow: "Equipamentos", label: "Etapa 10/13" },
+  { eyebrow: "Rotina semanal", label: "Etapa 11/13" },
+  { eyebrow: "Plano pronto", label: "Etapa 12/13" },
+  { eyebrow: "Criacao da conta", label: "Etapa 13/13" },
 ] as const;
 
 function StepIntro({
@@ -118,8 +119,8 @@ function StepIntro({
   description: string;
 }) {
   const meta = STEP_META[step] ?? {
-    eyebrow: "Onboarding",
-    label: `Step ${String(step + 1).padStart(2, "0")}`,
+    eyebrow: "Etapa",
+    label: `Etapa ${String(step + 1).padStart(2, "0")}`,
   };
   const progress = ((step + 1) / TOTAL_STEPS) * 100;
 
@@ -195,7 +196,7 @@ function StatusMessage({ message }: { message: string | null }) {
   );
 }
 
-function ScrollPicker({ value, onChange, min, max, unit, label, description }: ScrollPickerProps) {
+function ScrollPicker({ value, onChange, min, max, unit, label }: ScrollPickerProps) {
   const dragRef = useRef<{
     mouseActive: boolean;
     touchId: number | null;
@@ -273,18 +274,9 @@ function ScrollPicker({ value, onChange, min, max, unit, label, description }: S
   };
 
   return (
-    <div className="fl-onboarding-surface-card space-y-8">
-      <div className="space-y-3 text-center">
-        <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--app-primary-color)]">
-          {label}
-        </p>
-        {description ? (
-          <p className="mx-auto max-w-sm text-sm leading-7 text-[var(--fl-onboarding-muted)]">{description}</p>
-        ) : null}
-      </div>
-
+    <div className="fl-onboarding-slider-card">
       <div
-        className="fl-onboarding-wheel-shell"
+        className="fl-onboarding-wheel-shell fl-onboarding-slider-shell"
         onMouseDown={handleMouseDown}
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
@@ -319,22 +311,14 @@ function ScrollPicker({ value, onChange, min, max, unit, label, description }: S
                 disabled={item.value === null}
                 className={`fl-onboarding-wheel-value ${isActive ? "is-active" : ""} ${isAdjacent ? "is-adjacent" : ""} ${item.value === null ? "is-empty" : ""}`}
               >
-                <span>{item.value ?? ""}</span>
-                {isActive ? <small>{unit}</small> : null}
+                <span className="fl-onboarding-wheel-number-shell">
+                  <span className="fl-onboarding-wheel-number">{item.value ?? ""}</span>
+                </span>
+                {isActive ? <small className="fl-onboarding-wheel-unit">{unit}</small> : null}
               </button>
             );
           })}
         </div>
-      </div>
-
-      <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.24em] text-[var(--fl-onboarding-subtle)]">
-        <button type="button" onClick={() => onChange(Math.max(min, clamped - 1))}>
-          - 1
-        </button>
-        <span>Deslize verticalmente</span>
-        <button type="button" onClick={() => onChange(Math.min(max, clamped + 1))}>
-          + 1
-        </button>
       </div>
     </div>
   );
@@ -342,42 +326,56 @@ function ScrollPicker({ value, onChange, min, max, unit, label, description }: S
 
 function ExerciseValueRow({
   label,
+  badge,
+  icon,
   value,
   onChange,
 }: {
   label: string;
+  badge: string;
+  icon: ReactNode;
   value: number;
   onChange: (value: number) => void;
 }) {
   const safeValue = Math.max(0, value);
-  const previousValue = Math.max(0, safeValue - 1);
-  const nextValue = safeValue + 1;
+
   return (
-    <div className="fl-onboarding-surface-card space-y-4">
-      <div>
+    <div className="fl-onboarding-capacity-card">
+      <div className="fl-onboarding-capacity-meta">
         <p className="text-lg font-bold text-[var(--fl-onboarding-ink)]">{label}</p>
-        <p className="text-sm text-[var(--fl-onboarding-muted)]">
-          Toque nos valores laterais para ajustar.
-        </p>
+        <span className="fl-onboarding-capacity-badge">{badge}</span>
       </div>
-      <div className="grid grid-cols-3 gap-3 text-center">
-        <button
-          type="button"
-          onClick={() => onChange(previousValue)}
-          className="fl-onboarding-value-button"
-        >
-          {previousValue}
-        </button>
-        <button type="button" className="fl-onboarding-value-button is-active">
-          {safeValue}
-        </button>
-        <button
-          type="button"
-          onClick={() => onChange(nextValue)}
-          className="fl-onboarding-value-button"
-        >
-          {nextValue}
-        </button>
+
+      <div className="fl-onboarding-capacity-input">
+        <div className="fl-onboarding-capacity-icon">{icon}</div>
+        <input
+          type="number"
+          min={0}
+          inputMode="numeric"
+          value={String(safeValue)}
+          onChange={(event) => onChange(Math.max(0, Number(event.target.value) || 0))}
+          className="fl-onboarding-capacity-value"
+          aria-label={label}
+        />
+
+        <div className="fl-onboarding-capacity-stepper">
+          <button
+            type="button"
+            onClick={() => onChange(Math.max(0, safeValue - 1))}
+            className="fl-onboarding-capacity-stepper-button"
+            aria-label={`Diminuir ${label}`}
+          >
+            <Minus className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            onClick={() => onChange(safeValue + 1)}
+            className="fl-onboarding-capacity-stepper-button"
+            aria-label={`Aumentar ${label}`}
+          >
+            <Plus className="h-4 w-4" />
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -409,8 +407,8 @@ const INITIAL_CREDENTIALS: CredentialsStep = { email: "", password: "", confirmP
 const INITIAL_PROFILE: ProfileStep = {
   username: "",
   full_name: "",
-  weight: "",
-  height: "",
+  weight: "70",
+  height: "170",
   initial_conditioning: "iniciante",
   initial_pushups: "0",
   initial_situps: "0",
@@ -505,7 +503,7 @@ const EQUIPMENT_OPTIONS = [
   { id: "anilhas", label: "Anilhas", icon: Scale },
   { id: "corda", label: "Corda", icon: Activity },
   { id: "elastico", label: "Elastico", icon: Zap },
-  { id: "kettlebell", label: "Kettlebell", icon: Weight },
+  { id: "kettlebell", label: "Peso russo", icon: Weight },
 ] as const;
 const INJURY_OPTIONS = [
   { id: "joelho", label: "Joelho" },
@@ -589,34 +587,47 @@ function goalPlanCopy(goal: ProfileStep["main_goal"]) {
 function conditioningPlanCopy(conditioning: ProfileStep["initial_conditioning"]) {
   switch (conditioning) {
     case "sedentario":
-      return "comecando leve para criar confianca desde a primeira semana";
+      return "com um inicio leve para criar confianca desde a primeira semana";
     case "iniciante":
-      return "guiando os primeiros ganhos com estrutura simples e segura";
+      return "com uma progressao simples e segura para os primeiros ganhos";
     case "intermediario":
-      return "aproveitando sua base atual para acelerar a evolucao";
+      return "aproveitando sua base atual para acelerar a evolucao com controle";
     default:
-      return "mantendo intensidade alta sem perder consistencia e controle";
+      return "com intensidade alta sem perder consistencia nem controle";
+  }
+}
+
+function conditioningPlanNarrative(conditioning: ProfileStep["initial_conditioning"]) {
+  switch (conditioning) {
+    case "sedentario":
+      return "comecar leve e ganhar confianca desde a primeira semana";
+    case "iniciante":
+      return "guiar seus primeiros ganhos com uma estrutura simples e segura";
+    case "intermediario":
+      return "aproveitar sua base atual e acelerar a evolucao com controle";
+    default:
+      return "manter intensidade alta sem abrir mao de consistencia nem controle";
   }
 }
 export default function Onboarding() {
   const { user, loading: authLoading, checkAuth } = useAuth();
   const navigate = useNavigate();
-  const { colorScheme, toggleColorScheme } = useAuthColorScheme();
+  const { themeMode, toggleThemeMode } = useTheme();
 
   const [currentStep, setCurrentStep] = useState(0);
   const [credentials, setCredentials] = useState(INITIAL_CREDENTIALS);
   const [profile, setProfile] = useState(INITIAL_PROFILE);
   const [weeklyFrequency, setWeeklyFrequency] = useState(3);
+  const [isGeneratingPlanPreview, setIsGeneratingPlanPreview] = useState(false);
   const [stepError, setStepError] = useState<string | null>(null);
   const [stepLoading, setStepLoading] = useState(false);
-  const [showPassword, setShowPassword] = useState(false);
   const [selectedEquipment, setSelectedEquipment] = useState<string[]>([]);
   const [usernameAvailability, setUsernameAvailability] = useState<AvailabilityState>({ status: "idle" });
   const [emailAvailability, setEmailAvailability] = useState<AvailabilityState>({ status: "idle" });
 
   const usernameReqRef = useRef(0);
   const emailReqRef = useRef(0);
-  const checkoutRedirectRef = useRef(false);
+  const planPreviewTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     const email = sessionStorage.getItem("onboarding_email");
@@ -628,8 +639,19 @@ export default function Onboarding() {
 
   useEffect(() => {
     if (authLoading) return;
-    if (user?.onboarding_completed === 1 && !checkoutRedirectRef.current) navigate("/home");
+    if (!user) return;
+    if (user.onboarding_completed === 1) {
+      navigate(hasPlanAccess(user) ? ROUTE_PATHS.home : resolveAuthenticatedStartRoute(user), { replace: true });
+    }
   }, [authLoading, navigate, user]);
+
+  useEffect(() => {
+    return () => {
+      if (planPreviewTimerRef.current !== null) {
+        window.clearTimeout(planPreviewTimerRef.current);
+      }
+    };
+  }, []);
 
   const setCredential = (field: keyof CredentialsStep) => (e: ChangeEvent<HTMLInputElement>) => {
     const nextValue = e.target.value;
@@ -752,11 +774,31 @@ export default function Onboarding() {
 
   const advanceToStep = useCallback((nextStep: number) => {
     setStepError(null);
+    setIsGeneratingPlanPreview(false);
     setCurrentStep(nextStep);
     if (typeof window !== "undefined") {
       window.scrollTo({ top: 0, behavior: "smooth" });
     }
   }, []);
+
+  const handleWeeklyFrequencyContinue = useCallback(() => {
+    setStepError(null);
+    setIsGeneratingPlanPreview(true);
+
+    if (planPreviewTimerRef.current !== null) {
+      window.clearTimeout(planPreviewTimerRef.current);
+    }
+
+    planPreviewTimerRef.current = window.setTimeout(() => {
+      planPreviewTimerRef.current = null;
+      setIsGeneratingPlanPreview(false);
+      advanceToStep(11);
+    }, PLAN_PREVIEW_LOADING_MS);
+
+    if (typeof window !== "undefined") {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  }, [advanceToStep]);
 
   const handleGoalSelection = (goal: GoalValue) => {
     setProfile((currentProfile) => ({ ...currentProfile, main_goal: goal }));
@@ -842,6 +884,15 @@ export default function Onboarding() {
       return;
     }
 
+    if (
+      usernameAvailability.status === "checking" ||
+      usernameAvailability.status === "unavailable" ||
+      usernameAvailability.status === "invalid"
+    ) {
+      setStepError(usernameAvailability.message ?? "Use um nome de usuario disponivel para criar a conta.");
+      return;
+    }
+
     setStepLoading(true);
 
     try {
@@ -890,35 +941,25 @@ export default function Onboarding() {
         return;
       }
 
-      const equipmentStr = [...selectedEquipment, profile.equipment].filter(Boolean).join(", ");
-
-      const res = await api("/api/onboarding", {
-        method: "POST",
-        body: JSON.stringify({
-          username: profile.username.trim(),
-          full_name: profile.full_name.trim(),
-          weight: Number(profile.weight),
-          height: Number(profile.height),
-          initial_conditioning: profile.initial_conditioning,
-          initial_pushups: Number(profile.initial_pushups) || 0,
-          initial_situps: Number(profile.initial_situps) || 0,
-          initial_squats: Number(profile.initial_squats) || 0,
-          injuries: profile.injuries || undefined,
-          equipment: equipmentStr || undefined,
-          main_goal: profile.main_goal,
-        }),
+      saveOnboardingDraft({
+        username: profile.username.trim(),
+        full_name: profile.full_name.trim(),
+        weight: profile.weight,
+        height: profile.height,
+        age: profile.age,
+        gender: profile.gender,
+        initial_conditioning: profile.initial_conditioning,
+        initial_pushups: profile.initial_pushups,
+        initial_situps: profile.initial_situps,
+        initial_squats: profile.initial_squats,
+        injuries: profile.injuries,
+        equipment: profile.equipment,
+        main_goal: profile.main_goal,
+        weeklyFrequency,
+        selectedEquipment,
       });
 
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        setStepError((data as { error?: string | undefined }).error ?? "Erro ao salvar perfil.");
-        setStepLoading(false);
-        return;
-      }
-
-      checkoutRedirectRef.current = true;
-      await checkAuth();
-      navigate("/checkout");
+      navigate(ROUTE_PATHS.checkout, { replace: true });
     } catch {
       setStepError("Nao foi possivel conectar ao servidor.");
     } finally {
@@ -950,23 +991,6 @@ export default function Onboarding() {
     });
   };
 
-  if (authLoading) {
-    return (
-      <div className="fl-auth-page fl-auth-funnel-page">
-        <div className="mx-auto flex min-h-screen max-w-7xl flex-col px-4 py-4 sm:px-6 lg:px-8">
-          <AuthThemeHeader colorScheme={colorScheme} onToggleColorScheme={toggleColorScheme} />
-          <div className="flex flex-1 items-center justify-center">
-            <div className="fl-onboarding-loading-card px-6 py-12 text-center">
-              <div className="text-sm font-semibold uppercase tracking-[0.3em] text-[var(--app-primary-color)]">
-                Carregando onboarding
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   const selectedGoal = GOAL_OPTIONS.find((option) => option.value === profile.main_goal) ?? {
     value: "saude_geral" as const,
     label: "Manutencao",
@@ -988,7 +1012,7 @@ export default function Onboarding() {
   const isExistingAccountError = stepError?.includes("cadastrado") ?? false;
   const planHighlights = [
     {
-      icon: Trophy,
+      icon: Target,
       title: "Missoes desbloqueadas",
       text: `Vamos ativar ${goalPlanCopy(profile.main_goal)} logo nas primeiras semanas.`,
     },
@@ -1000,7 +1024,7 @@ export default function Onboarding() {
     {
       icon: CalendarDays,
       title: "Rotina que encaixa",
-      text: `A estrutura inicial considera ${weeklyFrequency} dias por semana para manter aderencia.`,
+      text: `A estrutura inicial considera ${weeklyFrequency} ${weeklyFrequency === 1 ? "dia" : "dias"} por semana para manter aderencia.`,
     },
   ];
   const accountSubmitDisabled =
@@ -1033,55 +1057,7 @@ export default function Onboarding() {
           description="O FitLoot mistura treino, progresso e recompensa para fazer sua rotina render mais e parecer mais viciante."
         />
 
-        <div className="fl-onboarding-hero-panel">
-          <div className="fl-onboarding-badge-row">
-            <span className="fl-onboarding-chip">
-              <Sparkles className="h-4 w-4" />
-              Loot diario
-            </span>
-            <span className="fl-onboarding-chip">
-              <Trophy className="h-4 w-4" />
-              Metas claras
-            </span>
-          </div>
-
-          <h2 className="fl-onboarding-section-title">
-            Antes de pedir qualquer dado, a ideia e simples: treinar com mais constancia porque cada semana vira uma progressao visivel.
-          </h2>
-
-          <div className="grid gap-3 sm:grid-cols-3">
-            {[
-              {
-                icon: Target,
-                title: "Missoes objetivas",
-                text: "Cada fase do plano vira uma meta curta e facil de entender.",
-              },
-              {
-                icon: TrendingUp,
-                title: "Progressao guiada",
-                text: "O app adapta carga e ritmo conforme sua realidade de hoje.",
-              },
-              {
-                icon: CalendarDays,
-                title: "Rotina sustentavel",
-                text: "Seu plano nasce para caber na semana que voce realmente consegue cumprir.",
-              },
-            ].map((item) => {
-              const Icon = item.icon;
-              return (
-                <article key={item.title} className="fl-onboarding-surface-card">
-                  <div className="fl-onboarding-feature-icon">
-                    <Icon className="h-5 w-5" strokeWidth={2.2} />
-                  </div>
-                  <p className="mt-4 text-lg font-bold text-[var(--fl-onboarding-ink)]">{item.title}</p>
-                  <p className="mt-2 text-sm leading-6 text-[var(--fl-onboarding-muted)]">{item.text}</p>
-                </article>
-              );
-            })}
-          </div>
-        </div>
-
-        <div className="space-y-4">
+        <div className="space-y-4 pt-4">
           <PrimaryButton label="Comecar" onClick={() => advanceToStep(1)} />
           <p className="fl-onboarding-helper-copy">Sem formulario agora. Primeiro montamos o seu caminho ideal.</p>
         </div>
@@ -1323,7 +1299,6 @@ export default function Onboarding() {
 
         <div className="fl-onboarding-badge-row">
           <span className="fl-onboarding-chip">{GENDER_OPTIONS.find((option) => option.value === profile.gender)?.label ?? "Perfil"}</span>
-          <span className="fl-onboarding-chip">{profile.age} anos</span>
           <span className="fl-onboarding-chip">{profile.height} cm</span>
           <span className="fl-onboarding-chip">{profile.weight} kg</span>
         </div>
@@ -1331,6 +1306,8 @@ export default function Onboarding() {
         <div className="space-y-4">
           <ExerciseValueRow
             label="Flexoes"
+            badge="Superior"
+            icon={<Dumbbell className="h-5 w-5" strokeWidth={2.2} />}
             value={Number(profile.initial_pushups) || 0}
             onChange={(nextValue) =>
               setProfile((currentProfile) => ({
@@ -1341,6 +1318,8 @@ export default function Onboarding() {
           />
           <ExerciseValueRow
             label="Abdominais"
+            badge="Tronco"
+            icon={<Flame className="h-5 w-5" strokeWidth={2.2} />}
             value={Number(profile.initial_situps) || 0}
             onChange={(nextValue) =>
               setProfile((currentProfile) => ({
@@ -1351,6 +1330,8 @@ export default function Onboarding() {
           />
           <ExerciseValueRow
             label="Agachamentos"
+            badge="Pernas"
+            icon={<Weight className="h-5 w-5" strokeWidth={2.2} />}
             value={Number(profile.initial_squats) || 0}
             onChange={(nextValue) =>
               setProfile((currentProfile) => ({
@@ -1361,7 +1342,7 @@ export default function Onboarding() {
           />
         </div>
 
-        <div className="grid gap-3">
+        <div className="fl-onboarding-sticky-footer grid gap-3">
           <PrimaryButton label="Continuar" onClick={handleCapacityContinue} />
           <SecondaryButton label="Voltar" onClick={() => advanceToStep(6)} />
         </div>
@@ -1489,50 +1470,78 @@ export default function Onboarding() {
       </section>
     );
   } else if (currentStep === 10) {
-    stepContent = (
-      <section className="space-y-8">
-        <StepIntro
-          step={10}
-          title={
-            <>
-              Quantos dias por <span className="text-[var(--app-primary-color)]">semana?</span>
-            </>
-          }
-          description="Escolha sua frequencia real. O plano vai nascer com isso em mente para manter aderencia desde o comeco."
-        />
+    if (isGeneratingPlanPreview) {
+      stepContent = (
+        <section className="space-y-8">
+          <StepIntro
+            step={10}
+            title={
+              <>
+                Gerando seu <span className="text-[var(--app-primary-color)]">plano.</span>
+              </>
+            }
+            description="Estamos organizando a estrutura inicial com base na sua frequencia semanal."
+          />
 
-        <ScrollPicker
-          label="Frequencia semanal"
-          description="Use o mesmo gesto do seletor de idade para ajustar uma rotina que voce realmente consegue sustentar."
-          value={weeklyFrequency}
-          onChange={setWeeklyFrequency}
-          min={1}
-          max={7}
-          unit="dias"
-        />
-
-        <div className="fl-onboarding-surface-card">
-          <div className="flex items-start gap-4">
-            <div className="fl-onboarding-feature-icon">
-              <CalendarDays className="h-5 w-5" strokeWidth={2.2} />
-            </div>
-            <div>
+          <div className="fl-onboarding-surface-card flex min-h-[320px] flex-col items-center justify-center gap-5 text-center">
+            <AppLoader size="lg" />
+            <div className="space-y-2">
               <p className="text-lg font-bold text-[var(--fl-onboarding-ink)]">
-                {weeklyFrequency} {weeklyFrequency === 1 ? "dia" : "dias"} por semana
+                Gerando seu plano personalizado...
               </p>
-              <p className="mt-2 text-sm leading-6 text-[var(--fl-onboarding-muted)]">
-                {frequencyMessage(weeklyFrequency)}
+              <p className="text-sm leading-6 text-[var(--fl-onboarding-muted)]">
+                Em instantes voce vai ver como a sua rotina se transforma em progresso.
               </p>
             </div>
           </div>
-        </div>
+        </section>
+      );
+    } else {
+      stepContent = (
+        <section className="space-y-8">
+          <StepIntro
+            step={10}
+            title={
+              <>
+                Quantos dias por <span className="text-[var(--app-primary-color)]">semana?</span>
+              </>
+            }
+            description="Escolha sua frequencia real. O plano vai nascer com isso em mente para manter aderencia desde o comeco."
+          />
 
-        <div className="grid gap-3">
-          <PrimaryButton label="Continuar" onClick={() => advanceToStep(11)} />
-          <SecondaryButton label="Voltar" onClick={() => advanceToStep(9)} />
-        </div>
-      </section>
-    );
+          <ScrollPicker
+            label="Frequencia semanal"
+            description="Use o mesmo gesto do seletor de idade para ajustar uma rotina que voce realmente consegue sustentar."
+            value={weeklyFrequency}
+            onChange={setWeeklyFrequency}
+            min={1}
+            max={7}
+            unit="dias"
+          />
+
+          <div className="fl-onboarding-surface-card">
+            <div className="flex items-start gap-4">
+              <div className="fl-onboarding-feature-icon">
+                <CalendarDays className="h-5 w-5" strokeWidth={2.2} />
+              </div>
+              <div>
+                <p className="text-lg font-bold text-[var(--fl-onboarding-ink)]">
+                  {weeklyFrequency} {weeklyFrequency === 1 ? "dia" : "dias"} por semana
+                </p>
+                <p className="mt-2 text-sm leading-6 text-[var(--fl-onboarding-muted)]">
+                  {frequencyMessage(weeklyFrequency)}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid gap-3">
+            <PrimaryButton label="Continuar" onClick={handleWeeklyFrequencyContinue} />
+            <SecondaryButton label="Voltar" onClick={() => advanceToStep(9)} />
+          </div>
+        </section>
+      );
+    }
   } else if (currentStep === 11) {
     stepContent = (
       <section className="space-y-8">
@@ -1543,7 +1552,7 @@ export default function Onboarding() {
               Seu plano esta <span className="text-[var(--app-primary-color)]">pronto.</span>
             </>
           }
-          description="Antes do cadastro, voce ja enxerga o valor do que vai desbloquear. O funil vende o produto antes de pedir seus dados."
+          description="Antes de criar sua conta, voce ja consegue visualizar como o plano vai se adaptar ao seu objetivo e ao seu ritmo."
         />
 
         <div className="fl-onboarding-hero-panel space-y-5">
@@ -1558,7 +1567,7 @@ export default function Onboarding() {
               {heroName}, seu plano vai combinar {selectedGoal.label.toLowerCase()} com uma progressao {conditioningLabel.toLowerCase()}.
             </h2>
             <p className="mt-3 text-sm leading-7 text-[var(--fl-onboarding-muted)]">
-              Nas proximas semanas voce desbloqueia {goalPlanCopy(profile.main_goal)}. O ritmo inicial foi desenhado para {conditioningPlanCopy(profile.initial_conditioning)} e respeitar sua rotina de {weeklyFrequency} dias por semana.
+              Nas proximas semanas, voce vai desbloquear {goalPlanCopy(profile.main_goal)}. O ritmo inicial foi pensado para {conditioningPlanNarrative(profile.initial_conditioning)} e respeitar sua rotina de {weeklyFrequency} {weeklyFrequency === 1 ? "dia" : "dias"} por semana.
             </p>
           </div>
         </div>
@@ -1595,7 +1604,7 @@ export default function Onboarding() {
         </div>
 
         <div className="grid gap-3">
-          <PrimaryButton label="Quero comecar" onClick={() => advanceToStep(12)} />
+          <PrimaryButton label="Criar minha conta" onClick={() => advanceToStep(12)} />
           <SecondaryButton label="Voltar" onClick={() => advanceToStep(10)} />
         </div>
       </section>
@@ -1610,25 +1619,11 @@ export default function Onboarding() {
               Crie sua <span className="text-[var(--app-primary-color)]">conta.</span>
             </>
           }
-          description="Agora sim faz sentido pedir seus dados: o plano ja foi apresentado e o proximo passo leva para um checkout separado."
+          description="Ultimo passo: informe seus dados de acesso. A tela de pagamento abre em seguida, de forma separada."
         />
 
-        <div className="fl-onboarding-surface-card">
-          <div className="flex items-start gap-4">
-            <div className="fl-onboarding-feature-icon">
-              <CheckCircle2 className="h-5 w-5" strokeWidth={2.2} />
-            </div>
-            <div>
-              <p className="text-lg font-bold text-[var(--fl-onboarding-ink)]">Cadastro primeiro, checkout depois</p>
-              <p className="mt-2 text-sm leading-6 text-[var(--fl-onboarding-muted)]">
-                O onboarding termina com a criacao da conta. Em seguida, voce segue para o checkout em uma rota separada, sem misturar cobranca com o funil.
-              </p>
-            </div>
-          </div>
-        </div>
-
         <form onSubmit={handleAccountSubmit} className="space-y-6">
-          <Field label="Nome completo" leftIcon={<UserRound className="h-4 w-4" />}>
+          <Field label="Nome completo">
             <Input
               value={profile.full_name}
               onChange={setProfileField("full_name")}
@@ -1638,17 +1633,7 @@ export default function Onboarding() {
           </Field>
 
           <div className="space-y-2">
-            <Field
-              label="Nome de usuario"
-              leftIcon={<User className="h-4 w-4" />}
-              rightSlot={
-                usernameAvailability.status === "checking" ? (
-                  <span className="text-xs text-[var(--fl-onboarding-subtle)]">...</span>
-                ) : usernameAvailability.status === "available" ? (
-                  <CheckCircle2 className="h-4 w-4 text-emerald-400" />
-                ) : null
-              }
-            >
+            <Field label="Nome de usuario">
               <Input
                 value={profile.username}
                 onChange={setProfileField("username")}
@@ -1666,17 +1651,7 @@ export default function Onboarding() {
           </div>
 
           <div className="space-y-2">
-            <Field
-              label="Email"
-              leftIcon={<Mail className="h-4 w-4" />}
-              rightSlot={
-                emailAvailability.status === "checking" ? (
-                  <span className="text-xs text-[var(--fl-onboarding-subtle)]">...</span>
-                ) : emailAvailability.status === "available" ? (
-                  <CheckCircle2 className="h-4 w-4 text-emerald-400" />
-                ) : null
-              }
-            >
+            <Field label="Email">
               <Input
                 type="email"
                 value={credentials.email}
@@ -1694,27 +1669,9 @@ export default function Onboarding() {
           </div>
 
           <div className="grid gap-4 md:grid-cols-2">
-            <Field
-              label="Senha"
-              leftIcon={<Lock className="h-4 w-4" />}
-              hint="minimo 8 caracteres"
-              rightSlot={
-                <button
-                  type="button"
-                  onMouseDown={(event) => {
-                    event.preventDefault();
-                  }}
-                  onClick={() => setShowPassword((currentValue) => !currentValue)}
-                  className="rounded-full p-2 text-[var(--fl-onboarding-subtle)] transition hover:bg-white/10 hover:text-[var(--fl-onboarding-ink)]"
-                  aria-label={showPassword ? "Ocultar senha" : "Mostrar senha"}
-                  title={showPassword ? "Ocultar senha" : "Mostrar senha"}
-                >
-                  {showPassword ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
-                </button>
-              }
-            >
+            <Field label="Senha">
               <Input
-                type={showPassword ? "text" : "password"}
+                type="password"
                 value={credentials.password}
                 onChange={setCredential("password")}
                 placeholder="Senha segura"
@@ -1723,9 +1680,9 @@ export default function Onboarding() {
               />
             </Field>
 
-            <Field label="Confirmar senha" leftIcon={<Lock className="h-4 w-4" />}>
+            <Field label="Confirmar senha">
               <Input
-                type={showPassword ? "text" : "password"}
+                type="password"
                 value={credentials.confirmPassword}
                 onChange={setCredential("confirmPassword")}
                 placeholder="Repita a senha"
@@ -1737,7 +1694,7 @@ export default function Onboarding() {
           {isExistingAccountError ? (
             <button
               type="button"
-              onClick={() => navigate("/app")}
+              onClick={() => navigate(ROUTE_PATHS.app)}
               className="fl-onboarding-secondary-button"
             >
               Fazer login
@@ -1747,7 +1704,7 @@ export default function Onboarding() {
           <PrimaryButton
             type="submit"
             disabled={accountSubmitDisabled}
-            label={stepLoading ? "Criando conta..." : "Criar conta e ir para checkout"}
+            label={stepLoading ? "Criando conta..." : "Criar conta e ir para o pagamento"}
           />
           <SecondaryButton label="Voltar" onClick={() => advanceToStep(11)} />
         </form>
@@ -1764,7 +1721,7 @@ export default function Onboarding() {
       </div>
 
       <div className="mx-auto flex min-h-screen max-w-7xl flex-col px-4 py-4 sm:px-6 lg:px-8">
-        <AuthThemeHeader colorScheme={colorScheme} onToggleColorScheme={toggleColorScheme} />
+        <AuthThemeHeader colorScheme={themeMode} onToggleColorScheme={toggleThemeMode} />
 
         <main className="relative z-10 flex flex-1 flex-col items-center justify-start px-0 pb-12 pt-6">
           <div className="w-full max-w-[540px]">
@@ -1782,11 +1739,11 @@ export default function Onboarding() {
 
         <footer className="hidden justify-center pb-8 text-[10px] font-bold uppercase tracking-[0.34em] text-[var(--fl-onboarding-subtle)] md:flex">
           <div className="flex items-center gap-6">
-            <span>Precision</span>
+            <span>Precisao</span>
             <span>•</span>
-            <span>Progression</span>
+            <span>Progresso</span>
             <span>•</span>
-            <span>Rewards</span>
+            <span>Recompensas</span>
           </div>
         </footer>
       </div>

@@ -36,7 +36,7 @@ function ensureThemeFontLoaded(fontKey: string): void {
   const query = FONT_QUERY_BY_KEY[fontKey];
   if (!query) return;
 
-  const existingTag = document.querySelector(`link[data-fitloot-font="${fontKey}"]`);
+  const existingTag = document.querySelector('link[data-fitloot-font="' + fontKey + '"]');
   if (existingTag) {
     loadedFonts.add(fontKey);
     return;
@@ -78,14 +78,19 @@ function resolveRgbTriplet(color: string | null | undefined, fallback: string): 
 
   const normalizedHex = normalizeHexColor(color);
   if (normalizedHex) {
-    const channels = normalizedHex.match(/.{1,2}/g);
-    if (!channels || channels.length !== 3) return fallback;
+    const channels = [
+      normalizedHex.slice(0, 2),
+      normalizedHex.slice(2, 4),
+      normalizedHex.slice(4, 6),
+    ];
+    if (channels.some((channel) => channel.length !== 2)) return fallback;
     return channels.map((channel) => Number.parseInt(channel, 16)).join(" ");
   }
 
-  const rgbMatch = color.match(/rgba?\(([^)]+)\)/i);
-  if (!rgbMatch) return fallback;
-  const rgbChannels = rgbMatch[1];
+  const openParenIndex = color.indexOf("(");
+  const closeParenIndex = color.lastIndexOf(")");
+  if (openParenIndex === -1 || closeParenIndex <= openParenIndex) return fallback;
+  const rgbChannels = color.slice(openParenIndex + 1, closeParenIndex);
   if (!rgbChannels) return fallback;
 
   const channels = rgbChannels
@@ -142,11 +147,11 @@ export function applyProfileTheme(profile: UserProfileTheme | null): void {
   if (theme.custom_font) {
     const fontKey = String(theme.custom_font);
     ensureThemeFontLoaded(fontKey);
-    root.classList.add(`font-title-${fontKey}`);
+    root.classList.add("font-title-" + fontKey);
   }
 
   if (theme.custom_background_type === "image" && theme.custom_background_value) {
-    root.style.setProperty("--app-bg-image", `url(${String(theme.custom_background_value)})`);
+    root.style.setProperty("--app-bg-image", "url(" + String(theme.custom_background_value) + ")");
     root.style.setProperty("--app-bg-color", "transparent");
   } else if (theme.custom_background_type === "color" && theme.custom_background_value) {
     root.style.setProperty("--app-bg-color", String(theme.custom_background_value));

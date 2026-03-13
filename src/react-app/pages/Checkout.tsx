@@ -1,283 +1,544 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
-import { api } from "@/react-app/utils/api";
-import { useAuth } from "@/react-app/App";
-import { Button } from "@/react-app/components/ui/button";
-import { Input } from "@/react-app/components/ui/input";
-import { AuthThemeHeader, useAuthColorScheme } from "@/react-app/components/AuthThemeHeader";
 import {
   ArrowRight,
-  CheckCircle2,
+  BadgeCheck,
+  Check,
   CreditCard,
+  LockKeyhole,
   QrCode,
-  Shield,
+  ShieldCheck,
   Sparkles,
 } from "lucide-react";
+import BillingCycleSwitch from "@/react-app/components/BillingCycleSwitch";
+import { AuthThemeHeader } from "@/react-app/components/AuthThemeHeader";
+import { Input } from "@/react-app/components/ui/input";
+import { ROUTE_PATHS } from "@/react-app/constants/auth";
+import {
+  CHECKOUT_PLAN_DISPLAY_ORDER,
+  CHECKOUT_PLANS,
+  formatCurrency,
+  getCheckoutPlan,
+  getPlanPricing,
+  type BillingCycle,
+  type CheckoutPaymentMethod,
+  type CheckoutPlanId,
+} from "@/react-app/constants/checkout";
+import { useAuth } from "@/react-app/contexts/auth";
+import { useTheme } from "@/react-app/contexts/theme";
+import { hasPlanAccess } from "@/react-app/services/authService";
+import { api } from "@/react-app/utils/api";
+import {
+  clearOnboardingDraft,
+  loadOnboardingDraft,
+  type OnboardingDraft,
+} from "@/react-app/utils/onboardingDraft";
+
+type CardForm = {
+  number: string;
+  holderName: string;
+  expiry: string;
+  cvv: string;
+};
+
+type CheckoutFlowResponse = {
+  checkout_status?: "pending" | "vip_active" | undefined;
+  plan_status?: "pending" | "active" | "cancelled" | "failed" | "expired" | undefined;
+  checkout_url?: string | null | undefined;
+  message?: string | undefined;
+  error?: string | undefined;
+};
+
+function buildOnboardingCheckoutPayload(
+  draft: OnboardingDraft,
+  planId: CheckoutPlanId,
+  paymentMethod: CheckoutPaymentMethod,
+  card: CardForm,
+) {
+  const equipment = [...draft.selectedEquipment, draft.equipment].filter(Boolean).join(", ");
+
+  return {
+    username: draft.username.trim(),
+    full_name: draft.full_name.trim(),
+    weight: Number(draft.weight),
+    height: Number(draft.height),
+    age: Number(draft.age),
+    gender: draft.gender,
+    initial_conditioning: draft.initial_conditioning,
+    initial_pushups: Number(draft.initial_pushups) || 0,
+    initial_situps: Number(draft.initial_situps) || 0,
+    initial_squats: Number(draft.initial_squats) || 0,
+    injuries: draft.injuries || undefined,
+    equipment: equipment || undefined,
+    main_goal: draft.main_goal,
+    goals: [draft.main_goal],
+    training_frequency: draft.weeklyFrequency,
+    plan_id: planId,
+    payment_method: paymentMethod,
+    card_number: paymentMethod === "card" ? card.number.trim() : undefined,
+    card_holder_name: paymentMethod === "card" ? card.holderName.trim() : undefined,
+    card_expiry: paymentMethod === "card" ? card.expiry.trim() : undefined,
+    card_cvv: paymentMethod === "card" ? card.cvv.trim() : undefined,
+  };
+}
 
 const FIELD_WRAP = "fl-auth-input-shell min-h-[3.5rem] rounded-[1.3rem]";
 const FIELD_INPUT =
   "h-full w-full !border-0 !bg-transparent !p-0 text-base text-[var(--fl-auth-ink)] !shadow-none !ring-0 " +
   "placeholder:text-[var(--fl-auth-subtle)] focus-visible:!ring-0 focus-visible:!ring-offset-0";
 
-const PLAN_OPTIONS = [
-  { id: "free" as const, name: "Basico", price: "R$ 49/mes", color: "from-slate-500 to-slate-700", features: ["Missoes diarias", "XP e niveis", "Ranking"] },
-  { id: "pro" as const, name: "Premium", price: "R$ 99/mes", color: "from-emerald-500 to-teal-600", features: ["Tudo do Basico", "Scanner com IA", "Ranking global"], popular: true },
-  { id: "annual" as const, name: "Elite", price: "R$ 149/mes", color: "from-teal-500 to-cyan-600", features: ["Tudo do Premium", "Planos de treino", "Suporte VIP"] },
-] as const;
-
-function Field({
-  label,
-  leftIcon,
-  children,
+function PlanCard({
+  planId,
+  selected,
+  billingCycle,
+  onSelect,
 }: {
-  label: string;
-  leftIcon?: ReactNode;
-  children: ReactNode;
+  planId: CheckoutPlanId;
+  selected: boolean;
+  billingCycle: BillingCycle;
+  onSelect: (planId: CheckoutPlanId) => void;
 }) {
+  const { plan, monthlyPriceCents, annualDiscountedMonthlyCents, annualDiscountedTotalCents, annualSavingsCents } =
+    getPlanPricing(planId, billingCycle);
+
   return (
-    <div className="space-y-2">
-      <label className="text-xs font-semibold uppercase tracking-[0.24em] text-[var(--fl-auth-subtle)]">
-        {label}
-      </label>
-      <div className={FIELD_WRAP}>
-        {leftIcon ? <span className="text-[var(--fl-auth-subtle)]">{leftIcon}</span> : null}
-        <div className="min-w-0 flex-1">{children}</div>
+    <button
+      type="button"
+      onClick={() => onSelect(planId)}
+      className={`relative rounded-[2rem] border p-6 text-left transition ${
+        selected
+          ? "border-[var(--app-primary-color)] bg-[rgba(var(--fl-color-accent-rgb),0.12)] shadow-[0_24px_64px_-32px_rgba(16,185,129,0.8)]"
+          : "border-[var(--fl-auth-card-border)] bg-[var(--fl-auth-panel)]"
+      }`}
+    >
+      {plan.recommended ? (
+        <span className="absolute right-5 top-5 rounded-full bg-[var(--app-primary-color)] px-4 py-1 text-[10px] font-bold uppercase tracking-[0.26em] text-black">
+          Mais popular
+        </span>
+      ) : null}
+
+      <div className="space-y-4">
+        <div>
+          <p className={`text-3xl font-bold tracking-tight ${selected ? "text-[var(--app-primary-color)]" : "text-[var(--fl-auth-ink)]"}`}>
+            {plan.name}
+          </p>
+          <div className="mt-3 flex flex-wrap items-end gap-2">
+            {billingCycle === "annual" ? (
+              <>
+                <span className="text-sm text-[var(--fl-auth-subtle)] line-through">{formatCurrency(monthlyPriceCents)}/mes</span>
+                <span className="text-4xl font-black text-[var(--fl-auth-ink)]">{formatCurrency(annualDiscountedMonthlyCents)}</span>
+                <span className="pb-1 text-lg text-[var(--fl-auth-subtle)]">/mes</span>
+              </>
+            ) : (
+              <>
+                <span className="text-4xl font-black text-[var(--fl-auth-ink)]">{formatCurrency(monthlyPriceCents)}</span>
+                <span className="pb-1 text-lg text-[var(--fl-auth-subtle)]">/mes</span>
+              </>
+            )}
+          </div>
+          {billingCycle === "annual" ? (
+            <div className="mt-3 space-y-2">
+              <div className="flex flex-wrap gap-2">
+                <span className="rounded-full border border-[var(--app-primary-color)]/45 bg-[rgba(var(--fl-color-accent-rgb),0.12)] px-3 py-1 text-xs font-semibold text-[var(--app-primary-color)]">
+                  10% OFF
+                </span>
+                <span className="rounded-full bg-[var(--app-primary-color)] px-3 py-1 text-xs font-bold text-black">
+                  1 mes gratis
+                </span>
+              </div>
+              <p className="text-sm text-[var(--app-primary-color)]">
+                {formatCurrency(annualDiscountedTotalCents)}/ano com economia total de {formatCurrency(annualSavingsCents)}.
+              </p>
+            </div>
+          ) : null}
+        </div>
+
+        <div className="space-y-3 border-t border-[var(--fl-auth-card-border)] pt-5">
+          {plan.benefits.map((benefit) => (
+            <div key={benefit} className="flex items-start gap-3 text-sm text-[var(--fl-auth-muted)]">
+              <span className="mt-0.5 flex h-5 w-5 items-center justify-center rounded-full bg-[rgba(var(--fl-color-accent-rgb),0.14)] text-[var(--app-primary-color)]">
+                <Check className="h-3.5 w-3.5" strokeWidth={2.6} />
+              </span>
+              <span>{benefit}</span>
+            </div>
+          ))}
+        </div>
       </div>
-    </div>
+    </button>
   );
 }
 
 export default function Checkout() {
   const navigate = useNavigate();
-  const { user } = useAuth();
-  const { colorScheme, toggleColorScheme } = useAuthColorScheme();
+  const { user, checkAuth, logout } = useAuth();
+  const { themeMode, toggleThemeMode } = useTheme();
+  const requiresOnboardingCheckout = user?.onboarding_completed !== 1;
+  const [planId, setPlanId] = useState<CheckoutPlanId>(
+    requiresOnboardingCheckout
+      ? "pro"
+      : user?.plan_id === "free" || user?.plan_id === "pro" || user?.plan_id === "annual"
+        ? user.plan_id
+        : "pro",
+  );
+  const [billingCycle, setBillingCycle] = useState<BillingCycle>("monthly");
+  const [paymentMethod, setPaymentMethod] = useState<CheckoutPaymentMethod>("pix");
+  const [card, setCard] = useState<CardForm>({ number: "", holderName: "", expiry: "", cvv: "" });
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const onboardingDraft = useMemo(() => loadOnboardingDraft(), []);
 
-  const [selectedPlan, setSelectedPlan] = useState<"free" | "pro" | "annual">("free");
-  const [paymentTab, setPaymentTab] = useState<"card" | "pix">("card");
-  const [stepLoading, setStepLoading] = useState(false);
-  const [stepError, setStepError] = useState<string | null>(null);
+  const selectedPlan = useMemo(() => getCheckoutPlan(planId), [planId]);
+  const pricing = useMemo(() => getPlanPricing(planId, billingCycle), [planId, billingCycle]);
+  const checkoutPlansInDisplayOrder = useMemo(
+    () =>
+      CHECKOUT_PLAN_DISPLAY_ORDER
+        .map((currentPlanId) => CHECKOUT_PLANS.find((plan) => plan.id === currentPlanId))
+        .filter((plan): plan is (typeof CHECKOUT_PLANS)[number] => Boolean(plan)),
+    [],
+  );
 
-  const selectedPlanData = PLAN_OPTIONS.find((plan) => plan.id === selectedPlan) ?? PLAN_OPTIONS[0];
-  const heroName = user?.name.trim().split(" ")[0] || "Voce";
+  useEffect(() => {
+    if (!user) return;
+    if (hasPlanAccess(user)) {
+      navigate(ROUTE_PATHS.home, { replace: true });
+      return;
+    }
+    if (user.onboarding_completed === 1 && user.plan_status === "pending") {
+      navigate(ROUTE_PATHS.paymentPending, { replace: true });
+    }
+  }, [navigate, user]);
 
-  const handleCheckoutSubmit = async () => {
-    setStepError(null);
-    setStepLoading(true);
+  useEffect(() => {
+    if (requiresOnboardingCheckout && !onboardingDraft) {
+      setError("Nao encontramos os dados do onboarding. Saia e recomece a criacao da conta.");
+    }
+  }, [onboardingDraft, requiresOnboardingCheckout]);
 
+  const handleLogoutAndReset = async () => {
     try {
-      const paymentMethod = paymentTab === "card" ? "card" : "pix";
-      const status = paymentTab === "card" ? "active" : "pending";
+      await api("/api/logout");
+    } catch {
+      // Local cleanup still needs to happen.
+    } finally {
+      clearOnboardingDraft();
+      logout();
+      navigate(ROUTE_PATHS.login, { replace: true });
+    }
+  };
 
-      const response = await api("/api/users/plan", {
+  const handleCheckout = async () => {
+    setError(null);
+
+    if (paymentMethod === "card" && (!card.number.trim() || !card.holderName.trim() || !card.expiry.trim() || !card.cvv.trim())) {
+      setError("Preencha os dados do cartao para continuar.");
+      return;
+    }
+
+    if (requiresOnboardingCheckout && !onboardingDraft) {
+      setError("Nao encontramos os dados do onboarding. Saia e recomece a criacao da conta.");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const endpoint = requiresOnboardingCheckout ? "/api/onboarding" : "/api/checkout/start";
+      const payloadBody = requiresOnboardingCheckout && onboardingDraft
+        ? buildOnboardingCheckoutPayload(onboardingDraft, planId, paymentMethod, card)
+        : {
+            plan_id: planId,
+            payment_method: paymentMethod,
+            card_number: paymentMethod === "card" ? card.number.trim() : undefined,
+            card_holder_name: paymentMethod === "card" ? card.holderName.trim() : undefined,
+            card_expiry: paymentMethod === "card" ? card.expiry.trim() : undefined,
+            card_cvv: paymentMethod === "card" ? card.cvv.trim() : undefined,
+          };
+
+      const response = await api(endpoint, {
         method: "POST",
-        body: JSON.stringify({
-          plan_id: selectedPlan,
-          payment_method: paymentMethod as "card" | "pix",
-          status: status as "active" | "pending",
-        }),
+        body: JSON.stringify(payloadBody),
       });
 
-      if (!response.ok) {
-        setStepError("Erro ao salvar plano.");
+      if (response.status === 401 || response.status === 403) {
+        navigate(ROUTE_PATHS.app, { replace: true });
         return;
       }
 
-      navigate("/home");
+      const payload = (await response.json().catch(() => null)) as CheckoutFlowResponse | null;
+      if (!response.ok) {
+        setError(payload?.error ?? "Nao foi possivel iniciar o checkout.");
+        return;
+      }
+
+      if (requiresOnboardingCheckout) {
+        clearOnboardingDraft();
+      }
+
+      await checkAuth();
+
+      if (payload?.checkout_status === "vip_active" || payload?.plan_status === "active") {
+        navigate(ROUTE_PATHS.home, { replace: true });
+        return;
+      }
+
+      const checkoutUrl =
+        (typeof payload?.checkout_url === "string" && payload.checkout_url) ||
+        selectedPlan.checkoutUrl;
+
+      if (checkoutUrl) {
+        window.open(checkoutUrl, "_blank", "noopener,noreferrer");
+      }
+
+      navigate(ROUTE_PATHS.paymentPending, { replace: true });
     } catch {
-      setStepError("Nao foi possivel conectar ao servidor.");
+      setError("Erro de conexao ao iniciar o checkout.");
     } finally {
-      setStepLoading(false);
+      setLoading(false);
     }
   };
 
   return (
     <div className="fl-auth-page fl-auth-funnel-page">
       <div className="pointer-events-none absolute inset-0 -z-10 overflow-hidden">
-        <div className="absolute -left-24 top-20 h-72 w-72 rounded-full bg-[var(--fl-auth-primary-soft)] blur-3xl" />
+        <div className="absolute -left-24 top-16 h-72 w-72 rounded-full bg-[var(--fl-auth-primary-soft)] blur-3xl" />
         <div className="absolute right-[-4rem] top-[18%] h-96 w-96 rounded-full bg-[var(--fl-auth-secondary-soft)] blur-3xl" />
-        <div className="absolute bottom-[-8rem] left-1/3 h-72 w-72 rounded-full bg-[var(--fl-auth-primary-soft)] blur-3xl" />
+        <div className="absolute bottom-[-10rem] left-1/3 h-80 w-80 rounded-full bg-[var(--fl-auth-primary-soft)] blur-[120px]" />
       </div>
 
       <div className="mx-auto flex min-h-screen max-w-7xl flex-col px-4 py-4 sm:px-6 lg:px-8">
-        <AuthThemeHeader colorScheme={colorScheme} onToggleColorScheme={toggleColorScheme} />
+        <AuthThemeHeader colorScheme={themeMode} onToggleColorScheme={toggleThemeMode} />
 
-        <div className="flex flex-1 items-center justify-center py-4 lg:py-8">
-          <div className="fl-auth-shell">
-            <aside className="fl-auth-panel fl-auth-hero order-1 rounded-[2rem] p-6 sm:p-8 lg:p-10">
-              <div className="hidden h-full flex-col justify-between lg:flex">
-                <div className="space-y-6">
-                  <span className="fl-auth-pill w-fit">
-                    <Sparkles className="h-3.5 w-3.5" />
-                    Checkout
-                  </span>
-                  <div>
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.34em] text-[var(--app-primary-color)]">Etapa separada</p>
-                    <h1 className="mt-3 max-w-[12ch] text-5xl font-bold leading-[1.02] tracking-tight xl:text-6xl">Escolha seu plano.</h1>
-                    <p className="mt-4 max-w-xl text-base leading-7 text-[var(--fl-auth-muted)] xl:text-lg">{heroName}, o onboarding terminou. Agora o checkout cuida sozinho da assinatura e do pagamento.</p>
-                  </div>
-                  <div className="space-y-3">
-                    {[
-                      { title: "Checkout separado", text: "Plano e pagamento nao ficam mais misturados ao onboarding." },
-                      { title: "Mesmo visual", text: "A tela reaproveita o mesmo shell, header e tokens visuais." },
-                      { title: "Fechamento rapido", text: "Cartao aprova como ativo e PIX segue como pendente, igual ao fluxo anterior." },
-                    ].map((item) => (
-                      <article key={item.title} className="fl-auth-option rounded-[1.5rem] p-4" data-selected="false">
-                        <p className="text-lg font-semibold">{item.title}</p>
-                        <p className="mt-1 text-sm leading-6 text-[var(--fl-auth-muted)]">{item.text}</p>
-                      </article>
-                    ))}
-                  </div>
+        <main className="flex flex-1 items-center justify-center py-4 lg:py-8">
+          <div className="w-full rounded-[2.4rem] border border-[var(--fl-auth-card-border)] bg-[var(--fl-auth-panel)] p-6 shadow-[0_32px_90px_-48px_rgba(16,185,129,0.45)] sm:p-8 lg:p-10">
+            <div className="mx-auto max-w-5xl space-y-8">
+              <div className="space-y-5 text-center">
+                <span className="mx-auto inline-flex items-center gap-2 rounded-full border border-[var(--app-primary-color)]/35 bg-[rgba(var(--fl-color-accent-rgb),0.12)] px-4 py-2 text-xs font-semibold uppercase tracking-[0.26em] text-[var(--app-primary-color)]">
+                  <Sparkles className="h-4 w-4" />
+                  Escolha seu plano de batalha
+                </span>
+                <div className="space-y-3">
+                  <h1 className="text-4xl font-black tracking-tight text-[var(--fl-auth-ink)] sm:text-5xl lg:text-6xl">
+                    Escolha o plano que acompanha sua evolucao.
+                  </h1>
+                  <p className="mx-auto max-w-3xl text-base leading-7 text-[var(--fl-auth-muted)] sm:text-lg">
+                    {requiresOnboardingCheckout
+                      ? "Sua conta ja foi criada. Agora escolha o plano, o modo de cobranca e finalize com PIX ou cartao."
+                      : "Escolha o nivel, o modo de cobranca e finalize com PIX ou cartao."}
+                  </p>
                 </div>
               </div>
-            </aside>
 
-            <main className="fl-auth-panel order-2 rounded-[2rem] p-5 sm:p-7 lg:p-8">
-              <div className="space-y-6 animate-authStepEnter">
-                <div className="space-y-3 lg:hidden">
-                  <span className="fl-auth-pill w-fit">
-                    <Sparkles className="h-3.5 w-3.5" />
-                    Checkout
-                  </span>
-                  <div>
-                    <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">Escolha o plano e conclua.</h1>
-                    <p className="mt-2 text-sm leading-6 text-[var(--fl-auth-muted)]">O onboarding terminou e a cobranca segue separada aqui.</p>
-                  </div>
-                </div>
+              <div className="flex justify-center">
+                <BillingCycleSwitch value={billingCycle} onChange={setBillingCycle} />
+              </div>
 
-                {stepError ? (
-                  <div className="space-y-3 rounded-[1.35rem] border border-red-400/25 bg-red-500/10 px-4 py-3 text-sm text-red-600">
-                    <p>{stepError}</p>
-                  </div>
-                ) : null}
+              <div className="grid gap-5 lg:grid-cols-3">
+                {checkoutPlansInDisplayOrder.map((plan) => (
+                  <PlanCard
+                    key={plan.id}
+                    planId={plan.id}
+                    selected={planId === plan.id}
+                    billingCycle={billingCycle}
+                    onSelect={setPlanId}
+                  />
+                ))}
+              </div>
 
-                <section className="space-y-4">
-                  <div className="flex items-end justify-between gap-4">
-                    <div>
-                      <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[var(--fl-auth-subtle)]">Plano</p>
-                      <h2 className="text-3xl font-bold tracking-tight">Escolha sua assinatura.</h2>
-                    </div>
-                    <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[var(--fl-auth-subtle)]">premium cards</p>
-                  </div>
+              <section className="grid gap-6 lg:grid-cols-[1.05fr_0.95fr]">
+                <div className="rounded-[2rem] border border-[var(--fl-auth-card-border)] bg-[var(--fl-auth-surface)] p-6">
+                  <div className="space-y-3">
+                    <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[var(--fl-auth-subtle)]">
+                      Metodo de pagamento
+                    </p>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      {([
+                        { id: "pix", label: "PIX", description: "5% de desconto no provedor e fluxo simples.", icon: QrCode },
+                        { id: "card", label: "Cartao de credito", description: "Parcelamento e aprovacao via operadora.", icon: CreditCard },
+                      ] as const).map((option) => {
+                        const Icon = option.icon;
+                        const active = paymentMethod === option.id;
 
-                  <div className="grid gap-3 xl:grid-cols-3">
-                    {PLAN_OPTIONS.map((plan) => (
-                      <button
-                        key={plan.id}
-                        type="button"
-                        onClick={() => setSelectedPlan(plan.id)}
-                        className="fl-auth-plan-card relative rounded-[1.6rem] p-5 text-left transition"
-                        data-selected={selectedPlan === plan.id}
-                      >
-                        {"popular" in plan && plan.popular ? (
-                          <span className="fl-auth-pill absolute right-4 top-4" data-selected="true">
-                            recomendado
-                          </span>
-                        ) : null}
-
-                        <div className={`mb-4 inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br ${plan.color} text-white shadow-lg`}>
-                          <Shield className="h-5 w-5" strokeWidth={2.1} />
-                        </div>
-
-                        <div className="space-y-2">
-                          <p className="text-xl font-bold">{plan.name}</p>
-                          <p className="text-3xl font-bold tracking-tight">{plan.price}</p>
-                        </div>
-
-                        <div className="mt-5 space-y-2">
-                          {plan.features.map((feature) => (
-                            <div key={feature} className="flex items-center gap-2 text-sm text-[var(--fl-auth-muted)]">
-                              <CheckCircle2 className="h-4 w-4 text-[var(--app-primary-color)]" />
-                              <span>{feature}</span>
+                        return (
+                          <button
+                            key={option.id}
+                            type="button"
+                            onClick={() => setPaymentMethod(option.id)}
+                            className={`rounded-[1.5rem] border p-4 text-left transition ${
+                              active
+                                ? "border-[var(--app-primary-color)] bg-[rgba(var(--fl-color-accent-rgb),0.12)]"
+                                : "border-[var(--fl-auth-card-border)] bg-transparent"
+                            }`}
+                          >
+                            <div className="flex items-start gap-4">
+                              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[rgba(var(--fl-color-accent-rgb),0.14)] text-[var(--app-primary-color)]">
+                                <Icon className="h-5 w-5" strokeWidth={2.2} />
+                              </div>
+                              <div className="space-y-1">
+                                <p className="font-bold text-[var(--fl-auth-ink)]">{option.label}</p>
+                                <p className="text-sm leading-6 text-[var(--fl-auth-muted)]">{option.description}</p>
+                              </div>
                             </div>
-                          ))}
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                </section>
-
-                <section className="space-y-4 border-t border-[var(--fl-auth-card-border)] pt-5">
-                  <div className="flex items-end justify-between gap-4">
-                    <div>
-                      <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[var(--fl-auth-subtle)]">Pagamento</p>
-                      <h3 className="text-2xl font-bold tracking-tight">Ative {selectedPlanData.name} do seu jeito.</h3>
+                          </button>
+                        );
+                      })}
                     </div>
-                    {selectedPlan !== "free" ? (
-                      <span className="fl-auth-pill" data-selected="true">
-                        {selectedPlanData.price}
-                      </span>
-                    ) : null}
                   </div>
 
-                  {selectedPlan === "free" ? (
-                    <div className="fl-auth-option rounded-[1.4rem] p-4" data-selected="false">
-                      <p className="font-semibold">Nenhum pagamento necessario no plano Basico.</p>
-                      <p className="mt-1 text-sm leading-6 text-[var(--fl-auth-muted)]">O checkout ainda registra a escolha do plano, mas sem exigir dados de cobranca aqui.</p>
+                  {paymentMethod === "card" ? (
+                    <div className="mt-6 grid gap-4">
+                      <label className="space-y-2">
+                        <span className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--fl-auth-subtle)]">
+                          Numero do cartao
+                        </span>
+                        <div className={FIELD_WRAP}>
+                          <CreditCard className="h-4 w-4 text-[var(--fl-auth-subtle)]" />
+                          <Input
+                            value={card.number}
+                            onChange={(event) => setCard((current) => ({ ...current, number: event.target.value }))}
+                            placeholder="0000 0000 0000 0000"
+                            className={FIELD_INPUT}
+                          />
+                        </div>
+                      </label>
+
+                      <label className="space-y-2">
+                        <span className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--fl-auth-subtle)]">
+                          Nome no cartao
+                        </span>
+                        <div className={FIELD_WRAP}>
+                          <Input
+                            value={card.holderName}
+                            onChange={(event) => setCard((current) => ({ ...current, holderName: event.target.value }))}
+                            placeholder="Como esta impresso"
+                            className={FIELD_INPUT}
+                          />
+                        </div>
+                      </label>
+
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        <label className="space-y-2">
+                          <span className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--fl-auth-subtle)]">
+                            Validade
+                          </span>
+                          <div className={FIELD_WRAP}>
+                            <Input
+                              value={card.expiry}
+                              onChange={(event) => setCard((current) => ({ ...current, expiry: event.target.value }))}
+                              placeholder="MM/AA"
+                              className={FIELD_INPUT}
+                            />
+                          </div>
+                        </label>
+
+                        <label className="space-y-2">
+                          <span className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--fl-auth-subtle)]">
+                            CVV
+                          </span>
+                          <div className={FIELD_WRAP}>
+                            <Input
+                              value={card.cvv}
+                              onChange={(event) => setCard((current) => ({ ...current, cvv: event.target.value }))}
+                              placeholder="000"
+                              className={FIELD_INPUT}
+                            />
+                          </div>
+                        </label>
+                      </div>
                     </div>
                   ) : (
-                    <div className="space-y-4">
-                      <div className="flex flex-wrap gap-2">
-                        {([
-                          { tab: "card", label: "Cartao", icon: CreditCard },
-                          { tab: "pix", label: "PIX", icon: QrCode },
-                        ] as const).map(({ tab, label, icon: Icon }) => (
-                          <button
-                            key={tab}
-                            type="button"
-                            onClick={() => setPaymentTab(tab)}
-                            className="fl-auth-pill"
-                            data-selected={paymentTab === tab}
-                          >
-                            <Icon className="h-4 w-4" />
-                            {label}
-                          </button>
-                        ))}
-                      </div>
-
-                      {paymentTab === "card" ? (
-                        <div className="grid gap-4">
-                          <Field label="Numero do cartao" leftIcon={<CreditCard className="h-4 w-4" />}>
-                            <Input placeholder="0000 0000 0000 0000" className={FIELD_INPUT} />
-                          </Field>
-                          <Field label="Nome no cartao">
-                            <Input placeholder="Como aparece no cartao" className={FIELD_INPUT} />
-                          </Field>
-                          <div className="grid gap-4 sm:grid-cols-2">
-                            <Field label="Validade">
-                              <Input placeholder="MM/AA" className={FIELD_INPUT} />
-                            </Field>
-                            <Field label="CVV">
-                              <Input placeholder="000" className={FIELD_INPUT} />
-                            </Field>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="fl-auth-option rounded-[1.4rem] p-4 text-center" data-selected="false">
-                          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-[var(--fl-auth-primary-soft)] text-[var(--app-primary-color)]">
-                            <QrCode className="h-5 w-5" strokeWidth={2.2} />
-                          </div>
-                          <p className="mt-3 font-semibold">O QR Code demonstrativo aparece apos confirmar.</p>
-                          <p className="mt-1 text-sm leading-6 text-[var(--fl-auth-muted)]">A logica atual continua marcando PIX como pendente e cartao como ativo.</p>
-                        </div>
-                      )}
+                    <div className="mt-6 rounded-[1.5rem] border border-[var(--fl-auth-card-border)] bg-[rgba(var(--fl-color-accent-rgb),0.08)] p-5 text-sm text-[var(--fl-auth-muted)]">
+                      O checkout Cakto sera aberto com o plano selecionado para concluir o PIX fora do app.
                     </div>
                   )}
-                </section>
+                </div>
 
-                <Button
-                  type="button"
-                  onClick={handleCheckoutSubmit}
-                  disabled={stepLoading}
-                  size="lg"
-                  className="fl-auth-cta h-14 w-full rounded-[1.15rem] text-base font-semibold disabled:opacity-50"
-                >
-                  {stepLoading ? "Finalizando..." : "Finalizar assinatura"}
-                  {!stepLoading ? <ArrowRight className="h-4 w-4" /> : null}
-                </Button>
-              </div>
-            </main>
+                <div className="rounded-[2rem] border border-[var(--fl-auth-card-border)] bg-[var(--fl-auth-surface)] p-6">
+                  <div className="space-y-4">
+                    <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[var(--fl-auth-subtle)]">
+                      Resumo
+                    </p>
+                    <div>
+                      <p className="text-3xl font-black text-[var(--fl-auth-ink)]">{selectedPlan.name}</p>
+                      <p className="mt-2 text-sm text-[var(--fl-auth-muted)]">
+                        {billingCycle === "annual"
+                          ? `${formatCurrency(pricing.annualDiscountedTotalCents)} cobrados no anual`
+                          : `${formatCurrency(pricing.monthlyPriceCents)} cobrados por mes`}
+                      </p>
+                    </div>
+
+                    <div className="rounded-[1.4rem] border border-[var(--fl-auth-card-border)] bg-[var(--fl-auth-panel)] p-4">
+                      <div className="flex items-center justify-between text-sm text-[var(--fl-auth-muted)]">
+                        <span>Modo</span>
+                        <span className="font-semibold text-[var(--fl-auth-ink)]">
+                          {billingCycle === "annual" ? "Anual com desconto" : "Mensal"}
+                        </span>
+                      </div>
+                      <div className="mt-3 flex items-center justify-between text-sm text-[var(--fl-auth-muted)]">
+                        <span>Metodo</span>
+                        <span className="font-semibold capitalize text-[var(--fl-auth-ink)]">{paymentMethod}</span>
+                      </div>
+                      {billingCycle === "annual" ? (
+                        <div className="mt-3 flex items-center justify-between text-sm text-[var(--fl-auth-muted)]">
+                          <span>Economia anual</span>
+                          <span className="font-semibold text-[var(--app-primary-color)]">
+                            {formatCurrency(pricing.annualSavingsCents)}
+                          </span>
+                        </div>
+                      ) : null}
+                    </div>
+
+                    {error ? (
+                      <div className="rounded-[1.2rem] border border-red-400/30 bg-red-500/10 px-4 py-3 text-sm text-red-500">
+                        {error}
+                      </div>
+                    ) : null}
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void handleCheckout();
+                      }}
+                      disabled={loading || (requiresOnboardingCheckout && !onboardingDraft)}
+                      className="flex h-14 w-full items-center justify-center gap-2 rounded-[1.2rem] bg-[var(--app-primary-color)] px-5 text-base font-black text-black transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {loading
+                        ? "Abrindo checkout..."
+                        : requiresOnboardingCheckout
+                          ? "Concluir onboarding e abrir checkout"
+                          : "Continuar para o checkout"}
+                      {!loading ? <ArrowRight className="h-4 w-4" /> : null}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void handleLogoutAndReset();
+                      }}
+                      className="w-full rounded-[1.2rem] border border-red-300/35 px-5 py-3 text-sm font-semibold text-red-400 transition hover:bg-red-500/10"
+                    >
+                      Sair e recomecar
+                    </button>
+
+                    <div className="grid gap-3 text-xs text-[var(--fl-auth-muted)] sm:grid-cols-3">
+                      {[
+                        { icon: LockKeyhole, label: "SSL criptografado" },
+                        { icon: ShieldCheck, label: "Checkout seguro" },
+                        { icon: BadgeCheck, label: "Satisfacao garantida" },
+                      ].map((item) => {
+                        const Icon = item.icon;
+                        return (
+                          <div key={item.label} className="flex items-center gap-2 rounded-full border border-[var(--fl-auth-card-border)] px-3 py-2">
+                            <Icon className="h-4 w-4 text-[var(--app-primary-color)]" />
+                            <span>{item.label}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              </section>
+            </div>
           </div>
-        </div>
+        </main>
       </div>
     </div>
   );

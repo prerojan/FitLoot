@@ -25,7 +25,13 @@ export function useAuthColorScheme() {
     const root = document.documentElement;
     root.classList.remove("fitloot-auth-light", "fitloot-auth-dark");
     root.classList.add(`fitloot-auth-${colorScheme}`);
+    root.style.colorScheme = colorScheme;
     localStorage.setItem(AUTH_THEME_STORAGE_KEY, colorScheme);
+
+    return () => {
+      root.classList.remove("fitloot-auth-light", "fitloot-auth-dark");
+      root.style.removeProperty("color-scheme");
+    };
   }, [colorScheme]);
 
   return {

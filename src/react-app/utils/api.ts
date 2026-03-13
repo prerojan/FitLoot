@@ -29,6 +29,10 @@ export class ApiRequestError extends Error {
 
 const requestCache = new Map<string, CacheEntry>();
 
+type PlanAccessRequiredPayload = {
+  redirect_to?: string | undefined;
+};
+
 function normalizePath(path: string): string {
   return path.startsWith("/") ? path : `/${path}`;
 }
@@ -49,6 +53,19 @@ async function parseJsonResponse<T>(response: Response): Promise<T> {
   }
 
   return payload as T;
+}
+
+async function handlePlanAccessRequired(response: Response): Promise<void> {
+  if (response.status !== 402 || typeof window === "undefined") return;
+
+  const payload = (await response.clone().json().catch(() => null)) as PlanAccessRequiredPayload | null;
+  const redirectTo = typeof payload?.redirect_to === "string" ? payload.redirect_to.trim() : "";
+  if (!redirectTo) return;
+
+  const normalizedRedirect = redirectTo.startsWith("/") ? redirectTo : `/${redirectTo}`;
+  if (window.location.pathname === normalizedRedirect) return;
+
+  window.location.assign(normalizedRedirect);
 }
 
 export async function api(path: string, options: ApiRequestOptions = {}) {
@@ -83,13 +100,16 @@ export async function api(path: string, options: ApiRequestOptions = {}) {
     : null;
 
   try {
-    return await fetch(url, {
+    const response = await fetch(url, {
       ...restOptions,
       method,
       credentials: "include",
       signal: controller.signal,
       headers: requestHeaders,
     });
+
+    await handlePlanAccessRequired(response);
+    return response;
   } finally {
     if (timeoutId !== null) {
       globalThis.clearTimeout(timeoutId);

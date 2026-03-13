@@ -144,12 +144,12 @@ const Home: FC = () => {
                     </span>
 
                     <div className="space-y-3">
-                      <h2 className="fl-auth-display max-w-xl text-5xl font-bold leading-[1.02] xl:text-6xl">
+                      <h2 className="fl-auth-display max-w-xl text-5xl font-bold leading-[1.02] text-white xl:text-6xl">
                         Entre e{" "}
                         <span className="italic text-[var(--fl-color-accent)]">suba de nivel</span>{" "}
                         na vida real.
                       </h2>
-                      <p className="max-w-md text-base leading-7 text-white/78 xl:text-lg">
+                      <p className="max-w-md text-base leading-7 text-white xl:text-lg">
                         Transforme exercicios em conquistas epicas com XP.
                       </p>
                     </div>
@@ -167,12 +167,12 @@ const Home: FC = () => {
                   </span>
 
                   <div className="space-y-2">
-                    <h2 className="fl-auth-display text-4xl font-bold leading-[1.02]">
+                    <h2 className="fl-auth-display text-4xl font-bold leading-[1.02] text-white">
                       Entre e{" "}
                       <span className="italic text-[var(--fl-color-accent)]">suba de nivel</span>{" "}
                       na vida real.
                     </h2>
-                    <p className="text-sm leading-6 text-[var(--fl-color-text-muted)]">
+                    <p className="text-sm leading-6 text-white">
                       Transforme exercicios em conquistas epicas com XP.
                     </p>
                   </div>
