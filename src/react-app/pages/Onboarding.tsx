@@ -665,15 +665,24 @@ export default function Onboarding() {
 
   const setCredential = (field: keyof CredentialsStep) => (e: ChangeEvent<HTMLInputElement>) => {
     const nextValue = e.target.value;
-    const nextCredentials = { ...credentials, [field]: nextValue };
-    setCredentials(nextCredentials);
+    let nextPasswordError: string | null = null;
+
+    setCredentials((currentCredentials) => {
+      const nextCredentials = { ...currentCredentials, [field]: nextValue };
+      if (field === "password" || field === "confirmPassword") {
+        nextPasswordError = getPasswordMismatchMessage(
+          nextCredentials.password,
+          nextCredentials.confirmPassword,
+        );
+      }
+      return nextCredentials;
+    });
+
     if (field === "email") {
       setEmailAvailability({ status: "idle" });
     }
     if (field === "password" || field === "confirmPassword") {
-      setPasswordMismatchError(
-        getPasswordMismatchMessage(nextCredentials.password, nextCredentials.confirmPassword),
-      );
+      setPasswordMismatchError(nextPasswordError);
     }
   };
 
@@ -876,17 +885,21 @@ export default function Onboarding() {
     const trimmedFullName = profile.full_name.trim();
     const trimmedUsername = profile.username.trim();
     const normalizedEmail = credentials.email.trim().toLowerCase();
+    const currentPasswordMismatchError = getPasswordMismatchMessage(
+      credentials.password,
+      credentials.confirmPassword,
+    );
 
     if (
       !normalizedEmail ||
       !credentials.password ||
       credentials.password.length < 8 ||
-      passwordMismatchError
+      currentPasswordMismatchError
     ) {
       setStepError(
         credentials.password.length < 8
           ? "A senha deve ter pelo menos 8 caracteres"
-          : passwordMismatchError
+          : currentPasswordMismatchError
             ? "As senhas nao coincidem"
             : "Preencha e-mail e senha.",
       );
@@ -1040,7 +1053,6 @@ export default function Onboarding() {
   const trimmedUsername = profile.username.trim();
   const normalizedEmail = credentials.email.trim().toLowerCase();
   const isPasswordValid = credentials.password.length >= 8;
-  const isConfirmPasswordValid = credentials.password === credentials.confirmPassword;
   const isEmailFormatValid = normalizedEmail.length > 0 && EMAIL_REGEX.test(normalizedEmail);
   const isUsernameFormatValid = trimmedUsername.length >= 3;
   const hasPasswordMismatch = passwordMismatchError !== null;
@@ -1064,14 +1076,10 @@ export default function Onboarding() {
   const accountSubmitDisabled =
     stepLoading ||
     !trimmedFullName ||
-    !trimmedUsername ||
-    !normalizedEmail ||
-    !credentials.password ||
-    !isPasswordValid ||
-    !isConfirmPasswordValid ||
-    hasPasswordMismatch ||
+    !isUsernameFormatValid ||
     !isEmailFormatValid ||
-    !isUsernameFormatValid;
+    !isPasswordValid ||
+    hasPasswordMismatch;
 
   let stepContent: ReactNode;
 
