@@ -30,6 +30,7 @@ const Home: FC = () => {
   const navigate = useNavigate();
   const { checkAuth } = useAuth();
   const { themeMode, toggleThemeMode } = useTheme();
+  const mobileHeroTextClass = themeMode === "light" ? "text-black" : "text-white";
 
   const [form, setForm] = useState<LoginForm>({ email: "", password: "" });
   const [showPassword, setShowPassword] = useState(false);
@@ -167,12 +168,12 @@ const Home: FC = () => {
                   </span>
 
                   <div className="space-y-2">
-                    <h2 className="fl-auth-display text-4xl font-bold leading-[1.02] text-white">
+                    <h2 className={`fl-auth-display text-4xl font-bold leading-[1.02] ${mobileHeroTextClass}`}>
                       Entre e{" "}
                       <span className="italic text-[var(--fl-color-accent)]">suba de nivel</span>{" "}
                       na vida real.
                     </h2>
-                    <p className="text-sm leading-6 text-white">
+                    <p className={`text-sm leading-6 ${mobileHeroTextClass}`}>
                       Transforme exercicios em conquistas epicas com XP.
                     </p>
                   </div>
