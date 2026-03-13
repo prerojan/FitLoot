@@ -1,5 +1,5 @@
 ﻿import { useCallback } from "react";
-import { AUTHENTICATED_HINT_KEY, PENDING_404_ACHIEVEMENT_KEY } from "@/react-app/constants/auth";
+import { AUTHENTICATED_HINT_KEY, PENDING_404_ACHIEVEMENT_KEY, ROUTE_PATHS } from "@/react-app/constants/auth";
 import { triggerRouteNotFoundAchievement } from "@/react-app/services/achievementService";
 import { fetchCurrentUser, hasPlanAccess, notifyAppOpen, prefetchCoreRoutes } from "@/react-app/services/authService";
 import { fetchProfileTheme } from "@/react-app/services/profileService";
@@ -11,9 +11,39 @@ interface UseAuthBootstrapParams {
   setLoading: (loading: boolean) => void;
 }
 
+const AUTH_BOOTSTRAP_PROTECTED_PATHS = new Set<string>([
+  ROUTE_PATHS.app,
+  ROUTE_PATHS.payment,
+  ROUTE_PATHS.paymentPending,
+  ROUTE_PATHS.checkout,
+  ROUTE_PATHS.home,
+  ROUTE_PATHS.dashboard,
+  ROUTE_PATHS.profile,
+  ROUTE_PATHS.shop,
+  ROUTE_PATHS.ranking,
+  ROUTE_PATHS.minigames,
+  ROUTE_PATHS.aiChat,
+  ROUTE_PATHS.foodAnalysis,
+]);
+
+function shouldProbeCurrentSession(): boolean {
+  if (typeof window === "undefined") return true;
+
+  const hasAuthenticatedHint = localStorage.getItem(AUTHENTICATED_HINT_KEY) === "1";
+  if (hasAuthenticatedHint) return true;
+
+  return AUTH_BOOTSTRAP_PROTECTED_PATHS.has(window.location.pathname);
+}
+
 export function useAuthBootstrap({ setUser, setLoading }: UseAuthBootstrapParams) {
   return useCallback(async () => {
     try {
+      if (!shouldProbeCurrentSession()) {
+        applyProfileTheme(null);
+        setUser(null);
+        return;
+      }
+
       const user = await fetchCurrentUser();
       if (!user) {
         localStorage.removeItem(AUTHENTICATED_HINT_KEY);

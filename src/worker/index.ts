@@ -1610,7 +1610,7 @@ function buildSessionCookieAttributes(requestUrl: string, maxAgeSeconds: number)
   const attributes = [
     "Path=/",
     "HttpOnly",
-    "SameSite=None",
+    secureCookie ? "SameSite=None" : "SameSite=Lax",
     `Max-Age=${maxAgeSeconds}`,
   ];
 
