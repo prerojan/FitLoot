@@ -1,64 +1,120 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
-import { ROUTE_PATHS } from "@/react-app/constants/auth";
 import PaymentStatusPopup from "@/react-app/components/PaymentStatusPopup";
 import LoadingBall from "@/react-app/components/LoadingBall";
+import { ROUTE_PATHS } from "@/react-app/constants/auth";
 import { useAuth } from "@/react-app/contexts/auth";
 import { hasPlanAccess } from "@/react-app/services/authService";
 import { api } from "@/react-app/utils/api";
 
+type PaymentMethod = "none" | "card" | "pix";
+
 type SubscriptionStatusPayload = {
   plan_id: "free" | "pro" | "annual" | "vip";
   plan_status: "pending" | "active" | "cancelled" | "failed" | "expired";
-  payment_method: "none" | "card" | "pix";
+  payment_method: PaymentMethod;
   amount: number;
+  has_access?: boolean | undefined;
   checkout_url?: string | null | undefined;
 };
 
-const METHOD_HELP: Record<"card" | "pix", string> = {
-  card: "A aprovação do cartão pode levar alguns instantes. Aguarde e clique em verificar status.",
-  pix: "Conclua o pagamento no app do seu banco e depois clique em verificar status.",
+type VerifyStatusOptions = {
+  silent?: boolean;
+  resetBackoff?: boolean;
 };
+
+const STATUS_BACKOFF_SCHEDULE_MS = [5_000, 8_000, 12_000, 18_000, 30_000, 45_000] as const;
+
+const METHOD_HELP: Record<Exclude<PaymentMethod, "none">, string> = {
+  card: "A aprovacao do cartao pode levar alguns instantes. Voce pode aguardar a verificacao automatica ou conferir manualmente.",
+  pix: "Conclua o pagamento no app do seu banco. Assim que a Cakto confirmar o PIX, seu acesso sera liberado.",
+};
+
+function formatAmount(amountInCents: number | null): string | null {
+  if (amountInCents === null || !Number.isFinite(amountInCents)) return null;
+  return (amountInCents / 100).toLocaleString("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+  });
+}
 
 export default function PaymentPending() {
   const { user, checkAuth, logout } = useAuth();
   const navigate = useNavigate();
+  const pollTimerRef = useRef<number | null>(null);
+  const pollAttemptRef = useRef(0);
+  const verifyStatusRef = useRef<(options?: VerifyStatusOptions) => Promise<void>>(async () => undefined);
+
   const [checking, setChecking] = useState(false);
+  const [autoChecking, setAutoChecking] = useState(false);
   const [lastAmount, setLastAmount] = useState<number | null>(null);
   const [checkoutUrl, setCheckoutUrl] = useState<string | null>(null);
-  const [method, setMethod] = useState<"card" | "pix">("card");
+  const [method, setMethod] = useState<PaymentMethod>("card");
   const [statusPopup, setStatusPopup] = useState<{
     title: string;
     message: string;
     tone: "success" | "warning" | "error";
   } | null>(null);
 
+  const clearScheduledPoll = useCallback(() => {
+    if (pollTimerRef.current !== null) {
+      window.clearTimeout(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+  }, []);
+
+  const scheduleNextPoll = useCallback(() => {
+    clearScheduledPoll();
+    const delayIndex = Math.min(pollAttemptRef.current, STATUS_BACKOFF_SCHEDULE_MS.length - 1);
+    const delay = STATUS_BACKOFF_SCHEDULE_MS[delayIndex];
+    pollAttemptRef.current = Math.min(pollAttemptRef.current + 1, STATUS_BACKOFF_SCHEDULE_MS.length - 1);
+    pollTimerRef.current = window.setTimeout(() => {
+      void verifyStatusRef.current({ silent: true });
+    }, delay);
+  }, [clearScheduledPoll]);
+
   useEffect(() => {
     if (!user) return;
     if (hasPlanAccess(user)) {
+      clearScheduledPoll();
       navigate(ROUTE_PATHS.home, { replace: true });
       return;
     }
     if (user.plan_status !== "pending") {
+      clearScheduledPoll();
       navigate(ROUTE_PATHS.payment, { replace: true });
     }
-  }, [navigate, user]);
+  }, [clearScheduledPoll, navigate, user]);
 
-  const methodHint = useMemo(() => METHOD_HELP[method], [method]);
+  const methodHint = useMemo(() => {
+    return method === "none" ? METHOD_HELP.card : METHOD_HELP[method];
+  }, [method]);
 
   const handleExitAndReset = async () => {
+    clearScheduledPoll();
     try {
-      await api("/api/logout", { credentials: "include" });
+      await api("/api/logout");
     } catch {
-      // ignore network issues and continue local reset
+      // Ignore network issues and continue local reset.
     } finally {
       logout();
       navigate(ROUTE_PATHS.login, { replace: true });
     }
   };
 
-  const handleVerifyStatus = async () => {
-    setChecking(true);
+  const verifyStatus = useCallback(async (options: VerifyStatusOptions = {}) => {
+    const silent = options.silent === true;
+    if (options.resetBackoff) {
+      pollAttemptRef.current = 0;
+    }
+
+    clearScheduledPoll();
+    if (silent) {
+      setAutoChecking(true);
+    } else {
+      setChecking(true);
+    }
+
     try {
       const response = await api("/api/subscription/status");
       if (response.status === 401 || response.status === 403) {
@@ -68,11 +124,14 @@ export default function PaymentPending() {
 
       const payload = (await response.json().catch(() => null)) as SubscriptionStatusPayload | null;
       if (!response.ok || !payload) {
-        setStatusPopup({
-          title: "Falha na verificação",
-          message: "Não foi possível consultar o status agora. Tente novamente.",
-          tone: "error",
-        });
+        scheduleNextPoll();
+        if (!silent) {
+          setStatusPopup({
+            title: "Falha na verificacao",
+            message: "Nao foi possivel consultar o status agora. Vamos tentar novamente em instantes.",
+            tone: "error",
+          });
+        }
         return;
       }
 
@@ -82,7 +141,8 @@ export default function PaymentPending() {
       setLastAmount(Number.isFinite(payload.amount) ? payload.amount : null);
       setCheckoutUrl(typeof payload.checkout_url === "string" ? payload.checkout_url : null);
 
-      if (payload.plan_id === "vip" || payload.plan_status === "active") {
+      if (payload.plan_id === "vip" || payload.plan_status === "active" || payload.has_access) {
+        clearScheduledPoll();
         setStatusPopup({
           title: "Pagamento aprovado",
           message: "Seu acesso foi liberado. Redirecionando para o painel...",
@@ -91,65 +151,107 @@ export default function PaymentPending() {
         await checkAuth();
         window.setTimeout(() => {
           navigate(ROUTE_PATHS.home, { replace: true });
-        }, 1200);
+        }, silent ? 500 : 1200);
         return;
       }
 
       if (payload.plan_status === "pending") {
-        setStatusPopup({
-          title: "Pagamento ainda pendente",
-          message: "Recebemos sua solicitação, mas a aprovação ainda não foi confirmada.",
-          tone: "warning",
-        });
+        scheduleNextPoll();
+        if (!silent) {
+          setStatusPopup({
+            title: "Pagamento ainda pendente",
+            message: "Recebemos sua solicitacao e vamos continuar verificando a aprovacao automaticamente.",
+            tone: "warning",
+          });
+        }
         return;
       }
 
+      clearScheduledPoll();
       setStatusPopup({
-        title: "Pagamento não aprovado",
-        message: "Seu pagamento foi recusado ou cancelado. Você pode tentar novamente.",
+        title: "Pagamento nao aprovado",
+        message: "Seu pagamento foi recusado, cancelado ou expirou. Voce pode tentar novamente.",
         tone: "error",
       });
       window.setTimeout(() => {
         navigate(ROUTE_PATHS.payment, { replace: true });
       }, 1300);
     } catch {
-      setStatusPopup({
-        title: "Falha na verificação",
-        message: "Erro de conexão ao consultar o pagamento.",
-        tone: "error",
-      });
+      scheduleNextPoll();
+      if (!silent) {
+        setStatusPopup({
+          title: "Falha na verificacao",
+          message: "Erro de conexao ao consultar o pagamento. Vamos tentar novamente automaticamente.",
+          tone: "error",
+        });
+      }
     } finally {
-      setChecking(false);
+      if (silent) {
+        setAutoChecking(false);
+      } else {
+        setChecking(false);
+      }
     }
-  };
+  }, [checkAuth, clearScheduledPoll, navigate, scheduleNextPoll]);
+
+  useEffect(() => {
+    verifyStatusRef.current = verifyStatus;
+  }, [verifyStatus]);
+
+  useEffect(() => {
+    if (!user || user.plan_status !== "pending") {
+      clearScheduledPoll();
+      return;
+    }
+
+    pollAttemptRef.current = 0;
+    void verifyStatus({ silent: true, resetBackoff: true });
+
+    return () => {
+      clearScheduledPoll();
+    };
+  }, [clearScheduledPoll, user, verifyStatus]);
+
+  const formattedAmount = useMemo(() => formatAmount(lastAmount), [lastAmount]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 px-4 py-8">
       <div className="mx-auto max-w-xl rounded-3xl border border-white/70 bg-white/85 p-6 shadow-xl backdrop-blur-xl md:p-8">
-        <h1 className="text-2xl font-bold text-gray-900">Aguardando confirmação de pagamento</h1>
+        <h1 className="text-2xl font-bold text-gray-900">Aguardando confirmacao do pagamento</h1>
         <p className="mt-2 text-sm text-gray-600">
-          Seu checkout foi iniciado e está em processamento. Assim que a operadora confirmar, seu acesso será liberado.
+          Seu checkout foi iniciado e o sistema esta consultando a Cakto com backoff para liberar o acesso assim que o pagamento for aprovado.
         </p>
 
         <div className="mt-5 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
           {methodHint}
         </div>
 
+        <div className="mt-4 flex items-center gap-2 text-sm text-gray-600">
+          {(autoChecking || checking) ? <LoadingBall size="sm" /> : null}
+          <span>
+            {checking
+              ? "Conferindo status manualmente..."
+              : autoChecking
+                ? "Verificacao automatica em andamento..."
+                : "Verificacao automatica ativa com intervalo progressivo."}
+          </span>
+        </div>
+
         <ul className="mt-5 list-disc space-y-2 pl-5 text-sm text-gray-700">
-          <li>Cartão: aprovação automática após análise da operadora.</li>
-          <li>PIX: confirme o pagamento no banco antes de verificar.</li>
+          <li>Cartao: a aprovacao depende da analise da operadora.</li>
+          <li>PIX: confirme o pagamento no banco para acelerar a liberacao.</li>
         </ul>
 
-        {lastAmount !== null && (
+        {formattedAmount ? (
           <p className="mt-4 text-sm font-semibold text-gray-800">
-            Valor em processamento: {(lastAmount / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
+            Valor em processamento: {formattedAmount}
           </p>
-        )}
+        ) : null}
 
         <button
           type="button"
           onClick={() => {
-            void handleVerifyStatus();
+            void verifyStatus({ resetBackoff: true });
           }}
           disabled={checking}
           className="mt-6 w-full rounded-xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
@@ -160,7 +262,7 @@ export default function PaymentPending() {
               Verificando status
             </span>
           ) : (
-            "Verificar status"
+            "Verificar status agora"
           )}
         </button>
 
@@ -179,18 +281,18 @@ export default function PaymentPending() {
           }}
           className="mt-3 w-full rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700 hover:bg-red-100"
         >
-          Sair e começar do zero
+          Sair e comecar do zero
         </button>
 
-        {checkoutUrl && (
+        {checkoutUrl ? (
           <button
             type="button"
             onClick={() => window.open(checkoutUrl, "_blank", "noopener,noreferrer")}
             className="mt-3 w-full rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700 hover:bg-emerald-100"
           >
-            Abrir checkout
+            Abrir checkout novamente
           </button>
-        )}
+        ) : null}
       </div>
 
       <PaymentStatusPopup

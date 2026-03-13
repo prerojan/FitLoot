@@ -28,6 +28,15 @@ import {
 import { assertString, safeGet } from "../utils/typeHelpers";
 import { toStatusCode } from "./httpHelpers";
 import { processDailyResetForAllUsers } from "./services/dailyReset";
+import {
+  buildTrackedCheckoutUrl,
+  fetchCaktoOrderById,
+  fetchLatestCaktoOrderByCustomer,
+  parseCaktoWebhookPayload,
+  resolveWebhookSecret,
+  type CaktoOrderSnapshot,
+  type CaktoPlanCatalog,
+} from "./services/cakto";
 import { enrichExercise } from "./services/exerciseEnrichment";
 
 // Tipo do usuÃƒÂ¡rio autenticado
@@ -85,9 +94,25 @@ const CHECKOUT_PLAN_CATALOG: Record<
   },
 };
 
+const CAKTO_PLAN_CATALOG: CaktoPlanCatalog = {
+  free: {
+    productId: CHECKOUT_PLAN_CATALOG.free.product_id,
+    checkoutUrl: CHECKOUT_PLAN_CATALOG.free.checkout_url,
+  },
+  pro: {
+    productId: CHECKOUT_PLAN_CATALOG.pro.product_id,
+    checkoutUrl: CHECKOUT_PLAN_CATALOG.pro.checkout_url,
+  },
+  annual: {
+    productId: CHECKOUT_PLAN_CATALOG.annual.product_id,
+    checkoutUrl: CHECKOUT_PLAN_CATALOG.annual.checkout_url,
+  },
+};
+
 const USER_PURGE_TARGETS: ReadonlyArray<{ table: string; columns: ReadonlyArray<string> }> = [
   { table: "sessions", columns: ["user_id"] },
   { table: "subscriptions", columns: ["user_id"] },
+  { table: "cakto_webhook_events", columns: ["identified_user_id"] },
   { table: "user_profiles", columns: ["user_id"] },
   { table: "user_attributes", columns: ["user_id"] },
   { table: "user_progression", columns: ["user_id"] },
@@ -119,12 +144,12 @@ const PLAN_GUARD_EXEMPT_PATHS = new Set<string>([
 ]);
 
 const WEBHOOK_SUPPORTED_EVENTS = new Set<string>([
-  "subscription.created",
-  "subscription.cancelled",
-  "subscription.renewed",
-  "pix.generated",
-  "payment.approved",
-  "payment.refused",
+  "purchase_approved",
+  "purchase_refused",
+  "subscription_created",
+  "subscription_renewed",
+  "subscription_canceled",
+  "checkout_abandonment",
 ]);
 
 
@@ -280,6 +305,14 @@ type SubscriptionRecord = {
   status: string;
   payment_method: string;
   amount: number;
+  external_order_id: string | null;
+  external_subscription_id: string | null;
+  customer_email: string | null;
+  checkout_url: string | null;
+  product_id: string | null;
+  started_at: string | null;
+  expires_at: string | null;
+  metadata_json: string | null;
   webhook_event_log: string | null;
   created_at: string;
   updated_at: string;
@@ -292,6 +325,19 @@ type SubscriptionEventLogEntry = {
   status: PlanStatus;
 };
 
+type SubscriptionMetadata = {
+  customer_name?: string | undefined;
+  external_status?: string | undefined;
+  failure_reason?: string | undefined;
+  last_event_id?: string | undefined;
+  last_event_type?: string | undefined;
+  checkout_tracking_id?: string | undefined;
+  checkout_tracking_user_id?: string | undefined;
+  checkout_tracking_plan_id?: PublicPlanId | undefined;
+};
+
+type CaktoWebhookEventStatus = "received" | "processing" | "processed" | "ignored" | "failed";
+
 type CheckoutStartResult = {
   checkout_status: "pending" | "vip_active";
   plan_id: PlanId;
@@ -303,22 +349,6 @@ type CheckoutStartResult = {
   subscription_id: string;
   message: string;
 };
-
-class CheckoutValidationError extends Error {
-  readonly code: string;
-  readonly status: number;
-
-  constructor(message: string, code = "CHECKOUT_VALIDATION_ERROR", status = 400) {
-    super(message);
-    this.name = "CheckoutValidationError";
-    this.code = code;
-    this.status = status;
-  }
-}
-
-function isCheckoutValidationError(error: unknown): error is CheckoutValidationError {
-  return error instanceof CheckoutValidationError;
-}
 
 function isPublicPlanId(value: string): value is PublicPlanId {
   return value === "free" || value === "pro" || value === "annual";
@@ -410,18 +440,6 @@ function normalizePublicPlanIdFromValue(value: string | null | undefined): Publi
   if (normalized === "pro" || normalized === "premium") return "pro";
   if (normalized === "annual" || normalized === "elite") return "annual";
   return null;
-}
-
-function normalizeCheckoutPaymentMethodFromValue(value: string | null | undefined): CheckoutPaymentMethod | null {
-  if (!value) return null;
-  const normalized = value.trim().toLowerCase();
-  if (normalized === "card" || normalized === "credit_card") return "card";
-  if (normalized === "pix") return "pix";
-  return null;
-}
-
-function hasText(value: string | null | undefined): boolean {
-  return typeof value === "string" && value.trim().length > 0;
 }
 
 async function getTableColumns(db: D1Database, tableName: string): Promise<Set<string>> {
@@ -700,6 +718,9 @@ export interface Env {
   FEEDBACK_FROM_EMAIL?: string | undefined;
   VIP_ACTIVATION_CODE?: string | undefined;
   WEBHOOK_SECRET?: string | undefined;
+  CAKTO_CLIENT_ID?: string | undefined;
+  CAKTO_CLIENT_SECRET?: string | undefined;
+  CAKTO_WEBHOOK_SECRET?: string | undefined;
 }
 // --------------------------------
 
@@ -1648,32 +1669,6 @@ async function hashPassword(password: string, salt: string): Promise<string> {
   return toHex(derivedBits);
 }
 
-function normalizeWebhookSignature(signatureHeader: string): string {
-  const trimmed = signatureHeader.trim();
-  return trimmed.toLowerCase().startsWith("sha256=") ? trimmed.slice(7) : trimmed;
-}
-
-function timingSafeEquals(left: string, right: string): boolean {
-  if (left.length !== right.length) return false;
-  let mismatch = 0;
-  for (let index = 0; index < left.length; index += 1) {
-    mismatch |= left.charCodeAt(index) ^ right.charCodeAt(index);
-  }
-  return mismatch === 0;
-}
-
-async function signWebhookPayload(secret: string, payload: string): Promise<string> {
-  const key = await crypto.subtle.importKey(
-    "raw",
-    encoder.encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"],
-  );
-  const signature = await crypto.subtle.sign("HMAC", key, encoder.encode(payload));
-  return toHex(signature);
-}
-
 function parseSubscriptionEventLog(raw: string | null): SubscriptionEventLogEntry[] {
   if (!raw) return [];
 
@@ -1704,34 +1699,168 @@ function serializeSubscriptionEventLog(entries: SubscriptionEventLogEntry[]): st
   return JSON.stringify(entries.slice(-100));
 }
 
+function parseSubscriptionMetadata(raw: string | null): SubscriptionMetadata {
+  if (!raw) return {};
+
+  try {
+    const parsed = JSON.parse(raw);
+    if (!isRecord(parsed)) return {};
+
+    const metadata: SubscriptionMetadata = {};
+    if (typeof parsed.customer_name === "string") metadata.customer_name = parsed.customer_name;
+    if (typeof parsed.external_status === "string") metadata.external_status = parsed.external_status;
+    if (typeof parsed.failure_reason === "string") metadata.failure_reason = parsed.failure_reason;
+    if (typeof parsed.last_event_id === "string") metadata.last_event_id = parsed.last_event_id;
+    if (typeof parsed.last_event_type === "string") metadata.last_event_type = parsed.last_event_type;
+    if (typeof parsed.checkout_tracking_id === "string") metadata.checkout_tracking_id = parsed.checkout_tracking_id;
+    if (typeof parsed.checkout_tracking_user_id === "string") metadata.checkout_tracking_user_id = parsed.checkout_tracking_user_id;
+    if (typeof parsed.checkout_tracking_plan_id === "string" && isPublicPlanId(parsed.checkout_tracking_plan_id)) {
+      metadata.checkout_tracking_plan_id = parsed.checkout_tracking_plan_id;
+    }
+    return metadata;
+  } catch {
+    return {};
+  }
+}
+
+function serializeSubscriptionMetadata(metadata: SubscriptionMetadata): string {
+  return JSON.stringify(metadata);
+}
+
+const SUBSCRIPTION_SELECT_SQL = `SELECT
+  id,
+  user_id,
+  plan_id,
+  status,
+  payment_method,
+  amount,
+  external_order_id,
+  external_subscription_id,
+  customer_email,
+  checkout_url,
+  product_id,
+  started_at,
+  expires_at,
+  metadata_json,
+  webhook_event_log,
+  created_at,
+  updated_at
+FROM subscriptions`;
+
 async function getSubscriptionById(db: D1Database, subscriptionId: string): Promise<SubscriptionRecord | null> {
   return db
-    .prepare(
-      `SELECT id, user_id, plan_id, status, payment_method, amount, webhook_event_log, created_at, updated_at
-      FROM subscriptions
-      WHERE id = ?`
-    )
+    .prepare(`${SUBSCRIPTION_SELECT_SQL} WHERE id = ?`)
     .bind(subscriptionId)
+    .first<SubscriptionRecord>();
+}
+
+async function getSubscriptionByExternalOrderId(
+  db: D1Database,
+  externalOrderId: string,
+): Promise<SubscriptionRecord | null> {
+  return db
+    .prepare(`${SUBSCRIPTION_SELECT_SQL} WHERE external_order_id = ?`)
+    .bind(externalOrderId)
     .first<SubscriptionRecord>();
 }
 
 async function getLatestSubscriptionByUser(db: D1Database, userId: string): Promise<SubscriptionRecord | null> {
   return db
-    .prepare(
-      `SELECT id, user_id, plan_id, status, payment_method, amount, webhook_event_log, created_at, updated_at
-      FROM subscriptions
-      WHERE user_id = ?
-      ORDER BY datetime(updated_at) DESC
-      LIMIT 1`
-    )
+    .prepare(`${SUBSCRIPTION_SELECT_SQL} WHERE user_id = ? ORDER BY datetime(updated_at) DESC LIMIT 1`)
     .bind(userId)
     .first<SubscriptionRecord>();
+}
+
+async function getUserIdByEmail(db: D1Database, email: string): Promise<string | null> {
+  const normalizedEmail = email.trim().toLowerCase();
+  if (!normalizedEmail) return null;
+
+  const row = await db
+    .prepare("SELECT id FROM users WHERE lower(email) = ? LIMIT 1")
+    .bind(normalizedEmail)
+    .first<{ id: string }>();
+
+  return row?.id ?? null;
+}
+
+async function recordCaktoWebhookReceipt(
+  db: D1Database,
+  params: {
+    eventId: string;
+    eventType: string;
+    externalOrderId?: string | null;
+    identifiedUserId?: string | null;
+    customerEmail?: string | null;
+    payloadJson: string;
+  },
+): Promise<boolean> {
+  const existing = await db
+    .prepare("SELECT id FROM cakto_webhook_events WHERE id = ? LIMIT 1")
+    .bind(params.eventId)
+    .first<{ id: string }>();
+  if (existing?.id) {
+    return false;
+  }
+
+  await db.prepare(
+    `INSERT INTO cakto_webhook_events (
+      id,
+      event_type,
+      external_order_id,
+      identified_user_id,
+      customer_email,
+      status,
+      payload_json,
+      received_at
+    ) VALUES (?, ?, ?, ?, ?, 'received', ?, datetime('now'))`
+  ).bind(
+    params.eventId,
+    params.eventType,
+    params.externalOrderId ?? null,
+    params.identifiedUserId ?? null,
+    params.customerEmail ?? null,
+    params.payloadJson,
+  ).run();
+
+  return true;
+}
+
+async function updateCaktoWebhookEventStatus(
+  db: D1Database,
+  eventId: string,
+  params: {
+    status: CaktoWebhookEventStatus;
+    externalOrderId?: string | null;
+    identifiedUserId?: string | null;
+    customerEmail?: string | null;
+    errorMessage?: string | null;
+  },
+): Promise<void> {
+  await db.prepare(
+    `UPDATE cakto_webhook_events
+      SET status = ?,
+          external_order_id = COALESCE(?, external_order_id),
+          identified_user_id = COALESCE(?, identified_user_id),
+          customer_email = COALESCE(?, customer_email),
+          error_message = ?,
+          processed_at = CASE WHEN ? IN ('processed', 'ignored', 'failed') THEN datetime('now') ELSE processed_at END
+      WHERE id = ?`
+  ).bind(
+    params.status,
+    params.externalOrderId ?? null,
+    params.identifiedUserId ?? null,
+    params.customerEmail ?? null,
+    params.errorMessage ?? null,
+    params.status,
+    eventId,
+  ).run();
 }
 
 async function ensureSubscriptionRecord(
   db: D1Database,
   params: {
-    id: string;
+    id?: string | null;
+    externalOrderId?: string | null;
     status: PlanStatus;
     eventType: string;
     source: "checkout" | "webhook";
@@ -1739,21 +1868,38 @@ async function ensureSubscriptionRecord(
     planId?: string | null;
     paymentMethod?: string | null;
     amount?: number | null;
+    externalSubscriptionId?: string | null;
+    customerEmail?: string | null;
+    checkoutUrl?: string | null;
+    productId?: string | null;
+    startedAt?: string | null;
+    expiresAt?: string | null;
+    metadata?: SubscriptionMetadata | null;
   },
 ): Promise<SubscriptionRecord | null> {
-  const existing = await getSubscriptionById(db, params.id);
+  const existing =
+    (params.externalOrderId ? await getSubscriptionByExternalOrderId(db, params.externalOrderId) : null) ??
+    (params.id ? await getSubscriptionById(db, params.id) : null);
+  const recordId = existing?.id ?? params.id ?? crypto.randomUUID();
   const nextUserId = params.userId ?? existing?.user_id ?? null;
   const nextPlanId = params.planId ?? existing?.plan_id ?? null;
   const nextPaymentMethodRaw = params.paymentMethod ?? existing?.payment_method ?? null;
   const nextAmountRaw = params.amount ?? existing?.amount ?? null;
   const nextAmount = parseInteger(nextAmountRaw);
+  const nextExternalOrderId = params.externalOrderId ?? existing?.external_order_id ?? null;
+  const nextExternalSubscriptionId = params.externalSubscriptionId ?? existing?.external_subscription_id ?? null;
+  const nextCustomerEmail = params.customerEmail ?? existing?.customer_email ?? null;
+  const nextCheckoutUrl = params.checkoutUrl ?? existing?.checkout_url ?? null;
+  const nextProductId = params.productId ?? existing?.product_id ?? null;
+  const nextStartedAt = params.startedAt ?? existing?.started_at ?? null;
+  const nextExpiresAt = params.expiresAt ?? existing?.expires_at ?? null;
 
   if (!nextUserId || !nextPlanId || !nextPaymentMethodRaw || nextAmount === null) {
     return null;
   }
 
-  const nextPaymentMethod = normalizeCheckoutPaymentMethodFromValue(nextPaymentMethodRaw);
-  if (!nextPaymentMethod) {
+  const nextPaymentMethod = normalizeUserPaymentMethod(nextPaymentMethodRaw);
+  if (nextPaymentMethod === "none") {
     return null;
   }
 
@@ -1766,30 +1912,97 @@ async function ensureSubscriptionRecord(
     received_at: new Date().toISOString(),
   });
   const serializedLog = serializeSubscriptionEventLog(nextLog);
+  const nextMetadata: SubscriptionMetadata = {
+    ...parseSubscriptionMetadata(existing?.metadata_json ?? null),
+    ...(params.metadata ?? {}),
+  };
+  const serializedMetadata = serializeSubscriptionMetadata(nextMetadata);
 
   if (existing) {
     await db.prepare(
       `UPDATE subscriptions
-      SET user_id = ?, plan_id = ?, status = ?, payment_method = ?, amount = ?, webhook_event_log = ?, updated_at = datetime('now')
+      SET user_id = ?, plan_id = ?, status = ?, payment_method = ?, amount = ?, external_order_id = ?, external_subscription_id = ?, customer_email = ?, checkout_url = ?, product_id = ?, started_at = ?, expires_at = ?, metadata_json = ?, webhook_event_log = ?, updated_at = datetime('now')
       WHERE id = ?`
-    ).bind(nextUserId, nextPlanId, nextStatus, nextPaymentMethod, nextAmount, serializedLog, params.id).run();
+    ).bind(
+      nextUserId,
+      nextPlanId,
+      nextStatus,
+      nextPaymentMethod,
+      nextAmount,
+      nextExternalOrderId,
+      nextExternalSubscriptionId,
+      nextCustomerEmail,
+      nextCheckoutUrl,
+      nextProductId,
+      nextStartedAt,
+      nextExpiresAt,
+      serializedMetadata,
+      serializedLog,
+      recordId,
+    ).run();
   } else {
     await db.prepare(
       `INSERT INTO subscriptions (
-        id, user_id, plan_id, status, payment_method, amount, webhook_event_log, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`
-    ).bind(params.id, nextUserId, nextPlanId, nextStatus, nextPaymentMethod, nextAmount, serializedLog).run();
+        id, user_id, plan_id, status, payment_method, amount, external_order_id, external_subscription_id, customer_email, checkout_url, product_id, started_at, expires_at, metadata_json, webhook_event_log, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`
+    ).bind(
+      recordId,
+      nextUserId,
+      nextPlanId,
+      nextStatus,
+      nextPaymentMethod,
+      nextAmount,
+      nextExternalOrderId,
+      nextExternalSubscriptionId,
+      nextCustomerEmail,
+      nextCheckoutUrl,
+      nextProductId,
+      nextStartedAt,
+      nextExpiresAt,
+      serializedMetadata,
+      serializedLog,
+    ).run();
   }
 
-  return getSubscriptionById(db, params.id);
+  return getSubscriptionById(db, recordId);
 }
 
-async function syncUserPlanFromSubscription(db: D1Database, subscription: SubscriptionRecord): Promise<void> {
+async function syncUserPlanFromSubscription(
+  db: D1Database,
+  subscription: SubscriptionRecord,
+  options?: {
+    preserveActiveAccess?: boolean;
+    keepCurrentState?: boolean;
+    markOnboardingCompleted?: boolean;
+  },
+): Promise<void> {
+  const preserveActiveAccess = options?.preserveActiveAccess === true;
+  const keepCurrentState = options?.keepCurrentState === true;
+  const currentUser = await getUserAuthRecordById(db, subscription.user_id);
+
+  if (keepCurrentState && currentUser) {
+    return;
+  }
+
+  const nextPlanId = normalizePlanId(subscription.plan_id);
+  const nextStatus = normalizePlanStatus(subscription.status);
+  const nextPaymentMethod = normalizeUserPaymentMethod(subscription.payment_method);
+
+  if (preserveActiveAccess && currentUser && hasPlanAccess(currentUser.plan_id, currentUser.plan_status)) {
+    await updateUserPlanState(db, subscription.user_id, {
+      planId: currentUser.plan_id,
+      status: currentUser.plan_status,
+      paymentMethod: nextPaymentMethod === "none" ? currentUser.payment_method : nextPaymentMethod,
+      markOnboardingCompleted: options?.markOnboardingCompleted ?? false,
+    });
+    return;
+  }
+
   await updateUserPlanState(db, subscription.user_id, {
-    planId: normalizePlanId(subscription.plan_id),
-    status: normalizePlanStatus(subscription.status),
-    paymentMethod: normalizeUserPaymentMethod(subscription.payment_method),
-    markOnboardingCompleted: false,
+    planId: nextPlanId,
+    status: nextStatus,
+    paymentMethod: nextPaymentMethod,
+    markOnboardingCompleted: options?.markOnboardingCompleted ?? false,
   });
 }
 
@@ -1864,19 +2077,12 @@ async function startCheckoutForUser(
     };
   }
 
-  if (
-    params.paymentMethod === "card" &&
-    (!hasText(params.cardNumber) || !hasText(params.cardHolderName) || !hasText(params.cardExpiry))
-  ) {
-    throw new CheckoutValidationError(
-      "Preencha os dados do cartão para continuar ou escolha PIX.",
-      "CARD_DETAILS_REQUIRED",
-      400,
-    );
-  }
-
   const amount = resolveCheckoutAmount(params.planId);
-  const checkoutUrl = resolveCheckoutUrl(params.planId);
+  const checkoutUrl = buildTrackedCheckoutUrl(resolveCheckoutUrl(params.planId), {
+    checkoutId: subscriptionId,
+    userId: params.userId,
+    planId: params.planId,
+  });
   const productId = resolveCheckoutProductId(params.planId);
   const pendingSubscription = await ensureSubscriptionRecord(db, {
     id: subscriptionId,
@@ -1887,18 +2093,36 @@ async function startCheckoutForUser(
     amount,
     eventType: "checkout.started",
     source: "checkout",
+    checkoutUrl,
+    productId,
+    metadata: {
+      checkout_tracking_id: subscriptionId,
+      checkout_tracking_user_id: params.userId,
+      checkout_tracking_plan_id: params.planId,
+      last_event_type: "checkout.started",
+    },
   });
 
   if (!pendingSubscription) {
     throw new Error("Failed to create pending checkout.");
   }
 
-  await updateUserPlanState(db, params.userId, {
-    planId: params.planId,
-    status: "pending",
-    paymentMethod: params.paymentMethod,
-    markOnboardingCompleted: params.markOnboardingCompleted,
-  });
+  const currentUser = await getUserAuthRecordById(db, params.userId);
+  if (!currentUser || !hasPlanAccess(currentUser.plan_id, currentUser.plan_status)) {
+    await updateUserPlanState(db, params.userId, {
+      planId: params.planId,
+      status: "pending",
+      paymentMethod: params.paymentMethod,
+      markOnboardingCompleted: params.markOnboardingCompleted,
+    });
+  } else if (params.markOnboardingCompleted) {
+    await updateUserPlanState(db, params.userId, {
+      planId: currentUser.plan_id,
+      status: currentUser.plan_status,
+      paymentMethod: currentUser.payment_method,
+      markOnboardingCompleted: true,
+    });
+  }
 
   return {
     checkout_status: "pending",
@@ -1911,6 +2135,292 @@ async function startCheckoutForUser(
     subscription_id: subscriptionId,
     message: "Pagamento iniciado. Aguarde a confirmação para liberar o acesso.",
   };
+}
+
+type CaktoUserSyncMode = "apply" | "preserve-active" | "keep-current";
+
+function resolveCaktoSyncMode(eventType: string): { status: PlanStatus; syncMode: CaktoUserSyncMode; paymentMethod: UserPaymentMethod | null } {
+  switch (eventType) {
+    case "purchase_approved":
+    case "subscription_created":
+    case "subscription_renewed":
+      return { status: "active", syncMode: "apply", paymentMethod: null };
+    case "subscription_canceled":
+      return { status: "cancelled", syncMode: "apply", paymentMethod: null };
+    case "purchase_refused":
+      return { status: "failed", syncMode: "keep-current", paymentMethod: null };
+    case "checkout_abandonment":
+      return { status: "pending", syncMode: "keep-current", paymentMethod: null };
+    default:
+      return { status: "pending", syncMode: "preserve-active", paymentMethod: null };
+  }
+}
+
+function mergeCaktoOrderSnapshots(primary: CaktoOrderSnapshot, fallback: CaktoOrderSnapshot | null): CaktoOrderSnapshot {
+  if (!fallback) return primary;
+
+  return {
+    eventType: primary.eventType ?? fallback.eventType,
+    eventId: primary.eventId ?? fallback.eventId,
+    secret: primary.secret ?? fallback.secret,
+    externalOrderId: primary.externalOrderId ?? fallback.externalOrderId,
+    externalSubscriptionId: primary.externalSubscriptionId ?? fallback.externalSubscriptionId,
+    checkoutUrl: primary.checkoutUrl ?? fallback.checkoutUrl,
+    customerEmail: primary.customerEmail ?? fallback.customerEmail,
+    customerName: primary.customerName ?? fallback.customerName,
+    paymentMethod: primary.paymentMethod !== "none" ? primary.paymentMethod : fallback.paymentMethod,
+    planId: primary.planId ?? fallback.planId,
+    productId: primary.productId ?? fallback.productId,
+    productName: primary.productName ?? fallback.productName,
+    amountCents: primary.amountCents ?? fallback.amountCents,
+    externalStatus: primary.externalStatus ?? fallback.externalStatus,
+    startedAt: primary.startedAt ?? fallback.startedAt,
+    expiresAt: primary.expiresAt ?? fallback.expiresAt,
+    failureReason: primary.failureReason ?? fallback.failureReason,
+    tracking: {
+      checkoutId: primary.tracking.checkoutId ?? fallback.tracking.checkoutId,
+      userId: primary.tracking.userId ?? fallback.tracking.userId,
+      planId: primary.tracking.planId ?? fallback.tracking.planId,
+    },
+    rawEvent: primary.rawEvent,
+    rawData: Object.keys(primary.rawData).length > 0 ? primary.rawData : fallback.rawData,
+  };
+}
+
+async function hashWebhookBody(rawBody: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", encoder.encode(rawBody));
+  return toHex(digest);
+}
+
+async function resolveCaktoWebhookEventId(snapshot: CaktoOrderSnapshot, rawBody: string): Promise<string> {
+  if (snapshot.eventId) return snapshot.eventId;
+  const hashed = await hashWebhookBody(rawBody);
+  return `${snapshot.eventType ?? "unknown"}:${hashed}`;
+}
+
+async function resolveWebhookUserIdFromSnapshot(db: D1Database, snapshot: CaktoOrderSnapshot): Promise<string | null> {
+  if (snapshot.tracking.userId) {
+    const trackedUser = await getUserAuthRecordById(db, snapshot.tracking.userId);
+    if (trackedUser?.id) return trackedUser.id;
+  }
+
+  if (snapshot.customerEmail) {
+    return getUserIdByEmail(db, snapshot.customerEmail);
+  }
+
+  return null;
+}
+
+async function resolveSubscriptionAnchorId(
+  db: D1Database,
+  snapshot: CaktoOrderSnapshot,
+  userId: string | null,
+): Promise<string | null> {
+  if (snapshot.tracking.checkoutId) {
+    return snapshot.tracking.checkoutId;
+  }
+
+  if (!userId) return null;
+
+  const latest = await getLatestSubscriptionByUser(db, userId);
+  if (!latest) return null;
+  if (normalizePlanStatus(latest.status) !== "pending") return null;
+  if (snapshot.planId && latest.plan_id !== snapshot.planId) return null;
+  return latest.id;
+}
+
+async function enrichCaktoSnapshotFromApi(
+  env: Env,
+  snapshot: CaktoOrderSnapshot,
+): Promise<CaktoOrderSnapshot> {
+  const shouldFetchByOrderId =
+    Boolean(snapshot.externalOrderId) &&
+    (!snapshot.customerEmail || !snapshot.planId || snapshot.amountCents === null || snapshot.paymentMethod === "none");
+
+  if (shouldFetchByOrderId && snapshot.externalOrderId) {
+    try {
+      const order = await fetchCaktoOrderById(env, snapshot.externalOrderId, CAKTO_PLAN_CATALOG);
+      return mergeCaktoOrderSnapshots(snapshot, order);
+    } catch (error) {
+      console.error("[cakto][order-by-id]", {
+        orderId: snapshot.externalOrderId,
+        message: getErrorMessage(error),
+      });
+    }
+  }
+
+  const shouldFetchByCustomer =
+    Boolean(snapshot.customerEmail) &&
+    (!snapshot.externalOrderId || !snapshot.planId || snapshot.amountCents === null);
+
+  if (shouldFetchByCustomer && snapshot.customerEmail) {
+    try {
+      const order = await fetchLatestCaktoOrderByCustomer(env, snapshot.customerEmail, CAKTO_PLAN_CATALOG);
+      return mergeCaktoOrderSnapshots(snapshot, order);
+    } catch (error) {
+      console.error("[cakto][order-by-customer]", {
+        customerEmail: snapshot.customerEmail,
+        message: getErrorMessage(error),
+      });
+    }
+  }
+
+  return snapshot;
+}
+
+async function processCaktoWebhook(
+  c: import("hono").Context<AppContext>,
+  rawBody: string,
+  payload: Record<string, unknown>,
+): Promise<void> {
+  const initialSnapshot = parseCaktoWebhookPayload(payload, CAKTO_PLAN_CATALOG);
+  const eventType = initialSnapshot.eventType;
+  const eventId = await resolveCaktoWebhookEventId(initialSnapshot, rawBody);
+
+  if (!eventType || !WEBHOOK_SUPPORTED_EVENTS.has(eventType)) {
+    const registered = await recordCaktoWebhookReceipt(c.env.fitloot_db, {
+      eventId,
+      eventType: eventType ?? "unknown",
+      externalOrderId: initialSnapshot.externalOrderId,
+      customerEmail: initialSnapshot.customerEmail,
+      payloadJson: rawBody,
+    });
+    if (registered) {
+      await updateCaktoWebhookEventStatus(c.env.fitloot_db, eventId, {
+        status: "ignored",
+        externalOrderId: initialSnapshot.externalOrderId,
+        customerEmail: initialSnapshot.customerEmail,
+      });
+    }
+    return;
+  }
+
+  const registered = await recordCaktoWebhookReceipt(c.env.fitloot_db, {
+    eventId,
+    eventType,
+    externalOrderId: initialSnapshot.externalOrderId,
+    customerEmail: initialSnapshot.customerEmail,
+    payloadJson: rawBody,
+  });
+
+  if (!registered) {
+    console.info("[cakto][webhook][duplicate]", { eventId, eventType });
+    return;
+  }
+
+  console.info("[cakto][webhook][payload]", {
+    eventId,
+    eventType,
+    payload,
+  });
+
+  await updateCaktoWebhookEventStatus(c.env.fitloot_db, eventId, {
+    status: "processing",
+    externalOrderId: initialSnapshot.externalOrderId,
+    customerEmail: initialSnapshot.customerEmail,
+  });
+
+  try {
+    const snapshot = await enrichCaktoSnapshotFromApi(c.env, initialSnapshot);
+    const userId = await resolveWebhookUserIdFromSnapshot(c.env.fitloot_db, snapshot);
+    if (!userId) {
+      await updateCaktoWebhookEventStatus(c.env.fitloot_db, eventId, {
+        status: "failed",
+        externalOrderId: snapshot.externalOrderId,
+        customerEmail: snapshot.customerEmail,
+        errorMessage: "USER_NOT_IDENTIFIED",
+      });
+      return;
+    }
+
+    const anchorId = await resolveSubscriptionAnchorId(c.env.fitloot_db, snapshot, userId);
+    const latestSubscription = await getLatestSubscriptionByUser(c.env.fitloot_db, userId);
+    const effectivePlanId =
+      snapshot.planId ??
+      (latestSubscription && isPublicPlanId(latestSubscription.plan_id) ? latestSubscription.plan_id : null);
+    const effectiveAmount =
+      snapshot.amountCents ??
+      (latestSubscription ? Number(latestSubscription.amount) : null) ??
+      (effectivePlanId ? resolveCheckoutAmount(effectivePlanId) : null);
+    const syncRule = resolveCaktoSyncMode(eventType);
+    const paymentMethod =
+      syncRule.paymentMethod ??
+      (snapshot.paymentMethod !== "none" ? snapshot.paymentMethod : normalizeUserPaymentMethod(latestSubscription?.payment_method));
+
+    if (!effectivePlanId || effectiveAmount === null || paymentMethod === "none") {
+      await updateCaktoWebhookEventStatus(c.env.fitloot_db, eventId, {
+        status: "failed",
+        externalOrderId: snapshot.externalOrderId,
+        identifiedUserId: userId,
+        customerEmail: snapshot.customerEmail,
+        errorMessage: "INSUFFICIENT_CHECKOUT_CONTEXT",
+      });
+      return;
+    }
+
+    const subscription = await ensureSubscriptionRecord(c.env.fitloot_db, {
+      id: anchorId,
+      externalOrderId: snapshot.externalOrderId,
+      externalSubscriptionId: snapshot.externalSubscriptionId,
+      userId,
+      planId: effectivePlanId,
+      status: syncRule.status,
+      paymentMethod,
+      amount: effectiveAmount,
+      customerEmail: snapshot.customerEmail,
+      checkoutUrl: snapshot.checkoutUrl,
+      productId: snapshot.productId,
+      startedAt: snapshot.startedAt ?? (syncRule.status === "active" ? new Date().toISOString() : null),
+      expiresAt: snapshot.expiresAt,
+      eventType,
+      source: "webhook",
+      metadata: {
+        customer_name: snapshot.customerName ?? undefined,
+        external_status: snapshot.externalStatus ?? undefined,
+        failure_reason: snapshot.failureReason ?? undefined,
+        last_event_id: eventId,
+        last_event_type: eventType,
+        checkout_tracking_id: snapshot.tracking.checkoutId ?? undefined,
+        checkout_tracking_user_id: userId,
+        checkout_tracking_plan_id: effectivePlanId,
+      },
+    });
+
+    if (!subscription) {
+      await updateCaktoWebhookEventStatus(c.env.fitloot_db, eventId, {
+        status: "failed",
+        externalOrderId: snapshot.externalOrderId,
+        identifiedUserId: userId,
+        customerEmail: snapshot.customerEmail,
+        errorMessage: "SUBSCRIPTION_UPSERT_FAILED",
+      });
+      return;
+    }
+
+    await syncUserPlanFromSubscription(c.env.fitloot_db, subscription, {
+      keepCurrentState: syncRule.syncMode === "keep-current",
+      preserveActiveAccess: syncRule.syncMode === "preserve-active",
+      markOnboardingCompleted: true,
+    });
+
+    await updateCaktoWebhookEventStatus(c.env.fitloot_db, eventId, {
+      status: "processed",
+      externalOrderId: snapshot.externalOrderId,
+      identifiedUserId: userId,
+      customerEmail: snapshot.customerEmail,
+    });
+  } catch (error) {
+    console.error("[cakto][webhook][process]", {
+      message: getErrorMessage(error),
+      payload,
+    });
+    await updateCaktoWebhookEventStatus(c.env.fitloot_db, eventId, {
+      status: "failed",
+      externalOrderId: initialSnapshot.externalOrderId,
+      customerEmail: initialSnapshot.customerEmail,
+      errorMessage: getErrorMessage(error),
+    });
+  }
 }
 
 // Auth endpoints (e-mail/senha)
@@ -2182,24 +2692,16 @@ app.post(
     if (!user) return c.json({ error: "Unauthorized" }, 401);
 
     const data = c.req.valid("json");
-    let checkoutResult: CheckoutStartResult;
-    try {
-      checkoutResult = await startCheckoutForUser(c.env.fitloot_db, c.env, {
-        userId: user.id,
-        planId: data.plan_id,
-        paymentMethod: data.payment_method,
-        cardNumber: data.card_number,
-        cardHolderName: data.card_holder_name,
-        cardExpiry: data.card_expiry,
-        cardCvv: data.card_cvv,
-        markOnboardingCompleted: false,
-      });
-    } catch (error) {
-      if (isCheckoutValidationError(error)) {
-        return c.json({ error: error.message, code: error.code }, 400);
-      }
-      throw error;
-    }
+    const checkoutResult = await startCheckoutForUser(c.env.fitloot_db, c.env, {
+      userId: user.id,
+      planId: data.plan_id,
+      paymentMethod: data.payment_method,
+      cardNumber: data.card_number,
+      cardHolderName: data.card_holder_name,
+      cardExpiry: data.card_expiry,
+      cardCvv: data.card_cvv,
+      markOnboardingCompleted: false,
+    });
 
     const refreshedUser = await getUserAuthRecordById(c.env.fitloot_db, user.id);
 
@@ -2228,8 +2730,12 @@ app.get("/api/subscription/status", authMiddleware, async (c) => {
     normalizePublicPlanIdFromValue(latestSubscription?.plan_id ?? null) ??
     (isPublicPlanId(refreshedUser.plan_id) ? refreshedUser.plan_id : null);
   const currentPlanAmount = effectivePublicPlanId ? resolveCheckoutAmount(effectivePublicPlanId) : 0;
-  const checkoutUrl = effectivePublicPlanId ? resolveCheckoutUrl(effectivePublicPlanId) : null;
-  const productId = effectivePublicPlanId ? resolveCheckoutProductId(effectivePublicPlanId) : null;
+  const checkoutUrl =
+    latestSubscription?.checkout_url ??
+    (effectivePublicPlanId ? resolveCheckoutUrl(effectivePublicPlanId) : null);
+  const productId =
+    latestSubscription?.product_id ??
+    (effectivePublicPlanId ? resolveCheckoutProductId(effectivePublicPlanId) : null);
 
   return c.json({
     plan_id: refreshedUser.plan_id,
@@ -2245,27 +2751,19 @@ app.get("/api/subscription/status", authMiddleware, async (c) => {
         status: normalizePlanStatus(latestSubscription.status),
         payment_method: normalizeUserPaymentMethod(latestSubscription.payment_method),
         amount: Number(latestSubscription.amount),
+        external_order_id: latestSubscription.external_order_id,
+        external_subscription_id: latestSubscription.external_subscription_id,
+        customer_email: latestSubscription.customer_email,
+        started_at: latestSubscription.started_at,
+        expires_at: latestSubscription.expires_at,
         updated_at: latestSubscription.updated_at,
       }
       : null,
   });
 });
 
-app.post("/api/webhook/payment", async (c) => {
-  const webhookSecret = typeof c.env.WEBHOOK_SECRET === "string" ? c.env.WEBHOOK_SECRET : "";
-  const signatureHeader = c.req.header("x-webhook-signature") ?? c.req.header("x-signature") ?? "";
-
-  if (!webhookSecret || !signatureHeader) {
-    return c.json({ error: "Unauthorized", code: "WEBHOOK_SIGNATURE_INVALID" }, 401);
-  }
-
+async function handleCaktoWebhookRequest(c: import("hono").Context<AppContext>) {
   const rawBody = await c.req.text();
-  const expectedSignature = await signWebhookPayload(webhookSecret, rawBody);
-  const receivedSignature = normalizeWebhookSignature(signatureHeader);
-
-  if (!timingSafeEquals(receivedSignature, expectedSignature)) {
-    return c.json({ error: "Unauthorized", code: "WEBHOOK_SIGNATURE_INVALID" }, 401);
-  }
 
   let payload: Record<string, unknown>;
   try {
@@ -2278,92 +2776,22 @@ app.post("/api/webhook/payment", async (c) => {
     return c.json({ received: true, ignored: true }, 200);
   }
 
-  const eventType = typeof payload.type === "string" ? payload.type : "";
-  if (!WEBHOOK_SUPPORTED_EVENTS.has(eventType)) {
-    return c.json({ received: true, ignored: true }, 200);
+  const configuredSecret =
+    (typeof c.env.CAKTO_WEBHOOK_SECRET === "string" && c.env.CAKTO_WEBHOOK_SECRET.trim()) ||
+    (typeof c.env.WEBHOOK_SECRET === "string" && c.env.WEBHOOK_SECRET.trim()) ||
+    "";
+  const receivedSecret = resolveWebhookSecret(payload, c.req.raw.headers);
+
+  if (configuredSecret && receivedSecret !== configuredSecret) {
+    return c.json({ error: "Unauthorized", code: "CAKTO_WEBHOOK_SECRET_INVALID" }, 401);
   }
 
-  const eventData = isRecord(payload.data) ? payload.data : {};
-  const subscriptionId =
-    (typeof eventData.subscription_id === "string" ? eventData.subscription_id : null) ??
-    (typeof eventData.id === "string" ? eventData.id : null) ??
-    (typeof payload.subscription_id === "string" ? payload.subscription_id : null) ??
-    (typeof payload.id === "string" ? payload.id : null);
-
-  if (!subscriptionId) {
-    return c.json({ received: true, ignored: true }, 200);
-  }
-
-  const existingSubscription = await getSubscriptionById(c.env.fitloot_db, subscriptionId);
-  const payloadPlanId = normalizePublicPlanIdFromValue(
-    (typeof eventData.plan_id === "string" ? eventData.plan_id : null) ??
-    (typeof payload.plan_id === "string" ? payload.plan_id : null),
-  );
-  const payloadPaymentMethod = normalizeCheckoutPaymentMethodFromValue(
-    (typeof eventData.payment_method === "string" ? eventData.payment_method : null) ??
-    (typeof payload.payment_method === "string" ? payload.payment_method : null),
-  );
-  const payloadUserId =
-    (typeof eventData.user_id === "string" ? eventData.user_id : null) ??
-    (typeof payload.user_id === "string" ? payload.user_id : null);
-  const payloadAmount = parseInteger((eventData.amount ?? payload.amount) as unknown);
-
-  let nextStatus: PlanStatus = "pending";
-  let forcedPaymentMethod: CheckoutPaymentMethod | null = null;
-
-  switch (eventType) {
-    case "subscription.created":
-      nextStatus = "pending";
-      break;
-    case "subscription.cancelled":
-      nextStatus = "cancelled";
-      break;
-    case "subscription.renewed":
-      nextStatus = "active";
-      break;
-    case "pix.generated":
-      nextStatus = "pending";
-      forcedPaymentMethod = "pix";
-      break;
-    case "payment.approved":
-      nextStatus = "active";
-      break;
-    case "payment.refused":
-      nextStatus = "failed";
-      break;
-    default:
-      return c.json({ received: true, ignored: true }, 200);
-  }
-
-  const effectiveUserId = payloadUserId ?? existingSubscription?.user_id ?? null;
-  const effectivePlanId = payloadPlanId ?? normalizePublicPlanIdFromValue(existingSubscription?.plan_id ?? null);
-  const effectivePaymentMethod =
-    forcedPaymentMethod ??
-    payloadPaymentMethod ??
-    normalizeCheckoutPaymentMethodFromValue(existingSubscription?.payment_method ?? null);
-  const effectiveAmount =
-    payloadAmount ??
-    parseInteger(existingSubscription?.amount ?? null) ??
-    (effectivePlanId ? resolveCheckoutAmount(effectivePlanId) : null);
-
-  const updatedSubscription = await ensureSubscriptionRecord(c.env.fitloot_db, {
-    id: subscriptionId,
-    userId: effectiveUserId,
-    planId: effectivePlanId,
-    paymentMethod: effectivePaymentMethod,
-    amount: effectiveAmount,
-    status: nextStatus,
-    eventType,
-    source: "webhook",
-  });
-
-  if (!updatedSubscription) {
-    return c.json({ received: true, ignored: true }, 200);
-  }
-
-  await syncUserPlanFromSubscription(c.env.fitloot_db, updatedSubscription);
+  c.executionCtx.waitUntil(processCaktoWebhook(c, rawBody, payload));
   return c.json({ received: true }, 200);
-});
+}
+
+app.post("/api/cakto/webhook", async (c) => handleCaktoWebhookRequest(c));
+app.post("/api/webhook/payment", async (c) => handleCaktoWebhookRequest(c));
 
 app.get("/api/logout", async (c) => {
   const sessionId = getSessionIdFromCookieHeader(c.req.header("Cookie"));
@@ -2792,9 +3220,7 @@ app.post("/api/onboarding", authMiddleware, zValidator("json", OnboardingRequest
   const conditioning = data.initial_conditioning as ConditioningLevel;
   const maxTier = conditioningOrder(conditioning);
   let checkoutResult: CheckoutStartResult | undefined;
-
-  try {
-    await withTransaction(c.env.fitloot_db, async () => {
+  await withTransaction(c.env.fitloot_db, async () => {
       await c.env.fitloot_db.prepare(
         `INSERT INTO user_profiles (
           user_id, username, full_name, weight, height, initial_conditioning, injuries, equipment, main_goal,
@@ -2895,12 +3321,6 @@ app.post("/api/onboarding", authMiddleware, zValidator("json", OnboardingRequest
       });
       await evaluateLevelTitles(c.env.fitloot_db, user.id, 1);
     });
-  } catch (error) {
-    if (isCheckoutValidationError(error)) {
-      return c.json({ error: error.message, code: error.code }, 400);
-    }
-    throw error;
-  }
 
   if (!checkoutResult) {
     throw new Error("Checkout result missing after onboarding transaction.");
@@ -7292,6 +7712,191 @@ Contexto do usuÃƒÂ¡rio:
   }
 });
 
+type AiRecommendationsPayload = {
+  next_skill_recommendation: {
+    name: string;
+    reason: string;
+  };
+  weak_attribute: {
+    name: string;
+    suggestion: string;
+  };
+  training_focus: {
+    type: string;
+    reason: string;
+  };
+  motivation_message: string;
+};
+
+type AiRecommendationSkillRow = {
+  name: string;
+  total_reps: number;
+  best_reps: number;
+};
+
+function toRoundedNumber(value: unknown): number {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? Math.round(numeric) : 0;
+}
+
+function buildFallbackRecommendations(params: {
+  level: number;
+  streak: number;
+  goal: string | null | undefined;
+  attributes: {
+    strength: number;
+    constitution: number;
+    vitality: number;
+    dexterity: number;
+    focus: number;
+  };
+  skills: AiRecommendationSkillRow[];
+}): AiRecommendationsPayload {
+  const goal = typeof params.goal === "string" ? params.goal : "";
+  const focusByGoal: Record<string, { type: string; reason: string }> = {
+    perder_peso: {
+      type: "Condicionamento",
+      reason: "Aumente a frequencia de sessoes dinamicas para elevar o gasto calorico com consistencia.",
+    },
+    ganhar_massa: {
+      type: "Forca progressiva",
+      reason: "Priorize sobrecarga gradual e execucao controlada para sustentar ganho de massa.",
+    },
+    resistencia: {
+      type: "Volume e resistencia",
+      reason: "Blocos mais longos e descansos menores ajudam a consolidar sua resistencia.",
+    },
+    calistenia: {
+      type: "Tecnica de base",
+      reason: "Fortalecer movimentos fundamentais melhora o controle corporal para a progressao na calistenia.",
+    },
+    saude_geral: {
+      type: "Constancia semanal",
+      reason: "Rotina equilibrada e aderente costuma gerar o melhor resultado para saude geral.",
+    },
+  };
+
+  const weakestAttributeCandidates: Array<{ name: string; value: number; suggestion: string }> = [
+    {
+      name: "Forca",
+      value: params.attributes.strength,
+      suggestion: "Inclua exercicios compostos e aumente a carga ou repeticoes de forma gradual.",
+    },
+    {
+      name: "Constituicao",
+      value: params.attributes.constitution,
+      suggestion: "Combine volume moderado com recuperacao consistente para aguentar mais sessoes na semana.",
+    },
+    {
+      name: "Vitalidade",
+      value: params.attributes.vitality,
+      suggestion: "Mantenha cardio leve e pausas bem distribuidas para melhorar energia ao longo do treino.",
+    },
+    {
+      name: "Destreza",
+      value: params.attributes.dexterity,
+      suggestion: "Trabalhe controle de movimento e amplitude para ganhar precisao e mobilidade.",
+    },
+    {
+      name: "Foco",
+      value: params.attributes.focus,
+      suggestion: "Use treinos curtos com meta clara para aumentar concentracao e regularidade.",
+    },
+  ];
+  const weakestAttribute = weakestAttributeCandidates.sort((left, right) => left.value - right.value)[0];
+
+  const topSkill = params.skills[0] ?? null;
+  const focus = focusByGoal[goal] ?? {
+    type: "Evolucao equilibrada",
+    reason: "A melhor recomendacao agora e sustentar consistencia e ajustar o treino com base no seu progresso recente.",
+  };
+
+  return {
+    next_skill_recommendation: topSkill
+      ? {
+        name: topSkill.name,
+        reason: `Voce ja construiu base em ${topSkill.name}. Vale aprofundar essa skill enquanto mantem progressao controlada nas demais.`,
+      }
+      : {
+        name: "Fundamentos de corpo livre",
+        reason: "Comece pelas skills basicas para construir repertorio tecnico e facilitar as proximas evolucoes.",
+      },
+    weak_attribute: {
+      name: weakestAttribute.name,
+      suggestion: weakestAttribute.suggestion,
+    },
+    training_focus: focus,
+    motivation_message:
+      params.streak >= 7
+        ? `Voce ja acumula ${params.streak} dias de streak. O melhor proximo passo e proteger essa consistencia enquanto sobe o nivel.`
+        : `Seu nivel ${params.level} ja mostra progresso. Mantenha constancia nos proximos dias para transformar ritmo em resultado.`,
+  };
+}
+
+function mergeRecommendationsWithFallback(
+  raw: unknown,
+  fallback: AiRecommendationsPayload,
+): AiRecommendationsPayload {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return fallback;
+  }
+
+  const data = raw as Record<string, unknown>;
+  const nextSkill = data.next_skill_recommendation;
+  const weakAttribute = data.weak_attribute;
+  const trainingFocus = data.training_focus;
+
+  const nextSkillRecord =
+    nextSkill && typeof nextSkill === "object" && !Array.isArray(nextSkill)
+      ? nextSkill as Record<string, unknown>
+      : null;
+  const weakAttributeRecord =
+    weakAttribute && typeof weakAttribute === "object" && !Array.isArray(weakAttribute)
+      ? weakAttribute as Record<string, unknown>
+      : null;
+  const trainingFocusRecord =
+    trainingFocus && typeof trainingFocus === "object" && !Array.isArray(trainingFocus)
+      ? trainingFocus as Record<string, unknown>
+      : null;
+
+  return {
+    next_skill_recommendation: {
+      name:
+        typeof nextSkillRecord?.name === "string" && nextSkillRecord.name.trim().length > 0
+          ? nextSkillRecord.name.trim()
+          : fallback.next_skill_recommendation.name,
+      reason:
+        typeof nextSkillRecord?.reason === "string" && nextSkillRecord.reason.trim().length > 0
+          ? nextSkillRecord.reason.trim()
+          : fallback.next_skill_recommendation.reason,
+    },
+    weak_attribute: {
+      name:
+        typeof weakAttributeRecord?.name === "string" && weakAttributeRecord.name.trim().length > 0
+          ? weakAttributeRecord.name.trim()
+          : fallback.weak_attribute.name,
+      suggestion:
+        typeof weakAttributeRecord?.suggestion === "string" && weakAttributeRecord.suggestion.trim().length > 0
+          ? weakAttributeRecord.suggestion.trim()
+          : fallback.weak_attribute.suggestion,
+    },
+    training_focus: {
+      type:
+        typeof trainingFocusRecord?.type === "string" && trainingFocusRecord.type.trim().length > 0
+          ? trainingFocusRecord.type.trim()
+          : fallback.training_focus.type,
+      reason:
+        typeof trainingFocusRecord?.reason === "string" && trainingFocusRecord.reason.trim().length > 0
+          ? trainingFocusRecord.reason.trim()
+          : fallback.training_focus.reason,
+    },
+    motivation_message:
+      typeof data.motivation_message === "string" && data.motivation_message.trim().length > 0
+        ? data.motivation_message.trim()
+        : fallback.motivation_message,
+  };
+}
+
 // 3. AI Recommendations Engine
 app.get("/api/ai/recommendations", authMiddleware, async (c) => {
   const user = c.get("user");
@@ -7316,6 +7921,35 @@ app.get("/api/ai/recommendations", authMiddleware, async (c) => {
       `).bind(user.id).first(),
     ]);
 
+    const skillRows = Array.isArray(skills.results)
+      ? (skills.results as Array<{ name?: unknown; total_reps?: unknown; best_reps?: unknown }>)
+        .map((skill) => ({
+          name: typeof skill.name === "string" && skill.name.trim().length > 0 ? skill.name.trim() : "Skill sem nome",
+          total_reps: toRoundedNumber(skill.total_reps),
+          best_reps: toRoundedNumber(skill.best_reps),
+        }))
+      : [];
+
+    const userStats = {
+      level: toRoundedNumber(progression?.level),
+      total_missions: toRoundedNumber(completedMissions?.count),
+      streak: toRoundedNumber(progression?.current_streak),
+    };
+
+    const fallbackRecommendations = buildFallbackRecommendations({
+      level: userStats.level,
+      streak: userStats.streak,
+      goal: typeof profile?.main_goal === "string" ? profile.main_goal : null,
+      attributes: {
+        strength: toRoundedNumber(attributes?.strength),
+        constitution: toRoundedNumber(attributes?.constitution),
+        vitality: toRoundedNumber(attributes?.vitality),
+        dexterity: toRoundedNumber(attributes?.dexterity),
+        focus: toRoundedNumber(attributes?.focus),
+      },
+      skills: skillRows,
+    });
+
     const prompt = `Analise este perfil fitness gamificado e gere recomendaÃƒÂ§ÃƒÂµes personalizadas em JSON.
 NÃƒÂ­vel: ${progression?.level}
 XP: ${progression?.xp}
@@ -7323,22 +7957,45 @@ MissÃƒÂµes completas: ${completedMissions?.count}
 Streak: ${progression?.current_streak}
 Objetivo: ${profile?.main_goal}
 Atributos: forÃƒÂ§a ${attributes?.strength}, constituiÃƒÂ§ÃƒÂ£o ${attributes?.constitution}, vitalidade ${attributes?.vitality}, destreza ${attributes?.dexterity}, foco ${attributes?.focus}
-Skills: ${(skills.results as Array<{ name: string; total_reps: number }>).slice(0, 5).map((s) => `${s.name}:${s.total_reps}`).join(",")}`;
+Skills: ${skillRows.slice(0, 5).map((skill) => `${skill.name}:${skill.total_reps}`).join(",")}`;
 
-    const openaiData = await callOpenAIChat(c, [{ role: "user", content: prompt }], 1000, true);
-    const content = safeGet(openaiData.choices ?? [], 0)?.message?.content ?? "{}";
-    const recommendations = JSON.parse(content);
+    if (!c.env.HF_TOKEN) {
+      return c.json({
+        success: true,
+        recommendations: fallbackRecommendations,
+        user_stats: userStats,
+        degraded: true,
+        source: "fallback",
+      });
+    }
+
+    let recommendations = fallbackRecommendations;
+    let degraded = false;
+
+    try {
+      const openaiData = await callOpenAIChat(c, [{ role: "user", content: prompt }], 1000, true);
+      const content = safeGet(openaiData.choices ?? [], 0)?.message?.content ?? "{}";
+      recommendations = mergeRecommendationsWithFallback(JSON.parse(content), fallbackRecommendations);
+    } catch (error) {
+      degraded = true;
+      console.error("[/api/ai/recommendations][upstream]", {
+        userId: user.id,
+        message: getErrorMessage(error),
+      });
+    }
 
     return c.json({
       success: true,
       recommendations,
-      user_stats: {
-        level: progression?.level,
-        total_missions: completedMissions?.count,
-        streak: progression?.current_streak,
-      },
+      user_stats: userStats,
+      degraded,
+      source: degraded ? "fallback" : "ai",
     });
   } catch (error) {
+    console.error("[/api/ai/recommendations]", {
+      userId: user.id,
+      message: getErrorMessage(error),
+    });
     const friendly = toFriendlyErrorResponse(error);
     return c.json(friendly.payload, toStatusCode(friendly.status));
   }

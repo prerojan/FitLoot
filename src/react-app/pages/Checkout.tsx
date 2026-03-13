@@ -34,13 +34,6 @@ import {
   type OnboardingDraft,
 } from "@/react-app/utils/onboardingDraft";
 
-type CardForm = {
-  number: string;
-  holderName: string;
-  expiry: string;
-  cvv: string;
-};
-
 type CheckoutFlowResponse = {
   checkout_status?: "pending" | "vip_active" | undefined;
   plan_status?: "pending" | "active" | "cancelled" | "failed" | "expired" | undefined;
@@ -53,7 +46,7 @@ function buildOnboardingCheckoutPayload(
   draft: OnboardingDraft,
   planId: CheckoutPlanId,
   paymentMethod: CheckoutPaymentMethod,
-  card: CardForm,
+  cardCvv: string,
 ) {
   const equipment = [...draft.selectedEquipment, draft.equipment].filter(Boolean).join(", ");
 
@@ -75,17 +68,9 @@ function buildOnboardingCheckoutPayload(
     training_frequency: draft.weeklyFrequency,
     plan_id: planId,
     payment_method: paymentMethod,
-    card_number: paymentMethod === "card" ? card.number.trim() : undefined,
-    card_holder_name: paymentMethod === "card" ? card.holderName.trim() : undefined,
-    card_expiry: paymentMethod === "card" ? card.expiry.trim() : undefined,
-    card_cvv: paymentMethod === "card" ? card.cvv.trim() : undefined,
+    card_cvv: paymentMethod === "card" && cardCvv.trim() ? cardCvv.trim() : undefined,
   };
 }
-
-const FIELD_WRAP = "fl-auth-input-shell min-h-[3.5rem] rounded-[1.3rem]";
-const FIELD_INPUT =
-  "h-full w-full !border-0 !bg-transparent !p-0 text-base text-[var(--fl-auth-ink)] !shadow-none !ring-0 " +
-  "placeholder:text-[var(--fl-auth-subtle)] focus-visible:!ring-0 focus-visible:!ring-offset-0";
 
 function PlanCard({
   planId,
@@ -182,7 +167,7 @@ export default function Checkout() {
   );
   const [billingCycle, setBillingCycle] = useState<BillingCycle>("monthly");
   const [paymentMethod, setPaymentMethod] = useState<CheckoutPaymentMethod>("pix");
-  const [card, setCard] = useState<CardForm>({ number: "", holderName: "", expiry: "", cvv: "" });
+  const [cardCvv, setCardCvv] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const onboardingDraft = useMemo(() => loadOnboardingDraft(), []);
@@ -229,28 +214,29 @@ export default function Checkout() {
   const handleCheckout = async () => {
     setError(null);
 
-    if (paymentMethod === "card" && (!card.number.trim() || !card.holderName.trim() || !card.expiry.trim() || !card.cvv.trim())) {
-      setError("Preencha os dados do cartao para continuar.");
-      return;
-    }
-
     if (requiresOnboardingCheckout && !onboardingDraft) {
       setError("Nao encontramos os dados do onboarding. Saia e recomece a criacao da conta.");
       return;
+    }
+
+    const checkoutWindow = window.open("about:blank", "_blank");
+    if (checkoutWindow) {
+      try {
+        checkoutWindow.opener = null;
+      } catch {
+        // Browsers may block access to opener assignment.
+      }
     }
 
     setLoading(true);
     try {
       const endpoint = requiresOnboardingCheckout ? "/api/onboarding" : "/api/checkout/start";
       const payloadBody = requiresOnboardingCheckout && onboardingDraft
-        ? buildOnboardingCheckoutPayload(onboardingDraft, planId, paymentMethod, card)
+        ? buildOnboardingCheckoutPayload(onboardingDraft, planId, paymentMethod, cardCvv)
         : {
             plan_id: planId,
             payment_method: paymentMethod,
-            card_number: paymentMethod === "card" ? card.number.trim() : undefined,
-            card_holder_name: paymentMethod === "card" ? card.holderName.trim() : undefined,
-            card_expiry: paymentMethod === "card" ? card.expiry.trim() : undefined,
-            card_cvv: paymentMethod === "card" ? card.cvv.trim() : undefined,
+            card_cvv: paymentMethod === "card" && cardCvv.trim() ? cardCvv.trim() : undefined,
           };
 
       const response = await api(endpoint, {
@@ -259,12 +245,18 @@ export default function Checkout() {
       });
 
       if (response.status === 401 || response.status === 403) {
+        if (checkoutWindow && !checkoutWindow.closed) {
+          checkoutWindow.close();
+        }
         navigate(ROUTE_PATHS.app, { replace: true });
         return;
       }
 
       const payload = (await response.json().catch(() => null)) as CheckoutFlowResponse | null;
       if (!response.ok) {
+        if (checkoutWindow && !checkoutWindow.closed) {
+          checkoutWindow.close();
+        }
         setError(payload?.error ?? "Nao foi possivel iniciar o checkout.");
         return;
       }
@@ -276,6 +268,9 @@ export default function Checkout() {
       await checkAuth();
 
       if (payload?.checkout_status === "vip_active" || payload?.plan_status === "active") {
+        if (checkoutWindow && !checkoutWindow.closed) {
+          checkoutWindow.close();
+        }
         navigate(ROUTE_PATHS.home, { replace: true });
         return;
       }
@@ -285,11 +280,19 @@ export default function Checkout() {
         selectedPlan.checkoutUrl;
 
       if (checkoutUrl) {
-        window.open(checkoutUrl, "_blank", "noopener,noreferrer");
+        if (checkoutWindow && !checkoutWindow.closed) {
+          checkoutWindow.location.replace(checkoutUrl);
+        } else {
+          window.location.assign(checkoutUrl);
+          return;
+        }
       }
 
       navigate(ROUTE_PATHS.paymentPending, { replace: true });
     } catch {
+      if (checkoutWindow && !checkoutWindow.closed) {
+        checkoutWindow.close();
+      }
       setError("Erro de conexao ao iniciar o checkout.");
     } finally {
       setLoading(false);
@@ -383,72 +386,31 @@ export default function Checkout() {
                     </div>
                   </div>
 
-                  {paymentMethod === "card" ? (
-                    <div className="mt-6 grid gap-4">
-                      <label className="space-y-2">
-                        <span className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--fl-auth-subtle)]">
-                          Numero do cartao
-                        </span>
-                        <div className={FIELD_WRAP}>
-                          <CreditCard className="h-4 w-4 text-[var(--fl-auth-subtle)]" />
-                          <Input
-                            value={card.number}
-                            onChange={(event) => setCard((current) => ({ ...current, number: event.target.value }))}
-                            placeholder="0000 0000 0000 0000"
-                            className={FIELD_INPUT}
-                          />
-                        </div>
-                      </label>
-
-                      <label className="space-y-2">
-                        <span className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--fl-auth-subtle)]">
-                          Nome no cartao
-                        </span>
-                        <div className={FIELD_WRAP}>
-                          <Input
-                            value={card.holderName}
-                            onChange={(event) => setCard((current) => ({ ...current, holderName: event.target.value }))}
-                            placeholder="Como esta impresso"
-                            className={FIELD_INPUT}
-                          />
-                        </div>
-                      </label>
-
-                      <div className="grid gap-4 sm:grid-cols-2">
-                        <label className="space-y-2">
-                          <span className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--fl-auth-subtle)]">
-                            Validade
-                          </span>
-                          <div className={FIELD_WRAP}>
-                            <Input
-                              value={card.expiry}
-                              onChange={(event) => setCard((current) => ({ ...current, expiry: event.target.value }))}
-                              placeholder="MM/AA"
-                              className={FIELD_INPUT}
-                            />
-                          </div>
-                        </label>
-
-                        <label className="space-y-2">
-                          <span className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--fl-auth-subtle)]">
-                            CVV
-                          </span>
-                          <div className={FIELD_WRAP}>
-                            <Input
-                              value={card.cvv}
-                              onChange={(event) => setCard((current) => ({ ...current, cvv: event.target.value }))}
-                              placeholder="000"
-                              className={FIELD_INPUT}
-                            />
-                          </div>
-                        </label>
-                      </div>
+                  <div className="mt-6 space-y-4">
+                    <div className="rounded-[1.5rem] border border-[var(--fl-auth-card-border)] bg-[rgba(var(--fl-color-accent-rgb),0.08)] p-5 text-sm text-[var(--fl-auth-muted)]">
+                      {paymentMethod === "pix"
+                        ? "O checkout Cakto sera aberto com o plano selecionado para concluir o PIX fora do app."
+                        : "O checkout Cakto sera aberto com o plano selecionado para concluir o pagamento com cartao fora do app."}
                     </div>
-                  ) : (
-                    <div className="mt-6 rounded-[1.5rem] border border-[var(--fl-auth-card-border)] bg-[rgba(var(--fl-color-accent-rgb),0.08)] p-5 text-sm text-[var(--fl-auth-muted)]">
-                      O checkout Cakto sera aberto com o plano selecionado para concluir o PIX fora do app.
-                    </div>
-                  )}
+
+                    {paymentMethod === "card" ? (
+                      <label className="block space-y-2">
+                        <span className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--fl-auth-subtle)]">
+                          CVV opcional
+                        </span>
+                        <Input
+                          value={cardCvv}
+                          onChange={(event) => setCardCvv(event.target.value)}
+                          type="password"
+                          inputMode="numeric"
+                          autoComplete="off"
+                          maxLength={32}
+                          placeholder="***"
+                          className="h-12 rounded-[1.2rem] border-[var(--fl-auth-card-border)] bg-[var(--fl-auth-panel)] px-4 text-[var(--fl-auth-ink)] placeholder:text-[var(--fl-auth-subtle)]"
+                        />
+                      </label>
+                    ) : null}
+                  </div>
                 </div>
 
                 <div className="rounded-[2rem] border border-[var(--fl-auth-card-border)] bg-[var(--fl-auth-surface)] p-6">
@@ -474,7 +436,9 @@ export default function Checkout() {
                       </div>
                       <div className="mt-3 flex items-center justify-between text-sm text-[var(--fl-auth-muted)]">
                         <span>Metodo</span>
-                        <span className="font-semibold capitalize text-[var(--fl-auth-ink)]">{paymentMethod}</span>
+                        <span className="font-semibold text-[var(--fl-auth-ink)]">
+                          {paymentMethod === "pix" ? "PIX" : "Cartao"}
+                        </span>
                       </div>
                       {billingCycle === "annual" ? (
                         <div className="mt-3 flex items-center justify-between text-sm text-[var(--fl-auth-muted)]">

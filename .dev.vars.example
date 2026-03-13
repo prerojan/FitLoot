@@ -1,0 +1,4 @@
+# Cakto
+CAKTO_CLIENT_ID=seu_client_id_aqui
+CAKTO_CLIENT_SECRET=seu_client_secret_aqui
+CAKTO_WEBHOOK_SECRET=seu_webhook_secret_aqui
