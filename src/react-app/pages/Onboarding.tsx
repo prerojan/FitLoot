@@ -404,6 +404,7 @@ type AvailabilityState = {
 };
 
 const INITIAL_CREDENTIALS: CredentialsStep = { email: "", password: "", confirmPassword: "" };
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const INITIAL_PROFILE: ProfileStep = {
   username: "",
   full_name: "",
@@ -685,7 +686,9 @@ export default function Onboarding() {
     setUsernameAvailability({ status: "checking" });
 
     try {
-      const response = await api(`/api/auth/check-availability?username=${encodeURIComponent(username)}`);
+      const response = await api(`/api/auth/check-availability?username=${encodeURIComponent(username)}`, {
+        timeoutMs: 8_000,
+      });
       const payload = (await response.json().catch(() => null)) as { usernameAvailable?: boolean | undefined } | null;
 
       if (requestId !== usernameReqRef.current) return false;
@@ -715,8 +718,7 @@ export default function Onboarding() {
       return true;
     }
 
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
+    if (!EMAIL_REGEX.test(email)) {
       setEmailAvailability({ status: "invalid", message: "E-mail invalido." });
       return false;
     }
@@ -725,7 +727,9 @@ export default function Onboarding() {
     setEmailAvailability({ status: "checking" });
 
     try {
-      const response = await api(`/api/auth/check-availability?email=${encodeURIComponent(email)}`);
+      const response = await api(`/api/auth/check-availability?email=${encodeURIComponent(email)}`, {
+        timeoutMs: 8_000,
+      });
       const payload = (await response.json().catch(() => null)) as { emailAvailable?: boolean | undefined } | null;
 
       if (requestId !== emailReqRef.current) return false;
@@ -854,8 +858,12 @@ export default function Onboarding() {
     e.preventDefault();
     setStepError(null);
 
+    const trimmedFullName = profile.full_name.trim();
+    const trimmedUsername = profile.username.trim();
+    const normalizedEmail = credentials.email.trim().toLowerCase();
+
     if (
-      !credentials.email ||
+      !normalizedEmail ||
       !credentials.password ||
       credentials.password.length < 8 ||
       credentials.password !== credentials.confirmPassword
@@ -870,60 +878,64 @@ export default function Onboarding() {
       return;
     }
 
-    if (!profile.full_name.trim()) {
+    if (!trimmedFullName) {
       setStepError("Preencha seu nome completo na etapa de Identidade.");
       return;
     }
 
-    if (
-      emailAvailability.status === "checking" ||
-      emailAvailability.status === "unavailable" ||
-      emailAvailability.status === "invalid"
-    ) {
-      setStepError(emailAvailability.message ?? "Use um e-mail disponivel para criar a conta.");
+    if (trimmedUsername.length < 3) {
+      setStepError("O nome de usuario deve ter pelo menos 3 caracteres.");
       return;
     }
 
-    if (
-      usernameAvailability.status === "checking" ||
-      usernameAvailability.status === "unavailable" ||
-      usernameAvailability.status === "invalid"
-    ) {
-      setStepError(usernameAvailability.message ?? "Use um nome de usuario disponivel para criar a conta.");
+    if (!EMAIL_REGEX.test(normalizedEmail)) {
+      setStepError("Informe um e-mail valido.");
       return;
     }
 
     setStepLoading(true);
 
     try {
+      const [isEmailAvailable, isUsernameAvailable] = await Promise.all([
+        validateEmail(normalizedEmail),
+        validateUsername(trimmedUsername),
+      ]);
+
+      if (!isEmailAvailable) {
+        setStepError("Use um e-mail disponivel para criar a conta.");
+        return;
+      }
+
+      if (!isUsernameAvailable) {
+        setStepError("Use um nome de usuario disponivel para criar a conta.");
+        return;
+      }
+
       const registerRes = await api("/api/auth/register", {
         method: "POST",
         body: JSON.stringify({
-          email: credentials.email,
+          email: normalizedEmail,
           password: credentials.password,
-          name: profile.full_name.trim(),
+          name: trimmedFullName,
         }),
       });
 
       if (registerRes.status === 409) {
         setStepError("Este e-mail ja esta cadastrado.");
-        setStepLoading(false);
         return;
       }
       if (!registerRes.ok) {
         setStepError("Erro ao criar conta.");
-        setStepLoading(false);
         return;
       }
 
       const loginRes = await api("/api/auth/login", {
         method: "POST",
-        body: JSON.stringify({ email: credentials.email, password: credentials.password }),
+        body: JSON.stringify({ email: normalizedEmail, password: credentials.password }),
       });
 
       if (!loginRes.ok) {
         setStepError("Conta criada. Faca login em /app");
-        setStepLoading(false);
         return;
       }
 
@@ -932,18 +944,17 @@ export default function Onboarding() {
 
       const patchRes = await api("/api/users/me", {
         method: "PATCH",
-        body: JSON.stringify({ name: profile.full_name.trim() }),
+        body: JSON.stringify({ name: trimmedFullName }),
       });
 
       if (!patchRes.ok) {
         setStepError("Erro ao atualizar perfil.");
-        setStepLoading(false);
         return;
       }
 
       saveOnboardingDraft({
-        username: profile.username.trim(),
-        full_name: profile.full_name.trim(),
+        username: trimmedUsername,
+        full_name: trimmedFullName,
         weight: profile.weight,
         height: profile.height,
         age: profile.age,
@@ -1010,6 +1021,13 @@ export default function Onboarding() {
   const usernameStatusMessage = availabilityMessage(usernameAvailability);
   const emailStatusMessage = availabilityMessage(emailAvailability);
   const isExistingAccountError = stepError?.includes("cadastrado") ?? false;
+  const trimmedFullName = profile.full_name.trim();
+  const trimmedUsername = profile.username.trim();
+  const normalizedEmail = credentials.email.trim().toLowerCase();
+  const isPasswordValid = credentials.password.length >= 8;
+  const isConfirmPasswordValid = credentials.password === credentials.confirmPassword;
+  const isEmailFormatValid = normalizedEmail.length > 0 && EMAIL_REGEX.test(normalizedEmail);
+  const isUsernameFormatValid = trimmedUsername.length >= 3;
   const planHighlights = [
     {
       icon: Target,
@@ -1029,18 +1047,14 @@ export default function Onboarding() {
   ];
   const accountSubmitDisabled =
     stepLoading ||
-    !profile.full_name.trim() ||
-    !profile.username.trim() ||
-    !credentials.email ||
+    !trimmedFullName ||
+    !trimmedUsername ||
+    !normalizedEmail ||
     !credentials.password ||
-    credentials.password.length < 8 ||
-    credentials.password !== credentials.confirmPassword ||
-    emailAvailability.status === "checking" ||
-    emailAvailability.status === "unavailable" ||
-    emailAvailability.status === "invalid" ||
-    usernameAvailability.status === "checking" ||
-    usernameAvailability.status === "unavailable" ||
-    usernameAvailability.status === "invalid";
+    !isPasswordValid ||
+    !isConfirmPasswordValid ||
+    !isEmailFormatValid ||
+    !isUsernameFormatValid;
 
   let stepContent: ReactNode;
 
