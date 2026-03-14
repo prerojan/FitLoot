@@ -1,640 +1,817 @@
-import React from 'react';
-import { useNavigate } from 'react-router';
-import { Zap, Trophy, Target, Gamepad2, Heart, Brain, TrendingUp, Shield, Award, Star, ChevronRight, Dumbbell, Apple, Smartphone, Users, Swords, Clock, CheckCircle2, Flame, DollarSign, Sparkles, Crown, ShoppingBag } from 'lucide-react';
-import { Button } from '@/react-app/components/ui/button';
-import { Input } from '@/react-app/components/ui/input';
-import { Card } from '@/react-app/components/ui/card';
+import type { MouseEvent } from "react";
+import { useNavigate } from "react-router";
+import {
+  ArrowRight,
+  Bolt,
+  Brain,
+  Check,
+  ChevronRight,
+  Dumbbell,
+  Gamepad2,
+  Gift,
+  HeartPulse,
+  MoonStar,
+  QrCode,
+  Shield,
+  Sparkles,
+  Star,
+  SunMedium,
+  Swords,
+  Trophy,
+  Users,
+  Zap,
+  type LucideIcon,
+} from "lucide-react";
+import { ROUTE_PATHS } from "@/react-app/constants/auth";
+import { useTheme } from "@/react-app/contexts/theme";
+
+type NavItem = {
+  id: string;
+  label: string;
+};
+
+type MetricItem = {
+  value: string;
+  label: string;
+};
+
+type FeatureItem = {
+  icon: LucideIcon;
+  title: string;
+  description: string;
+};
+
+type AttributeItem = {
+  icon: LucideIcon;
+  title: string;
+  description: string;
+  stat: string;
+};
+
+type PlanItem = {
+  name: string;
+  price: string;
+  subtitle: string;
+  popular?: boolean;
+  features: string[];
+};
+
+type ReviewItem = {
+  initials: string;
+  name: string;
+  role: string;
+  content: string;
+};
+
+const navItems: NavItem[] = [
+  { id: "metricas", label: "Metricas" },
+  { id: "atributos", label: "Atributos" },
+  { id: "funcionalidades", label: "Arsenal" },
+  { id: "comparativo", label: "Comparativo" },
+  { id: "planos", label: "Planos" },
+  { id: "reviews", label: "Reviews" },
+];
+
+const metrics: MetricItem[] = [
+  { value: "10K+", label: "Usuarios ativos" },
+  { value: "2M+", label: "Calorias queimadas" },
+  { value: "500K+", label: "Loot boxes abertas" },
+  { value: "Nivel 42", label: "Media global" },
+];
+
+const attributes: AttributeItem[] = [
+  {
+    icon: Dumbbell,
+    title: "Forca",
+    description: "Treinos de carga aumentam dano base, capacidade de carga e presenca nas raids.",
+    stat: "FOR 88",
+  },
+  {
+    icon: Bolt,
+    title: "Agilidade",
+    description: "Cardio explosivo e treino funcional ampliam esquiva, velocidade e mobilidade.",
+    stat: "AGI 64",
+  },
+  {
+    icon: HeartPulse,
+    title: "Resistencia",
+    description: "Sessoes longas elevam HP maximo, recuperacao e consistencia em missoes longas.",
+    stat: "RES 92",
+  },
+];
+
+const features: FeatureItem[] = [
+  {
+    icon: Gamepad2,
+    title: "Gamificacao real",
+    description: "Cada treino gera XP balanceado com recompensas e progressao clara para manter ritmo.",
+  },
+  {
+    icon: Brain,
+    title: "Missoes com IA",
+    description: "Objetivos diarios ajustados ao seu historico, fadiga e meta atual.",
+  },
+  {
+    icon: Sparkles,
+    title: "Coach dinamico",
+    description: "Sugestoes instantaneas para carga, descanso e intensidade durante o treino.",
+  },
+  {
+    icon: QrCode,
+    title: "Nutri scanner",
+    description: "Leitura rapida de refeicoes com feedback de buffs, macros e recuperacao.",
+  },
+  {
+    icon: Shield,
+    title: "Anti cheat",
+    description: "Validacao de atividade para garantir que recompensa venha de esforco real.",
+  },
+  {
+    icon: Gift,
+    title: "Loja de recompensas",
+    description: "Troque moedas por beneficios reais, descontos e itens especiais do ecossistema.",
+  },
+];
+
+const plans: PlanItem[] = [
+  {
+    name: "Basico",
+    price: "R$ 49",
+    subtitle: "Entrada na guilda com progresso essencial.",
+    features: [
+      "Missoes diarias",
+      "Evolucao de atributos (FOR, CON, VIT, DES, FOCO)",
+      "Sistema de XP e niveis",
+      "Streaks e multiplicadores",
+      "Ranking basico",
+    ],
+  },
+  {
+    name: "Premium",
+    price: "R$ 99",
+    subtitle: "Plano mais escolhido para subir de nivel sem travar.",
+    popular: true,
+    features: [
+      "Tudo do Basico",
+      "Missoes semanais e mensais",
+      "Scanner de alimentos com IA",
+      "Ranking global e local",
+      "Loja de cupons fitness",
+      "Sistema de amigos",
+      "Mini-games e desafios",
+    ],
+  },
+  {
+    name: "Elite",
+    price: "R$ 149",
+    subtitle: "Camada maxima para quem quer performance e status.",
+    features: [
+      "Tudo do Premium",
+      "Planos personalizados de treino",
+      "Planos personalizados de nutricao",
+      "Habilidades avancadas de calistenia",
+      'Animacoes "novo nivel" premium',
+      "Suporte VIP prioritario",
+      "Personalizacao total do perfil",
+    ],
+  },
+];
+
+const reviews: ReviewItem[] = [
+  {
+    initials: "RM",
+    name: "Ricardo M.",
+    role: "Guerreiro nivel 45",
+    content: "Pela primeira vez eu nao falho treino. A vontade de subir de nivel venceu a preguica.",
+  },
+  {
+    initials: "AL",
+    name: "Ana L.",
+    role: "Maga fitness nivel 38",
+    content: "O scanner nutricional virou parte da minha rotina. Agora eu sei qual loot meu corpo precisa.",
+  },
+  {
+    initials: "KP",
+    name: "Kadu P.",
+    role: "Paladino nivel 52",
+    content: "Troquei pontos por creatina e desconto em equipamento. O loop de recompensa funciona mesmo.",
+  },
+];
+
+const comparisonRows = [
+  { label: "Plano de treino", common: "Generico e estatico", fitloot: "IA adaptativa 24/7" },
+  { label: "Motivacao", common: "Depende so de voce", fitloot: "Loop de missao, ranking e reward" },
+  { label: "Custo mensal", common: "R$ 150 a R$ 300", fitloot: "A partir de R$ 49" },
+  { label: "Cashback e perks", common: "Nenhum", fitloot: "Ate 25% em parceiros" },
+];
+
 export default function Landing() {
   const navigate = useNavigate();
-  const [email, setEmail] = React.useState('');
-  const features = [{
-    icon: Gamepad2,
-    title: 'Gamificação Real',
-    description: 'Transforme exercícios em conquistas épicas com XP, níveis e recompensas reais'
-  }, {
-    icon: Target,
-    title: 'Missões Personalizadas',
-    description: 'Desafios diários, semanais e mensais adaptados ao seu nível fitness'
-  }, {
-    icon: Trophy,
-    title: 'Títulos & Conquistas',
-    description: 'Desbloqueie títulos raros e mostre suas conquistas para o mundo'
-  }, {
-    icon: Brain,
-    title: 'IA Personalizada',
-    description: 'Recomendações inteligentes de treinos e nutrição baseadas na sua evolução'
-  }, {
-    icon: Apple,
-    title: 'Scanner Nutricional',
-    description: 'Tire uma foto da comida e receba análise nutricional completa instantaneamente'
-  }, {
-    icon: Shield,
-    title: 'Sistema Anti-Trapaça',
-    description: 'Validação por sensores garante que você realmente está treinando'
-  }, {
-    icon: Award,
-    title: 'Loja de Recompensas',
-    description: 'Troque seus pontos por cupons de whey, creatina e equipamentos fitness'
-  }, {
-    icon: Smartphone,
-    title: 'Google Fit & Apple Health',
-    description: 'Sincronização automática com seus apps de saúde favoritos'
-  }];
-  const stats = [{
-    value: '10K+',
-    label: 'Usuários Ativos'
-  }, {
-    value: '2M+',
-    label: 'Calorias Queimadas'
-  }, {
-    value: '500K+',
-    label: 'Missões Completas'
-  }, {
-    value: '95%',
-    label: 'Taxa de Sucesso'
-  }];
-  const costComparison = [{
-    service: 'Academia',
-    monthly: 'R$ 265',
-    yearly: 'R$ 3.180',
-    icon: Dumbbell
-  }, {
-    service: 'Personal Trainer',
-    monthly: 'R$ 900',
-    yearly: 'R$ 10.800',
-    icon: Users
-  }, {
-    service: 'Nutricionista',
-    monthly: 'R$ 300',
-    yearly: 'R$ 3.600',
-    icon: Apple
-  }, {
-    service: 'Apps de Treino/Nutrição',
-    monthly: 'R$ 50',
-    yearly: 'R$ 600',
-    icon: Smartphone
-  }, {
-    service: 'Total Tradicional',
-    monthly: 'R$ 1.515',
-    yearly: 'R$ 18.180',
-    icon: DollarSign,
-    highlight: true
-  }, {
-    service: 'FitLoot Premium',
-    monthly: 'R$ 99',
-    yearly: 'R$ 990',
-    icon: Zap,
-    fitloot: true
-  }];
-  const plans = [{
-    name: 'Básico',
-    price: 'R$ 49',
-    yearlyPrice: 'R$ 490',
-    savings: '',
-    features: ['Missões diárias', 'Evolução de atributos (FOR, CON, VIT, DES, FOCO)', 'Sistema de XP e níveis', 'Streaks e multiplicadores', 'Ranking básico'],
-    icon: Target,
-    color: 'from-gray-400 to-gray-500'
-  }, {
-    name: 'Premium',
-    price: 'R$ 99',
-    yearlyPrice: 'R$ 990',
-    savings: '2 meses grátis',
-    features: ['Tudo do Básico', 'Missões semanais e mensais', 'Scanner de alimentos com IA', 'Ranking global e local', 'Loja de cupons fitness', 'Sistema de amigos', 'Mini-games e desafios'],
-    icon: Crown,
-    color: 'from-emerald-500 to-teal-600',
-    popular: true
-  }, {
-    name: 'Elite',
-    price: 'R$ 149',
-    yearlyPrice: 'R$ 1.490',
-    savings: '2 meses grátis',
-    features: ['Tudo do Premium', 'Planos personalizados de treino', 'Planos personalizados de nutrição', 'Habilidades avançadas de calistenia', 'Animações "novo nível" premium', 'Suporte VIP prioritário', 'Personalização total do perfil'],
-    icon: Sparkles,
-    color: 'from-purple-500 to-pink-600'
-  }];
-  const testimonials = [{
-    name: 'Carlos Silva',
-    role: 'Atleta Amador',
-    content: 'FitLoot mudou completamente minha relação com exercícios. Em 3 meses perdi 12kg e ganhei músculos que nunca imaginei!',
-    rating: 5,
-    avatar: '👨',
-    stats: 'Nível 28 • 45 dias de streak'
-  }, {
-    name: 'Marina Costa',
-    role: 'Personal Trainer',
-    content: 'Recomendo para todos os meus alunos. A gamificação mantém a motivação lá em cima. Resultados surpreendentes!',
-    rating: 5,
-    avatar: '👩',
-    stats: 'Nível 42 • 120 dias de streak'
-  }, {
-    name: 'Rafael Mendes',
-    role: 'Desenvolvedor',
-    content: 'Trabalho sentado o dia todo, mas com FitLoot consegui criar o hábito de me exercitar. As missões são viciantes!',
-    rating: 5,
-    avatar: '👨‍💻',
-    stats: 'Nível 19 • 30 dias de streak'
-  }];
-  const handleEmailSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    alert(`Obrigado! Enviaremos novidades para ${email}`);
-    setEmail('');
+  const { themeMode, toggleThemeMode } = useTheme();
+
+  const scrollToSection =
+    (sectionId: string) =>
+    (event: MouseEvent<HTMLAnchorElement>) => {
+      event.preventDefault();
+      document.getElementById(sectionId)?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    };
+
+  const goToLogin = () => {
+    navigate(ROUTE_PATHS.login);
   };
 
-  const handleGetStarted = () => {
-    navigate('/app');
-  };
-
-  return <div className="min-h-screen bg-white">
-      {/* Hero Section */}
-      <div className="relative overflow-hidden bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50">
-        <div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1534438327276-14e5300c3a48?auto=format&fit=crop&w=1200&q=45')] bg-cover bg-center opacity-5" />
-        
-        <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16 md:py-24">
-          <div className="text-center">
-            <div className="flex items-center justify-center gap-3 mb-6">
-              <Zap className="w-12 h-12 text-emerald-500" strokeWidth={2.5} />
-              <h1 className="fl-title-page text-5xl md:text-7xl">
-                Fit<span className="text-emerald-500">Loot</span>
-              </h1>
-            </div>
-            
-            <h2 className="fl-title-page md:text-5xl mb-6 leading-tight">
-              Transforme Sua Vida<br />
-              <span className="text-transparent bg-clip-text bg-gradient-to-r from-emerald-500 to-teal-500">
-                Em Um Grande Jogo
+  return (
+    <div className="min-h-screen text-[var(--fl-color-text)]">
+      <header className="fixed inset-x-0 top-0 z-50 border-b border-[var(--fl-border-soft)] bg-[var(--fl-surface-glass)] backdrop-blur-2xl">
+        <div className="mx-auto max-w-7xl px-4 py-4 sm:px-6 lg:px-8">
+          <div className="flex items-center justify-between gap-4">
+            <button
+              type="button"
+              onClick={() => {
+                window.scrollTo({ top: 0, behavior: "smooth" });
+              }}
+              className="flex items-center gap-3 text-left"
+            >
+              <span className="flex h-12 w-12 items-center justify-center rounded-2xl border border-[var(--fl-border-soft)] bg-[rgba(var(--fl-color-accent-rgb),0.14)] shadow-[0_0_24px_rgba(var(--fl-color-accent-rgb),0.16)]">
+                <Zap className="h-6 w-6 text-[var(--fl-color-accent)]" strokeWidth={2.3} />
               </span>
-            </h2>
-            
-            <p className="text-xl md:text-2xl text-gray-600 mb-10 max-w-3xl mx-auto leading-relaxed">
-              Ganhe XP, suba de nível, desbloqueie habilidades e evolua seus atributos enquanto melhora sua saúde na vida real
-            </p>
-            
-            <div className="flex flex-col sm:flex-row gap-4 justify-center items-center mb-12">
-                <Button onClick={handleGetStarted} size="lg" className="fl-btn-primary px-8 py-6 text-lg rounded-full shadow-lg hover:shadow-xl">
-                  Começar Teste Grátis de 7 Dias
-                  <ChevronRight className="ml-2 w-5 h-5" />
-                </Button>
-              
-              <Button variant="outline" size="lg" className="border-2 border-emerald-500 text-emerald-600 hover:bg-emerald-50 px-8 py-6 text-lg rounded-full" onClick={() => document.getElementById('como-funciona')?.scrollIntoView({
-              behavior: 'smooth'
-            })}>
-                Ver Como Funciona
-              </Button>
-            </div>
+              <span>
+                <span className="block text-[0.68rem] font-bold uppercase tracking-[0.22em] text-[var(--fl-color-accent)]">
+                  Fitness RPG
+                </span>
+                <span className="fl-auth-display block text-xl font-bold sm:text-2xl">FitLoot</span>
+              </span>
+            </button>
 
-            {/* Stats */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-6 max-w-4xl mx-auto">
-              {stats.map((stat, idx) => <Card key={idx} className="fl-card-soft p-6 rounded-3xl hover:shadow-lg transition-shadow">
-                  <div className="text-3xl md:text-4xl font-bold text-emerald-600 mb-2">
-                    {stat.value}
-                  </div>
-                  <div className="text-sm md:text-base text-gray-600">
-                    {stat.label}
-                  </div>
-                </Card>)}
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={toggleThemeMode}
+                className="flex h-11 w-11 items-center justify-center rounded-full border border-[var(--fl-border-soft)] bg-[var(--fl-surface-muted)] text-[var(--fl-color-text-muted)] transition hover:border-[var(--fl-border-strong)] hover:text-[var(--fl-color-text)]"
+                aria-label={themeMode === "dark" ? "Ativar tema claro" : "Ativar tema escuro"}
+                title={themeMode === "dark" ? "Ativar tema claro" : "Ativar tema escuro"}
+              >
+                {themeMode === "dark" ? <SunMedium className="h-5 w-5" /> : <MoonStar className="h-5 w-5" />}
+              </button>
+
+              <button
+                type="button"
+                onClick={goToLogin}
+                className="hidden rounded-full px-5 py-3 text-sm font-black uppercase tracking-[0.16em] text-[#04100b] transition hover:-translate-y-0.5 sm:inline-flex sm:items-center sm:gap-2"
+                style={{
+                  background: "linear-gradient(135deg, var(--app-primary-color), var(--app-secondary-color))",
+                  boxShadow: "0 18px 32px rgba(var(--fl-color-accent-rgb), 0.22)",
+                }}
+              >
+                Comecar agora
+                <ArrowRight className="h-4 w-4" />
+              </button>
             </div>
           </div>
+
+          <nav className="mt-4 flex gap-2 overflow-x-auto pb-1 md:mt-5 md:justify-center">
+            {navItems.map((item) => (
+              <a
+                key={item.id}
+                href={`#${item.id}`}
+                onClick={scrollToSection(item.id)}
+                className="whitespace-nowrap rounded-full border border-[var(--fl-border-soft)] bg-[var(--fl-surface-muted)] px-4 py-2 text-xs font-bold uppercase tracking-[0.16em] text-[var(--fl-color-text-muted)] transition hover:border-[var(--fl-border-strong)] hover:text-[var(--fl-color-text)]"
+              >
+                {item.label}
+              </a>
+            ))}
+          </nav>
         </div>
-      </div>
+      </header>
 
-      {/* Avatar Evolution Section */}
-      <div className="py-20 bg-white">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="grid md:grid-cols-2 gap-12 items-center">
-            <div>
-              <h3 className="fl-title-page md:text-5xl mb-6">
-                Evolua Seus Atributos <span className="text-emerald-500">RPG Style</span>
-              </h3>
-              <p className="text-xl text-gray-600 mb-8 leading-relaxed">
-                Cada treino evolui seus atributos físicos. Acompanhe seu progresso em tempo real e veja sua transformação!
-              </p>
-              
-              <div className="space-y-4">
-                {[{
-                name: 'FOR (Força)',
-                value: 85,
-                color: 'bg-red-500'
-              }, {
-                name: 'CON (Constituição)',
-                value: 72,
-                color: 'bg-orange-500'
-              }, {
-                name: 'VIT (Vitalidade)',
-                value: 68,
-                color: 'bg-green-500'
-              }, {
-                name: 'DES (Destreza)',
-                value: 90,
-                color: 'bg-blue-500'
-              }, {
-                name: 'FOCO',
-                value: 76,
-                color: 'bg-purple-500'
-              }].map((attr, idx) => <div key={idx}>
-                    <div className="flex justify-between mb-2">
-                      <span className="font-semibold text-gray-700">{attr.name}</span>
-                      <span className="font-bold text-gray-900">{attr.value}/100</span>
-                    </div>
-                    <div className="w-full bg-gray-200 rounded-full h-3 overflow-hidden">
-                      <div className={`${attr.color} h-full rounded-full transition-all duration-500`} style={{
-                    width: `${attr.value}%`
-                  }} />
-                    </div>
-                  </div>)}
-              </div>
-            </div>
-            
-            <div className="relative">
-              <div className="bg-gradient-to-br from-emerald-100 to-teal-100 rounded-3xl p-8 shadow-2xl">
-                <img
-                  src="https://images.unsplash.com/photo-1571019614242-c5c5dee9f50b?auto=format&fit=crop&w=600&h=600&q=60"
-                  alt="Avatar fitness"
-                  width={600}
-                  height={600}
-                  loading="lazy"
-                  decoding="async"
-                  className="w-full h-auto rounded-2xl shadow-lg"
-                />
-                <div className="absolute -top-4 -right-4 bg-white rounded-full p-4 shadow-xl">
-                  <div className="text-center">
-                    <div className="text-3xl font-bold text-emerald-600">42</div>
-                    <div className="text-xs text-gray-600">NÍVEL</div>
-                  </div>
-                </div>
-                <div className="absolute -bottom-4 left-1/2 transform -translate-x-1/2 bg-gradient-to-r from-yellow-400 to-orange-500 text-white px-6 py-3 rounded-full shadow-xl flex items-center gap-2">
-                  <Trophy className="w-5 h-5" />
-                  <span className="font-bold">Mestre da Calistenia</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
+      <main className="pt-40 sm:pt-36">
+        <section className="relative overflow-hidden px-4 pb-14 pt-8 sm:px-6 lg:px-8 lg:pb-24 lg:pt-12">
+          <div
+            className="pointer-events-none absolute right-[-10rem] top-[-8rem] h-[28rem] w-[28rem] rounded-full blur-3xl"
+            style={{ background: "rgba(var(--fl-color-accent-rgb), 0.16)" }}
+          />
+          <div
+            className="pointer-events-none absolute left-[-6rem] top-[18rem] h-[20rem] w-[20rem] rounded-full blur-3xl"
+            style={{ background: "rgba(var(--app-secondary-color-rgb), 0.12)" }}
+          />
 
-      {/* Cost Comparison Section */}
-      <div className="py-20 bg-gradient-to-br from-gray-50 to-gray-100">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="text-center mb-16">
-            <h3 className="fl-title-page md:text-5xl mb-4">Quanto Você Economiza com FitLoot?</h3>
-            <p className="text-xl text-gray-600">
-              Compare os custos tradicionais com nossa solução completa
-            </p>
-          </div>
+          <div className="mx-auto grid max-w-7xl items-center gap-10 lg:grid-cols-[1.02fr_0.98fr]">
+            <div className="space-y-8">
+              <span className="inline-flex items-center gap-2 rounded-full border border-[var(--fl-auth-chip-border)] bg-[var(--fl-auth-chip-bg)] px-4 py-2 text-[0.72rem] font-bold uppercase tracking-[0.18em] text-[var(--fl-color-accent)]">
+                <Sparkles className="h-4 w-4" />
+                Sessao beta aberta
+              </span>
 
-          <div className="bg-white rounded-3xl shadow-2xl overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="bg-gradient-to-r from-gray-800 to-gray-900 text-white">
-                  <tr>
-                    <th className="px-6 py-4 text-left text-lg font-bold">Serviço</th>
-                    <th className="px-6 py-4 text-center text-lg font-bold">Gasto Mensal</th>
-                    <th className="px-6 py-4 text-center text-lg font-bold">Gasto Anual</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {costComparison.map((item, idx) => {
-                  const Icon = item.icon;
-                  return <tr key={idx} className={`border-b border-gray-200 ${item.fitloot ? 'bg-gradient-to-r from-emerald-50 to-teal-50' : item.highlight ? 'bg-red-50 font-bold' : 'hover:bg-gray-50'}`}>
-                        <td className="px-6 py-4 flex items-center gap-3">
-                          <Icon className={`w-6 h-6 ${item.fitloot ? 'text-emerald-600' : 'text-gray-600'}`} />
-                          <span className={`text-lg ${item.fitloot ? 'font-bold text-emerald-900' : ''}`}>
-                            {item.service}
-                          </span>
-                        </td>
-                        <td className={`px-6 py-4 text-center text-lg ${item.fitloot ? 'font-bold text-emerald-600' : ''}`}>
-                          {item.monthly}
-                        </td>
-                        <td className={`px-6 py-4 text-center text-lg ${item.fitloot ? 'font-bold text-emerald-600' : ''}`}>
-                          {item.yearly}
-                        </td>
-                      </tr>;
-                })}
-                </tbody>
-              </table>
-            </div>
-            
-            <div className="bg-gradient-to-r from-emerald-500 to-teal-600 text-white p-6 text-center">
-              <div className="flex items-center justify-center gap-3 mb-2">
-                <Sparkles className="w-6 h-6" />
-                <p className="text-2xl font-bold">Economia de 93% ao ano!</p>
-                <Sparkles className="w-6 h-6" />
-              </div>
-              <p className="text-lg opacity-90">
-                FitLoot Premium substitui todos esses gastos com uma solução completa e gamificada
-              </p>
-            </div>
-          </div>
-        </div>
-      </div>
+              <div className="space-y-5">
+                <h1 className="fl-auth-display text-5xl font-black leading-[0.94] sm:text-6xl xl:text-7xl">
+                  Transforme esforco em{" "}
+                  <span
+                    className="bg-clip-text text-transparent"
+                    style={{
+                      backgroundImage: "linear-gradient(135deg, var(--app-primary-color), var(--app-secondary-color))",
+                    }}
+                  >
+                    poder real
+                  </span>
+                  .
+                </h1>
 
-      {/* Gamified Features Section */}
-      <div id="como-funciona" className="py-20 bg-white">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="text-center mb-16">
-            <h3 className="fl-title-page md:text-5xl mb-4">Mais Que Um Treino 
-Transforme Hábitos em XP!</h3>
-            <p className="text-xl text-gray-600">
-              Sistema de gamificação completo que torna exercícios viciantes
-            </p>
-          </div>
-
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8 mb-12">
-            {[{
-            icon: Target,
-            title: 'Missões Diárias',
-            description: 'Complete desafios personalizados e ganhe XP e pontos',
-            example: '"Caminhe 5.000 passos" • 50 XP • 10 Pontos'
-          }, {
-            icon: Flame,
-            title: 'Sistema de Streak',
-            description: 'Mantenha sequências diárias e ganhe multiplicadores de XP',
-            example: '30 dias consecutivos = +3.0x XP!'
-          }, {
-            icon: TrendingUp,
-            title: 'Evolução de Atributos',
-            description: 'Cada exercício evolui FOR, CON, VIT, DES e FOCO',
-            example: '100 flexões = +5 FOR, +3 CON'
-          }, {
-            icon: Award,
-            title: 'Conquistas Raras',
-            description: 'Desbloqueie títulos e conquistas épicas',
-            example: 'Lendário: "Dragão de Ferro" 🐉'
-          }, {
-            icon: Swords,
-            title: 'Mini-Games PvP',
-            description: 'Desafie amigos em percursos de treino cronometrados',
-            example: 'Vencedor: 100 XP | Perdedor: 50 XP'
-          }, {
-            icon: ShoppingBag,
-            title: 'Loja de Recompensas',
-            description: 'Troque pontos por cupons fitness reais',
-            example: '500 pts = 15% OFF em Whey Protein'
-          }].map((feature, idx) => {
-            const Icon = feature.icon;
-            return <Card key={idx} className="p-8 hover:shadow-xl transition-all border-emerald-100 rounded-3xl">
-                  <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center mb-6">
-                    <Icon className="w-8 h-8 text-white" strokeWidth={2} />
-                  </div>
-                  <h4 className="text-xl font-bold text-gray-900 mb-3">
-                    {feature.title}
-                  </h4>
-                  <p className="text-gray-600 mb-4 leading-relaxed">
-                    {feature.description}
-                  </p>
-                  <div className="bg-emerald-50 rounded-xl p-3 border border-emerald-200">
-                    <p className="text-sm text-emerald-700 font-medium">
-                      💡 {feature.example}
-                    </p>
-                  </div>
-                </Card>;
-          })}
-          </div>
-
-          {/* Smartphone mockup */}
-          <div className="text-center">
-            <img
-              src="https://images.unsplash.com/photo-1512941937669-90a1b58e7e9c?auto=format&fit=crop&w=800&h=600&q=60"
-              alt="App Interface"
-              width={800}
-              height={600}
-              loading="lazy"
-              decoding="async"
-              className="mx-auto rounded-3xl shadow-2xl max-w-2xl w-full"
-            />
-          </div>
-        </div>
-      </div>
-
-      {/* Plans Section */}
-      <div className="py-20 bg-gradient-to-br from-emerald-50 to-teal-50">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="text-center mb-16">
-            <h3 className="fl-title-page md:text-5xl mb-4">
-              🏆 Escolha Seu Plano FitLoot
-            </h3>
-            <p className="text-xl text-gray-600">
-              Teste grátis por 7 dias • Cancele quando quiser
-            </p>
-          </div>
-
-          <div className="grid md:grid-cols-3 gap-8">
-            {plans.map((plan, idx) => {
-            const Icon = plan.icon;
-            return <Card key={idx} className={`relative rounded-3xl overflow-hidden ${plan.popular ? 'ring-4 ring-emerald-500 shadow-2xl scale-105' : 'shadow-lg'}`}>
-                  {plan.popular && <div className="absolute top-0 right-0 bg-gradient-to-r from-emerald-500 to-teal-600 text-white px-6 py-2 rounded-bl-3xl font-bold">
-                      MAIS POPULAR
-                    </div>}
-                  
-                  <div className="p-8">
-                    <div className={`w-16 h-16 rounded-2xl bg-gradient-to-br ${plan.color} flex items-center justify-center mb-6`}>
-                      <Icon className="w-8 h-8 text-white" strokeWidth={2} />
-                    </div>
-                    
-                    <h4 className="fl-title-section mb-2">{plan.name}</h4>
-                    <div className="mb-4">
-                      <span className="text-4xl font-bold text-gray-900">{plan.price}</span>
-                      <span className="text-gray-600">/mês</span>
-                    </div>
-                    <p className="text-emerald-600 font-semibold mb-6">
-                      {plan.yearlyPrice}/ano {plan.savings && `• ${plan.savings}`}
-                    </p>
-                    
-                    <ul className="space-y-3 mb-8">
-                      {plan.features.map((feature, fIdx) => <li key={fIdx} className="flex items-start gap-2">
-                          <CheckCircle2 className="w-5 h-5 text-emerald-500 flex-shrink-0 mt-0.5" />
-                          <span className="text-gray-700">{feature}</span>
-                        </li>)}
-                    </ul>
-                    
-
-                      <Button onClick={handleGetStarted} className={`w-full py-6 rounded-full text-lg ${plan.popular ? 'fl-btn-primary shadow-lg' : 'bg-gray-200 hover:bg-gray-300 text-gray-900 font-semibold'}`}>
-                        Começar Teste Grátis
-                      </Button>
-
-                  </div>
-                </Card>;
-          })}
-          </div>
-          
-          <p className="text-center text-gray-600 mt-8 text-lg">
-            <Clock className="inline w-5 h-5 mr-2" />
-            7 dias grátis • Sem compromisso • Cancele quando quiser
-          </p>
-        </div>
-      </div>
-
-      {/* Testimonials */}
-      <div className="py-20 bg-white">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="text-center mb-16">
-            <h3 className="fl-title-page md:text-5xl mb-4">
-              O Que Dizem Nossos Usuários
-            </h3>
-            <p className="text-xl text-gray-600">
-              Milhares já transformaram suas vidas com FitLoot
-            </p>
-          </div>
-
-          <div className="grid md:grid-cols-3 gap-8">
-            {testimonials.map((testimonial, idx) => <Card key={idx} className="p-8 border-gray-100 rounded-3xl hover:shadow-xl transition-shadow">
-                <div className="flex gap-1 mb-4">
-                  {[...Array(testimonial.rating)].map((_, i) => <Star key={i} className="w-5 h-5 fill-yellow-400 text-yellow-400" />)}
-                </div>
-                <p className="text-gray-700 mb-6 leading-relaxed text-lg">
-                  "{testimonial.content}"
+                <p className="max-w-2xl text-base leading-8 text-[var(--fl-color-text-muted)] sm:text-lg">
+                  A plataforma que mistura treino, progressao e recompensas em um loop claro: voce treina,
+                  sobe atributos, desbloqueia loot e volta melhor para a proxima missao.
                 </p>
-                <div className="flex items-center gap-3 mb-3">
-                  <div className="w-12 h-12 rounded-full bg-gradient-to-br from-emerald-100 to-teal-100 flex items-center justify-center text-2xl">
-                    {testimonial.avatar}
-                  </div>
-                  <div>
-                    <div className="font-bold text-gray-900">
-                      {testimonial.name}
+              </div>
+
+              <div className="flex flex-col gap-4 sm:flex-row">
+                <button
+                  type="button"
+                  onClick={goToLogin}
+                  className="inline-flex items-center justify-center gap-2 rounded-full px-7 py-4 text-sm font-black uppercase tracking-[0.18em] text-[#04100b] transition hover:-translate-y-0.5"
+                  style={{
+                    background: "linear-gradient(135deg, var(--app-primary-color), var(--app-secondary-color))",
+                    boxShadow: "0 20px 36px rgba(var(--fl-color-accent-rgb), 0.24)",
+                  }}
+                >
+                  Baixar app
+                  <ArrowRight className="h-4 w-4" />
+                </button>
+
+                <a
+                  href="#funcionalidades"
+                  onClick={scrollToSection("funcionalidades")}
+                  className="inline-flex items-center justify-center gap-2 rounded-full border border-[var(--fl-border-strong)] bg-[var(--fl-surface-glass)] px-7 py-4 text-sm font-bold uppercase tracking-[0.14em] text-[var(--fl-color-text)] transition hover:-translate-y-0.5"
+                >
+                  Ver arsenal
+                  <ChevronRight className="h-4 w-4" />
+                </a>
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-3">
+                {[
+                  { icon: Trophy, label: "XP por treino", value: "Ate 5x mais recorrencia" },
+                  { icon: Swords, label: "Eventos", value: "Raids e desafios semanais" },
+                  { icon: Users, label: "Guilda", value: "Progressao compartilhada" },
+                ].map((item) => {
+                  const Icon = item.icon;
+                  return (
+                    <div
+                      key={item.label}
+                      className="rounded-[1.6rem] border border-[var(--fl-border-soft)] bg-[var(--fl-surface-glass)] p-5 backdrop-blur-xl"
+                      style={{ boxShadow: "var(--fl-shadow-glass)" }}
+                    >
+                      <div className="mb-4 flex h-11 w-11 items-center justify-center rounded-2xl bg-[rgba(var(--fl-color-accent-rgb),0.12)] text-[var(--fl-color-accent)]">
+                        <Icon className="h-5 w-5" strokeWidth={2.2} />
+                      </div>
+                      <p className="text-xs font-bold uppercase tracking-[0.18em] text-[var(--fl-color-text-soft)]">
+                        {item.label}
+                      </p>
+                      <p className="mt-2 text-sm font-semibold text-[var(--fl-color-text)]">{item.value}</p>
                     </div>
-                    <div className="text-sm text-gray-500">
-                      {testimonial.role}
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="relative">
+              <div
+                className="overflow-hidden rounded-[2.2rem] border border-[var(--fl-border-soft)] bg-[var(--fl-surface-strong)] p-3"
+                style={{ boxShadow: "var(--fl-shadow-glass)" }}
+              >
+                <div className="relative overflow-hidden rounded-[1.8rem] border border-[var(--fl-border-soft)]">
+                  <img
+                    src="https://images.unsplash.com/photo-1534438327276-14e5300c3a48?auto=format&fit=crop&w=1200&q=60"
+                    alt="Academia futurista FitLoot"
+                    loading="lazy"
+                    decoding="async"
+                    className="h-[520px] w-full object-cover"
+                  />
+                  <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(4,10,7,0.08),rgba(4,10,7,0.72))]" />
+
+                  <div className="absolute left-5 top-5 rounded-full border border-white/10 bg-black/25 px-4 py-2 text-xs font-bold uppercase tracking-[0.18em] text-white backdrop-blur-xl">
+                    Avatar online
+                  </div>
+
+                  <div className="absolute bottom-5 left-5 right-5 rounded-[1.8rem] border border-white/10 bg-black/35 p-5 text-white backdrop-blur-xl">
+                    <div className="flex items-center justify-between gap-4">
+                      <div>
+                        <p className="text-[0.7rem] font-bold uppercase tracking-[0.22em] text-white/70">
+                          Status do jogador
+                        </p>
+                        <p className="mt-2 text-2xl font-black">LVL 42</p>
+                      </div>
+                      <span className="rounded-full bg-[rgba(var(--fl-color-accent-rgb),0.22)] px-3 py-1 text-xs font-bold uppercase tracking-[0.14em] text-[var(--fl-color-accent)]">
+                        Raid pronta
+                      </span>
+                    </div>
+
+                    <div className="mt-5 h-2.5 overflow-hidden rounded-full bg-white/10">
+                      <div
+                        className="h-full rounded-full"
+                        style={{
+                          width: "75%",
+                          background: "linear-gradient(90deg, var(--app-primary-color), var(--app-secondary-color))",
+                        }}
+                      />
+                    </div>
+
+                    <div className="mt-5 grid grid-cols-3 gap-3">
+                      {attributes.map((item) => (
+                        <div key={item.title} className="rounded-2xl border border-white/10 bg-white/5 p-3 text-center">
+                          <p className="text-[0.65rem] font-bold uppercase tracking-[0.16em] text-white/55">
+                            {item.title}
+                          </p>
+                          <p className="mt-2 text-lg font-black text-[var(--fl-color-accent)]">{item.stat}</p>
+                        </div>
+                      ))}
                     </div>
                   </div>
                 </div>
-                <div className="flex items-center gap-2 text-sm text-emerald-600 font-semibold">
-                  <TrendingUp className="w-4 h-4" />
-                  {testimonial.stats}
+              </div>
+
+              <div
+                className="absolute -bottom-6 -left-4 hidden rounded-[1.6rem] border border-[var(--fl-border-soft)] bg-[var(--fl-surface-glass)] p-4 backdrop-blur-xl md:block"
+                style={{ boxShadow: "var(--fl-shadow-glass)" }}
+              >
+                <p className="text-[0.7rem] font-bold uppercase tracking-[0.18em] text-[var(--fl-color-text-soft)]">
+                  Conversao
+                </p>
+                <p className="mt-2 text-2xl font-black text-[var(--fl-color-text)]">+31% em aderencia</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="metricas" className="scroll-mt-40 border-y border-[var(--fl-border-soft)] bg-[var(--fl-surface-muted)]/80 px-4 py-10 sm:px-6 lg:px-8">
+          <div className="mx-auto grid max-w-7xl gap-4 md:grid-cols-4">
+            {metrics.map((metric) => (
+              <div
+                key={metric.label}
+                className="rounded-[1.6rem] border border-[var(--fl-border-soft)] bg-[var(--fl-surface-glass)] p-6 text-center backdrop-blur-xl"
+                style={{ boxShadow: "var(--fl-shadow-glass)" }}
+              >
+                <p className="text-3xl font-black text-[var(--fl-color-accent)] sm:text-4xl">{metric.value}</p>
+                <p className="mt-3 text-[0.78rem] font-bold uppercase tracking-[0.18em] text-[var(--fl-color-text-soft)]">
+                  {metric.label}
+                </p>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section id="atributos" className="scroll-mt-40 px-4 py-16 sm:px-6 lg:px-8 lg:py-24">
+          <div className="mx-auto max-w-7xl">
+            <div className="mx-auto max-w-3xl text-center">
+              <p className="text-xs font-bold uppercase tracking-[0.24em] text-[var(--fl-color-accent)]">Atributos</p>
+              <h2 className="fl-auth-display mt-4 text-4xl font-black tracking-tight sm:text-5xl">
+                Domine sua ficha em tempo real.
+              </h2>
+              <p className="mt-4 text-base leading-8 text-[var(--fl-color-text-muted)]">
+                Cada bloco de treino alimenta uma estatistica do avatar. O feedback visual deixa claro como o
+                treino da vida real muda seu desempenho no ecossistema FitLoot.
+              </p>
+            </div>
+
+            <div className="mt-12 grid gap-6 lg:grid-cols-3">
+              {attributes.map((item) => {
+                const Icon = item.icon;
+                return (
+                  <article
+                    key={item.title}
+                    className="group relative overflow-hidden rounded-[2rem] border border-[var(--fl-border-soft)] bg-[var(--fl-surface-glass)] p-8 backdrop-blur-xl transition hover:-translate-y-1 hover:border-[var(--fl-border-strong)]"
+                    style={{ boxShadow: "var(--fl-shadow-glass)" }}
+                  >
+                    <div
+                      className="absolute right-[-4rem] top-[-4rem] h-40 w-40 rounded-full blur-3xl transition group-hover:opacity-100"
+                      style={{ background: "rgba(var(--fl-color-accent-rgb), 0.18)" }}
+                    />
+                    <div className="relative">
+                      <div className="mb-6 flex h-14 w-14 items-center justify-center rounded-[1.3rem] bg-[rgba(var(--fl-color-accent-rgb),0.12)] text-[var(--fl-color-accent)]">
+                        <Icon className="h-7 w-7" strokeWidth={2.1} />
+                      </div>
+                      <div className="flex items-center justify-between gap-4">
+                        <h3 className="text-2xl font-black text-[var(--fl-color-text)]">{item.title}</h3>
+                        <span className="rounded-full border border-[rgba(var(--fl-color-accent-rgb),0.25)] bg-[rgba(var(--fl-color-accent-rgb),0.1)] px-3 py-1 text-xs font-bold uppercase tracking-[0.14em] text-[var(--fl-color-accent)]">
+                          {item.stat}
+                        </span>
+                      </div>
+                      <p className="mt-4 leading-8 text-[var(--fl-color-text-muted)]">{item.description}</p>
+                      <a
+                        href="#planos"
+                        onClick={scrollToSection("planos")}
+                        className="mt-6 inline-flex items-center gap-2 text-sm font-bold uppercase tracking-[0.16em] text-[var(--fl-color-accent)]"
+                      >
+                        Ver progressao
+                        <ChevronRight className="h-4 w-4" />
+                      </a>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          </div>
+        </section>
+
+        <section id="funcionalidades" className="scroll-mt-40 border-y border-[var(--fl-border-soft)] bg-[var(--fl-surface-muted)]/70 px-4 py-16 sm:px-6 lg:px-8 lg:py-24">
+          <div className="mx-auto max-w-7xl">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+              <div className="max-w-3xl">
+                <p className="text-xs font-bold uppercase tracking-[0.24em] text-[var(--fl-color-accent)]">Funcionalidades</p>
+                <h2 className="fl-auth-display mt-4 text-4xl font-black tracking-tight sm:text-5xl">
+                  O arsenal tecnologico da sua evolucao.
+                </h2>
+              </div>
+              <p className="max-w-2xl text-base leading-8 text-[var(--fl-color-text-muted)]">
+                O produto combina IA, mecanicas de jogo e reward design para transformar consistencia em
+                progressao concreta.
+              </p>
+            </div>
+
+            <div className="mt-12 grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
+              {features.map((feature) => {
+                const Icon = feature.icon;
+                return (
+                  <article
+                    key={feature.title}
+                    className="rounded-[1.8rem] border border-[var(--fl-border-soft)] bg-[var(--fl-surface-glass)] p-7 backdrop-blur-xl transition hover:-translate-y-1 hover:border-[var(--fl-border-strong)]"
+                    style={{ boxShadow: "var(--fl-shadow-glass)" }}
+                  >
+                    <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-[1.2rem] bg-[rgba(var(--fl-color-accent-rgb),0.12)] text-[var(--fl-color-accent)]">
+                      <Icon className="h-7 w-7" strokeWidth={2.1} />
+                    </div>
+                    <h3 className="text-2xl font-black text-[var(--fl-color-text)]">{feature.title}</h3>
+                    <p className="mt-4 leading-8 text-[var(--fl-color-text-muted)]">{feature.description}</p>
+                  </article>
+                );
+              })}
+            </div>
+          </div>
+        </section>
+
+        <section id="comparativo" className="scroll-mt-40 px-4 py-16 sm:px-6 lg:px-8 lg:py-24">
+          <div className="mx-auto max-w-5xl">
+            <div className="mx-auto max-w-3xl text-center">
+              <p className="text-xs font-bold uppercase tracking-[0.24em] text-[var(--fl-color-accent)]">Comparativo</p>
+              <h2 className="fl-auth-display mt-4 text-4xl font-black tracking-tight sm:text-5xl">
+                Quanto voce economiza com a stack certa.
+              </h2>
+              <p className="mt-4 text-base leading-8 text-[var(--fl-color-text-muted)]">
+                O app substitui friccao por progresso visivel e concentra treino, motivacao e beneficios em uma
+                unica assinatura.
+              </p>
+            </div>
+
+            <div
+              className="mt-12 overflow-hidden rounded-[2rem] border border-[var(--fl-border-soft)] bg-[var(--fl-surface-glass)] backdrop-blur-xl"
+              style={{ boxShadow: "var(--fl-shadow-glass)" }}
+            >
+              <div className="grid grid-cols-[1.2fr_1fr_1fr] border-b border-[var(--fl-border-soft)] bg-[rgba(var(--fl-color-accent-rgb),0.08)] text-sm font-bold uppercase tracking-[0.16em] text-[var(--fl-color-text)]">
+                <div className="p-5 sm:p-6">Beneficio</div>
+                <div className="p-5 sm:p-6">Academia comum</div>
+                <div className="p-5 text-[var(--fl-color-accent)] sm:p-6">FitLoot Elite</div>
+              </div>
+
+              <div className="divide-y divide-[var(--fl-border-soft)]">
+                {comparisonRows.map((row) => (
+                  <div key={row.label} className="grid grid-cols-[1.2fr_1fr_1fr] text-sm sm:text-base">
+                    <div className="p-5 font-semibold text-[var(--fl-color-text)] sm:p-6">{row.label}</div>
+                    <div className="p-5 text-[var(--fl-color-text-muted)] sm:p-6">{row.common}</div>
+                    <div className="p-5 font-bold text-[var(--fl-color-accent)] sm:p-6">{row.fitloot}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="planos" className="scroll-mt-40 relative px-4 py-16 sm:px-6 lg:px-8 lg:py-24">
+          <div
+            className="pointer-events-none absolute inset-x-0 top-12 mx-auto h-[26rem] max-w-6xl rounded-[3rem] blur-3xl"
+            style={{ background: "rgba(var(--fl-color-accent-rgb), 0.1)" }}
+          />
+
+          <div className="relative mx-auto max-w-7xl">
+            <div className="mx-auto max-w-3xl text-center">
+              <p className="text-xs font-bold uppercase tracking-[0.24em] text-[var(--fl-color-accent)]">Planos</p>
+              <h2 className="fl-auth-display mt-4 text-4xl font-black tracking-tight sm:text-5xl">
+                Escolha seu plano de batalha.
+              </h2>
+              <p className="mt-4 text-base leading-8 text-[var(--fl-color-text-muted)]">
+                Todos os CTAs de entrada levam voce para o login. Depois disso, o app libera a jornada de
+                onboarding e o acesso certo para o seu momento.
+              </p>
+            </div>
+
+            <div className="mt-12 grid gap-6 lg:grid-cols-3">
+              {plans.map((plan) => (
+                <article
+                  key={plan.name}
+                  className={`relative flex flex-col rounded-[2rem] border p-8 backdrop-blur-xl ${
+                    plan.popular
+                      ? "border-[rgba(var(--fl-color-accent-rgb),0.32)] bg-[rgba(var(--fl-color-accent-rgb),0.09)]"
+                      : "border-[var(--fl-border-soft)] bg-[var(--fl-surface-glass)]"
+                  }`}
+                  style={{ boxShadow: "var(--fl-shadow-glass)" }}
+                >
+                  {plan.popular ? (
+                    <span className="absolute left-1/2 top-0 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--app-primary-color)] px-4 py-2 text-xs font-black uppercase tracking-[0.16em] text-[#04100b]">
+                      Mais popular
+                    </span>
+                  ) : null}
+
+                  <div className="flex-1">
+                    <h3 className="text-2xl font-black text-[var(--fl-color-text)]">{plan.name}</h3>
+                    <div className="mt-4 flex items-end gap-2">
+                      <span className="text-4xl font-black text-[var(--fl-color-accent)]">{plan.price}</span>
+                      <span className="pb-1 text-sm text-[var(--fl-color-text-muted)]">/mes</span>
+                    </div>
+                    <p className="mt-3 leading-7 text-[var(--fl-color-text-muted)]">{plan.subtitle}</p>
+
+                    <div className="mt-6 space-y-3">
+                      {plan.features.map((feature) => (
+                        <div key={feature} className="flex items-start gap-3 text-sm text-[var(--fl-color-text-muted)]">
+                          <span className="mt-0.5 flex h-5 w-5 items-center justify-center rounded-full bg-[rgba(var(--fl-color-accent-rgb),0.14)] text-[var(--fl-color-accent)]">
+                            <Check className="h-3.5 w-3.5" strokeWidth={2.8} />
+                          </span>
+                          <span>{feature}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={goToLogin}
+                    className={`mt-8 inline-flex items-center justify-center gap-2 rounded-full px-6 py-4 text-sm font-black uppercase tracking-[0.16em] transition hover:-translate-y-0.5 ${
+                      plan.popular
+                        ? "text-[#04100b]"
+                        : "border border-[var(--fl-border-strong)] bg-[var(--fl-surface-strong)] text-[var(--fl-color-text)]"
+                    }`}
+                    style={
+                      plan.popular
+                        ? {
+                            background: "linear-gradient(135deg, var(--app-primary-color), var(--app-secondary-color))",
+                            boxShadow: "0 18px 32px rgba(var(--fl-color-accent-rgb), 0.24)",
+                          }
+                        : undefined
+                    }
+                  >
+                    {plan.popular ? "Dominar agora" : "Selecionar plano"}
+                    <ArrowRight className="h-4 w-4" />
+                  </button>
+                </article>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section id="reviews" className="scroll-mt-40 border-t border-[var(--fl-border-soft)] bg-[var(--fl-surface-muted)]/70 px-4 py-16 sm:px-6 lg:px-8 lg:py-24">
+          <div className="mx-auto max-w-7xl">
+            <div className="mx-auto max-w-3xl text-center">
+              <p className="text-xs font-bold uppercase tracking-[0.24em] text-[var(--fl-color-accent)]">Reviews</p>
+              <h2 className="fl-auth-display mt-4 text-4xl font-black tracking-tight sm:text-5xl">
+                Reviews de elite da comunidade.
+              </h2>
+            </div>
+
+            <div className="mt-12 grid gap-6 lg:grid-cols-3">
+              {reviews.map((review) => (
+                <article
+                  key={review.name}
+                  className="rounded-[1.9rem] border border-[var(--fl-border-soft)] bg-[var(--fl-surface-glass)] p-8 backdrop-blur-xl"
+                  style={{ boxShadow: "var(--fl-shadow-glass)" }}
+                >
+                  <div className="flex gap-1 text-[var(--fl-color-accent)]">
+                    {Array.from({ length: 5 }).map((_, index) => (
+                      <Star key={index} className="h-5 w-5 fill-current" />
+                    ))}
+                  </div>
+                  <p className="mt-6 text-lg leading-8 text-[var(--fl-color-text)]">"{review.content}"</p>
+                  <div className="mt-8 flex items-center gap-4">
+                    <div className="flex h-12 w-12 items-center justify-center rounded-full bg-[rgba(var(--fl-color-accent-rgb),0.14)] font-bold text-[var(--fl-color-accent)]">
+                      {review.initials}
+                    </div>
+                    <div>
+                      <p className="font-black text-[var(--fl-color-text)]">{review.name}</p>
+                      <p className="text-sm text-[var(--fl-color-text-muted)]">{review.role}</p>
+                    </div>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <footer className="border-t border-[var(--fl-border-soft)] bg-[var(--fl-surface-strong)] px-4 py-16 sm:px-6 lg:px-8">
+        <div className="mx-auto max-w-7xl">
+          <div className="grid gap-10 lg:grid-cols-[1.2fr_0.8fr_0.8fr_0.8fr]">
+            <div className="space-y-6">
+              <div className="flex items-center gap-3">
+                <span className="flex h-12 w-12 items-center justify-center rounded-2xl border border-[var(--fl-border-soft)] bg-[rgba(var(--fl-color-accent-rgb),0.14)] shadow-[0_0_24px_rgba(var(--fl-color-accent-rgb),0.16)]">
+                  <Zap className="h-6 w-6 text-[var(--fl-color-accent)]" strokeWidth={2.3} />
+                </span>
+                <div>
+                  <p className="fl-auth-display text-2xl font-black">FitLoot</p>
+                  <p className="text-sm text-[var(--fl-color-text-muted)]">Treino, progresso e recompensas</p>
                 </div>
-              </Card>)}
-          </div>
-        </div>
-      </div>
+              </div>
 
-      {/* Features Section */}
-      <div className="py-20 bg-gradient-to-br from-gray-50 to-gray-100">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="text-center mb-16">
-            <h3 className="fl-title-page md:text-5xl mb-4">
-              Funcionalidades Completas
-            </h3>
-            <p className="text-xl text-gray-600">
-              Tudo que você precisa em um só lugar
-            </p>
-          </div>
+              <p className="max-w-md leading-8 text-[var(--fl-color-text-muted)]">
+                A proposta da landing e simples: mostrar a progressao, levar para o login e deixar o restante da
+                jornada acontecer no produto certo.
+              </p>
 
-          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-8">
-            {features.map((feature, idx) => {
-            const Icon = feature.icon;
-            return <Card key={idx} className="p-8 hover:shadow-xl transition-all border-gray-100 rounded-3xl group cursor-pointer">
-                  <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-emerald-100 to-teal-100 flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
-                    <Icon className="w-8 h-8 text-emerald-600" strokeWidth={2} />
-                  </div>
-                  <h4 className="text-xl font-bold text-gray-900 mb-3">
-                    {feature.title}
-                  </h4>
-                  <p className="text-gray-600 leading-relaxed">
-                    {feature.description}
-                  </p>
-                </Card>;
-          })}
-          </div>
-        </div>
-      </div>
-
-      {/* Extra Benefits */}
-      <div className="py-20 bg-white">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="text-center mb-16">
-            <h3 className="fl-title-page md:text-5xl mb-4">
-              ✨ Benefícios Exclusivos
-            </h3>
-          </div>
-
-          <div className="grid md:grid-cols-2 gap-8">
-            {[{
-            icon: Shield,
-            title: 'Evolução Real Validada por Sensores',
-            description: 'Tecnologia anti-trapaça garante que você realmente está treinando'
-          }, {
-            icon: TrendingUp,
-            title: 'Ranking Local e Global',
-            description: 'Compete com amigos e atletas do mundo todo'
-          }, {
-            icon: ShoppingBag,
-            title: 'Loja de Cupons Fitness Reais',
-            description: 'Troque pontos por descontos em produtos reais'
-          }, {
-            icon: Sparkles,
-            title: 'Personalização Completa',
-            description: 'Customize cores, fontes, imagens e bordas do seu perfil'
-          }, {
-            icon: Users,
-            title: 'Sistema de Amigos',
-            description: 'Adicione amigos e acompanhe o progresso deles'
-          }, {
-            icon: Swords,
-            title: 'Desafios PvP',
-            description: 'Crie mini-games e desafie outros usuários em percursos de treino'
-          }].map((benefit, idx) => {
-            const Icon = benefit.icon;
-            return <div key={idx} className="flex gap-4 items-start">
-                  <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center flex-shrink-0">
-                    <Icon className="w-6 h-6 text-white" />
-                  </div>
-                  <div>
-                    <h4 className="text-xl font-bold text-gray-900 mb-2">{benefit.title}</h4>
-                    <p className="text-gray-600">{benefit.description}</p>
-                  </div>
-                </div>;
-          })}
-          </div>
-        </div>
-      </div>
-
-      {/* CTA Section */}
-      <div className="py-20 bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500">
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
-          <Dumbbell className="w-16 h-16 text-white mx-auto mb-6" strokeWidth={2} />
-          <h3 className="text-4xl md:text-5xl font-bold text-white mb-6">
-            💥 Pronto Para Começar Sua Jornada?
-          </h3>
-          <p className="text-xl text-white/90 mb-10">
-            Junte-se a milhares de pessoas que já estão transformando suas vidas com FitLoot
-          </p>
-          
-          <form onSubmit={handleEmailSubmit} className="max-w-md mx-auto mb-8">
-            <div className="flex gap-3">
-              <Input type="email" placeholder="Seu melhor e-mail" value={email} onChange={e => setEmail(e.target.value)} className="flex-1 py-6 px-6 rounded-full text-lg bg-white/95" required />
-              <Button type="submit" size="lg" className="bg-gray-900 hover:bg-gray-800 text-white px-8 rounded-full">
-                Enviar
-              </Button>
+              <button
+                type="button"
+                onClick={goToLogin}
+                className="inline-flex items-center gap-2 rounded-full px-5 py-3 text-sm font-black uppercase tracking-[0.16em] text-[#04100b] transition hover:-translate-y-0.5"
+                style={{
+                  background: "linear-gradient(135deg, var(--app-primary-color), var(--app-secondary-color))",
+                  boxShadow: "0 18px 32px rgba(var(--fl-color-accent-rgb), 0.2)",
+                }}
+              >
+                Entrar no app
+                <ArrowRight className="h-4 w-4" />
+              </button>
             </div>
-          </form>
 
-            <Button onClick={handleGetStarted} size="lg" className="bg-white text-emerald-600 hover:bg-gray-50 px-12 py-6 text-lg rounded-full shadow-xl hover:shadow-2xl transition-all">
-              Começar Teste Grátis de 7 Dias
-              <Heart className="ml-2 w-5 h-5" />
-            </Button>
-          
-          <p className="text-white/80 mt-6 text-sm">
-            Sem cartão de crédito necessário • Cancele quando quiser
-          </p>
-        </div>
-      </div>
+            <div>
+              <h3 className="text-sm font-black uppercase tracking-[0.18em] text-[var(--fl-color-text)]">Navegacao</h3>
+              <div className="mt-5 space-y-3">
+                {navItems.map((item) => (
+                  <a
+                    key={item.id}
+                    href={`#${item.id}`}
+                    onClick={scrollToSection(item.id)}
+                    className="block text-sm text-[var(--fl-color-text-muted)] transition hover:text-[var(--fl-color-accent)]"
+                  >
+                    {item.label}
+                  </a>
+                ))}
+              </div>
+            </div>
 
-      {/* Footer */}
-      <div className="py-12 bg-gray-900 text-white">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex flex-col md:flex-row justify-between items-center gap-6">
-            <div className="flex items-center gap-2">
-              <Zap className="w-8 h-8 text-emerald-400" />
-              <span className="text-2xl font-bold">FitLoot</span>
+            <div>
+              <h3 className="text-sm font-black uppercase tracking-[0.18em] text-[var(--fl-color-text)]">Suporte</h3>
+              <div className="mt-5 space-y-3">
+                <button
+                  type="button"
+                  onClick={goToLogin}
+                  className="block text-sm text-[var(--fl-color-text-muted)] transition hover:text-[var(--fl-color-accent)]"
+                >
+                  Login
+                </button>
+                <a
+                  href="#comparativo"
+                  onClick={scrollToSection("comparativo")}
+                  className="block text-sm text-[var(--fl-color-text-muted)] transition hover:text-[var(--fl-color-accent)]"
+                >
+                  Planos e beneficios
+                </a>
+                <a
+                  href="#reviews"
+                  onClick={scrollToSection("reviews")}
+                  className="block text-sm text-[var(--fl-color-text-muted)] transition hover:text-[var(--fl-color-accent)]"
+                >
+                  Feedback da comunidade
+                </a>
+              </div>
             </div>
-            <div className="text-center text-gray-400">
-              © 2024 FitLoot. Todos os direitos reservados.
-            </div>
-            <div className="flex gap-6 text-gray-400">
-              <a href="#" className="hover:text-white transition-colors">Termos</a>
-              <a href="#" className="hover:text-white transition-colors">Privacidade</a>
-              <a href="#" className="hover:text-white transition-colors">Contato</a>
+
+            <div>
+              <h3 className="text-sm font-black uppercase tracking-[0.18em] text-[var(--fl-color-text)]">Redes</h3>
+              <div className="mt-5 flex flex-wrap gap-3">
+                {[
+                  { icon: Users, label: "Guilda" },
+                  { icon: Trophy, label: "Ranking" },
+                  { icon: Sparkles, label: "Eventos" },
+                ].map((item) => {
+                  const Icon = item.icon;
+                  return (
+                    <button
+                      key={item.label}
+                      type="button"
+                      onClick={goToLogin}
+                      className="inline-flex h-12 w-12 items-center justify-center rounded-full border border-[var(--fl-border-soft)] bg-[var(--fl-surface-glass)] text-[var(--fl-color-text-muted)] transition hover:border-[var(--fl-border-strong)] hover:text-[var(--fl-color-accent)]"
+                      title={item.label}
+                      aria-label={item.label}
+                    >
+                      <Icon className="h-5 w-5" />
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           </div>
+
+          <div className="mt-12 border-t border-[var(--fl-border-soft)] pt-6 text-sm text-[var(--fl-color-text-soft)]">
+            (c) 2024 FitLoot. Todos os direitos reservados.
+          </div>
         </div>
-      </div>
-    </div>;
+      </footer>
+    </div>
+  );
 }

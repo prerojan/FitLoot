@@ -111,6 +111,8 @@
   --fl-auth-muted: var(--fl-color-text-muted);
   --fl-auth-subtle: var(--fl-color-text-soft);
   --fl-auth-panel-strong: var(--fl-surface-strong);
+  --fl-auth-panel: var(--fl-surface-strong);
+  --fl-auth-surface: var(--fl-surface-muted);
   --fl-auth-card: var(--fl-surface-muted);
   --fl-auth-card-border: var(--fl-border-soft);
   --fl-auth-card-selected: color-mix(in srgb, var(--fl-color-accent) 12%, var(--fl-surface-strong));

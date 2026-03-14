@@ -588,7 +588,7 @@ export default function Checkout() {
                             autoComplete="off"
                             maxLength={128}
                             placeholder="Insira seu código"
-                            className="h-12 rounded-[1.2rem] border-[var(--fl-auth-card-border)] bg-[var(--fl-auth-panel)] px-4 text-[var(--fl-auth-ink)] placeholder:text-[var(--fl-auth-subtle)]"
+                            className="h-12 rounded-[1.2rem] border-[var(--fl-auth-input-border)] bg-[var(--fl-auth-input-bg)] px-4 text-[var(--fl-auth-ink)] placeholder:text-[var(--fl-auth-subtle)]"
                           />
                           <button
                             type="button"
