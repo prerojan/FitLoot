@@ -366,12 +366,12 @@ export default function Dashboard() {
     <AppPageShell bottomNavActive="missions" profile={profile} progression={progression}>
       <main className="mx-auto max-w-[48rem] px-4 pb-16 pt-4 sm:px-5 md:px-8 md:pt-8">
         <div className="space-y-3 md:space-y-6">
-          <div className="flex items-center justify-between gap-4 px-1">
+          <div className="flex w-full items-start justify-between gap-4 px-1">
             <div className="flex flex-col">
               <p className="text-sm font-semibold md:text-base" style={{ color: "var(--fl-color-text)" }}>{displayName}</p>
-              <p className="text-xs" style={{ color: "var(--fl-color-text-muted)" }}>{usernameLabel}</p>
+              <p className="text-[0.7rem] sm:text-xs text-slate-400 font-medium" style={{ color: "var(--fl-color-text-muted)" }}>{usernameLabel}</p>
             </div>
-            <div className="flex flex-col items-start gap-1.5 md:flex-row md:items-center md:gap-2">
+            <div className="flex flex-col items-end gap-1 md:flex-row md:items-center md:gap-2">
               {loadingState.titles ? <LoadingBall size="sm" /> : activeTitle ? (
                 <div
                   className="rounded-full px-3 py-1 text-[0.68rem] font-bold uppercase tracking-[0.16em]"
@@ -407,46 +407,48 @@ export default function Dashboard() {
           ) : null}
 
           <section className="space-y-4">
-            <div className="rounded-[2rem] px-3 py-4 md:px-8 md:py-6" style={PRIMARY_GLOW_STYLE}>
-              <div className="flex min-h-[9rem] flex-col gap-8 sm:min-h-[9.25rem] sm:flex-row sm:items-center sm:justify-between">
-                <div className="flex flex-1 flex-col justify-center gap-4 sm:gap-5">
-                  <div className="inline-flex items-center gap-2 text-[0.64rem] font-black uppercase tracking-[0.24em] sm:text-[0.68rem] sm:tracking-[0.28em]">
-                    <Cloud className="h-3.5 w-3.5" />
+            <div className="rounded-[2rem] px-4 py-5 md:px-8 md:py-6" style={PRIMARY_GLOW_STYLE}>
+              <div className="flex min-h-[9.5rem] flex-row items-center justify-between gap-2 sm:min-h-[10rem]">
+                <div className="flex flex-col justify-center gap-3 md:gap-4 pl-1">
+                  <div className="inline-flex items-center gap-2 text-[0.64rem] font-black uppercase tracking-[0.24em] sm:text-[0.68rem] sm:tracking-[0.28em] text-black/80">
+                    <Cloud className="h-4 w-4" />
                     <span>Experience Points</span>
                   </div>
-                  <div className="inline-flex w-fit items-center gap-2 rounded-full px-4 py-3 text-sm font-black" style={{ background: "color-mix(in srgb, var(--fl-nav-item-active-text) 10%, transparent)" }}>
+                  <div className="inline-flex w-fit items-center gap-2 rounded-full px-3 py-1.5 md:px-4 md:py-3 text-xs md:text-sm font-black bg-black/10 text-black">
                     <Flame className="h-4 w-4" />
                     <span>{loadingState.progression ? <LoadingBall size="sm" /> : `${progression?.current_streak ?? 0}-Day Streak`}</span>
                   </div>
-                  <div className="md:hidden text-xs font-bold uppercase tracking-[0.18em] opacity-75">
-                    {loadingState.progression ? <LoadingBall size="sm" /> : `${formatNumber(Math.max(0, progression?.xp ?? 0))} / ${formatNumber(xpForNextLevel)} para o proximo nivel`}
+                  <div className="mt-2 text-[0.6rem] md:text-xs font-black uppercase tracking-[0.2em] text-black/60">
+                    {loadingState.progression ? <LoadingBall size="sm" /> : `${formatNumber(Math.max(0, progression?.xp ?? 0))} / ${formatNumber(xpForNextLevel)} PARA O PROXIMO NIVEL`}
                   </div>
                 </div>
 
-                <div className="relative mx-auto flex h-[6rem] w-[10.5rem] shrink-0 items-end justify-center sm:mx-0 sm:h-[6.6rem] sm:w-[12.5rem]">
-                  <svg viewBox="0 0 176 104" className="absolute inset-0 h-full w-full" aria-hidden="true">
-                    <path
-                      d="M26 86 A62 62 0 0 1 150 86"
-                      fill="none"
-                      stroke="color-mix(in srgb, var(--fl-nav-item-active-text) 24%, transparent)"
-                      strokeLinecap="round"
-                      strokeWidth="14"
-                    />
-                    <path
-                      d="M26 86 A62 62 0 0 1 150 86"
-                      fill="none"
-                      pathLength={100}
-                      stroke="var(--fl-nav-item-active-text)"
-                      strokeDasharray={`${xpProgress} 100`}
-                      strokeLinecap="round"
-                      strokeWidth="14"
-                    />
-                  </svg>
-                  <div className="absolute inset-x-0 bottom-[0.1rem] flex items-end justify-center gap-1 sm:bottom-0">
-                    <span className="text-2xl font-black leading-none md:text-[2.35rem]">
-                      {loadingState.progression ? <LoadingBall size="sm" /> : formatNumber(Math.max(0, progression?.xp ?? 0))}
-                    </span>
-                    <span className="pb-1 text-[0.7rem] font-black uppercase opacity-75 sm:text-xs">XP</span>
+                <div className="relative flex shrink-0 items-center justify-center">
+                  <div className="h-[8rem] w-[9rem] sm:h-[9.5rem] sm:w-[11rem] relative">
+                    <svg viewBox="0 0 176 104" className="absolute inset-0 h-full w-full" aria-hidden="true">
+                      <path
+                        d="M18 86 A70 70 0 0 1 158 86"
+                        fill="none"
+                        stroke="rgba(0,0,0,0.15)"
+                        strokeLinecap="round"
+                        strokeWidth="18"
+                      />
+                      <path
+                        d="M18 86 A70 70 0 0 1 158 86"
+                        fill="none"
+                        pathLength={100}
+                        stroke="var(--fl-nav-item-active-text)"
+                        strokeDasharray={`${xpProgress} 100`}
+                        strokeLinecap="round"
+                        strokeWidth="18"
+                      />
+                    </svg>
+                    <div className="absolute inset-x-0 bottom-4 flex items-end justify-center gap-1 sm:bottom-5">
+                      <span className="text-[2.6rem] font-black leading-none text-black drop-shadow-sm md:text-[3rem]">
+                        {loadingState.progression ? <LoadingBall size="sm" /> : formatNumber(Math.max(0, progression?.xp ?? 0))}
+                      </span>
+                      <span className="pb-1 text-[0.75rem] font-black uppercase text-black md:text-[0.85rem]">XP</span>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -478,7 +480,7 @@ export default function Dashboard() {
           </section>
 
           <section className="px-1 pt-1 sm:px-2">
-            <div className="grid grid-cols-5 gap-2 sm:gap-3">
+            <div className="flex w-full gap-1 sm:gap-2 justify-between">
               {calendarDates.map((date) => {
                 const dateKey = formatDateKey(date);
                 const isCurrentDay = dateKey === todayKey;
@@ -488,10 +490,10 @@ export default function Dashboard() {
                 return (
                   <div
                     key={dateKey}
-                    className={`flex flex-col items-center px-1 py-2 ${isCurrentDay ? "rounded-xl shadow-lg" : "rounded-[1.35rem]"}`}
+                    className={`flex flex-1 min-w-0 flex-col items-center justify-center p-2 md:px-2 md:py-3 ${isCurrentDay ? "rounded-xl shadow-lg" : "rounded-xl md:rounded-[1.35rem]"}`}
                     style={isCurrentDay ? {
                       background: "var(--app-primary-color)",
-                      color: "var(--fl-nav-item-active-text)",
+                      color: "var(--fl-background-color, #0f172a)",
                       boxShadow: "0 12px 26px color-mix(in srgb, var(--app-primary-color) 18%, transparent)",
                     } : {
                       color: isPastDay ? "color-mix(in srgb, var(--fl-color-text-muted) 82%, transparent)" : "var(--fl-nav-item-muted)",
@@ -500,7 +502,7 @@ export default function Dashboard() {
                   >
                     <span className="text-[0.64rem] font-black uppercase tracking-[0.18em]">{weekdayLabel}</span>
                     <span className="mt-1 text-lg font-black">{String(date.getDate()).padStart(2, "0")}</span>
-                    <span className="mt-2 h-1.5 w-1.5 rounded-full" style={{ background: isCompletedDay ? (isCurrentDay ? "color-mix(in srgb, var(--fl-nav-item-active-text) 72%, transparent)" : "color-mix(in srgb, var(--app-primary-color) 72%, transparent)") : "transparent" }} />
+                    <span className="mt-2 h-1.5 w-1.5 rounded-full" style={{ background: isCompletedDay ? (isCurrentDay ? "color-mix(in srgb, var(--fl-background-color, #0f172a) 72%, transparent)" : "color-mix(in srgb, var(--app-primary-color) 72%, transparent)") : "transparent" }} />
                   </div>
                 );
               })}
