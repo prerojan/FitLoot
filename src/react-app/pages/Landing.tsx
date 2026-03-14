@@ -35,24 +35,23 @@ type MetricItem = {
   label: string;
 };
 
+type AttributeItem = {
+  icon: LucideIcon;
+  title: string;
+  description: string;
+};
+
 type FeatureItem = {
   icon: LucideIcon;
   title: string;
   description: string;
 };
 
-type AttributeItem = {
-  icon: LucideIcon;
-  title: string;
-  description: string;
-  stat: string;
-};
-
 type PlanItem = {
   name: string;
   price: string;
-  subtitle: string;
   popular?: boolean;
+  buttonLabel: string;
   features: string[];
 };
 
@@ -64,18 +63,16 @@ type ReviewItem = {
 };
 
 const navItems: NavItem[] = [
-  { id: "metricas", label: "Metricas" },
   { id: "atributos", label: "Atributos" },
-  { id: "funcionalidades", label: "Arsenal" },
-  { id: "comparativo", label: "Comparativo" },
+  { id: "funcionalidades", label: "Funcionalidades" },
   { id: "planos", label: "Planos" },
-  { id: "reviews", label: "Reviews" },
+  { id: "comunidade", label: "Comunidade" },
 ];
 
 const metrics: MetricItem[] = [
   { value: "10K+", label: "Usuarios ativos" },
   { value: "2M+", label: "Calorias queimadas" },
-  { value: "500K+", label: "Loot boxes abertas" },
+  { value: "500k", label: "Loot boxes abertas" },
   { value: "Nivel 42", label: "Media global" },
 ];
 
@@ -83,61 +80,68 @@ const attributes: AttributeItem[] = [
   {
     icon: Dumbbell,
     title: "Forca",
-    description: "Treinos de carga aumentam dano base, capacidade de carga e presenca nas raids.",
-    stat: "FOR 88",
+    description:
+      "Foque em treinos de hipertrofia e carga para elevar seu dano base e sua capacidade de carga no jogo.",
   },
   {
     icon: Bolt,
     title: "Agilidade",
-    description: "Cardio explosivo e treino funcional ampliam esquiva, velocidade e mobilidade.",
-    stat: "AGI 64",
+    description:
+      "Treinos funcionais e cardio explosivo aumentam sua esquiva e velocidade de ataque nas raids.",
   },
   {
     icon: HeartPulse,
     title: "Resistencia",
-    description: "Sessoes longas elevam HP maximo, recuperacao e consistencia em missoes longas.",
-    stat: "RES 92",
+    description:
+      "Aumente seu HP maximo atraves de treinos de longa duracao, respiracao e consistencia.",
   },
 ];
 
 const features: FeatureItem[] = [
   {
     icon: Gamepad2,
-    title: "Gamificacao real",
-    description: "Cada treino gera XP balanceado com recompensas e progressao clara para manter ritmo.",
+    title: "Gamificacao Real",
+    description: "Sistema de XP balanceado por IA para garantir que cada caloria conte para sua evolucao.",
   },
   {
     icon: Brain,
-    title: "Missoes com IA",
-    description: "Objetivos diarios ajustados ao seu historico, fadiga e meta atual.",
+    title: "Missoes de IA",
+    description: "Objetivos diarios gerados dinamicamente baseados no seu nivel de cansaco e historico.",
   },
   {
-    icon: Sparkles,
-    title: "Coach dinamico",
-    description: "Sugestoes instantaneas para carga, descanso e intensidade durante o treino.",
+    icon: Zap,
+    title: "Treinador Personalizado",
+    description: "Um coach digital ajusta sua serie no meio do treino se detectar queda de performance.",
   },
   {
     icon: QrCode,
-    title: "Nutri scanner",
-    description: "Leitura rapida de refeicoes com feedback de buffs, macros e recuperacao.",
+    title: "Nutri Scanner",
+    description: "Aponte a camera e descubra instantaneamente os buffs e efeitos de cada refeicao.",
   },
   {
     icon: Shield,
-    title: "Anti cheat",
-    description: "Validacao de atividade para garantir que recompensa venha de esforco real.",
+    title: "Anti-Cheat System",
+    description: "Validacao biometrica e GPS para garantir que ninguem consiga loot sem suar a camisa.",
   },
   {
     icon: Gift,
-    title: "Loja de recompensas",
-    description: "Troque moedas por beneficios reais, descontos e itens especiais do ecossistema.",
+    title: "Loja de Recompensas",
+    description: "Troque suas moedas virtuais por suplementos, equipamentos e mensalidades reais.",
   },
+];
+
+const comparisonRows = [
+  { label: "Plano de Treino", common: "Generico / Estatico", fitloot: "IA Adaptativa 24/7" },
+  { label: "Motivacao", common: "Depende de voce", fitloot: "Gamificacao Viciante" },
+  { label: "Custo Mensal", common: "R$ 150 - R$ 300", fitloot: "A partir de R$ 49" },
+  { label: "Cashback em Loja", common: "Nenhum", fitloot: "Ate 25% em Suplementos" },
 ];
 
 const plans: PlanItem[] = [
   {
     name: "Basico",
     price: "R$ 49",
-    subtitle: "Entrada na guilda com progresso essencial.",
+    buttonLabel: "Selecionar Plano",
     features: [
       "Missoes diarias",
       "Evolucao de atributos (FOR, CON, VIT, DES, FOCO)",
@@ -149,8 +153,8 @@ const plans: PlanItem[] = [
   {
     name: "Premium",
     price: "R$ 99",
-    subtitle: "Plano mais escolhido para subir de nivel sem travar.",
     popular: true,
+    buttonLabel: "Dominar Agora",
     features: [
       "Tudo do Basico",
       "Missoes semanais e mensais",
@@ -164,7 +168,7 @@ const plans: PlanItem[] = [
   {
     name: "Elite",
     price: "R$ 149",
-    subtitle: "Camada maxima para quem quer performance e status.",
+    buttonLabel: "Seja Lendario",
     features: [
       "Tudo do Premium",
       "Planos personalizados de treino",
@@ -181,28 +185,35 @@ const reviews: ReviewItem[] = [
   {
     initials: "RM",
     name: "Ricardo M.",
-    role: "Guerreiro nivel 45",
-    content: "Pela primeira vez eu nao falho treino. A vontade de subir de nivel venceu a preguica.",
+    role: "Guerreiro Nivel 45",
+    content: "Pela primeira vez na vida eu nao falto um treino. A vontade de subir de nivel e maior que a preguica.",
   },
   {
     initials: "AL",
     name: "Ana L.",
-    role: "Maga fitness nivel 38",
-    content: "O scanner nutricional virou parte da minha rotina. Agora eu sei qual loot meu corpo precisa.",
+    role: "Maga Fitness Nivel 38",
+    content: "O Nutri Scanner mudou meu jogo. Agora sei exatamente qual loot meu corpo precisa depois do treino.",
   },
   {
     initials: "KP",
     name: "Kadu P.",
-    role: "Paladino nivel 52",
-    content: "Troquei pontos por creatina e desconto em equipamento. O loop de recompensa funciona mesmo.",
+    role: "Paladino Nivel 52",
+    content: 'Troquei meus pontos por um kit de creatina e chegou em 3 dias. Funciona mesmo.',
   },
 ];
 
-const comparisonRows = [
-  { label: "Plano de treino", common: "Generico e estatico", fitloot: "IA adaptativa 24/7" },
-  { label: "Motivacao", common: "Depende so de voce", fitloot: "Loop de missao, ranking e reward" },
-  { label: "Custo mensal", common: "R$ 150 a R$ 300", fitloot: "A partir de R$ 49" },
-  { label: "Cashback e perks", common: "Nenhum", fitloot: "Ate 25% em parceiros" },
+const footerNavigation = [
+  { label: "App Mobile", type: "login" as const },
+  { label: "Marketplace", target: "funcionalidades", type: "section" as const },
+  { label: "Lideres de Rank", target: "comunidade", type: "section" as const },
+  { label: "Raids Locais", target: "planos", type: "section" as const },
+];
+
+const footerSupport = [
+  { label: "FAQ", target: "funcionalidades", type: "section" as const },
+  { label: "Termos de Uso", type: "login" as const },
+  { label: "Privacidade", type: "login" as const },
+  { label: "Contato", target: "comunidade", type: "section" as const },
 ];
 
 export default function Landing() {
@@ -211,7 +222,7 @@ export default function Landing() {
 
   const scrollToSection =
     (sectionId: string) =>
-    (event: MouseEvent<HTMLAnchorElement>) => {
+    (event: MouseEvent<HTMLAnchorElement | HTMLButtonElement>) => {
       event.preventDefault();
       document.getElementById(sectionId)?.scrollIntoView({
         behavior: "smooth",
@@ -224,10 +235,18 @@ export default function Landing() {
   };
 
   return (
-    <div className="min-h-screen text-[var(--fl-color-text)]">
-      <header className="fixed inset-x-0 top-0 z-50 border-b border-[var(--fl-border-soft)] bg-[var(--fl-surface-glass)] backdrop-blur-2xl">
-        <div className="mx-auto max-w-7xl px-4 py-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between gap-4">
+    <div className="relative min-h-screen overflow-x-hidden text-[var(--fl-color-text)]">
+      <div
+        className="pointer-events-none absolute inset-x-0 top-0 h-[36rem] opacity-90"
+        style={{
+          background:
+            "radial-gradient(circle at 12% 14%, rgba(var(--fl-color-accent-rgb), 0.12), transparent 30%), radial-gradient(circle at 84% 12%, rgba(var(--app-secondary-color-rgb), 0.08), transparent 26%)",
+        }}
+      />
+
+      <header className="fixed inset-x-0 top-0 z-50 border-b border-[var(--fl-border-soft)] bg-[color-mix(in_srgb,var(--fl-surface-strong)_88%,transparent)] backdrop-blur-2xl">
+        <div className="mx-auto max-w-[1280px] px-4 sm:px-6 lg:px-8">
+          <div className="flex h-20 items-center justify-between gap-4">
             <button
               type="button"
               onClick={() => {
@@ -235,16 +254,24 @@ export default function Landing() {
               }}
               className="flex items-center gap-3 text-left"
             >
-              <span className="flex h-12 w-12 items-center justify-center rounded-2xl border border-[var(--fl-border-soft)] bg-[rgba(var(--fl-color-accent-rgb),0.14)] shadow-[0_0_24px_rgba(var(--fl-color-accent-rgb),0.16)]">
-                <Zap className="h-6 w-6 text-[var(--fl-color-accent)]" strokeWidth={2.3} />
+              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-[rgba(var(--fl-color-accent-rgb),0.14)] text-[var(--fl-color-accent)]">
+                <Zap className="h-5 w-5" strokeWidth={2.3} />
               </span>
-              <span>
-                <span className="block text-[0.68rem] font-bold uppercase tracking-[0.22em] text-[var(--fl-color-accent)]">
-                  Fitness RPG
-                </span>
-                <span className="fl-auth-display block text-xl font-bold sm:text-2xl">FitLoot</span>
-              </span>
+              <span className="fl-auth-display text-xl font-bold">FitLoot</span>
             </button>
+
+            <nav className="hidden items-center gap-8 lg:flex">
+              {navItems.map((item) => (
+                <a
+                  key={item.id}
+                  href={`#${item.id}`}
+                  onClick={scrollToSection(item.id)}
+                  className="text-xs font-bold tracking-[0.08em] text-[var(--fl-color-text)] transition hover:text-[var(--fl-color-accent)]"
+                >
+                  {item.label}
+                </a>
+              ))}
+            </nav>
 
             <div className="flex items-center gap-3">
               <button
@@ -260,25 +287,24 @@ export default function Landing() {
               <button
                 type="button"
                 onClick={goToLogin}
-                className="hidden rounded-full px-5 py-3 text-sm font-black uppercase tracking-[0.16em] text-[#04100b] transition hover:-translate-y-0.5 sm:inline-flex sm:items-center sm:gap-2"
+                className="inline-flex items-center justify-center rounded-full px-5 py-3 text-sm font-black text-[var(--fl-nav-item-active-text)] transition hover:-translate-y-0.5"
                 style={{
                   background: "linear-gradient(135deg, var(--app-primary-color), var(--app-secondary-color))",
-                  boxShadow: "0 18px 32px rgba(var(--fl-color-accent-rgb), 0.22)",
+                  boxShadow: "0 18px 36px rgba(var(--fl-color-accent-rgb), 0.22)",
                 }}
               >
-                Comecar agora
-                <ArrowRight className="h-4 w-4" />
+                Comecar Agora
               </button>
             </div>
           </div>
 
-          <nav className="mt-4 flex gap-2 overflow-x-auto pb-1 md:mt-5 md:justify-center">
+          <nav className="flex gap-2 overflow-x-auto pb-4 lg:hidden">
             {navItems.map((item) => (
               <a
                 key={item.id}
                 href={`#${item.id}`}
                 onClick={scrollToSection(item.id)}
-                className="whitespace-nowrap rounded-full border border-[var(--fl-border-soft)] bg-[var(--fl-surface-muted)] px-4 py-2 text-xs font-bold uppercase tracking-[0.16em] text-[var(--fl-color-text-muted)] transition hover:border-[var(--fl-border-strong)] hover:text-[var(--fl-color-text)]"
+                className="whitespace-nowrap rounded-full border border-[var(--fl-border-soft)] bg-[var(--fl-surface-muted)] px-4 py-2 text-[0.7rem] font-bold uppercase tracking-[0.16em] text-[var(--fl-color-text-muted)] transition hover:border-[var(--fl-border-strong)] hover:text-[var(--fl-color-text)]"
               >
                 {item.label}
               </a>
@@ -287,7 +313,7 @@ export default function Landing() {
         </div>
       </header>
 
-      <main className="pt-40 sm:pt-36">
+      <main className="relative pt-28">
         <section className="relative overflow-hidden px-4 pb-14 pt-8 sm:px-6 lg:px-8 lg:pb-24 lg:pt-12">
           <div
             className="pointer-events-none absolute right-[-10rem] top-[-8rem] h-[28rem] w-[28rem] rounded-full blur-3xl"
@@ -356,6 +382,7 @@ export default function Landing() {
                   { icon: Users, label: "Guilda", value: "Progressao compartilhada" },
                 ].map((item) => {
                   const Icon = item.icon;
+
                   return (
                     <div
                       key={item.label}
@@ -418,12 +445,16 @@ export default function Landing() {
                     </div>
 
                     <div className="mt-5 grid grid-cols-3 gap-3">
-                      {attributes.map((item) => (
-                        <div key={item.title} className="rounded-2xl border border-white/10 bg-white/5 p-3 text-center">
+                      {[
+                        { label: "Forca", value: "FOR 88" },
+                        { label: "Agilidade", value: "AGI 64" },
+                        { label: "Resistencia", value: "RES 92" },
+                      ].map((stat) => (
+                        <div key={stat.label} className="rounded-2xl border border-white/10 bg-white/5 p-3 text-center">
                           <p className="text-[0.65rem] font-bold uppercase tracking-[0.16em] text-white/55">
-                            {item.title}
+                            {stat.label}
                           </p>
-                          <p className="mt-2 text-lg font-black text-[var(--fl-color-accent)]">{item.stat}</p>
+                          <p className="mt-2 text-lg font-black text-[var(--fl-color-accent)]">{stat.value}</p>
                         </div>
                       ))}
                     </div>
@@ -444,16 +475,15 @@ export default function Landing() {
           </div>
         </section>
 
-        <section id="metricas" className="scroll-mt-40 border-y border-[var(--fl-border-soft)] bg-[var(--fl-surface-muted)]/80 px-4 py-10 sm:px-6 lg:px-8">
-          <div className="mx-auto grid max-w-7xl gap-4 md:grid-cols-4">
+        <section
+          id="metricas"
+          className="scroll-mt-28 border-y border-[var(--fl-border-soft)] bg-[color-mix(in_srgb,var(--fl-surface-muted)_78%,transparent)] px-4 py-9 sm:px-6 lg:px-8"
+        >
+          <div className="mx-auto grid max-w-[1280px] grid-cols-2 gap-y-8 md:grid-cols-4">
             {metrics.map((metric) => (
-              <div
-                key={metric.label}
-                className="rounded-[1.6rem] border border-[var(--fl-border-soft)] bg-[var(--fl-surface-glass)] p-6 text-center backdrop-blur-xl"
-                style={{ boxShadow: "var(--fl-shadow-glass)" }}
-              >
+              <div key={metric.label} className="text-center">
                 <p className="text-3xl font-black text-[var(--fl-color-accent)] sm:text-4xl">{metric.value}</p>
-                <p className="mt-3 text-[0.78rem] font-bold uppercase tracking-[0.18em] text-[var(--fl-color-text-soft)]">
+                <p className="mt-3 text-[0.64rem] font-bold uppercase tracking-[0.2em] text-[var(--fl-color-text-soft)]">
                   {metric.label}
                 </p>
               </div>
@@ -461,88 +491,88 @@ export default function Landing() {
           </div>
         </section>
 
-        <section id="atributos" className="scroll-mt-40 px-4 py-16 sm:px-6 lg:px-8 lg:py-24">
-          <div className="mx-auto max-w-7xl">
+        <section id="atributos" className="scroll-mt-28 px-4 py-20 sm:px-6 lg:px-8 lg:py-24">
+          <div className="mx-auto max-w-[1280px]">
             <div className="mx-auto max-w-3xl text-center">
-              <p className="text-xs font-bold uppercase tracking-[0.24em] text-[var(--fl-color-accent)]">Atributos</p>
-              <h2 className="fl-auth-display mt-4 text-4xl font-black tracking-tight sm:text-5xl">
-                Domine sua ficha em tempo real.
+              <h2 className="fl-auth-display text-4xl font-black tracking-[-0.05em] sm:text-5xl">
+                Domine Seus <span className="text-[var(--fl-color-accent)]">Atributos</span>
               </h2>
-              <p className="mt-4 text-base leading-8 text-[var(--fl-color-text-muted)]">
-                Cada bloco de treino alimenta uma estatistica do avatar. O feedback visual deixa claro como o
-                treino da vida real muda seu desempenho no ecossistema FitLoot.
+              <p className="mt-4 text-sm leading-7 text-[var(--fl-color-text-muted)] sm:text-base">
+                Cada movimento seu impacta sua ficha de personagem em tempo real.
               </p>
             </div>
 
-            <div className="mt-12 grid gap-6 lg:grid-cols-3">
-              {attributes.map((item) => {
+            <div className="mt-14 grid gap-6 lg:grid-cols-3">
+              {attributes.map((item, index) => {
                 const Icon = item.icon;
+                const isHighlighted = index === 1;
+
                 return (
                   <article
                     key={item.title}
-                    className="group relative overflow-hidden rounded-[2rem] border border-[var(--fl-border-soft)] bg-[var(--fl-surface-glass)] p-8 backdrop-blur-xl transition hover:-translate-y-1 hover:border-[var(--fl-border-strong)]"
-                    style={{ boxShadow: "var(--fl-shadow-glass)" }}
+                    className="group rounded-[1.8rem] border p-8"
+                    style={{
+                      borderColor: isHighlighted
+                        ? "rgba(var(--fl-color-accent-rgb), 0.34)"
+                        : "var(--fl-border-soft)",
+                      background:
+                        "linear-gradient(180deg, color-mix(in srgb, var(--fl-surface-glass) 98%, transparent), color-mix(in srgb, var(--fl-surface-muted) 100%, transparent))",
+                      boxShadow: isHighlighted
+                        ? "0 0 0 1px rgba(var(--fl-color-accent-rgb), 0.1), 0 24px 54px rgba(0, 0, 0, 0.26)"
+                        : "0 18px 42px rgba(0, 0, 0, 0.16)",
+                    }}
                   >
-                    <div
-                      className="absolute right-[-4rem] top-[-4rem] h-40 w-40 rounded-full blur-3xl transition group-hover:opacity-100"
-                      style={{ background: "rgba(var(--fl-color-accent-rgb), 0.18)" }}
-                    />
-                    <div className="relative">
-                      <div className="mb-6 flex h-14 w-14 items-center justify-center rounded-[1.3rem] bg-[rgba(var(--fl-color-accent-rgb),0.12)] text-[var(--fl-color-accent)]">
-                        <Icon className="h-7 w-7" strokeWidth={2.1} />
-                      </div>
-                      <div className="flex items-center justify-between gap-4">
-                        <h3 className="text-2xl font-black text-[var(--fl-color-text)]">{item.title}</h3>
-                        <span className="rounded-full border border-[rgba(var(--fl-color-accent-rgb),0.25)] bg-[rgba(var(--fl-color-accent-rgb),0.1)] px-3 py-1 text-xs font-bold uppercase tracking-[0.14em] text-[var(--fl-color-accent)]">
-                          {item.stat}
-                        </span>
-                      </div>
-                      <p className="mt-4 leading-8 text-[var(--fl-color-text-muted)]">{item.description}</p>
-                      <a
-                        href="#planos"
-                        onClick={scrollToSection("planos")}
-                        className="mt-6 inline-flex items-center gap-2 text-sm font-bold uppercase tracking-[0.16em] text-[var(--fl-color-accent)]"
-                      >
-                        Ver progressao
-                        <ChevronRight className="h-4 w-4" />
-                      </a>
+                    <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[rgba(var(--fl-color-accent-rgb),0.12)] text-[var(--fl-color-accent)]">
+                      <Icon className="h-5 w-5" strokeWidth={2.2} />
                     </div>
+
+                    <h3 className="mt-6 text-2xl font-black text-[var(--fl-color-text)]">{item.title}</h3>
+                    <p className="mt-4 text-sm leading-7 text-[var(--fl-color-text-muted)]">{item.description}</p>
+
+                    <a
+                      href="#planos"
+                      onClick={scrollToSection("planos")}
+                      className="mt-6 inline-flex items-center gap-2 text-[0.72rem] font-black uppercase tracking-[0.16em] text-[var(--fl-color-accent)]"
+                    >
+                      Ver Progressao
+                      <ArrowRight className="h-3.5 w-3.5" />
+                    </a>
                   </article>
                 );
               })}
             </div>
           </div>
         </section>
-
-        <section id="funcionalidades" className="scroll-mt-40 border-y border-[var(--fl-border-soft)] bg-[var(--fl-surface-muted)]/70 px-4 py-16 sm:px-6 lg:px-8 lg:py-24">
-          <div className="mx-auto max-w-7xl">
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-              <div className="max-w-3xl">
-                <p className="text-xs font-bold uppercase tracking-[0.24em] text-[var(--fl-color-accent)]">Funcionalidades</p>
-                <h2 className="fl-auth-display mt-4 text-4xl font-black tracking-tight sm:text-5xl">
-                  O arsenal tecnologico da sua evolucao.
-                </h2>
-              </div>
-              <p className="max-w-2xl text-base leading-8 text-[var(--fl-color-text-muted)]">
-                O produto combina IA, mecanicas de jogo e reward design para transformar consistencia em
-                progressao concreta.
+        <section id="funcionalidades" className="scroll-mt-28 px-4 py-20 sm:px-6 lg:px-8 lg:py-24">
+          <div className="mx-auto max-w-[1280px]">
+            <div className="max-w-3xl">
+              <h2 className="fl-auth-display text-4xl font-black tracking-[-0.05em] sm:text-5xl">
+                O Arsenal Tecnologico
+              </h2>
+              <p className="mt-4 text-sm leading-7 text-[var(--fl-color-text-muted)] sm:text-base">
+                Funcionalidades desenhadas para atletas de elite e gamers hardcore.
               </p>
             </div>
 
-            <div className="mt-12 grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
+            <div className="mt-14 grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
               {features.map((feature) => {
                 const Icon = feature.icon;
                 return (
                   <article
                     key={feature.title}
-                    className="rounded-[1.8rem] border border-[var(--fl-border-soft)] bg-[var(--fl-surface-glass)] p-7 backdrop-blur-xl transition hover:-translate-y-1 hover:border-[var(--fl-border-strong)]"
-                    style={{ boxShadow: "var(--fl-shadow-glass)" }}
+                    className="rounded-[1.6rem] border p-6"
+                    style={{
+                      borderColor: "var(--fl-border-soft)",
+                      background:
+                        "linear-gradient(180deg, color-mix(in srgb, var(--fl-surface-glass) 98%, transparent), color-mix(in srgb, var(--fl-surface-muted) 100%, transparent))",
+                      boxShadow: "0 18px 42px rgba(0, 0, 0, 0.16)",
+                    }}
                   >
-                    <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-[1.2rem] bg-[rgba(var(--fl-color-accent-rgb),0.12)] text-[var(--fl-color-accent)]">
-                      <Icon className="h-7 w-7" strokeWidth={2.1} />
+                    <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[rgba(var(--fl-color-accent-rgb),0.12)] text-[var(--fl-color-accent)]">
+                      <Icon className="h-5 w-5" strokeWidth={2.2} />
                     </div>
-                    <h3 className="text-2xl font-black text-[var(--fl-color-text)]">{feature.title}</h3>
-                    <p className="mt-4 leading-8 text-[var(--fl-color-text-muted)]">{feature.description}</p>
+                    <h3 className="mt-5 text-lg font-black text-[var(--fl-color-text)]">{feature.title}</h3>
+                    <p className="mt-3 text-sm leading-7 text-[var(--fl-color-text-muted)]">{feature.description}</p>
                   </article>
                 );
               })}
@@ -550,35 +580,38 @@ export default function Landing() {
           </div>
         </section>
 
-        <section id="comparativo" className="scroll-mt-40 px-4 py-16 sm:px-6 lg:px-8 lg:py-24">
+        <section id="comparativo" className="scroll-mt-28 px-4 py-20 sm:px-6 lg:px-8 lg:py-24">
           <div className="mx-auto max-w-5xl">
-            <div className="mx-auto max-w-3xl text-center">
-              <p className="text-xs font-bold uppercase tracking-[0.24em] text-[var(--fl-color-accent)]">Comparativo</p>
-              <h2 className="fl-auth-display mt-4 text-4xl font-black tracking-tight sm:text-5xl">
-                Quanto voce economiza com a stack certa.
+            <div className="text-center">
+              <h2 className="fl-auth-display text-4xl font-black tracking-[-0.05em] sm:text-5xl">
+                Quanto Voce <span className="text-[var(--fl-color-accent)]">Economiza?</span>
               </h2>
-              <p className="mt-4 text-base leading-8 text-[var(--fl-color-text-muted)]">
-                O app substitui friccao por progresso visivel e concentra treino, motivacao e beneficios em uma
-                unica assinatura.
+              <p className="mt-4 text-sm leading-7 text-[var(--fl-color-text-muted)] sm:text-base">
+                O investimento que se paga com saude e beneficios exclusivos.
               </p>
             </div>
 
             <div
-              className="mt-12 overflow-hidden rounded-[2rem] border border-[var(--fl-border-soft)] bg-[var(--fl-surface-glass)] backdrop-blur-xl"
-              style={{ boxShadow: "var(--fl-shadow-glass)" }}
+              className="mt-12 overflow-hidden rounded-[1.9rem] border"
+              style={{
+                borderColor: "var(--fl-border-soft)",
+                background:
+                  "linear-gradient(180deg, color-mix(in srgb, var(--fl-surface-glass) 98%, transparent), color-mix(in srgb, var(--fl-surface-muted) 100%, transparent))",
+                boxShadow: "0 24px 54px rgba(0, 0, 0, 0.2)",
+              }}
             >
-              <div className="grid grid-cols-[1.2fr_1fr_1fr] border-b border-[var(--fl-border-soft)] bg-[rgba(var(--fl-color-accent-rgb),0.08)] text-sm font-bold uppercase tracking-[0.16em] text-[var(--fl-color-text)]">
-                <div className="p-5 sm:p-6">Beneficio</div>
-                <div className="p-5 sm:p-6">Academia comum</div>
-                <div className="p-5 text-[var(--fl-color-accent)] sm:p-6">FitLoot Elite</div>
+              <div className="grid grid-cols-[1.2fr_1fr_1fr] bg-[rgba(var(--fl-color-accent-rgb),0.1)] text-[0.68rem] font-black uppercase tracking-[0.16em] text-[var(--fl-color-text)] sm:text-xs">
+                <div className="p-4 sm:p-6">Beneficio</div>
+                <div className="p-4 sm:p-6">Academia Comum</div>
+                <div className="p-4 text-[var(--fl-color-accent)] sm:p-6">FitLoot Elite</div>
               </div>
 
               <div className="divide-y divide-[var(--fl-border-soft)]">
                 {comparisonRows.map((row) => (
-                  <div key={row.label} className="grid grid-cols-[1.2fr_1fr_1fr] text-sm sm:text-base">
-                    <div className="p-5 font-semibold text-[var(--fl-color-text)] sm:p-6">{row.label}</div>
-                    <div className="p-5 text-[var(--fl-color-text-muted)] sm:p-6">{row.common}</div>
-                    <div className="p-5 font-bold text-[var(--fl-color-accent)] sm:p-6">{row.fitloot}</div>
+                  <div key={row.label} className="grid grid-cols-[1.2fr_1fr_1fr] text-xs sm:text-sm">
+                    <div className="p-4 font-semibold text-[var(--fl-color-text)] sm:p-6">{row.label}</div>
+                    <div className="p-4 text-[var(--fl-color-text-muted)] sm:p-6">{row.common}</div>
+                    <div className="p-4 font-bold text-[var(--fl-color-accent)] sm:p-6">{row.fitloot}</div>
                   </div>
                 ))}
               </div>
@@ -586,54 +619,52 @@ export default function Landing() {
           </div>
         </section>
 
-        <section id="planos" className="scroll-mt-40 relative px-4 py-16 sm:px-6 lg:px-8 lg:py-24">
-          <div
-            className="pointer-events-none absolute inset-x-0 top-12 mx-auto h-[26rem] max-w-6xl rounded-[3rem] blur-3xl"
-            style={{ background: "rgba(var(--fl-color-accent-rgb), 0.1)" }}
-          />
-
-          <div className="relative mx-auto max-w-7xl">
+        <section
+          id="planos"
+          className="scroll-mt-28 border-y border-[var(--fl-border-soft)] bg-[rgba(var(--fl-color-accent-rgb),0.05)] px-4 py-20 sm:px-6 lg:px-8 lg:py-24"
+        >
+          <div className="mx-auto max-w-[1280px]">
             <div className="mx-auto max-w-3xl text-center">
-              <p className="text-xs font-bold uppercase tracking-[0.24em] text-[var(--fl-color-accent)]">Planos</p>
-              <h2 className="fl-auth-display mt-4 text-4xl font-black tracking-tight sm:text-5xl">
-                Escolha seu plano de batalha.
-              </h2>
-              <p className="mt-4 text-base leading-8 text-[var(--fl-color-text-muted)]">
-                Todos os CTAs de entrada levam voce para o login. Depois disso, o app libera a jornada de
-                onboarding e o acesso certo para o seu momento.
+              <h2 className="fl-auth-display text-4xl font-black tracking-[-0.05em] sm:text-5xl">Planos de Batalha</h2>
+              <p className="mt-4 text-sm leading-7 text-[var(--fl-color-text-muted)] sm:text-base">
+                Escolha seu nivel de comprometimento.
               </p>
             </div>
 
-            <div className="mt-12 grid gap-6 lg:grid-cols-3">
+            <div className="mt-14 grid gap-6 lg:grid-cols-3">
               {plans.map((plan) => (
                 <article
                   key={plan.name}
-                  className={`relative flex flex-col rounded-[2rem] border p-8 backdrop-blur-xl ${
-                    plan.popular
-                      ? "border-[rgba(var(--fl-color-accent-rgb),0.32)] bg-[rgba(var(--fl-color-accent-rgb),0.09)]"
-                      : "border-[var(--fl-border-soft)] bg-[var(--fl-surface-glass)]"
-                  }`}
-                  style={{ boxShadow: "var(--fl-shadow-glass)" }}
+                  className="relative flex flex-col rounded-[1.9rem] border p-7"
+                  style={{
+                    borderColor: plan.popular ? "rgba(var(--fl-color-accent-rgb), 0.38)" : "var(--fl-border-soft)",
+                    background: plan.popular
+                      ? "linear-gradient(180deg, rgba(var(--fl-color-accent-rgb), 0.1), color-mix(in srgb, var(--fl-surface-strong) 100%, transparent))"
+                      : "linear-gradient(180deg, color-mix(in srgb, var(--fl-surface-glass) 98%, transparent), color-mix(in srgb, var(--fl-surface-muted) 100%, transparent))",
+                    boxShadow: plan.popular
+                      ? "0 0 0 1px rgba(var(--fl-color-accent-rgb), 0.1), 0 28px 64px rgba(0, 0, 0, 0.28)"
+                      : "0 20px 48px rgba(0, 0, 0, 0.18)",
+                    transform: plan.popular ? "translateY(-8px)" : undefined,
+                  }}
                 >
                   {plan.popular ? (
-                    <span className="absolute left-1/2 top-0 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--app-primary-color)] px-4 py-2 text-xs font-black uppercase tracking-[0.16em] text-[#04100b]">
-                      Mais popular
+                    <span className="absolute left-1/2 top-0 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--app-primary-color)] px-4 py-1.5 text-[0.62rem] font-black uppercase tracking-[0.16em] text-[var(--fl-nav-item-active-text)]">
+                      Mais Popular
                     </span>
                   ) : null}
 
                   <div className="flex-1">
-                    <h3 className="text-2xl font-black text-[var(--fl-color-text)]">{plan.name}</h3>
-                    <div className="mt-4 flex items-end gap-2">
+                    <h3 className="text-xl font-black text-[var(--fl-color-text)]">{plan.name}</h3>
+                    <div className="mt-3 flex items-end gap-1">
                       <span className="text-4xl font-black text-[var(--fl-color-accent)]">{plan.price}</span>
                       <span className="pb-1 text-sm text-[var(--fl-color-text-muted)]">/mes</span>
                     </div>
-                    <p className="mt-3 leading-7 text-[var(--fl-color-text-muted)]">{plan.subtitle}</p>
 
-                    <div className="mt-6 space-y-3">
+                    <div className="mt-7 space-y-3">
                       {plan.features.map((feature) => (
                         <div key={feature} className="flex items-start gap-3 text-sm text-[var(--fl-color-text-muted)]">
-                          <span className="mt-0.5 flex h-5 w-5 items-center justify-center rounded-full bg-[rgba(var(--fl-color-accent-rgb),0.14)] text-[var(--fl-color-accent)]">
-                            <Check className="h-3.5 w-3.5" strokeWidth={2.8} />
+                          <span className="mt-0.5 flex h-4.5 w-4.5 items-center justify-center rounded-full bg-[rgba(var(--fl-color-accent-rgb),0.14)] text-[var(--fl-color-accent)]">
+                            <Check className="h-3.5 w-3.5" strokeWidth={3} />
                           </span>
                           <span>{feature}</span>
                         </div>
@@ -644,22 +675,22 @@ export default function Landing() {
                   <button
                     type="button"
                     onClick={goToLogin}
-                    className={`mt-8 inline-flex items-center justify-center gap-2 rounded-full px-6 py-4 text-sm font-black uppercase tracking-[0.16em] transition hover:-translate-y-0.5 ${
+                    className={`mt-8 inline-flex items-center justify-center rounded-full px-5 py-3.5 text-sm font-black transition hover:-translate-y-0.5 ${
                       plan.popular
-                        ? "text-[#04100b]"
+                        ? "text-[var(--fl-nav-item-active-text)]"
                         : "border border-[var(--fl-border-strong)] bg-[var(--fl-surface-strong)] text-[var(--fl-color-text)]"
                     }`}
                     style={
                       plan.popular
                         ? {
-                            background: "linear-gradient(135deg, var(--app-primary-color), var(--app-secondary-color))",
-                            boxShadow: "0 18px 32px rgba(var(--fl-color-accent-rgb), 0.24)",
+                            background:
+                              "linear-gradient(135deg, var(--app-primary-color), var(--app-secondary-color))",
+                            boxShadow: "0 18px 36px rgba(var(--fl-color-accent-rgb), 0.24)",
                           }
                         : undefined
                     }
                   >
-                    {plan.popular ? "Dominar agora" : "Selecionar plano"}
-                    <ArrowRight className="h-4 w-4" />
+                    {plan.buttonLabel}
                   </button>
                 </article>
               ))}
@@ -667,35 +698,41 @@ export default function Landing() {
           </div>
         </section>
 
-        <section id="reviews" className="scroll-mt-40 border-t border-[var(--fl-border-soft)] bg-[var(--fl-surface-muted)]/70 px-4 py-16 sm:px-6 lg:px-8 lg:py-24">
-          <div className="mx-auto max-w-7xl">
-            <div className="mx-auto max-w-3xl text-center">
-              <p className="text-xs font-bold uppercase tracking-[0.24em] text-[var(--fl-color-accent)]">Reviews</p>
-              <h2 className="fl-auth-display mt-4 text-4xl font-black tracking-tight sm:text-5xl">
-                Reviews de elite da comunidade.
+        <section id="comunidade" className="scroll-mt-28 px-4 py-20 sm:px-6 lg:px-8 lg:py-24">
+          <div className="mx-auto max-w-[1280px]">
+            <div className="text-center">
+              <h2 className="fl-auth-display text-4xl font-black tracking-[-0.05em] sm:text-5xl">
+                Reviews de <span className="text-[var(--fl-color-accent)]">Elite</span>
               </h2>
             </div>
 
-            <div className="mt-12 grid gap-6 lg:grid-cols-3">
+            <div className="mt-14 grid gap-6 lg:grid-cols-3">
               {reviews.map((review) => (
                 <article
                   key={review.name}
-                  className="rounded-[1.9rem] border border-[var(--fl-border-soft)] bg-[var(--fl-surface-glass)] p-8 backdrop-blur-xl"
-                  style={{ boxShadow: "var(--fl-shadow-glass)" }}
+                  className="rounded-[1.7rem] border p-7"
+                  style={{
+                    borderColor: "var(--fl-border-soft)",
+                    background:
+                      "linear-gradient(180deg, color-mix(in srgb, var(--fl-surface-glass) 98%, transparent), color-mix(in srgb, var(--fl-surface-muted) 100%, transparent))",
+                    boxShadow: "0 20px 46px rgba(0, 0, 0, 0.18)",
+                  }}
                 >
                   <div className="flex gap-1 text-[var(--fl-color-accent)]">
                     {Array.from({ length: 5 }).map((_, index) => (
-                      <Star key={index} className="h-5 w-5 fill-current" />
+                      <Star key={index} className="h-4.5 w-4.5 fill-current" />
                     ))}
                   </div>
-                  <p className="mt-6 text-lg leading-8 text-[var(--fl-color-text)]">"{review.content}"</p>
-                  <div className="mt-8 flex items-center gap-4">
-                    <div className="flex h-12 w-12 items-center justify-center rounded-full bg-[rgba(var(--fl-color-accent-rgb),0.14)] font-bold text-[var(--fl-color-accent)]">
+
+                  <p className="mt-5 text-sm leading-7 text-[var(--fl-color-text)]">"{review.content}"</p>
+
+                  <div className="mt-7 flex items-center gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[rgba(var(--fl-color-accent-rgb),0.14)] text-sm font-bold text-[var(--fl-color-accent)]">
                       {review.initials}
                     </div>
                     <div>
                       <p className="font-black text-[var(--fl-color-text)]">{review.name}</p>
-                      <p className="text-sm text-[var(--fl-color-text-muted)]">{review.role}</p>
+                      <p className="text-xs text-[var(--fl-color-text-muted)]">{review.role}</p>
                     </div>
                   </div>
                 </article>
@@ -705,110 +742,93 @@ export default function Landing() {
         </section>
       </main>
 
-      <footer className="border-t border-[var(--fl-border-soft)] bg-[var(--fl-surface-strong)] px-4 py-16 sm:px-6 lg:px-8">
-        <div className="mx-auto max-w-7xl">
-          <div className="grid gap-10 lg:grid-cols-[1.2fr_0.8fr_0.8fr_0.8fr]">
-            <div className="space-y-6">
+      <footer className="border-t border-[var(--fl-border-soft)] bg-[color-mix(in_srgb,var(--fl-surface-strong)_100%,transparent)] px-4 py-16 sm:px-6 lg:px-8">
+        <div className="mx-auto max-w-[1280px]">
+          <div className="grid gap-12 md:grid-cols-4">
+            <div className="md:col-span-2">
               <div className="flex items-center gap-3">
-                <span className="flex h-12 w-12 items-center justify-center rounded-2xl border border-[var(--fl-border-soft)] bg-[rgba(var(--fl-color-accent-rgb),0.14)] shadow-[0_0_24px_rgba(var(--fl-color-accent-rgb),0.16)]">
-                  <Zap className="h-6 w-6 text-[var(--fl-color-accent)]" strokeWidth={2.3} />
+                <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-[rgba(var(--fl-color-accent-rgb),0.14)] text-[var(--fl-color-accent)]">
+                  <Zap className="h-5 w-5" strokeWidth={2.3} />
                 </span>
-                <div>
-                  <p className="fl-auth-display text-2xl font-black">FitLoot</p>
-                  <p className="text-sm text-[var(--fl-color-text-muted)]">Treino, progresso e recompensas</p>
-                </div>
+                <span className="fl-auth-display text-2xl font-bold">FitLoot</span>
               </div>
 
-              <p className="max-w-md leading-8 text-[var(--fl-color-text-muted)]">
-                A proposta da landing e simples: mostrar a progressao, levar para o login e deixar o restante da
-                jornada acontecer no produto certo.
+              <p className="mt-6 max-w-sm text-sm leading-7 text-[var(--fl-color-text-muted)]">
+                Elevando o patamar do fitness atraves da tecnologia e diversao. Junte-se a maior guilda de saude do
+                mundo.
               </p>
 
-              <button
-                type="button"
-                onClick={goToLogin}
-                className="inline-flex items-center gap-2 rounded-full px-5 py-3 text-sm font-black uppercase tracking-[0.16em] text-[#04100b] transition hover:-translate-y-0.5"
-                style={{
-                  background: "linear-gradient(135deg, var(--app-primary-color), var(--app-secondary-color))",
-                  boxShadow: "0 18px 32px rgba(var(--fl-color-accent-rgb), 0.2)",
-                }}
-              >
-                Entrar no app
-                <ArrowRight className="h-4 w-4" />
-              </button>
-            </div>
-
-            <div>
-              <h3 className="text-sm font-black uppercase tracking-[0.18em] text-[var(--fl-color-text)]">Navegacao</h3>
-              <div className="mt-5 space-y-3">
-                {navItems.map((item) => (
-                  <a
-                    key={item.id}
-                    href={`#${item.id}`}
-                    onClick={scrollToSection(item.id)}
-                    className="block text-sm text-[var(--fl-color-text-muted)] transition hover:text-[var(--fl-color-accent)]"
+              <div className="mt-6 flex gap-3">
+                {[Users, Trophy, Zap].map((Icon, index) => (
+                  <button
+                    key={index}
+                    type="button"
+                    onClick={goToLogin}
+                    className="flex h-10 w-10 items-center justify-center rounded-full border border-[var(--fl-border-soft)] bg-[var(--fl-surface-muted)] text-[var(--fl-color-text-muted)] transition hover:border-[var(--fl-border-strong)] hover:text-[var(--fl-color-accent)]"
                   >
-                    {item.label}
-                  </a>
+                    <Icon className="h-4.5 w-4.5" />
+                  </button>
                 ))}
               </div>
             </div>
 
             <div>
-              <h3 className="text-sm font-black uppercase tracking-[0.18em] text-[var(--fl-color-text)]">Suporte</h3>
-              <div className="mt-5 space-y-3">
-                <button
-                  type="button"
-                  onClick={goToLogin}
-                  className="block text-sm text-[var(--fl-color-text-muted)] transition hover:text-[var(--fl-color-accent)]"
-                >
-                  Login
-                </button>
-                <a
-                  href="#comparativo"
-                  onClick={scrollToSection("comparativo")}
-                  className="block text-sm text-[var(--fl-color-text-muted)] transition hover:text-[var(--fl-color-accent)]"
-                >
-                  Planos e beneficios
-                </a>
-                <a
-                  href="#reviews"
-                  onClick={scrollToSection("reviews")}
-                  className="block text-sm text-[var(--fl-color-text-muted)] transition hover:text-[var(--fl-color-accent)]"
-                >
-                  Feedback da comunidade
-                </a>
-              </div>
-            </div>
-
-            <div>
-              <h3 className="text-sm font-black uppercase tracking-[0.18em] text-[var(--fl-color-text)]">Redes</h3>
-              <div className="mt-5 flex flex-wrap gap-3">
-                {[
-                  { icon: Users, label: "Guilda" },
-                  { icon: Trophy, label: "Ranking" },
-                  { icon: Sparkles, label: "Eventos" },
-                ].map((item) => {
-                  const Icon = item.icon;
-                  return (
+              <h3 className="text-sm font-black text-[var(--fl-color-text)]">Navegacao</h3>
+              <div className="mt-6 space-y-3">
+                {footerNavigation.map((item) =>
+                  item.type === "login" ? (
                     <button
                       key={item.label}
                       type="button"
                       onClick={goToLogin}
-                      className="inline-flex h-12 w-12 items-center justify-center rounded-full border border-[var(--fl-border-soft)] bg-[var(--fl-surface-glass)] text-[var(--fl-color-text-muted)] transition hover:border-[var(--fl-border-strong)] hover:text-[var(--fl-color-accent)]"
-                      title={item.label}
-                      aria-label={item.label}
+                      className="block text-sm text-[var(--fl-color-text-muted)] transition hover:text-[var(--fl-color-accent)]"
                     >
-                      <Icon className="h-5 w-5" />
+                      {item.label}
                     </button>
-                  );
-                })}
+                  ) : (
+                    <a
+                      key={item.label}
+                      href={`#${item.target}`}
+                      onClick={scrollToSection(item.target)}
+                      className="block text-sm text-[var(--fl-color-text-muted)] transition hover:text-[var(--fl-color-accent)]"
+                    >
+                      {item.label}
+                    </a>
+                  ),
+                )}
+              </div>
+            </div>
+
+            <div>
+              <h3 className="text-sm font-black text-[var(--fl-color-text)]">Suporte</h3>
+              <div className="mt-6 space-y-3">
+                {footerSupport.map((item) =>
+                  item.type === "login" ? (
+                    <button
+                      key={item.label}
+                      type="button"
+                      onClick={goToLogin}
+                      className="block text-sm text-[var(--fl-color-text-muted)] transition hover:text-[var(--fl-color-accent)]"
+                    >
+                      {item.label}
+                    </button>
+                  ) : (
+                    <a
+                      key={item.label}
+                      href={`#${item.target}`}
+                      onClick={scrollToSection(item.target)}
+                      className="block text-sm text-[var(--fl-color-text-muted)] transition hover:text-[var(--fl-color-accent)]"
+                    >
+                      {item.label}
+                    </a>
+                  ),
+                )}
               </div>
             </div>
           </div>
 
-          <div className="mt-12 border-t border-[var(--fl-border-soft)] pt-6 text-sm text-[var(--fl-color-text-soft)]">
-            (c) 2024 FitLoot. Todos os direitos reservados.
+          <div className="mt-14 border-t border-[var(--fl-border-soft)] pt-6 text-xs text-[var(--fl-color-text-soft)]">
+            (c) 2024 FitLoot. Todos os direitos reservados. Feito para quem nao aceita ser um NPC.
           </div>
         </div>
       </footer>
