@@ -21,6 +21,7 @@ import { api } from "@/react-app/utils/api";
 type MissionCardProps = {
   mission: Mission & { skill_name?: string | undefined };
   onComplete: (id: number, reps: number, verified: boolean) => Promise<void> | void;
+  layout?: "default" | "compact";
 };
 
 type MissionExecutionState = {
@@ -403,7 +404,7 @@ function MissionExecutionModal({
   );
 }
 
-function MissionCardComponent({ mission, onComplete }: MissionCardProps) {
+function MissionCardComponent({ mission, onComplete, layout = "default" }: MissionCardProps) {
   const [showDetails, setShowDetails] = useState(false);
   const [showExecution, setShowExecution] = useState(false);
   const [completing, setCompleting] = useState(false);
@@ -509,160 +510,198 @@ function MissionCardComponent({ mission, onComplete }: MissionCardProps) {
   const detailCircuitTasks = resolveCircuitTasks(missionDetails);
   const detailCompletedCircuitTasks = detailCircuitTasks.filter((task) => task.completed).length;
   const detailCircuitProgress = detailCircuitTasks.length > 0 ? (detailCompletedCircuitTasks / detailCircuitTasks.length) * 100 : 0;
+  const compactDurationLabel = mission.duration_estimate_minutes && mission.duration_estimate_minutes > 0
+    ? `${mission.duration_estimate_minutes} min`
+    : null;
+  const compactSummary = isCircuitMission
+    ? [compactDurationLabel, `${circuitTasks.length || monthlyTarget} tarefas`].filter(Boolean).join(" | ")
+    : [compactDurationLabel, formatGoal(mission, metricType)].filter(Boolean).join(" | ");
+  const compactActionLabel = isCircuitMission ? "Ver detalhes" : "Iniciar Treino";
+  const triggerContent = layout === "compact" ? (
+    <div className="flex items-center justify-between gap-4">
+      <div className="flex min-w-0 items-center gap-4">
+        <div
+          className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl"
+          style={{ background: "var(--app-primary-color)", color: "var(--fl-nav-item-active-text)" }}
+        >
+          <Dumbbell className="h-5 w-5" />
+        </div>
+        <div className="min-w-0">
+          <h3 className="truncate text-base font-bold" style={{ color: "var(--fl-color-text)" }}>
+            {mission.title}
+          </h3>
+          <p className="truncate text-[11px] font-medium" style={{ color: "var(--fl-color-text-muted)" }}>
+            {compactSummary}
+          </p>
+        </div>
+      </div>
+
+      {isFailed ? (
+        <span className="text-xs font-bold" style={{ color: "var(--fl-color-text-muted)" }}>
+          Expirada
+        </span>
+      ) : isCompleted ? (
+        <CheckCircle2 className="h-5 w-5 shrink-0" style={{ color: "var(--app-primary-color)" }} />
+      ) : (
+        <button
+          type="button"
+          onClick={() => { void openDetails(); }}
+          disabled={completing}
+          className="shrink-0 text-xs font-bold transition-opacity hover:opacity-80 disabled:opacity-50"
+          style={{ color: "var(--app-primary-color)" }}
+        >
+          {completing ? "Abrindo..." : compactActionLabel}
+        </button>
+      )}
+    </div>
+  ) : (
+    <Card
+      tone="soft"
+      className={`p-5 transition-all min-h-[280px] ${
+        visualState === "failed"
+          ? "border-2 border-red-200 bg-red-50 opacity-90"
+          : visualState === "completed"
+            ? "border-2 border-emerald-200 bg-emerald-50"
+            : visualState === "in_progress"
+              ? "border-2 border-teal-200 bg-teal-50/80"
+              : "hover:shadow-xl"
+      }`}
+    >
+      <div className="flex items-start justify-between gap-2 mb-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge className={`w-fit ${
+            mission.type === "daily"
+              ? "bg-emerald-100 text-emerald-700 border border-emerald-200"
+              : mission.type === "weekly"
+                ? "bg-teal-100 text-teal-700 border border-teal-200"
+                : "bg-cyan-100 text-cyan-700 border border-cyan-200"
+          }`}>
+            {missionTypeLabel}
+          </Badge>
+          <Badge className="w-fit bg-gray-100 text-gray-700 border border-gray-200">
+            {primaryMuscle}
+          </Badge>
+          {isAIMission ? (
+            <Badge className="w-fit gap-1 bg-purple-100 text-purple-700 border border-purple-200">
+              <Sparkles className="w-3 h-3" />
+              IA
+            </Badge>
+          ) : null}
+        </div>
+        <Badge className={`w-fit ${
+          visualState === "failed"
+            ? "bg-red-100 text-red-700 border border-red-200"
+            : visualState === "completed"
+              ? "bg-emerald-100 text-emerald-700 border border-emerald-200"
+              : visualState === "in_progress"
+                ? "bg-teal-100 text-teal-700 border border-teal-200"
+                : "bg-gray-100 text-gray-700 border border-gray-200"
+        }`}>
+          {stateLabel}
+        </Badge>
+      </div>
+
+      {!isWeeklyMission && missionMediaUrl ? (
+        <div className="hidden sm:block w-full mb-3">
+          <img
+            src={missionMediaUrl}
+            alt={mission.title}
+            loading="lazy"
+            decoding="async"
+            className="w-full h-36 object-cover rounded-2xl border border-gray-200"
+          />
+        </div>
+      ) : null}
+
+      <h3 className="font-semibold text-gray-900 mb-1">{mission.title}</h3>
+      <p className="text-sm text-gray-500 mb-2">{primaryMuscle}</p>
+      {mission.description ? <p className="text-sm text-gray-600 mb-3 line-clamp-2">{mission.description}</p> : null}
+
+      {isWeeklyMission ? (
+        <div className="space-y-3 mb-3">
+          <div className="flex items-center justify-between text-xs text-gray-600">
+            <span>Progresso geral</span>
+            <span>{completedCircuitTasks}/{circuitTasks.length || 1}</span>
+          </div>
+          <div className="h-2 rounded-full bg-gray-100 overflow-hidden">
+            <div className="h-full bg-emerald-500" style={{ width: `${circuitProgress}%` }} />
+          </div>
+          <div className="space-y-2">
+            {circuitTasks.map((task) => {
+              const progress = task.required_count > 0
+                ? Math.min(100, Math.round((task.current_count / task.required_count) * 100))
+                : 0;
+              return (
+                <div key={task.id} className="rounded-xl border border-gray-200 p-2">
+                  <div className="flex items-center justify-between text-xs text-gray-700 mb-1">
+                    <span className="line-clamp-1">{task.label}</span>
+                    <span className="font-semibold">{task.current_count}/{task.required_count}</span>
+                  </div>
+                  <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden">
+                    <div className="h-full bg-teal-500" style={{ width: `${progress}%` }} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : isMonthlyMission ? (
+        <div className="space-y-2 mb-3">
+          <div className="flex items-center justify-between text-xs text-gray-600">
+            <span>Progresso mensal</span>
+            <span>{monthlyCurrent}/{monthlyTarget}</span>
+          </div>
+          <div className="h-2 rounded-full bg-gray-100 overflow-hidden">
+            <div className="h-full bg-cyan-500" style={{ width: `${monthlyProgress}%` }} />
+          </div>
+          <p className="text-sm text-gray-600">Meta: {formatGoal(mission, metricType)}</p>
+        </div>
+      ) : (
+        <div className="space-y-1 mb-3">
+          <p className="text-sm text-gray-600">Meta: {formatGoal(mission, metricType)}</p>
+          {mission.rest_seconds ? <p className="text-xs text-gray-500">Descanso entre series: {mission.rest_seconds}s</p> : null}
+        </div>
+      )}
+
+      <div className="grid grid-cols-3 gap-2 mb-3">
+        <div className="rounded-xl border border-emerald-100 bg-emerald-50 p-2 text-center">
+          <p className="text-[10px] text-emerald-700 uppercase tracking-wide">XP</p>
+          <p className="text-sm font-bold text-emerald-700">+{mission.xp_reward}</p>
+        </div>
+        <div className="rounded-xl border border-teal-100 bg-teal-50 p-2 text-center">
+          <p className="text-[10px] text-teal-700 uppercase tracking-wide">Pontos</p>
+          <p className="text-sm font-bold text-teal-700">+{mission.points_reward}</p>
+        </div>
+        <div className="rounded-xl border border-cyan-100 bg-cyan-50 p-2 text-center">
+          <p className="text-[10px] text-cyan-700 uppercase tracking-wide">Tempo</p>
+          <p className="text-sm font-bold text-cyan-700">{mission.duration_estimate_minutes ?? 10} min</p>
+        </div>
+      </div>
+
+      {mission.deadline ? (
+        <div className={`flex items-center gap-1 text-xs mb-3 ${isFailed ? "text-red-600" : "text-gray-500"}`}>
+          <Clock3 className="w-3 h-3" />
+          <span>{isFailed ? "Expirada/falhou" : "Em andamento"}</span>
+        </div>
+      ) : null}
+
+      {isFailed ? (
+        <div className="w-full py-3 text-center rounded-xl bg-red-100 text-red-700 font-medium">Missao falhou por expiracao</div>
+      ) : isCompleted ? (
+        <div className="w-full py-3 text-center rounded-xl bg-emerald-100 text-emerald-700 font-medium">
+          Missao concluida (+{mission.xp_reward} XP)
+        </div>
+      ) : (
+        <Button onClick={() => { void openDetails(); }} variant="primary" className="w-full py-3 rounded-xl shadow-md hover:shadow-lg" disabled={completing}>
+          Ver Detalhes
+        </Button>
+      )}
+    </Card>
+  );
 
   return (
     <>
-      <Card
-        tone="soft"
-        className={`p-5 transition-all min-h-[280px] ${
-          visualState === "failed"
-            ? "border-2 border-red-200 bg-red-50 opacity-90"
-            : visualState === "completed"
-              ? "border-2 border-emerald-200 bg-emerald-50"
-              : visualState === "in_progress"
-                ? "border-2 border-teal-200 bg-teal-50/80"
-                : "hover:shadow-xl"
-        }`}
-      >
-        <div className="flex items-start justify-between gap-2 mb-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge className={`w-fit ${
-              mission.type === "daily"
-                ? "bg-emerald-100 text-emerald-700 border border-emerald-200"
-                : mission.type === "weekly"
-                  ? "bg-teal-100 text-teal-700 border border-teal-200"
-                  : "bg-cyan-100 text-cyan-700 border border-cyan-200"
-            }`}>
-              {missionTypeLabel}
-            </Badge>
-            <Badge className="w-fit bg-gray-100 text-gray-700 border border-gray-200">
-              {primaryMuscle}
-            </Badge>
-            {isAIMission && (
-              <Badge className="w-fit gap-1 bg-purple-100 text-purple-700 border border-purple-200">
-                <Sparkles className="w-3 h-3" />
-                IA
-              </Badge>
-            )}
-          </div>
-          <Badge className={`w-fit ${
-            visualState === "failed"
-              ? "bg-red-100 text-red-700 border border-red-200"
-              : visualState === "completed"
-                ? "bg-emerald-100 text-emerald-700 border border-emerald-200"
-                : visualState === "in_progress"
-                  ? "bg-teal-100 text-teal-700 border border-teal-200"
-                  : "bg-gray-100 text-gray-700 border border-gray-200"
-          }`}>
-            {stateLabel}
-          </Badge>
-        </div>
-
-        {!isWeeklyMission && missionMediaUrl && (
-          <div className="hidden sm:block w-full mb-3">
-            <img
-              src={missionMediaUrl}
-              alt={mission.title}
-              loading="lazy"
-              decoding="async"
-              className="w-full h-36 object-cover rounded-2xl border border-gray-200"
-            />
-          </div>
-        )}
-
-        <h3 className="font-semibold text-gray-900 mb-1">{mission.title}</h3>
-        <p className="text-sm text-gray-500 mb-2">{primaryMuscle}</p>
-        {mission.description && (
-          <p className="text-sm text-gray-600 mb-3 line-clamp-2">{mission.description}</p>
-        )}
-
-        {isWeeklyMission ? (
-          <div className="space-y-3 mb-3">
-            <div className="flex items-center justify-between text-xs text-gray-600">
-              <span>Progresso geral</span>
-              <span>{completedCircuitTasks}/{circuitTasks.length || 1}</span>
-            </div>
-            <div className="h-2 rounded-full bg-gray-100 overflow-hidden">
-              <div className="h-full bg-emerald-500" style={{ width: `${circuitProgress}%` }} />
-            </div>
-            <div className="space-y-2">
-              {circuitTasks.map((task) => {
-                const progress = task.required_count > 0
-                  ? Math.min(100, Math.round((task.current_count / task.required_count) * 100))
-                  : 0;
-                return (
-                  <div key={task.id} className="rounded-xl border border-gray-200 p-2">
-                    <div className="flex items-center justify-between text-xs text-gray-700 mb-1">
-                      <span className="line-clamp-1">{task.label}</span>
-                      <span className="font-semibold">{task.current_count}/{task.required_count}</span>
-                    </div>
-                    <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden">
-                      <div className="h-full bg-teal-500" style={{ width: `${progress}%` }} />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        ) : isMonthlyMission ? (
-          <div className="space-y-2 mb-3">
-            <div className="flex items-center justify-between text-xs text-gray-600">
-              <span>Progresso mensal</span>
-              <span>{monthlyCurrent}/{monthlyTarget}</span>
-            </div>
-            <div className="h-2 rounded-full bg-gray-100 overflow-hidden">
-              <div className="h-full bg-cyan-500" style={{ width: `${monthlyProgress}%` }} />
-            </div>
-            <p className="text-sm text-gray-600">Meta: {formatGoal(mission, metricType)}</p>
-          </div>
-        ) : (
-          <div className="space-y-1 mb-3">
-            <p className="text-sm text-gray-600">Meta: {formatGoal(mission, metricType)}</p>
-            {mission.rest_seconds ? (
-              <p className="text-xs text-gray-500">Descanso entre series: {mission.rest_seconds}s</p>
-            ) : null}
-          </div>
-        )}
-
-        <div className="grid grid-cols-3 gap-2 mb-3">
-          <div className="rounded-xl border border-emerald-100 bg-emerald-50 p-2 text-center">
-            <p className="text-[10px] text-emerald-700 uppercase tracking-wide">XP</p>
-            <p className="text-sm font-bold text-emerald-700">+{mission.xp_reward}</p>
-          </div>
-          <div className="rounded-xl border border-teal-100 bg-teal-50 p-2 text-center">
-            <p className="text-[10px] text-teal-700 uppercase tracking-wide">Pontos</p>
-            <p className="text-sm font-bold text-teal-700">+{mission.points_reward}</p>
-          </div>
-          <div className="rounded-xl border border-cyan-100 bg-cyan-50 p-2 text-center">
-            <p className="text-[10px] text-cyan-700 uppercase tracking-wide">Tempo</p>
-            <p className="text-sm font-bold text-cyan-700">{mission.duration_estimate_minutes ?? 10} min</p>
-          </div>
-        </div>
-
-        {mission.deadline && (
-          <div className={`flex items-center gap-1 text-xs mb-3 ${isFailed ? "text-red-600" : "text-gray-500"}`}>
-            <Clock3 className="w-3 h-3" />
-            <span>{isFailed ? "Expirada/falhou" : "Em andamento"}</span>
-          </div>
-        )}
-
-        {isFailed ? (
-          <div className="w-full py-3 text-center rounded-xl bg-red-100 text-red-700 font-medium">Missao falhou por expiracao</div>
-        ) : isCompleted ? (
-          <div className="w-full py-3 text-center rounded-xl bg-emerald-100 text-emerald-700 font-medium">
-            Missao concluida (+{mission.xp_reward} XP)
-          </div>
-        ) : (
-          <Button
-            onClick={() => { void openDetails(); }}
-            variant="primary"
-            className="w-full py-3 rounded-xl shadow-md hover:shadow-lg"
-            disabled={completing}
-          >
-            Ver Detalhes
-          </Button>
-        )}
-      </Card>
+      {triggerContent}
 
       {showDetails && (
         <div className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm flex items-center justify-center px-4">
