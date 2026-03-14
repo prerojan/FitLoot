@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { Avatar } from "@/react-app/components/ui/avatar";
 import { useAuth } from "@/react-app/contexts/auth";
@@ -8,7 +8,8 @@ import LevelUpModal from "@/react-app/components/LevelUpModal";
 import AIRecommendations from "@/react-app/components/AIRecommendations";
 import AIMissionGenerator from "@/react-app/components/AIMissionGenerator";
 import LoadingBall from "@/react-app/components/LoadingBall";
-import { Bot, CalendarDays, Camera, Cloud, Flame } from "lucide-react";
+import { Bot, CalendarDays, Camera, Cloud, Flame, Zap } from "lucide-react";
+import { ROUTE_PATHS } from "@/react-app/constants/auth";
 import type { DailyMetrics, Mission, Title, UserProfile, UserProgression } from "@/shared/types";
 import {
   ApiRequestError,
@@ -37,7 +38,6 @@ import {
   formatDateKey,
   formatNumber,
   isMissionCompleted,
-  primaryMissionLabel,
   sortMissions,
 } from "@/react-app/pages/dashboardUtils";
 
@@ -71,6 +71,8 @@ export default function Dashboard() {
   const [error, setError] = useState<string | null>(null);
   const [showLevelUp, setShowLevelUp] = useState(false);
   const [newLevel, setNewLevel] = useState(0);
+  const [quickActionsOpen, setQuickActionsOpen] = useState(false);
+  const quickActionsRef = useRef<HTMLDivElement | null>(null);
 
   const setSectionLoading = useCallback((section: keyof DashboardLoadingState, value: boolean) => {
     setLoadingState((current) => ({ ...current, [section]: value }));
@@ -174,6 +176,22 @@ export default function Dashboard() {
   }, []);
 
   useEffect(() => {
+    if (!quickActionsOpen) return;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (quickActionsRef.current?.contains(target)) return;
+      setQuickActionsOpen(false);
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+    };
+  }, [quickActionsOpen]);
+
+  useEffect(() => {
     if (!user) {
       navigate("/app");
       return;
@@ -253,7 +271,6 @@ export default function Dashboard() {
     [missions],
   );
   const visibleDailyMissions = useMemo(() => allDailyMissions.slice(0, 3), [allDailyMissions]);
-  const checklistMissions = useMemo(() => allDailyMissions.slice(0, 2), [allDailyMissions]);
   const aiSpecialMissions = useMemo(
     () => sortMissions(missions.filter((mission) => mission.mission_origin === "ai" && mission.is_completed !== 1)),
     [missions],
@@ -282,8 +299,6 @@ export default function Dashboard() {
     [aiSpecialMissions, allDailyMissions, failedMissions, monthlyMissions, weeklyMissions],
   );
 
-  const xpForNextLevel = Math.max(100, (progression?.level || 1) * 100);
-  const xpProgress = clamp(((progression?.xp || 0) / xpForNextLevel) * 100, 0, 100);
   const stepsValue = metrics?.steps ?? 0;
   const caloriesValue = metrics?.calories_burned ?? 0;
   const stepsProgress = clamp((stepsValue / STEPS_TARGET) * 100, 0, 100);
@@ -305,6 +320,36 @@ export default function Dashboard() {
     if (lastActivityKey) keys.add(lastActivityKey);
     return keys;
   }, [missions, progression?.last_activity_date]);
+  const recentStepDates = useMemo(
+    () => Array.from({ length: 5 }, (_, index) => {
+      const date = new Date();
+      date.setHours(0, 0, 0, 0);
+      date.setDate(date.getDate() - (4 - index));
+      return date;
+    }),
+    [],
+  );
+  const stepBars = useMemo(() => {
+    const currentSteps = Math.max(0, stepsValue);
+    const fallbackRatios = [0.42, 0.56, 0.72, 0.64, 1];
+    const values = recentStepDates.map((date, index) => {
+      const dateKey = formatDateKey(date);
+      if (dateKey === todayKey) return currentSteps;
+      if (currentSteps === 0) return 0;
+
+      const activityAdjustment = completedWeekKeys.has(dateKey) ? 0.12 : -0.04;
+      const baseRatio = fallbackRatios[index] ?? 1;
+      const ratio = clamp(baseRatio + activityAdjustment, 0.18, 0.94);
+      return Math.round(currentSteps * ratio);
+    });
+    const maxValue = Math.max(...values, 0);
+
+    return values.map((value, index) => ({
+      height: maxValue > 0 ? (value / maxValue) * 100 : 0,
+      opacity: index === values.length - 1 ? 1 : 0.3 + index * 0.12,
+      value,
+    }));
+  }, [completedWeekKeys, recentStepDates, stepsValue, todayKey]);
 
   const displayName = profile?.full_name ?? user?.name ?? "Seu dashboard";
   const usernameLabel = profile?.username ? `@${profile.username}` : user?.email ?? "fitloot";
@@ -314,9 +359,13 @@ export default function Dashboard() {
     const section = document.getElementById(sectionId);
     if (section) section.scrollIntoView({ behavior: "smooth", block: "start" });
   }, []);
+  const handleQuickAction = useCallback((path: string) => {
+    setQuickActionsOpen(false);
+    navigate(path);
+  }, [navigate]);
 
   return (
-    <div className="min-h-screen pb-24 md:pb-10">
+    <div className="min-h-screen pb-32 md:pb-14">
       <header
         className="sticky top-0 z-40 hidden md:block"
         style={{
@@ -325,8 +374,8 @@ export default function Dashboard() {
           backdropFilter: "blur(18px)",
         }}
       >
-        <div className="mx-auto flex max-w-[82rem] items-center justify-between gap-6 px-6 py-4 lg:px-12">
-          <button type="button" onClick={() => navigate("/dashboard")} className="flex items-center gap-4" aria-label="Abrir dashboard">
+        <div className="mx-auto grid max-w-[82rem] grid-cols-[auto_1fr_auto] items-center gap-6 px-6 py-4 lg:px-12">
+          <button type="button" onClick={() => navigate(ROUTE_PATHS.dashboard)} className="flex items-center gap-4" aria-label="Abrir dashboard">
             <div style={{ color: "var(--app-primary-color)" }}>
               <svg fill="none" viewBox="0 0 48 48" className="h-8 w-8" xmlns="http://www.w3.org/2000/svg">
                 <path d="M4 4H17.3334V17.3334H30.6666V30.6666H44V44H4V4Z" fill="currentColor" />
@@ -335,39 +384,52 @@ export default function Dashboard() {
             <span className="text-xl font-bold uppercase tracking-[0.12em]" style={{ color: "var(--fl-color-text)" }}>FitLoot</span>
           </button>
 
-          <nav className="flex items-center gap-1">
-            {DESKTOP_NAV_ITEMS.map((item) => {
-              const isActive = item.matches.some((path) => path === location.pathname);
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => navigate(item.path)}
-                  className="flex items-center gap-2 rounded-2xl px-4 py-3 text-sm font-bold transition-colors hover:opacity-85"
-                  style={isActive ? {
-                    background: "var(--app-primary-color)",
-                    color: "var(--fl-nav-item-active-text)",
-                    boxShadow: "0 0 22px color-mix(in srgb, var(--app-primary-color) 34%, transparent)",
-                  } : { color: "var(--fl-nav-item-muted)" }}
-                >
-                  <MaterialIcon name={item.icon} filled={isActive} className="text-xl" />
-                  <span>{item.label}</span>
-                </button>
-              );
-            })}
-          </nav>
+          <div className="flex items-center justify-center gap-4">
+            <div
+              className="inline-flex items-center rounded-full border px-3 py-1.5 text-xs font-black uppercase tracking-[0.22em]"
+              style={{
+                borderColor: "color-mix(in srgb, var(--app-primary-color) 20%, transparent)",
+                background: "color-mix(in srgb, var(--fl-surface-strong) 74%, transparent)",
+                color: "var(--fl-color-text)",
+              }}
+            >
+              {loadingState.progression ? <LoadingBall size="sm" /> : `LVL ${progression?.level ?? 1}`}
+            </div>
+
+            <nav className="flex items-center gap-1">
+              {DESKTOP_NAV_ITEMS.map((item) => {
+                const isActive = item.matches.some((path) => path === location.pathname);
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => navigate(item.path)}
+                    className="flex items-center gap-2 rounded-2xl px-4 py-3 text-sm font-bold transition-colors hover:opacity-85"
+                    style={isActive ? {
+                      background: "var(--app-primary-color)",
+                      color: "var(--fl-nav-item-active-text)",
+                      boxShadow: "0 0 22px color-mix(in srgb, var(--app-primary-color) 34%, transparent)",
+                    } : { color: "var(--fl-nav-item-muted)" }}
+                  >
+                    <MaterialIcon name={item.icon} filled={isActive} className="text-xl" />
+                    <span>{item.label}</span>
+                  </button>
+                );
+              })}
+            </nav>
+          </div>
 
           <div className="flex items-center gap-4">
             <button
               type="button"
-              onClick={() => navigate("/profile")}
+              onClick={() => navigate(ROUTE_PATHS.profile)}
               className="flex h-11 w-11 items-center justify-center rounded-full"
               style={{ background: "color-mix(in srgb, var(--app-primary-color) 16%, transparent)", color: "var(--app-primary-color)" }}
               aria-label="Abrir configuracoes"
             >
               <MaterialIcon name="settings" filled className="text-2xl" />
             </button>
-            <button type="button" onClick={() => navigate("/profile")} className="rounded-full" aria-label="Abrir perfil">
+            <button type="button" onClick={() => navigate(ROUTE_PATHS.profile)} className="rounded-full" aria-label="Abrir perfil">
               <span className="flex rounded-full border-2 p-[2px]" style={{ borderColor: "var(--app-primary-color)" }}>
                 <Avatar src={user?.avatar_url ?? null} name={avatarName} className="h-10 w-10 object-cover" />
               </span>
@@ -376,7 +438,7 @@ export default function Dashboard() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-[46rem] px-4 pb-12 pt-4 md:px-8 md:pt-8">
+      <main className="mx-auto max-w-[46rem] px-4 pb-16 pt-4 md:px-8 md:pt-8">
         <div className="space-y-6">
           <div className="flex items-center justify-between gap-4 px-1">
             <div>
@@ -407,31 +469,26 @@ export default function Dashboard() {
           ) : null}
 
           <section className="space-y-4">
-            <div className="rounded-[2rem] px-6 py-6" style={PRIMARY_GLOW_STYLE}>
-              <div className="flex items-center justify-between gap-6">
-                <div className="flex min-h-[8rem] flex-1 flex-col justify-between">
-                  <div className="space-y-3">
-                    <div className="inline-flex items-center gap-2 rounded-full px-3 py-1 text-[0.64rem] font-black uppercase tracking-[0.28em]" style={{ background: "color-mix(in srgb, var(--fl-nav-item-active-text) 8%, transparent)" }}>
-                      <Cloud className="h-3.5 w-3.5" />
-                      <span>Pontos de Experiencia</span>
-                      <span className="opacity-65">Nivel {progression?.level ?? 1}</span>
-                    </div>
-                    <div className="inline-flex items-center gap-2 rounded-full px-4 py-3 text-sm font-black" style={{ background: "color-mix(in srgb, var(--fl-nav-item-active-text) 10%, transparent)" }}>
-                      <Flame className="h-4 w-4" />
-                      <span>{loadingState.progression ? <LoadingBall size="sm" /> : `${progression?.current_streak ?? 0} dias de sequencia`}</span>
-                    </div>
+            <div className="rounded-[2rem] px-6 py-6 md:px-8" style={PRIMARY_GLOW_STYLE}>
+              <div className="flex min-h-[9.25rem] items-center justify-between gap-6">
+                <div className="flex flex-1 flex-col justify-center gap-5">
+                  <div className="inline-flex items-center gap-2 text-[0.68rem] font-black uppercase tracking-[0.28em]">
+                    <Cloud className="h-3.5 w-3.5" />
+                    <span>Experience Points</span>
                   </div>
-                  <p className="text-[0.68rem] font-bold uppercase tracking-[0.18em] opacity-70">Progresso atual para o proximo nivel</p>
+                  <div className="inline-flex w-fit items-center gap-2 rounded-full px-4 py-3 text-sm font-black" style={{ background: "color-mix(in srgb, var(--fl-nav-item-active-text) 10%, transparent)" }}>
+                    <Flame className="h-4 w-4" />
+                    <span>{loadingState.progression ? <LoadingBall size="sm" /> : `${progression?.current_streak ?? 0}-Day Streak`}</span>
+                  </div>
                 </div>
 
-                <div className="relative flex shrink-0 flex-col items-center justify-end">
-                  <svg viewBox="0 0 120 72" className="h-20 w-36">
-                    <path d="M18 62 A42 42 0 0 1 102 62" fill="none" stroke="color-mix(in srgb, var(--fl-nav-item-active-text) 18%, transparent)" strokeLinecap="round" strokeWidth="10" />
-                    <path d="M18 62 A42 42 0 0 1 102 62" fill="none" pathLength={100} stroke="var(--fl-nav-item-active-text)" strokeDasharray={`${xpProgress} 100`} strokeLinecap="round" strokeWidth="10" />
+                <div className="relative flex h-[6.6rem] w-[12.5rem] shrink-0 items-end justify-center">
+                  <svg viewBox="0 0 176 104" className="absolute inset-x-0 top-0 h-[5.5rem] w-full">
+                    <path d="M26 86 A62 62 0 0 1 150 86" fill="none" stroke="var(--fl-nav-item-active-text)" strokeLinecap="round" strokeWidth="14" />
                   </svg>
                   <div className="absolute bottom-0 flex items-end gap-1">
-                    <span className="text-4xl font-black">{loadingState.progression ? <LoadingBall size="sm" /> : formatNumber(progression?.xp ?? 0)}</span>
-                    <span className="pb-2 text-xs font-bold uppercase opacity-70">XP</span>
+                    <span className="text-[2.35rem] font-black leading-none">{loadingState.progression ? <LoadingBall size="sm" /> : formatNumber(progression?.xp ?? 0)}</span>
+                    <span className="pb-1 text-xs font-black uppercase opacity-75">XP</span>
                   </div>
                 </div>
               </div>
@@ -445,13 +502,13 @@ export default function Dashboard() {
                 loading={loadingState.metrics}
                 footer={
                   <div className="mt-3 flex h-9 items-end gap-1">
-                    {[28, 62, 100, 74, 46].map((height, index) => (
+                    {stepBars.map((bar, index) => (
                       <div
-                        key={`${height}-${index}`}
+                        key={`${bar.value}-${index}`}
                         className="w-full rounded-[0.2rem]"
                         style={{
-                          height: `${height}%`,
-                          background: index === 2 ? "var(--app-primary-color)" : `color-mix(in srgb, var(--app-primary-color) ${26 + index * 14}%, transparent)`,
+                          height: `${bar.height}%`,
+                          background: `color-mix(in srgb, var(--app-primary-color) ${Math.round(bar.opacity * 100)}%, transparent)`,
                         }}
                       />
                     ))}
@@ -528,62 +585,6 @@ export default function Dashboard() {
             </div>
           </section>
 
-          <section>
-            <SectionHeader title="Checklist de Treino" actionLabel="Ver todos" onAction={() => scrollToSection("mission-feed")} />
-            <div className="rounded-[2rem] p-5" style={SUBTLE_PANEL_STYLE}>
-              {loadingState.missions ? (
-                <div className="flex items-center justify-center py-6"><LoadingBall size="md" /></div>
-              ) : checklistMissions.length > 0 ? (
-                <div className="space-y-4">
-                  {checklistMissions.map((mission, index) => (
-                    <div key={mission.id}>
-                      <div className="flex items-center justify-between gap-4">
-                        <div className="flex min-w-0 items-center gap-4">
-                          <div className="inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-[0.68rem] font-black" style={PRIMARY_GLOW_STYLE}>
-                            <MaterialIcon name="schedule" className="text-[1rem]" filled />
-                            <span>{mission.duration_estimate_minutes ?? 10} minutos</span>
-                          </div>
-                          <span className="truncate font-bold" style={{ color: "var(--fl-color-text)" }}>{primaryMissionLabel(mission)}</span>
-                        </div>
-                        <div className="flex h-7 w-7 items-center justify-center rounded-full border-2" style={{ borderColor: isMissionCompleted(mission) ? "var(--app-primary-color)" : "color-mix(in srgb, var(--fl-color-text-muted) 46%, transparent)" }}>
-                          {isMissionCompleted(mission) ? <div className="h-4 w-4 rounded-full" style={{ background: "var(--app-primary-color)" }} /> : null}
-                        </div>
-                      </div>
-                      {index < checklistMissions.length - 1 ? <div className="mt-4 h-px w-full" style={{ background: "color-mix(in srgb, var(--fl-color-text) 10%, transparent)" }} /> : null}
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="rounded-[1.5rem] p-5 text-sm" style={PANEL_STYLE}>O checklist de treino vai aparecer aqui assim que novas missoes forem geradas.</div>
-              )}
-            </div>
-          </section>
-
-          <section id="assistant-tools">
-            <SectionHeader title="Acoes Rapidas" />
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <button type="button" onClick={() => navigate("/ai-chat")} className="flex items-center justify-between rounded-[1.75rem] p-4 text-left transition-transform hover:-translate-y-0.5" style={PANEL_STYLE}>
-                <div>
-                  <p className="text-sm font-bold" style={{ color: "var(--fl-color-text)" }}>Assistente IA</p>
-                  <p className="mt-1 text-xs" style={{ color: "var(--fl-color-text-muted)" }}>Abra o chat para suporte tecnico e motivacional.</p>
-                </div>
-                <div className="flex h-11 w-11 items-center justify-center rounded-2xl" style={{ background: "color-mix(in srgb, var(--app-primary-color) 18%, transparent)" }}>
-                  <Bot className="h-5 w-5" style={{ color: "var(--app-primary-color)" }} />
-                </div>
-              </button>
-
-              <button type="button" onClick={() => navigate("/food-analysis")} className="flex items-center justify-between rounded-[1.75rem] p-4 text-left transition-transform hover:-translate-y-0.5" style={PANEL_STYLE}>
-                <div>
-                  <p className="text-sm font-bold" style={{ color: "var(--fl-color-text)" }}>Analise de alimentos</p>
-                  <p className="mt-1 text-xs" style={{ color: "var(--fl-color-text-muted)" }}>Envie fotos e acompanhe calorias pelo scanner.</p>
-                </div>
-                <div className="flex h-11 w-11 items-center justify-center rounded-2xl" style={{ background: "color-mix(in srgb, var(--app-primary-color) 18%, transparent)" }}>
-                  <Camera className="h-5 w-5" style={{ color: "var(--app-primary-color)" }} />
-                </div>
-              </button>
-            </div>
-          </section>
-
           {missionFeedSections.length > 0 ? (
             <section id="mission-feed" className="space-y-6">
               <SectionHeader title="Explorar Missoes" />
@@ -605,13 +606,63 @@ export default function Dashboard() {
             </section>
           ) : null}
 
-          <section className="space-y-4">
+          <section id="assistant-tools" className="space-y-4">
             <SectionHeader title="Ferramentas de IA" />
             <AIMissionGenerator onMissionsGenerated={() => { void refreshData(); }} {...(profile?.initial_conditioning ? { conditioning: profile.initial_conditioning } : {})} />
             <AIRecommendations />
           </section>
         </div>
       </main>
+
+      <div
+        ref={quickActionsRef}
+        className="fixed bottom-24 left-4 z-50 flex flex-col items-start gap-3 md:bottom-8 md:left-8"
+      >
+        <div
+          className={`flex flex-col items-start gap-3 transition-all duration-200 ${quickActionsOpen ? "translate-y-0 opacity-100" : "pointer-events-none translate-y-4 opacity-0"}`}
+        >
+          <button
+            type="button"
+            onClick={() => handleQuickAction(ROUTE_PATHS.aiChat)}
+            className="flex items-center gap-3 rounded-full px-4 py-3 text-sm font-bold shadow-lg transition-transform hover:-translate-y-0.5"
+            style={PANEL_STYLE}
+          >
+            <span
+              className="flex h-10 w-10 items-center justify-center rounded-full"
+              style={{ background: "color-mix(in srgb, var(--app-primary-color) 18%, transparent)", color: "var(--app-primary-color)" }}
+            >
+              <Bot className="h-5 w-5" />
+            </span>
+            <span style={{ color: "var(--fl-color-text)" }}>FitBot</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleQuickAction(ROUTE_PATHS.foodAnalysis)}
+            className="flex items-center gap-3 rounded-full px-4 py-3 text-sm font-bold shadow-lg transition-transform hover:-translate-y-0.5"
+            style={PANEL_STYLE}
+          >
+            <span
+              className="flex h-10 w-10 items-center justify-center rounded-full"
+              style={{ background: "color-mix(in srgb, var(--app-primary-color) 18%, transparent)", color: "var(--app-primary-color)" }}
+            >
+              <Camera className="h-5 w-5" />
+            </span>
+            <span style={{ color: "var(--fl-color-text)" }}>Analisar Alimento</span>
+          </button>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => setQuickActionsOpen((current) => !current)}
+          className="flex h-14 w-14 items-center justify-center rounded-full transition-transform duration-200"
+          style={PRIMARY_GLOW_STYLE}
+          aria-label="Abrir acoes rapidas"
+          aria-expanded={quickActionsOpen}
+        >
+          <Zap className={`h-6 w-6 transition-transform duration-200 ${quickActionsOpen ? "rotate-12" : ""}`} />
+        </button>
+      </div>
 
       <div className="md:hidden"><BottomNav active="missions" /></div>
       {showLevelUp ? <LevelUpModal level={newLevel} onClose={() => setShowLevelUp(false)} /> : null}
