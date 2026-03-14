@@ -70,28 +70,28 @@ export function MetricCard({
   loading: boolean;
 }) {
   return (
-    <div className="flex min-h-[9rem] flex-col justify-between rounded-[1.5rem] p-4 sm:min-h-[10rem] sm:rounded-[1.75rem] sm:p-5" style={PANEL_STYLE}>
-      <div className="flex items-start justify-between gap-4">
+    <div className="flex min-h-[9rem] flex-col justify-between rounded-[1.5rem] p-3 md:min-h-[10rem] md:rounded-[1.75rem] md:p-5" style={PANEL_STYLE}>
+      <div className="flex items-start justify-between gap-2 md:gap-4">
         <span
-          className="text-[0.68rem] font-black uppercase tracking-[0.22em]"
+          className="text-[0.58rem] md:text-[0.68rem] font-black uppercase tracking-[0.22em]"
           style={{ color: "var(--fl-color-text-muted)" }}
         >
           {label}
         </span>
         <div
-          className="flex h-10 w-10 items-center justify-center rounded-full"
+          className="flex h-8 w-8 md:h-10 md:w-10 shrink-0 items-center justify-center rounded-full"
           style={{ background: "color-mix(in srgb, var(--app-primary-color) 20%, transparent)" }}
         >
-          <MaterialIcon name={icon} className="text-xl" />
+          <MaterialIcon name={icon} className="text-lg md:text-xl" />
         </div>
       </div>
-      <div className="space-y-2">
-        <div className="text-[1.7rem] font-bold sm:text-2xl" style={{ color: "var(--fl-color-text)" }}>
+      <div className="space-y-1 md:space-y-2">
+        <div className="text-xl font-bold md:text-[1.7rem]" style={{ color: "var(--fl-color-text)" }}>
           {loading ? <LoadingBall size="sm" /> : value}
         </div>
         {sublabel ? (
           <div
-            className="text-[0.68rem] font-bold uppercase tracking-[0.2em]"
+            className="text-[0.58rem] md:text-[0.68rem] font-bold uppercase tracking-[0.2em]"
             style={{ color: "var(--fl-color-text-muted)" }}
           >
             {sublabel}

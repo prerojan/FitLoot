@@ -365,13 +365,27 @@ export default function Dashboard() {
   return (
     <AppPageShell bottomNavActive="missions" profile={profile} progression={progression}>
       <main className="mx-auto max-w-[48rem] px-4 pb-16 pt-4 sm:px-5 md:px-8 md:pt-8">
-        <div className="space-y-5 md:space-y-6">
+        <div className="space-y-3 md:space-y-6">
           <div className="flex items-center justify-between gap-4 px-1">
-            <div>
+            <div className="flex flex-col">
               <p className="text-sm font-semibold md:text-base" style={{ color: "var(--fl-color-text)" }}>{displayName}</p>
               <p className="text-xs" style={{ color: "var(--fl-color-text-muted)" }}>{usernameLabel}</p>
+            </div>
+            <div className="flex flex-col items-start gap-1.5 md:flex-row md:items-center md:gap-2">
+              {loadingState.titles ? <LoadingBall size="sm" /> : activeTitle ? (
+                <div
+                  className="rounded-full px-3 py-1 text-[0.68rem] font-bold uppercase tracking-[0.16em]"
+                  style={{
+                    background: "color-mix(in srgb, var(--app-primary-color) 14%, transparent)",
+                    color: "var(--app-primary-color)",
+                    border: "1px solid color-mix(in srgb, var(--app-primary-color) 22%, transparent)",
+                  }}
+                >
+                  {activeTitle.name}
+                </div>
+              ) : null}
               <div
-                className="mt-2 inline-flex items-center rounded-full border px-3 py-1 text-[0.68rem] font-black uppercase tracking-[0.18em] md:hidden"
+                className="inline-flex items-center rounded-full border px-2 py-0.5 text-[0.6rem] font-black uppercase tracking-[0.15em] md:hidden"
                 style={{
                   borderColor: "color-mix(in srgb, var(--app-primary-color) 22%, transparent)",
                   background: "color-mix(in srgb, var(--fl-surface-strong) 82%, transparent)",
@@ -381,18 +395,6 @@ export default function Dashboard() {
                 {loadingState.progression ? <LoadingBall size="sm" /> : `LVL ${levelValue}`}
               </div>
             </div>
-            {loadingState.titles ? <LoadingBall size="sm" /> : activeTitle ? (
-              <div
-                className="rounded-full px-3 py-1 text-[0.68rem] font-bold uppercase tracking-[0.16em]"
-                style={{
-                  background: "color-mix(in srgb, var(--app-primary-color) 14%, transparent)",
-                  color: "var(--app-primary-color)",
-                  border: "1px solid color-mix(in srgb, var(--app-primary-color) 22%, transparent)",
-                }}
-              >
-                {activeTitle.name}
-              </div>
-            ) : null}
           </div>
 
           {error ? (
@@ -405,7 +407,7 @@ export default function Dashboard() {
           ) : null}
 
           <section className="space-y-4">
-            <div className="rounded-[2rem] px-4 py-5 sm:px-6 sm:py-6 md:px-8" style={PRIMARY_GLOW_STYLE}>
+            <div className="rounded-[2rem] px-3 py-4 md:px-8 md:py-6" style={PRIMARY_GLOW_STYLE}>
               <div className="flex min-h-[9rem] flex-col gap-8 sm:min-h-[9.25rem] sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex flex-1 flex-col justify-center gap-4 sm:gap-5">
                   <div className="inline-flex items-center gap-2 text-[0.64rem] font-black uppercase tracking-[0.24em] sm:text-[0.68rem] sm:tracking-[0.28em]">
@@ -441,7 +443,7 @@ export default function Dashboard() {
                     />
                   </svg>
                   <div className="absolute inset-x-0 bottom-[0.1rem] flex items-end justify-center gap-1 sm:bottom-0">
-                    <span className="text-[2rem] font-black leading-none sm:text-[2.35rem]">
+                    <span className="text-2xl font-black leading-none md:text-[2.35rem]">
                       {loadingState.progression ? <LoadingBall size="sm" /> : formatNumber(Math.max(0, progression?.xp ?? 0))}
                     </span>
                     <span className="pb-1 text-[0.7rem] font-black uppercase opacity-75 sm:text-xs">XP</span>
@@ -450,7 +452,7 @@ export default function Dashboard() {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="grid grid-cols-2 gap-2 md:gap-3">
               <MetricCard
                 label="Passos"
                 value={formatNumber(stepsValue)}
@@ -486,7 +488,7 @@ export default function Dashboard() {
                 return (
                   <div
                     key={dateKey}
-                    className={`flex flex-col items-center rounded-[1.35rem] px-1 py-2 ${isCurrentDay ? "shadow-lg" : ""}`}
+                    className={`flex flex-col items-center px-1 py-2 ${isCurrentDay ? "rounded-xl shadow-lg" : "rounded-[1.35rem]"}`}
                     style={isCurrentDay ? {
                       background: "var(--app-primary-color)",
                       color: "var(--fl-nav-item-active-text)",
@@ -507,7 +509,7 @@ export default function Dashboard() {
 
           <section>
             <SectionHeader title="Missoes de Hoje" actionLabel="Ver todas" onAction={() => scrollToSection("mission-feed")} />
-            <div className="rounded-[2rem] p-5" style={SUBTLE_PANEL_STYLE}>
+            <div className="rounded-[2rem] p-3 md:p-5" style={SUBTLE_PANEL_STYLE}>
               <div className="mb-5 inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-[0.68rem] font-bold" style={{ background: "color-mix(in srgb, var(--fl-surface-strong) 86%, transparent)", color: "var(--fl-color-text-muted)", border: "1px solid var(--fl-border-soft)" }}>
                 <CalendarDays className="h-3.5 w-3.5" />
                 <span>{currentDateLabel}</span>
@@ -534,7 +536,7 @@ export default function Dashboard() {
             <SectionHeader title="Passos" actionLabel="Ver todos" onAction={() => scrollToSection("assistant-tools")} />
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
               <div className="shrink-0 whitespace-nowrap">
-                <span className="text-[1.55rem] font-black sm:text-[1.8rem]" style={{ color: "var(--fl-color-text)" }}>{loadingState.metrics ? <LoadingBall size="sm" /> : formatNumber(stepsValue)}</span>
+                <span className="text-xl font-black md:text-[1.8rem]" style={{ color: "var(--fl-color-text)" }}>{loadingState.metrics ? <LoadingBall size="sm" /> : formatNumber(stepsValue)}</span>
                 <span className="ml-2 text-sm font-bold" style={{ color: "var(--fl-color-text-muted)" }}>/ {formatNumber(STEPS_TARGET)}</span>
               </div>
               <div className="relative h-3 flex-1 overflow-hidden rounded-full" style={{ background: "color-mix(in srgb, var(--fl-color-text) 6%, transparent)" }}>
@@ -551,7 +553,7 @@ export default function Dashboard() {
               {missionFeedSections.map((section) => (
                 <div key={section.title}>
                   <h3 className="mb-3 text-sm font-black uppercase tracking-[0.18em]" style={{ color: "var(--fl-color-text-muted)" }}>{section.title}</h3>
-                  <div className="rounded-[2rem] p-5" style={SUBTLE_PANEL_STYLE}>
+                  <div className="rounded-[2rem] p-3 md:p-5" style={SUBTLE_PANEL_STYLE}>
                     <div className="space-y-4">
                       {section.missions.map((mission, index) => (
                         <div key={mission.id}>
