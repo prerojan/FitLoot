@@ -246,7 +246,7 @@ export default function Landing() {
 
       <header className="fixed inset-x-0 top-0 z-50 border-b border-[var(--fl-border-soft)] bg-[color-mix(in_srgb,var(--fl-surface-strong)_88%,transparent)] backdrop-blur-2xl">
         <div className="mx-auto max-w-[1280px] px-4 sm:px-6 lg:px-8">
-          <div className="flex h-20 items-center justify-between gap-4">
+          <div className="flex h-20 items-center justify-between gap-2 sm:gap-4">
             <button
               type="button"
               onClick={() => {
@@ -257,7 +257,7 @@ export default function Landing() {
               <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-[rgba(var(--fl-color-accent-rgb),0.14)] text-[var(--fl-color-accent)]">
                 <Zap className="h-5 w-5" strokeWidth={2.3} />
               </span>
-              <span className="fl-auth-display text-xl font-bold">FitLoot</span>
+              <span className="fl-auth-display text-lg font-bold sm:text-xl">FitLoot</span>
             </button>
 
             <nav className="hidden items-center gap-8 lg:flex">
@@ -287,7 +287,7 @@ export default function Landing() {
               <button
                 type="button"
                 onClick={goToLogin}
-                className="inline-flex items-center justify-center rounded-full px-5 py-3 text-sm font-black text-[var(--fl-nav-item-active-text)] transition hover:-translate-y-0.5"
+                className="inline-flex items-center justify-center rounded-full px-4 py-2.5 text-xs font-black text-[var(--fl-nav-item-active-text)] transition hover:-translate-y-0.5 sm:px-5 sm:py-3 sm:text-sm"
                 style={{
                   background: "linear-gradient(135deg, var(--app-primary-color), var(--app-secondary-color))",
                   boxShadow: "0 18px 36px rgba(var(--fl-color-accent-rgb), 0.22)",
@@ -298,7 +298,7 @@ export default function Landing() {
             </div>
           </div>
 
-          <nav className="flex gap-2 overflow-x-auto pb-4 lg:hidden">
+          <nav className="flex gap-2 overflow-x-auto pb-4 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden lg:hidden">
             {navItems.map((item) => (
               <a
                 key={item.id}
@@ -313,7 +313,7 @@ export default function Landing() {
         </div>
       </header>
 
-      <main className="relative pt-28">
+      <main className="relative pt-36 sm:pt-40 lg:pt-28">
         <section className="relative overflow-hidden px-4 pb-14 pt-8 sm:px-6 lg:px-8 lg:pb-24 lg:pt-12">
           <div
             className="pointer-events-none absolute right-[-10rem] top-[-8rem] h-[28rem] w-[28rem] rounded-full blur-3xl"
@@ -324,15 +324,15 @@ export default function Landing() {
             style={{ background: "rgba(var(--app-secondary-color-rgb), 0.12)" }}
           />
 
-          <div className="mx-auto grid max-w-7xl items-center gap-10 lg:grid-cols-[1.02fr_0.98fr]">
-            <div className="space-y-8">
+          <div className="mx-auto grid max-w-7xl items-center gap-8 md:gap-10 lg:grid-cols-[1.02fr_0.98fr]">
+            <div className="min-w-0 space-y-8">
               <span className="inline-flex items-center gap-2 rounded-full border border-[var(--fl-auth-chip-border)] bg-[var(--fl-auth-chip-bg)] px-4 py-2 text-[0.72rem] font-bold uppercase tracking-[0.18em] text-[var(--fl-color-accent)]">
                 <Sparkles className="h-4 w-4" />
                 Sessao beta aberta
               </span>
 
               <div className="space-y-5">
-                <h1 className="fl-auth-display text-5xl font-black leading-[0.94] sm:text-6xl xl:text-7xl">
+                <h1 className="fl-auth-display text-4xl font-black leading-[0.94] sm:text-5xl xl:text-7xl">
                   Transforme esforco em{" "}
                   <span
                     className="bg-clip-text text-transparent"
@@ -355,7 +355,7 @@ export default function Landing() {
                 <button
                   type="button"
                   onClick={goToLogin}
-                  className="inline-flex items-center justify-center gap-2 rounded-full px-7 py-4 text-sm font-black uppercase tracking-[0.18em] text-[#04100b] transition hover:-translate-y-0.5"
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-full px-6 py-3.5 text-xs font-black uppercase tracking-[0.18em] text-[#04100b] transition hover:-translate-y-0.5 sm:w-auto sm:px-7 sm:py-4 sm:text-sm"
                   style={{
                     background: "linear-gradient(135deg, var(--app-primary-color), var(--app-secondary-color))",
                     boxShadow: "0 20px 36px rgba(var(--fl-color-accent-rgb), 0.24)",
@@ -368,7 +368,7 @@ export default function Landing() {
                 <a
                   href="#funcionalidades"
                   onClick={scrollToSection("funcionalidades")}
-                  className="inline-flex items-center justify-center gap-2 rounded-full border border-[var(--fl-border-strong)] bg-[var(--fl-surface-glass)] px-7 py-4 text-sm font-bold uppercase tracking-[0.14em] text-[var(--fl-color-text)] transition hover:-translate-y-0.5"
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-full border border-[var(--fl-border-strong)] bg-[var(--fl-surface-glass)] px-6 py-3.5 text-xs font-bold uppercase tracking-[0.14em] text-[var(--fl-color-text)] transition hover:-translate-y-0.5 sm:w-auto sm:px-7 sm:py-4 sm:text-sm"
                 >
                   Ver arsenal
                   <ChevronRight className="h-4 w-4" />
@@ -402,9 +402,9 @@ export default function Landing() {
               </div>
             </div>
 
-            <div className="relative">
+            <div className="relative min-w-0">
               <div
-                className="overflow-hidden rounded-[2.2rem] border border-[var(--fl-border-soft)] bg-[var(--fl-surface-strong)] p-3"
+                className="mx-auto w-full max-w-[560px] overflow-hidden rounded-[2.2rem] border border-[var(--fl-border-soft)] bg-[var(--fl-surface-strong)] p-3"
                 style={{ boxShadow: "var(--fl-shadow-glass)" }}
               >
                 <div className="relative overflow-hidden rounded-[1.8rem] border border-[var(--fl-border-soft)]">
@@ -413,7 +413,7 @@ export default function Landing() {
                     alt="Academia futurista FitLoot"
                     loading="lazy"
                     decoding="async"
-                    className="h-[520px] w-full object-cover"
+                    className="h-[380px] w-full object-cover sm:h-[520px]"
                   />
                   <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(4,10,7,0.08),rgba(4,10,7,0.72))]" />
 
@@ -477,7 +477,7 @@ export default function Landing() {
 
         <section
           id="metricas"
-          className="scroll-mt-28 border-y border-[var(--fl-border-soft)] bg-[color-mix(in_srgb,var(--fl-surface-muted)_78%,transparent)] px-4 py-9 sm:px-6 lg:px-8"
+          className="scroll-mt-40 border-y border-[var(--fl-border-soft)] bg-[color-mix(in_srgb,var(--fl-surface-muted)_78%,transparent)] px-4 py-9 sm:px-6 lg:scroll-mt-28 lg:px-8"
         >
           <div className="mx-auto grid max-w-[1280px] grid-cols-2 gap-y-8 md:grid-cols-4">
             {metrics.map((metric) => (
@@ -491,7 +491,7 @@ export default function Landing() {
           </div>
         </section>
 
-        <section id="atributos" className="scroll-mt-28 px-4 py-20 sm:px-6 lg:px-8 lg:py-24">
+        <section id="atributos" className="scroll-mt-40 px-4 py-20 sm:px-6 lg:scroll-mt-28 lg:px-8 lg:py-24">
           <div className="mx-auto max-w-[1280px]">
             <div className="mx-auto max-w-3xl text-center">
               <h2 className="fl-auth-display text-4xl font-black tracking-[-0.05em] sm:text-5xl">
@@ -502,7 +502,7 @@ export default function Landing() {
               </p>
             </div>
 
-            <div className="mt-14 grid gap-6 lg:grid-cols-3">
+            <div className="mt-14 grid gap-6 md:grid-cols-2 md:[&>*:last-child]:col-span-2 lg:grid-cols-3 lg:[&>*:last-child]:col-span-1">
               {attributes.map((item, index) => {
                 const Icon = item.icon;
                 const isHighlighted = index === 1;
@@ -543,7 +543,7 @@ export default function Landing() {
             </div>
           </div>
         </section>
-        <section id="funcionalidades" className="scroll-mt-28 px-4 py-20 sm:px-6 lg:px-8 lg:py-24">
+        <section id="funcionalidades" className="scroll-mt-40 px-4 py-20 sm:px-6 lg:scroll-mt-28 lg:px-8 lg:py-24">
           <div className="mx-auto max-w-[1280px]">
             <div className="max-w-3xl">
               <h2 className="fl-auth-display text-4xl font-black tracking-[-0.05em] sm:text-5xl">
@@ -580,7 +580,7 @@ export default function Landing() {
           </div>
         </section>
 
-        <section id="comparativo" className="scroll-mt-28 px-4 py-20 sm:px-6 lg:px-8 lg:py-24">
+        <section id="comparativo" className="scroll-mt-40 px-4 py-20 sm:px-6 lg:scroll-mt-28 lg:px-8 lg:py-24">
           <div className="mx-auto max-w-5xl">
             <div className="text-center">
               <h2 className="fl-auth-display text-4xl font-black tracking-[-0.05em] sm:text-5xl">
@@ -591,29 +591,31 @@ export default function Landing() {
               </p>
             </div>
 
-            <div
-              className="mt-12 overflow-hidden rounded-[1.9rem] border"
-              style={{
-                borderColor: "var(--fl-border-soft)",
-                background:
-                  "linear-gradient(180deg, color-mix(in srgb, var(--fl-surface-glass) 98%, transparent), color-mix(in srgb, var(--fl-surface-muted) 100%, transparent))",
-                boxShadow: "0 24px 54px rgba(0, 0, 0, 0.2)",
-              }}
-            >
-              <div className="grid grid-cols-[1.2fr_1fr_1fr] bg-[rgba(var(--fl-color-accent-rgb),0.1)] text-[0.68rem] font-black uppercase tracking-[0.16em] text-[var(--fl-color-text)] sm:text-xs">
-                <div className="p-4 sm:p-6">Beneficio</div>
-                <div className="p-4 sm:p-6">Academia Comum</div>
-                <div className="p-4 text-[var(--fl-color-accent)] sm:p-6">FitLoot Elite</div>
-              </div>
+            <div className="-mx-4 mt-12 overflow-x-auto px-4 sm:mx-0 sm:px-0">
+              <div
+                className="min-w-[640px] overflow-hidden rounded-[1.9rem] border"
+                style={{
+                  borderColor: "var(--fl-border-soft)",
+                  background:
+                    "linear-gradient(180deg, color-mix(in srgb, var(--fl-surface-glass) 98%, transparent), color-mix(in srgb, var(--fl-surface-muted) 100%, transparent))",
+                  boxShadow: "0 24px 54px rgba(0, 0, 0, 0.2)",
+                }}
+              >
+                <div className="grid grid-cols-[1.2fr_1fr_1fr] bg-[rgba(var(--fl-color-accent-rgb),0.1)] text-[0.68rem] font-black uppercase tracking-[0.16em] text-[var(--fl-color-text)] sm:text-xs">
+                  <div className="p-4 sm:p-6">Beneficio</div>
+                  <div className="p-4 sm:p-6">Academia Comum</div>
+                  <div className="p-4 text-[var(--fl-color-accent)] sm:p-6">FitLoot Elite</div>
+                </div>
 
-              <div className="divide-y divide-[var(--fl-border-soft)]">
-                {comparisonRows.map((row) => (
-                  <div key={row.label} className="grid grid-cols-[1.2fr_1fr_1fr] text-xs sm:text-sm">
-                    <div className="p-4 font-semibold text-[var(--fl-color-text)] sm:p-6">{row.label}</div>
-                    <div className="p-4 text-[var(--fl-color-text-muted)] sm:p-6">{row.common}</div>
-                    <div className="p-4 font-bold text-[var(--fl-color-accent)] sm:p-6">{row.fitloot}</div>
-                  </div>
-                ))}
+                <div className="divide-y divide-[var(--fl-border-soft)]">
+                  {comparisonRows.map((row) => (
+                    <div key={row.label} className="grid grid-cols-[1.2fr_1fr_1fr] text-xs sm:text-sm">
+                      <div className="p-4 font-semibold text-[var(--fl-color-text)] sm:p-6">{row.label}</div>
+                      <div className="p-4 text-[var(--fl-color-text-muted)] sm:p-6">{row.common}</div>
+                      <div className="p-4 font-bold text-[var(--fl-color-accent)] sm:p-6">{row.fitloot}</div>
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
           </div>
@@ -621,7 +623,7 @@ export default function Landing() {
 
         <section
           id="planos"
-          className="scroll-mt-28 border-y border-[var(--fl-border-soft)] bg-[rgba(var(--fl-color-accent-rgb),0.05)] px-4 py-20 sm:px-6 lg:px-8 lg:py-24"
+          className="scroll-mt-40 border-y border-[var(--fl-border-soft)] bg-[rgba(var(--fl-color-accent-rgb),0.05)] px-4 py-20 sm:px-6 lg:scroll-mt-28 lg:px-8 lg:py-24"
         >
           <div className="mx-auto max-w-[1280px]">
             <div className="mx-auto max-w-3xl text-center">
@@ -631,11 +633,13 @@ export default function Landing() {
               </p>
             </div>
 
-            <div className="mt-14 grid gap-6 lg:grid-cols-3">
+            <div className="mt-14 grid gap-6 md:grid-cols-2 md:[&>*:last-child]:col-span-2 lg:grid-cols-3 lg:[&>*:last-child]:col-span-1">
               {plans.map((plan) => (
                 <article
                   key={plan.name}
-                  className="relative flex flex-col rounded-[1.9rem] border p-7"
+                  className={`relative mx-auto flex w-full max-w-md flex-col rounded-[1.9rem] border p-7 md:max-w-none ${
+                    plan.popular ? "lg:-translate-y-2" : ""
+                  }`}
                   style={{
                     borderColor: plan.popular ? "rgba(var(--fl-color-accent-rgb), 0.38)" : "var(--fl-border-soft)",
                     background: plan.popular
@@ -644,7 +648,6 @@ export default function Landing() {
                     boxShadow: plan.popular
                       ? "0 0 0 1px rgba(var(--fl-color-accent-rgb), 0.1), 0 28px 64px rgba(0, 0, 0, 0.28)"
                       : "0 20px 48px rgba(0, 0, 0, 0.18)",
-                    transform: plan.popular ? "translateY(-8px)" : undefined,
                   }}
                 >
                   {plan.popular ? (
@@ -675,7 +678,7 @@ export default function Landing() {
                   <button
                     type="button"
                     onClick={goToLogin}
-                    className={`mt-8 inline-flex items-center justify-center rounded-full px-5 py-3.5 text-sm font-black transition hover:-translate-y-0.5 ${
+                    className={`mt-8 inline-flex w-full items-center justify-center rounded-full px-5 py-3.5 text-sm font-black transition hover:-translate-y-0.5 ${
                       plan.popular
                         ? "text-[var(--fl-nav-item-active-text)]"
                         : "border border-[var(--fl-border-strong)] bg-[var(--fl-surface-strong)] text-[var(--fl-color-text)]"
@@ -698,7 +701,7 @@ export default function Landing() {
           </div>
         </section>
 
-        <section id="comunidade" className="scroll-mt-28 px-4 py-20 sm:px-6 lg:px-8 lg:py-24">
+        <section id="comunidade" className="scroll-mt-40 px-4 py-20 sm:px-6 lg:scroll-mt-28 lg:px-8 lg:py-24">
           <div className="mx-auto max-w-[1280px]">
             <div className="text-center">
               <h2 className="fl-auth-display text-4xl font-black tracking-[-0.05em] sm:text-5xl">
@@ -706,7 +709,7 @@ export default function Landing() {
               </h2>
             </div>
 
-            <div className="mt-14 grid gap-6 lg:grid-cols-3">
+            <div className="mt-14 grid gap-6 md:grid-cols-2 md:[&>*:last-child]:col-span-2 lg:grid-cols-3 lg:[&>*:last-child]:col-span-1">
               {reviews.map((review) => (
                 <article
                   key={review.name}
