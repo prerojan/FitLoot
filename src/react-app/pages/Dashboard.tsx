@@ -297,11 +297,6 @@ export default function Dashboard() {
   const caloriesValue = metrics?.calories_burned ?? 0;
   const stepsProgress = clamp((stepsValue / STEPS_TARGET) * 100, 0, 100);
   const todayKey = useMemo(() => formatDateKey(new Date()), []);
-  const todayDate = useMemo(() => {
-    const date = new Date();
-    date.setHours(0, 0, 0, 0);
-    return date;
-  }, []);
   const calendarDates = useMemo(() => buildCenteredDates(new Date(), 2), []);
   const currentDateLabel = useMemo(() => {
     const label = new Intl.DateTimeFormat("pt-BR", { weekday: "long", day: "numeric", month: "short" }).format(new Date());
@@ -361,6 +356,11 @@ export default function Dashboard() {
     setQuickActionsOpen(false);
     navigate(path);
   }, [navigate]);
+
+  const xpDisplayValue = Math.max(0, progression?.xp ?? 0);
+  const xpStrLength = xpDisplayValue.toString().length;
+  const xpTextSizeClass = xpStrLength >= 5 ? "text-xl md:text-2xl" : xpStrLength === 4 ? "text-2xl md:text-3xl" : "text-3xl md:text-4xl";
+  const xpLabelSizeClass = xpStrLength >= 5 ? "text-[0.6rem] md:text-[0.65rem]" : xpStrLength === 4 ? "text-[0.65rem] md:text-[0.7rem]" : "text-[0.7rem] md:text-[0.8rem]";
 
   return (
     <AppPageShell bottomNavActive="missions" profile={profile} progression={progression}>
@@ -443,11 +443,11 @@ export default function Dashboard() {
                         strokeWidth="18"
                       />
                     </svg>
-                    <div className="absolute inset-x-0 bottom-4 flex items-end justify-center gap-1 sm:bottom-5">
-                      <span className="text-[2.6rem] font-black leading-none text-black drop-shadow-sm md:text-[3rem]">
-                        {loadingState.progression ? <LoadingBall size="sm" /> : formatNumber(Math.max(0, progression?.xp ?? 0))}
+                    <div className="absolute inset-x-0 bottom-4 flex items-baseline justify-center gap-1 sm:bottom-5">
+                      <span className={`${xpTextSizeClass} font-black leading-none text-black drop-shadow-sm transition-all`}>
+                        {loadingState.progression ? <LoadingBall size="sm" /> : formatNumber(xpDisplayValue)}
                       </span>
-                      <span className="pb-1 text-[0.75rem] font-black uppercase text-black md:text-[0.85rem]">XP</span>
+                      <span className={`pb-0.5 ${xpLabelSizeClass} font-black uppercase text-black`}>XP</span>
                     </div>
                   </div>
                 </div>
@@ -480,29 +480,25 @@ export default function Dashboard() {
           </section>
 
           <section className="px-1 pt-1 sm:px-2">
-            <div className="flex w-full gap-1 sm:gap-2 justify-between">
+            <div className="flex w-full gap-2 justify-center">
               {calendarDates.map((date) => {
                 const dateKey = formatDateKey(date);
                 const isCurrentDay = dateKey === todayKey;
-                const isCompletedDay = completedWeekKeys.has(dateKey);
-                const isPastDay = date.getTime() < todayDate.getTime();
                 const weekdayLabel = new Intl.DateTimeFormat("pt-BR", { weekday: "short" }).format(date).replace(".", "").toUpperCase();
                 return (
                   <div
                     key={dateKey}
-                    className={`flex flex-1 min-w-0 flex-col items-center justify-center p-2 md:px-2 md:py-3 ${isCurrentDay ? "rounded-xl shadow-lg" : "rounded-xl md:rounded-[1.35rem]"}`}
+                    className={`flex h-12 w-12 shrink-0 flex-col items-center justify-center rounded-xl ${
+                      isCurrentDay
+                        ? "bg-[var(--app-primary-color)] text-[var(--fl-background-color,#0f172a)] shadow-lg"
+                        : "bg-transparent text-slate-400"
+                    }`}
                     style={isCurrentDay ? {
-                      background: "var(--app-primary-color)",
-                      color: "var(--fl-background-color, #0f172a)",
-                      boxShadow: "0 12px 26px color-mix(in srgb, var(--app-primary-color) 18%, transparent)",
-                    } : {
-                      color: isPastDay ? "color-mix(in srgb, var(--fl-color-text-muted) 82%, transparent)" : "var(--fl-nav-item-muted)",
-                      opacity: isPastDay ? 0.76 : 1,
-                    }}
+                      boxShadow: "0 8px 20px color-mix(in srgb, var(--app-primary-color) 20%, transparent)"
+                    } : {}}
                   >
-                    <span className="text-[0.64rem] font-black uppercase tracking-[0.18em]">{weekdayLabel}</span>
-                    <span className="mt-1 text-lg font-black">{String(date.getDate()).padStart(2, "0")}</span>
-                    <span className="mt-2 h-1.5 w-1.5 rounded-full" style={{ background: isCompletedDay ? (isCurrentDay ? "color-mix(in srgb, var(--fl-background-color, #0f172a) 72%, transparent)" : "color-mix(in srgb, var(--app-primary-color) 72%, transparent)") : "transparent" }} />
+                    <span className="text-[0.6rem] font-black uppercase tracking-[0.1em]">{weekdayLabel}</span>
+                    <span className="mt-0.5 text-base font-black leading-none">{String(date.getDate()).padStart(2, "0")}</span>
                   </div>
                 );
               })}
