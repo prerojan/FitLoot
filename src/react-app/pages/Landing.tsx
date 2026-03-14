@@ -421,20 +421,20 @@ export default function Landing() {
                     Avatar online
                   </div>
 
-                  <div className="absolute bottom-5 left-5 right-5 rounded-[1.8rem] border border-white/10 bg-black/35 p-5 text-white backdrop-blur-xl">
-                    <div className="flex items-center justify-between gap-4">
-                      <div>
-                        <p className="text-[0.7rem] font-bold uppercase tracking-[0.22em] text-white/70">
+                  <div className="absolute bottom-3 left-3 right-3 rounded-[1.4rem] border border-white/10 bg-black/35 p-3 text-white backdrop-blur-xl sm:bottom-5 sm:left-5 sm:right-5 sm:rounded-[1.8rem] sm:p-5">
+                    <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+                      <div className="min-w-0">
+                        <p className="text-[0.62rem] font-bold uppercase tracking-[0.18em] text-white/70 sm:text-[0.7rem] sm:tracking-[0.22em]">
                           Status do jogador
                         </p>
-                        <p className="mt-2 text-2xl font-black">LVL 42</p>
+                        <p className="mt-1.5 text-xl font-black sm:mt-2 sm:text-2xl">LVL 42</p>
                       </div>
-                      <span className="rounded-full bg-[rgba(var(--fl-color-accent-rgb),0.22)] px-3 py-1 text-xs font-bold uppercase tracking-[0.14em] text-[var(--fl-color-accent)]">
+                      <span className="self-start rounded-full bg-[rgba(var(--fl-color-accent-rgb),0.22)] px-2.5 py-1 text-[0.62rem] font-bold uppercase tracking-[0.12em] text-[var(--fl-color-accent)] sm:self-auto sm:px-3 sm:text-xs sm:tracking-[0.14em]">
                         Raid pronta
                       </span>
                     </div>
 
-                    <div className="mt-5 h-2.5 overflow-hidden rounded-full bg-white/10">
+                    <div className="mt-4 h-2 overflow-hidden rounded-full bg-white/10 sm:mt-5 sm:h-2.5">
                       <div
                         className="h-full rounded-full"
                         style={{
@@ -444,17 +444,19 @@ export default function Landing() {
                       />
                     </div>
 
-                    <div className="mt-5 grid grid-cols-3 gap-3">
+                    <div className="mt-4 grid grid-cols-3 gap-2 sm:mt-5 sm:gap-3">
                       {[
                         { label: "Forca", value: "FOR 88" },
                         { label: "Agilidade", value: "AGI 64" },
                         { label: "Resistencia", value: "RES 92" },
                       ].map((stat) => (
-                        <div key={stat.label} className="rounded-2xl border border-white/10 bg-white/5 p-3 text-center">
-                          <p className="text-[0.65rem] font-bold uppercase tracking-[0.16em] text-white/55">
+                        <div key={stat.label} className="rounded-xl border border-white/10 bg-white/5 p-2.5 text-center sm:rounded-2xl sm:p-3">
+                          <p className="text-[0.52rem] font-bold uppercase tracking-[0.12em] text-white/55 sm:text-[0.65rem] sm:tracking-[0.16em]">
                             {stat.label}
                           </p>
-                          <p className="mt-2 text-lg font-black text-[var(--fl-color-accent)]">{stat.value}</p>
+                          <p className="mt-1.5 text-sm font-black text-[var(--fl-color-accent)] sm:mt-2 sm:text-lg">
+                            {stat.value}
+                          </p>
                         </div>
                       ))}
                     </div>
