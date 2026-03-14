@@ -1,21 +1,23 @@
 import { Swords, Trophy, Users, Zap } from "lucide-react";
-import BottomNav from "@/react-app/components/BottomNav";
+import AppPageShell from "@/react-app/components/AppPageShell";
 
 export default function Arena() {
   return (
-    <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 pb-24">
-      <div className="bg-gradient-to-r from-emerald-500 to-teal-600 text-white px-6 pt-8 pb-6 rounded-b-3xl shadow-xl">
-        <div className="flex items-center gap-3">
-          <Swords className="w-8 h-8" />
-          <div>
-            <h1 className="text-3xl font-bold">Arena</h1>
-            <p className="text-emerald-100">Desafie seus limites</p>
+    <AppPageShell bottomNavActive="arena" className="bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50">
+      <section className="fl-app-container py-4 sm:py-6">
+        <div className="rounded-[1.75rem] bg-gradient-to-r from-emerald-500 to-teal-600 px-4 py-5 text-white shadow-xl sm:rounded-[2rem] sm:px-6 sm:py-6">
+          <div className="flex items-center gap-3">
+            <Swords className="h-7 w-7 sm:h-8 sm:w-8" />
+            <div>
+              <h1 className="fl-title-page text-white">Arena</h1>
+              <p className="text-sm text-emerald-100 sm:text-base">Desafie seus limites</p>
+            </div>
           </div>
         </div>
-      </div>
+      </section>
 
-      <div className="px-6 py-6">
-        <div className="fl-card p-8 text-center space-y-6">
+      <section className="fl-app-container py-4 sm:py-6">
+        <div className="fl-card space-y-5 p-5 text-center sm:space-y-6 sm:p-8">
           <div className="inline-flex h-16 w-16 items-center justify-center rounded-2xl bg-emerald-100 text-emerald-700 mx-auto">
             <Swords className="w-8 h-8" />
           </div>
@@ -38,9 +40,7 @@ export default function Arena() {
             </div>
           </div>
         </div>
-      </div>
-
-      <BottomNav active="arena" />
-    </div>
+      </section>
+    </AppPageShell>
   );
 }

@@ -7,7 +7,7 @@ interface LevelUpModalProps {
 
 export default function LevelUpModal({ level, onClose }: LevelUpModalProps) {
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fadeIn">
+    <div className="fl-z-modal fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 animate-fadeIn">
       <div className="bg-gradient-to-br from-emerald-500 to-teal-600 rounded-3xl p-8 max-w-md w-full shadow-2xl text-white relative animate-scaleIn">
         <button
           onClick={onClose}

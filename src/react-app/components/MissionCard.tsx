@@ -308,7 +308,7 @@ function MissionExecutionModal({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center px-4">
+    <div className="fl-z-mission-screen fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center px-4">
       <div className="w-full max-w-md bg-white rounded-3xl shadow-2xl p-6 space-y-4">
         <div className="flex items-center justify-between">
           <h3 className="text-lg font-bold text-gray-900">Executar Missao</h3>
@@ -704,7 +704,7 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
       {triggerContent}
 
       {showDetails && (
-        <div className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm flex items-center justify-center px-4">
+        <div className="fl-z-modal fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center px-4">
           <div className="w-full max-w-xl bg-white rounded-3xl shadow-2xl p-6 space-y-5 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between">
               <h3 className="text-xl font-bold text-gray-900">{missionDetails.title}</h3>
@@ -861,7 +861,7 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
       )}
 
       {showDetails && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 text-xs text-gray-500 flex items-center gap-2">
+        <div className="fl-z-modal fixed bottom-6 left-1/2 -translate-x-1/2 text-xs text-gray-500 flex items-center gap-2">
           <MapPinned className="w-3 h-3" />
           <span>{bodyAreaLabel(mission.body_area)}</span>
           <Trophy className="w-3 h-3" />

@@ -6,7 +6,7 @@
 import { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router";
 import { useAuth } from "@/react-app/contexts/auth";
-import BottomNav from "@/react-app/components/BottomNav";
+import AppPageShell from "@/react-app/components/AppPageShell";
 import { Send, Bot, User, Sparkles } from "lucide-react";
 import { api } from "@/react-app/utils/api";
 import LoadingBall from "@/react-app/components/LoadingBall";
@@ -162,25 +162,26 @@ export default function AIChat() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 pb-24">
-      {/* Header */}
-      <div className="bg-gradient-to-r from-emerald-500 to-teal-600 text-white px-6 py-6 shadow-xl">
-        <div className="flex items-center gap-3">
-          <div className="bg-white/20 backdrop-blur-sm p-3 rounded-full">
-            <Bot className="w-6 h-6" />
-          </div>
-          <div>
-            <h1 className="text-2xl font-bold">FitBot</h1>
-            <p className="text-emerald-100 text-sm flex items-center gap-1">
-              <Sparkles className="w-3 h-3" />
-              Assistente Fitness com IA
-            </p>
+    <AppPageShell bottomNavActive="missions" className="bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50">
+      <section className="fl-app-container pt-4 md:pt-8">
+        <div className="rounded-[1.75rem] bg-gradient-to-r from-emerald-500 to-teal-600 px-4 py-5 text-white shadow-xl sm:px-6 sm:py-6">
+          <div className="flex items-center gap-3">
+            <div className="rounded-full bg-white/20 p-3 backdrop-blur-sm">
+              <Bot className="h-5 w-5 sm:h-6 sm:w-6" />
+            </div>
+            <div className="min-w-0">
+              <h1 className="text-xl font-bold sm:text-2xl">FitBot</h1>
+              <p className="mt-1 flex flex-wrap items-center gap-1 text-sm text-emerald-100">
+                <Sparkles className="h-3 w-3" />
+                Assistente Fitness com IA
+              </p>
+            </div>
           </div>
         </div>
-      </div>
+      </section>
 
-      {/* Messages */}
-      <div className="px-4 py-6 space-y-4 max-h-[calc(100vh-280px)] overflow-y-auto">
+      <section className="fl-app-container pb-40 pt-5 md:pb-28">
+        <div className="mx-auto max-w-4xl space-y-4">
         {messages.map((message, index) => (
           <div
             key={index}
@@ -202,7 +203,7 @@ export default function AIChat() {
               )}
             </div>
             <div
-              className={`max-w-[75%] p-4 rounded-2xl ${
+              className={`max-w-[85%] rounded-2xl p-3.5 sm:max-w-[75%] sm:p-4 ${
                 message.role === "user"
                   ? "bg-emerald-500 text-white rounded-tr-none"
                   : "bg-white shadow-md rounded-tl-none"
@@ -235,48 +236,47 @@ export default function AIChat() {
         )}
 
         <div ref={messagesEndRef} />
-      </div>
+        </div>
+      </section>
 
-      {/* Quick Questions */}
       {messages.length <= 1 && !loading && (
-        <div className="px-4 mb-4">
-          <p className="text-xs text-gray-500 mb-2">Perguntas rápidas:</p>
+        <section className="fl-app-container mb-4">
+          <div className="mx-auto max-w-4xl">
+          <p className="mb-2 text-xs text-gray-500">Perguntas rápidas:</p>
           <div className="flex flex-wrap gap-2">
             {quickQuestions.map((question, index) => (
               <button
                 key={index}
                 onClick={() => handleQuickQuestion(question)}
-                className="px-3 py-2 bg-white rounded-full text-xs text-gray-700 shadow-sm hover:shadow-md transition-shadow"
+                className="min-h-11 rounded-full bg-white px-3 py-2 text-xs text-gray-700 shadow-sm transition-shadow hover:shadow-md"
               >
                 {question}
               </button>
             ))}
           </div>
-        </div>
+          </div>
+        </section>
       )}
 
-      {/* Input */}
-      <div className="fixed bottom-20 left-0 right-0 px-4 pb-4 bg-gradient-to-t from-white to-transparent pt-4">
-        <form onSubmit={sendMessage} className="flex gap-2">
+      <div className="fixed bottom-24 left-0 right-0 fl-z-card px-4 pb-4 pt-4 md:bottom-6">
+        <form onSubmit={sendMessage} className="mx-auto flex w-full max-w-4xl gap-2 rounded-[1.6rem] border border-[var(--fl-border-soft)] bg-[color-mix(in_srgb,var(--fl-surface-strong)_90%,transparent)] p-2 shadow-lg backdrop-blur-xl">
           <input
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             placeholder="Digite sua pergunta..."
-            className="flex-1 px-4 py-3 rounded-full border-2 border-emerald-200 focus:border-emerald-500 outline-none bg-white shadow-sm"
+            className="h-11 flex-1 rounded-full border-2 border-emerald-200 bg-white px-4 py-3 outline-none shadow-sm focus:border-emerald-500"
             disabled={loading}
           />
           <button
             type="submit"
             disabled={loading || !input.trim()}
-            className="shrink-0 w-10 h-10 bg-gradient-to-r from-emerald-500 to-teal-600 text-white rounded-full shadow-lg hover:shadow-xl transition-shadow disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-lg transition-shadow hover:shadow-xl disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Send className="w-5 h-5" />
           </button>
         </form>
       </div>
-
-      <BottomNav active="profile" />
-    </div>
+    </AppPageShell>
   );
 }

@@ -1,7 +1,7 @@
 ﻿import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { useAuth } from "@/react-app/contexts/auth";
-import BottomNav from "@/react-app/components/BottomNav";
+import AppPageShell from "@/react-app/components/AppPageShell";
 import LoadingBall from "@/react-app/components/LoadingBall";
 import { ShoppingBag, Coins, QrCode, Package } from "lucide-react";
 import type { UserProgression } from "@/shared/types";
@@ -124,42 +124,34 @@ export default function Shop() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 pb-24">
-        <div className="px-6 py-10">
+      <AppPageShell
+        bottomNavActive="shop"
+        progression={progression}
+        className="bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50"
+      >
+        <div className="fl-app-container py-6 sm:py-10">
           <div className="fl-card p-6 flex items-center justify-center">
             <LoadingBall size="md" />
           </div>
         </div>
-        <BottomNav active="shop" />
-      </div>
+      </AppPageShell>
     );
   }
 
   if (error) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 pb-24">
-        <div className="px-6 py-12 text-center">
+      <AppPageShell
+        bottomNavActive="shop"
+        progression={progression}
+        className="bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50"
+      >
+        <div className="fl-app-container py-10 text-center sm:py-12">
           <p className="text-red-600 mb-4">{error}</p>
           <button onClick={() => { setLoading(true); void loadData(); }} className="fl-btn-primary rounded-xl px-4 py-2">
             Tentar novamente
           </button>
         </div>
-        <BottomNav active="shop" />
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 pb-24">
-        <div className="px-6 py-12 text-center">
-          <p className="text-red-600 mb-4">{error}</p>
-          <button onClick={() => { setLoading(true); void loadData(); }} className="fl-btn-primary rounded-xl px-4 py-2">
-            Tentar novamente
-          </button>
-        </div>
-        <BottomNav active="shop" />
-      </div>
+      </AppPageShell>
     );
   }
 
@@ -169,67 +161,71 @@ export default function Shop() {
     : products.filter(p => p.category === selectedCategory);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 pb-24">
-      {/* Header */}
-      <div className="bg-gradient-to-r from-emerald-500 to-teal-600 text-white px-6 pt-8 pb-6 rounded-b-3xl shadow-xl">
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h1 className="text-3xl font-bold mb-1">Loja FitLoot</h1>
-            <p className="text-emerald-100">Troque pontos por recompensas reais</p>
-          </div>
-          <div className="text-right">
-            <div className="flex items-center gap-2 bg-white/20 backdrop-blur-sm rounded-full px-4 py-2">
-              <Coins className="w-5 h-5" />
-              <span className="text-2xl font-bold">{progression?.points?.toLocaleString() || 0}</span>
+    <AppPageShell
+      bottomNavActive="shop"
+      progression={progression}
+      className="bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50"
+    >
+      <section className="fl-app-container py-4 sm:py-6">
+        <div className="rounded-[1.75rem] bg-gradient-to-r from-emerald-500 to-teal-600 px-4 py-5 text-white shadow-xl sm:rounded-[2rem] sm:px-6 sm:py-6">
+          <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h1 className="fl-title-page mb-1 text-white">Loja FitLoot</h1>
+              <p className="text-sm text-emerald-100 sm:text-base">Troque pontos por recompensas reais</p>
             </div>
-            <p className="text-xs text-emerald-100 mt-1">pontos disponíveis</p>
+            <div className="text-left sm:text-right">
+              <div className="inline-flex items-center gap-2 rounded-full bg-white/20 px-4 py-2 backdrop-blur-sm">
+                <Coins className="w-5 h-5" />
+                <span className="text-xl font-bold sm:text-2xl">{progression?.points?.toLocaleString() || 0}</span>
+              </div>
+              <p className="mt-1 text-xs text-emerald-100">pontos disponíveis</p>
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <button
+              onClick={() => setActiveTab('shop')}
+              className={`flex min-h-11 flex-1 items-center justify-center gap-2 rounded-xl px-4 py-3 font-semibold transition-all ${
+                activeTab === 'shop'
+                  ? "bg-white text-emerald-600"
+                  : "bg-white/20 backdrop-blur-sm text-white"
+              }`}
+            >
+              <ShoppingBag className="w-5 h-5" />
+              Produtos
+            </button>
+            <button
+              onClick={() => setActiveTab('orders')}
+              className={`flex min-h-11 flex-1 items-center justify-center gap-2 rounded-xl px-4 py-3 font-semibold transition-all ${
+                activeTab === 'orders'
+                  ? "bg-white text-emerald-600"
+                  : "bg-white/20 backdrop-blur-sm text-white"
+              }`}
+            >
+              <Package className="w-5 h-5" />
+              Meus Cupons ({orders.length})
+            </button>
           </div>
         </div>
-
-        {/* Tabs */}
-        <div className="flex gap-2">
-          <button
-            onClick={() => setActiveTab('shop')}
-            className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-semibold transition-all ${
-              activeTab === 'shop'
-                ? "bg-white text-emerald-600"
-                : "bg-white/20 backdrop-blur-sm text-white"
-            }`}
-          >
-            <ShoppingBag className="w-5 h-5" />
-            Produtos
-          </button>
-          <button
-            onClick={() => setActiveTab('orders')}
-            className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-semibold transition-all ${
-              activeTab === 'orders'
-                ? "bg-white text-emerald-600"
-                : "bg-white/20 backdrop-blur-sm text-white"
-            }`}
-          >
-            <Package className="w-5 h-5" />
-            Meus Cupons ({orders.length})
-          </button>
-        </div>
-      </div>
+      </section>
 
       {purchaseSuccess && (
-        <div className="mx-6 mt-4 bg-green-500 text-white px-4 py-3 rounded-2xl shadow-lg flex items-center gap-2 animate-slideDown">
-          <QrCode className="w-5 h-5" />
-          <span className="font-medium">Compra realizada com sucesso!</span>
+        <div className="fl-app-container mt-1">
+          <div className="flex items-center gap-2 rounded-2xl bg-green-500 px-4 py-3 text-white shadow-lg animate-slideDown">
+            <QrCode className="w-5 h-5" />
+            <span className="font-medium">Compra realizada com sucesso!</span>
+          </div>
         </div>
       )}
 
-      {/* Content */}
       {activeTab === 'shop' && (
-        <div className="px-6 py-6">
-          {/* Category Filter */}
-          <div className="flex gap-2 overflow-x-auto pb-4 mb-6">
+        <section className="fl-app-container py-4 sm:py-6">
+          <div className="mb-6 flex gap-2 overflow-x-auto pb-2">
             {categories.map((cat) => (
               <button
                 key={cat}
                 onClick={() => setSelectedCategory(cat)}
-                className={`px-4 py-2 rounded-full font-medium whitespace-nowrap transition-all ${
+                className={`min-h-11 whitespace-nowrap rounded-full px-4 py-2 font-medium transition-all ${
                   selectedCategory === cat
                     ? "bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-md"
                     : "bg-white/80 text-gray-700 hover:bg-white"
@@ -240,8 +236,7 @@ export default function Shop() {
             ))}
           </div>
 
-          {/* Products Grid */}
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
             {filteredProducts.map((product) => (
               <ProductCard
                 key={product.id}
@@ -251,11 +246,11 @@ export default function Shop() {
               />
             ))}
           </div>
-        </div>
+        </section>
       )}
 
       {activeTab === 'orders' && (
-        <div className="px-6 py-6 space-y-4">
+        <section className="fl-app-container space-y-4 py-4 sm:py-6">
           {orders.length === 0 ? (
             <div className="text-center py-12">
               <Package className="w-16 h-16 text-gray-300 mx-auto mb-4" />
@@ -272,11 +267,9 @@ export default function Shop() {
               <OrderCard key={order.id} order={order} />
             ))
           )}
-        </div>
+        </section>
       )}
-
-      <BottomNav active="shop" />
-    </div>
+    </AppPageShell>
   );
 }
 
@@ -292,7 +285,7 @@ function ProductCard({
   const canAfford = userPoints >= product.points_cost;
 
   return (
-    <div className="bg-white/80 backdrop-blur-sm rounded-3xl shadow-lg overflow-hidden hover:shadow-xl transition-all hover:-translate-y-1">
+    <div className="overflow-hidden rounded-3xl bg-white/80 shadow-lg transition-all hover:-translate-y-1 hover:shadow-xl">
       <div className="aspect-video bg-gradient-to-br from-emerald-100 to-teal-100 relative overflow-hidden">
         {product.image_url ? (
           <img
@@ -309,8 +302,8 @@ function ProductCard({
         )}
       </div>
 
-      <div className="p-4">
-        <div className="flex items-start justify-between mb-2">
+      <div className="p-4 sm:p-5">
+        <div className="mb-2 flex items-start justify-between gap-3">
           <div className="flex-1">
             <h3 className="font-bold text-gray-900 mb-1">{product.name}</h3>
             {product.partner_name && (
@@ -323,8 +316,8 @@ function ProductCard({
           <p className="text-sm text-gray-600 mb-3 line-clamp-2">{product.description}</p>
         )}
 
-        <div className="flex items-center justify-between pt-3 border-t border-gray-200">
-          <div className="flex items-center gap-1 text-emerald-600 font-bold text-lg">
+        <div className="flex flex-col gap-3 border-t border-gray-200 pt-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-1 text-lg font-bold text-emerald-600">
             <Coins className="w-5 h-5" />
             <span>{product.points_cost.toLocaleString()}</span>
           </div>
@@ -332,7 +325,7 @@ function ProductCard({
           <button
             onClick={() => onPurchase(product.id)}
             disabled={!canAfford}
-            className={`px-4 py-2 rounded-xl font-semibold transition-all ${
+            className={`min-h-11 rounded-xl px-4 py-2 font-semibold transition-all sm:min-w-[124px] ${
               canAfford
                 ? "bg-gradient-to-r from-emerald-500 to-teal-600 text-white hover:shadow-lg hover:scale-105"
                 : "bg-gray-200 text-gray-400 cursor-not-allowed"
@@ -350,9 +343,9 @@ function OrderCard({ order }: { order: ShopOrderView }) {
   const isRedeemed = order.is_redeemed === 1;
 
   return (
-    <div className="bg-white/80 backdrop-blur-sm rounded-3xl p-5 shadow-lg">
-      <div className="flex gap-4">
-        <div className="w-20 h-20 bg-gradient-to-br from-emerald-100 to-teal-100 rounded-2xl flex-shrink-0 overflow-hidden">
+    <div className="rounded-3xl bg-white/80 p-4 shadow-lg sm:p-5">
+      <div className="flex flex-col gap-4 sm:flex-row">
+        <div className="h-20 w-20 flex-shrink-0 overflow-hidden rounded-2xl bg-gradient-to-br from-emerald-100 to-teal-100">
           {order.image_url ? (
             <img
               src={order.image_url}
@@ -379,7 +372,7 @@ function OrderCard({ order }: { order: ShopOrderView }) {
           </p>
         </div>
 
-        <div className="flex flex-col items-end justify-between">
+        <div className="flex flex-row items-center justify-between gap-3 sm:flex-col sm:items-end sm:justify-between">
           {isRedeemed ? (
             <span className="px-3 py-1 bg-gray-200 text-gray-600 rounded-full text-xs font-medium">
               Usado

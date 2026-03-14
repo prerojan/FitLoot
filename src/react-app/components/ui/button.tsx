@@ -8,7 +8,7 @@ export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElemen
 
 const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
   ({ className, variant = 'default', size = 'default', type = 'button', ...props }, ref) => {
-    const baseClasses = 'inline-flex items-center justify-center gap-2 rounded-md font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50';
+    const baseClasses = 'inline-flex touch-manipulation items-center justify-center gap-2 rounded-md font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50';
 
     const variantClasses: Record<NonNullable<ButtonProps['variant']>, string> = {
       default: 'bg-emerald-600 text-white hover:bg-emerald-700',
@@ -20,10 +20,10 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
     };
 
     const sizeClasses: Record<NonNullable<ButtonProps['size']>, string> = {
-      default: 'h-10 px-4 py-2',
-      sm: 'h-8 px-3 text-sm',
+      default: 'min-h-11 px-4 py-2',
+      sm: 'min-h-10 px-3 text-sm',
       lg: 'h-12 px-8',
-      icon: 'h-10 w-10',
+      icon: 'h-11 w-11',
     };
 
     return (

@@ -1,7 +1,7 @@
 ﻿import { useCallback, useEffect, useState } from "react";
 import { useAuth } from "@/react-app/contexts/auth";
 import { useNavigate, useSearchParams } from "react-router";
-import BottomNav from "@/react-app/components/BottomNav";
+import AppPageShell from "@/react-app/components/AppPageShell";
 import LoadingBall from "@/react-app/components/LoadingBall";
 import { Swords, Trophy, Clock, Zap, Target, Users, ChevronRight } from "lucide-react";
 import { ApiRequestError, api, fetchAndCacheJson, readCachedJson } from "@/react-app/utils/api";
@@ -204,79 +204,61 @@ export default function MiniGames() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-purple-50 via-pink-50 to-red-50 pb-24">
-        <div className="px-6 py-10">
+      <AppPageShell bottomNavActive="arena" className="bg-gradient-to-br from-purple-50 via-pink-50 to-red-50">
+        <div className="fl-app-container py-6 sm:py-10">
           <div className="fl-card p-6 flex items-center justify-center">
             <LoadingBall size="md" />
           </div>
         </div>
-        <BottomNav active="arena" />
-      </div>
+      </AppPageShell>
     );
   }
 
   if (error) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-purple-50 via-pink-50 to-red-50 pb-24">
-        <div className="px-6 py-12 text-center">
+      <AppPageShell bottomNavActive="arena" className="bg-gradient-to-br from-purple-50 via-pink-50 to-red-50">
+        <div className="fl-app-container py-10 text-center sm:py-12">
           <p className="text-red-600 mb-4">{error}</p>
           <button onClick={() => { setLoading(true); void loadSkills(); void loadGames(); }} className="fl-btn-primary rounded-xl px-4 py-2">
             Tentar novamente
           </button>
         </div>
-        <BottomNav active="arena" />
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-purple-50 via-pink-50 to-red-50 pb-24">
-        <div className="px-6 py-12 text-center">
-          <p className="text-red-600 mb-4">{error}</p>
-          <button onClick={() => { setLoading(true); void loadSkills(); void loadGames(); }} className="fl-btn-primary rounded-xl px-4 py-2">
-            Tentar novamente
-          </button>
-        </div>
-        <BottomNav active="arena" />
-      </div>
+      </AppPageShell>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-50 via-pink-50 to-red-50 pb-24">
-      {/* Header */}
-      <div className="bg-white/80 backdrop-blur-sm border-b border-gray-200 sticky top-0 z-10">
-        <div className="max-w-screen-xl mx-auto px-4 py-6">
-          <div className="flex items-center justify-between">
+    <AppPageShell bottomNavActive="arena" className="bg-gradient-to-br from-purple-50 via-pink-50 to-red-50">
+      <section className="fl-app-container py-4 sm:py-6">
+        <div className="rounded-[1.75rem] border border-white/60 bg-white/80 px-4 py-5 shadow-xl backdrop-blur-sm sm:rounded-[2rem] sm:px-6 sm:py-6">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center gap-3">
-              <Swords className="w-8 h-8 text-purple-600" />
+              <Swords className="h-7 w-7 text-purple-600 sm:h-8 sm:w-8" />
               <h1 className="fl-title-page">Mini-Games</h1>
             </div>
             <button
               onClick={() => setShowCreateForm(!showCreateForm)}
-              className="bg-gradient-to-r from-purple-500 to-pink-600 text-white px-6 py-3 rounded-full font-semibold hover:shadow-lg transition-all flex items-center gap-2"
+              className="flex min-h-11 items-center justify-center gap-2 rounded-full bg-gradient-to-r from-purple-500 to-pink-600 px-5 py-3 font-semibold text-white transition-all hover:shadow-lg sm:px-6"
             >
               <Zap className="w-5 h-5" />
               Novo Desafio
             </button>
           </div>
         </div>
-      </div>
+      </section>
 
-      <div className="max-w-screen-xl mx-auto px-4 py-6">
-        {/* Create Challenge Form */}
+      <section className="fl-app-container py-2 pb-6 sm:py-3">
         {showCreateForm && (
-          <div className="bg-white rounded-3xl shadow-2xl p-8 mb-6 animate-fadeIn">
+          <div className="mb-6 rounded-3xl bg-white p-5 shadow-2xl animate-fadeIn sm:p-8">
             <h2 className="fl-title-section mb-6">Criar Novo Desafio</h2>
             
             <div className="space-y-6">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Tipo de Oponente</label>
-                <div className="flex gap-4">
+                <div className="flex flex-col gap-3 sm:flex-row sm:gap-4">
                   <button
                     onClick={() => setOpponentType('friend')}
-                    className={`flex-1 py-3 rounded-xl font-semibold transition-all ${
+                    className={`min-h-11 flex-1 rounded-xl py-3 font-semibold transition-all ${
                       opponentType === 'friend'
                         ? 'bg-purple-500 text-white'
                         : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
@@ -288,7 +270,7 @@ export default function MiniGames() {
                   </button>
                   <button
                     onClick={() => setOpponentType('random')}
-                    className={`flex-1 py-3 rounded-xl font-semibold transition-all ${
+                    className={`min-h-11 flex-1 rounded-xl py-3 font-semibold transition-all ${
                       opponentType === 'random'
                         ? 'bg-purple-500 text-white'
                         : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
@@ -306,7 +288,7 @@ export default function MiniGames() {
                 <select
                   value={selectedSkill || ''}
                   onChange={(e) => setSelectedSkill(parseInt(e.target.value))}
-                  className="w-full px-4 py-3 rounded-xl border-2 border-gray-200 focus:border-purple-500 focus:outline-none"
+                  className="min-h-11 w-full rounded-xl border-2 border-gray-200 px-4 py-3 focus:border-purple-500 focus:outline-none"
                 >
                   <option value="">Selecione uma habilidade</option>
                   {skills.map((skill) => (
@@ -340,16 +322,16 @@ export default function MiniGames() {
                 </div>
               </div>
 
-              <div className="flex gap-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:gap-4">
                 <button
                   onClick={() => setShowCreateForm(false)}
-                  className="flex-1 bg-gray-200 text-gray-700 py-3 rounded-full font-semibold hover:bg-gray-300"
+                  className="min-h-11 flex-1 rounded-full bg-gray-200 py-3 font-semibold text-gray-700 hover:bg-gray-300"
                 >
                   Cancelar
                 </button>
                 <button
                   onClick={createChallenge}
-                  className="flex-1 bg-gradient-to-r from-purple-500 to-pink-600 text-white py-3 rounded-full font-semibold hover:shadow-lg"
+                  className="min-h-11 flex-1 rounded-full bg-gradient-to-r from-purple-500 to-pink-600 py-3 font-semibold text-white hover:shadow-lg"
                 >
                   Criar Desafio
                 </button>
@@ -368,14 +350,14 @@ export default function MiniGames() {
             <p className="text-gray-400 text-sm">Crie um novo desafio para começar!</p>
           </div>
         ) : (
-          <div className="grid md:grid-cols-2 gap-4 mb-8">
+          <div className="mb-8 grid gap-4 md:grid-cols-2">
             {activeGames.map((game) => {
               const isChallenger = game.challenger_user_id === user?.id;
               const isPending = game.status === 'pending';
               const isActive = game.status === 'active';
               
               return (
-                <div key={game.id} className="fl-card p-6 hover:shadow-xl transition-shadow">
+                <div key={game.id} className="fl-card p-5 transition-shadow hover:shadow-xl sm:p-6">
                   <div className="flex items-center justify-between mb-4">
                     <div className={`px-3 py-1 rounded-full text-sm font-semibold ${
                       isPending ? 'bg-yellow-100 text-yellow-700' : 'bg-green-100 text-green-700'
@@ -428,7 +410,7 @@ export default function MiniGames() {
                   {isPending && !isChallenger && (
                     <button
                       onClick={() => acceptChallenge(game.id)}
-                      className="w-full bg-gradient-to-r from-purple-500 to-pink-600 text-white py-3 rounded-full font-semibold hover:shadow-lg flex items-center justify-center gap-2"
+                      className="flex min-h-11 w-full items-center justify-center gap-2 rounded-full bg-gradient-to-r from-purple-500 to-pink-600 py-3 font-semibold text-white hover:shadow-lg"
                     >
                       Aceitar Desafio
                       <ChevronRight className="w-5 h-5" />
@@ -444,7 +426,7 @@ export default function MiniGames() {
                           completeChallenge(game.id, reps, time);
                         }
                       }}
-                      className="fl-btn-primary w-full py-3 rounded-full hover:shadow-lg flex items-center justify-center gap-2"
+                      className="fl-btn-primary flex min-h-11 w-full items-center justify-center gap-2 rounded-full py-3 hover:shadow-lg"
                     >
                       Completar Desafio
                       <Trophy className="w-5 h-5" />
@@ -470,7 +452,7 @@ export default function MiniGames() {
               {completedGames.map((game) => {
                 const isWinner = game.winner_user_id === user?.id;
                 return (
-                  <div key={game.id} className="bg-white rounded-xl p-4 shadow-md flex items-center justify-between">
+                  <div key={game.id} className="flex items-center justify-between rounded-xl bg-white p-4 shadow-md">
                     <div>
                       <div className="font-bold text-gray-900">{game.skill_name}</div>
                       <div className="text-sm text-gray-500">
@@ -488,10 +470,8 @@ export default function MiniGames() {
             </div>
           </>
         )}
-      </div>
-
-      <BottomNav active="arena" />
-    </div>
+      </section>
+    </AppPageShell>
   );
 }
 

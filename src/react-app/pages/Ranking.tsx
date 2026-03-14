@@ -1,7 +1,7 @@
 ﻿import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { useAuth } from "@/react-app/contexts/auth";
-import BottomNav from "@/react-app/components/BottomNav";
+import AppPageShell from "@/react-app/components/AppPageShell";
 import LoadingBall from "@/react-app/components/LoadingBall";
 import { Avatar } from "@/react-app/components/ui/avatar";
 import { Card } from "@/react-app/components/ui/card";
@@ -58,66 +58,52 @@ export default function Ranking() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 pb-24">
-        <div className="px-6 py-10">
+      <AppPageShell bottomNavActive="ranking" className="bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50">
+        <div className="fl-app-container py-6 sm:py-10">
           <div className="fl-card p-6 flex items-center justify-center">
             <LoadingBall size="md" />
           </div>
         </div>
-        <BottomNav active="ranking" />
-      </div>
+      </AppPageShell>
     );
   }
 
   if (error) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 pb-24">
-        <div className="px-6 py-12 text-center">
+      <AppPageShell bottomNavActive="ranking" className="bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50">
+        <div className="fl-app-container py-10 text-center sm:py-12">
           <p className="text-red-600 mb-4">{error}</p>
           <button onClick={loadRanking} className="fl-btn-primary rounded-xl px-4 py-2">
             Tentar novamente
           </button>
         </div>
-        <BottomNav active="ranking" />
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 pb-24">
-        <div className="px-6 py-12 text-center">
-          <p className="text-red-600 mb-4">{error}</p>
-          <button onClick={loadRanking} className="fl-btn-primary rounded-xl px-4 py-2">
-            Tentar novamente
-          </button>
-        </div>
-        <BottomNav active="ranking" />
-      </div>
+      </AppPageShell>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 pb-24">
-      <div className="bg-gradient-to-r from-emerald-500 to-teal-600 text-white px-6 pt-8 pb-6 rounded-b-3xl shadow-xl">
-        <div className="text-center mb-6">
-          <div className="inline-flex items-center justify-center w-16 h-16 bg-white/20 backdrop-blur-sm rounded-full mb-4">
-            <Trophy className="w-8 h-8" />
+    <AppPageShell bottomNavActive="ranking" className="bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50">
+      <section className="fl-app-container py-4 sm:py-6">
+        <div className="rounded-[1.75rem] bg-gradient-to-r from-emerald-500 to-teal-600 px-4 py-5 text-white shadow-xl sm:rounded-[2rem] sm:px-6 sm:py-6">
+          <div className="mb-6 text-center">
+            <div className="mb-4 inline-flex h-14 w-14 items-center justify-center rounded-full bg-white/20 backdrop-blur-sm sm:h-16 sm:w-16">
+              <Trophy className="h-7 w-7 sm:h-8 sm:w-8" />
+            </div>
+            <h1 className="fl-title-page mb-1 text-white">Ranking Global</h1>
+            <p className="text-sm text-emerald-100 sm:text-base">Top atletas do FitLoot</p>
           </div>
-          <h1 className="fl-title-page text-white mb-1">Ranking Global</h1>
-          <p className="text-emerald-100">Top atletas do FitLoot</p>
+
+          {safeGet(ranking, 0) && safeGet(ranking, 1) && safeGet(ranking, 2) && (
+            <div className="mb-2 flex items-end justify-center gap-2 sm:mb-4">
+              <PodiumCard position={2} player={safeGet(ranking, 1)} height="h-24" />
+              <PodiumCard position={1} player={safeGet(ranking, 0)} height="h-32" />
+              <PodiumCard position={3} player={safeGet(ranking, 2)} height="h-20" />
+            </div>
+          )}
         </div>
+      </section>
 
-        {safeGet(ranking, 0) && safeGet(ranking, 1) && safeGet(ranking, 2) && (
-          <div className="flex items-end justify-center gap-2 mb-6">
-            <PodiumCard position={2} player={safeGet(ranking, 1)} height="h-24" />
-            <PodiumCard position={1} player={safeGet(ranking, 0)} height="h-32" />
-            <PodiumCard position={3} player={safeGet(ranking, 2)} height="h-20" />
-          </div>
-        )}
-      </div>
-
-      <div className="px-6 py-6 space-y-3">
+      <section className="fl-app-container space-y-3 pb-6 pt-1 sm:space-y-4">
         {ranking.slice(3).map((player, index) => (
           <RankingCard key={index} position={index + 4} player={player} />
         ))}
@@ -128,10 +114,8 @@ export default function Ranking() {
             <p className="text-gray-500">Nenhum atleta no ranking ainda</p>
           </div>
         )}
-      </div>
-
-      <BottomNav active="ranking" />
-    </div>
+      </section>
+    </AppPageShell>
   );
 }
 
@@ -160,7 +144,7 @@ function PodiumCard({
   };
 
   return (
-    <div className="flex-1 max-w-[100px]">
+    <div className="max-w-[92px] flex-1 sm:max-w-[100px]">
       <Card tone="soft" className="p-3 mb-2 text-center shadow-xl">
         <div className="flex justify-center mb-2">{getMedalIcon()}</div>
         <p className="font-bold text-gray-900 text-sm truncate">{player.username}</p>
@@ -179,8 +163,8 @@ function PodiumCard({
 
 function RankingCard({ position, player }: { position: number; player: RankingPlayer }) {
   return (
-    <Card tone="soft" className="p-4 flex items-center gap-4 hover:shadow-xl transition-all">
-      <div className="flex items-center justify-center w-12 h-12 bg-gradient-to-br from-emerald-500 to-teal-600 text-white font-bold text-lg rounded-xl flex-shrink-0">
+    <Card tone="soft" className="flex items-center gap-3 p-4 transition-all hover:shadow-xl sm:gap-4">
+      <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 text-base font-bold text-white sm:h-12 sm:w-12 sm:text-lg">
         {position}
       </div>
 
@@ -192,11 +176,11 @@ function RankingCard({ position, player }: { position: number; player: RankingPl
       </div>
 
       <div className="text-right">
-        <div className="flex items-center gap-1 text-emerald-600 font-bold mb-1">
+        <div className="mb-1 flex items-center justify-end gap-1 font-bold text-emerald-600">
           <Zap className="w-4 h-4" />
           <span>Nv {player.level}</span>
         </div>
-        <div className="flex items-center gap-1 text-orange-600 text-sm">
+        <div className="flex items-center justify-end gap-1 text-sm text-orange-600">
           <Flame className="w-3 h-3" />
           <span>{player.current_streak}d</span>
         </div>

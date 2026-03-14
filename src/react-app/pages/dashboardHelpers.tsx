@@ -37,14 +37,14 @@ export function SectionHeader({
 }) {
   return (
     <div className="mb-4 flex items-center justify-between gap-4">
-      <h2 className="text-lg font-bold" style={{ color: "var(--fl-color-text)" }}>
+      <h2 className="text-base font-bold sm:text-lg" style={{ color: "var(--fl-color-text)" }}>
         {title}
       </h2>
       {actionLabel && onAction ? (
         <button
           type="button"
           onClick={onAction}
-          className="text-xs font-bold transition-colors hover:opacity-80"
+          className="min-h-11 text-[0.72rem] font-bold transition-colors hover:opacity-80 sm:min-h-0 sm:text-xs"
           style={{ color: "var(--fl-color-text-muted)" }}
         >
           {actionLabel}
@@ -70,7 +70,7 @@ export function MetricCard({
   loading: boolean;
 }) {
   return (
-    <div className="flex min-h-[10rem] flex-col justify-between rounded-[1.75rem] p-4" style={PANEL_STYLE}>
+    <div className="flex min-h-[9rem] flex-col justify-between rounded-[1.5rem] p-4 sm:min-h-[10rem] sm:rounded-[1.75rem] sm:p-5" style={PANEL_STYLE}>
       <div className="flex items-start justify-between gap-4">
         <span
           className="text-[0.68rem] font-black uppercase tracking-[0.22em]"
@@ -86,7 +86,7 @@ export function MetricCard({
         </div>
       </div>
       <div className="space-y-2">
-        <div className="text-2xl font-bold" style={{ color: "var(--fl-color-text)" }}>
+        <div className="text-[1.7rem] font-bold sm:text-2xl" style={{ color: "var(--fl-color-text)" }}>
           {loading ? <LoadingBall size="sm" /> : value}
         </div>
         {sublabel ? (

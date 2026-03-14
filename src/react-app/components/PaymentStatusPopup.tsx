@@ -30,7 +30,7 @@ export default function PaymentStatusPopup({ open, title, message, tone, onClose
   const styles = TONE_STYLES[tone];
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/35 px-4">
+    <div className="fl-z-toast fixed inset-0 flex items-center justify-center bg-black/35 px-4">
       <div className={`w-full max-w-sm rounded-2xl border ${styles.border} ${styles.bg} p-5 shadow-2xl`}>
         <h3 className={`text-lg font-bold ${styles.title}`}>{title}</h3>
         <p className="mt-2 text-sm text-gray-700">{message}</p>

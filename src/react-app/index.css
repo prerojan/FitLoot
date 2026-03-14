@@ -237,6 +237,7 @@ body {
 
 #root {
   min-height: 100vh;
+  overflow-x: hidden;
 }
 
 .loading {
@@ -297,22 +298,31 @@ body {
 
 @layer components {
   .fl-title-page {
-    @apply text-3xl font-extrabold tracking-tight;
+    font-size: clamp(1.85rem, 4vw, 2.6rem);
+    line-height: 1.05;
+    font-weight: 800;
+    letter-spacing: -0.03em;
     color: var(--fl-color-text);
   }
 
   .fl-title-section {
-    @apply text-2xl font-extrabold tracking-tight;
+    font-size: clamp(1.45rem, 3vw, 2.15rem);
+    line-height: 1.08;
+    font-weight: 800;
+    letter-spacing: -0.03em;
     color: var(--fl-color-text);
   }
 
   .fl-title-card {
-    @apply text-xl font-bold;
+    font-size: clamp(1.1rem, 2.2vw, 1.45rem);
+    line-height: 1.12;
+    font-weight: 700;
     color: var(--fl-color-text);
   }
 
   .fl-card {
-    @apply rounded-2xl bg-white shadow-lg;
+    @apply relative rounded-2xl bg-white shadow-lg;
+    z-index: 10;
     background-image: linear-gradient(
       180deg,
       rgba(255, 255, 255, 0.08),
@@ -324,7 +334,8 @@ body {
   }
 
   .fl-card-soft {
-    @apply rounded-2xl bg-white/60 backdrop-blur-sm border;
+    @apply relative rounded-2xl bg-white/60 backdrop-blur-sm border;
+    z-index: 10;
     border-color: rgba(var(--app-primary-color-rgb), 0.12);
     background-image: linear-gradient(
       135deg,
@@ -360,6 +371,48 @@ body {
   .fl-btn-secondary:hover {
     background: var(--fl-surface-glass);
     border-color: var(--fl-border-strong);
+  }
+}
+
+@layer utilities {
+  .fl-app-page {
+    min-height: 100vh;
+    overflow-x: hidden;
+    padding-bottom: 7.5rem;
+  }
+
+  .fl-app-container {
+    width: min(100%, 82rem);
+    margin-inline: auto;
+    padding-inline: 1rem;
+  }
+
+  .fl-z-base {
+    z-index: 0;
+  }
+
+  .fl-z-card {
+    z-index: 10;
+  }
+
+  .fl-z-nav {
+    z-index: 40;
+  }
+
+  .fl-z-fab {
+    z-index: 40;
+  }
+
+  .fl-z-modal {
+    z-index: 50;
+  }
+
+  .fl-z-mission-screen {
+    z-index: 60;
+  }
+
+  .fl-z-toast {
+    z-index: 70;
   }
 }
 
@@ -1382,6 +1435,22 @@ body {
   font-weight: 700;
   letter-spacing: 0.02em;
   line-height: 1;
+}
+
+@media (min-width: 640px) {
+  .fl-app-container {
+    padding-inline: 1.5rem;
+  }
+}
+
+@media (min-width: 768px) {
+  .fl-app-page {
+    padding-bottom: 2.5rem;
+  }
+
+  .fl-app-container {
+    padding-inline: 2rem;
+  }
 }
 
 @keyframes fadeIn {

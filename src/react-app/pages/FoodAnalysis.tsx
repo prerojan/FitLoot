@@ -1,7 +1,7 @@
 ﻿import { useMemo, useRef, useState, useEffect, type ChangeEventHandler } from "react";
 import { useNavigate } from "react-router";
 import { Camera, ImagePlus, RefreshCw, Save, AlertTriangle, CheckCircle2 } from "lucide-react";
-import BottomNav from "@/react-app/components/BottomNav";
+import AppPageShell from "@/react-app/components/AppPageShell";
 import { Card } from "@/react-app/components/ui/card";
 import { Button } from "@/react-app/components/ui/button";
 import LoadingBall from "@/react-app/components/LoadingBall";
@@ -342,14 +342,18 @@ export default function FoodAnalysis() {
   const macroBars = useMemo(() => result?.totals.macro_percentages ?? { protein: 0, carbs: 0, fats: 0 }, [result]);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 pb-24">
-      <div className="bg-gradient-to-r from-emerald-500 to-teal-600 text-white px-6 pt-8 pb-6 rounded-b-3xl shadow-xl">
-        <h1 className="text-2xl font-bold">Análise de alimentos</h1>
-        <p className="text-emerald-100 text-sm mt-1">Foto por câmera ou galeria, com MediaPipe + USDA + fallback</p>
-      </div>
+    <AppPageShell bottomNavActive="missions" className="bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50">
+      <section className="fl-app-container py-4 sm:py-6">
+        <div className="rounded-[1.75rem] bg-gradient-to-r from-emerald-500 to-teal-600 px-4 py-5 text-white shadow-xl sm:rounded-[2rem] sm:px-6 sm:py-6">
+          <h1 className="fl-title-page text-white">Análise de alimentos</h1>
+          <p className="mt-1 max-w-2xl text-sm text-emerald-100 sm:text-base">
+            Foto por câmera ou galeria, com MediaPipe + USDA + fallback
+          </p>
+        </div>
+      </section>
 
-      <div className="px-6 py-6 space-y-4">
-        <Card tone="soft" className="p-4 space-y-3">
+      <section className="fl-app-container space-y-4 pb-6 pt-1 sm:space-y-5">
+        <Card tone="soft" className="space-y-3 p-4 sm:p-5">
           {!preview && (
             <>
               {!streamActive ? (
@@ -363,7 +367,7 @@ export default function FoodAnalysis() {
                   Tirar foto
                 </Button>
               )}
-              <label className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-white border border-gray-200 py-3 px-4 cursor-pointer font-medium text-gray-700">
+              <label className="inline-flex min-h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-xl border border-gray-200 bg-white px-4 py-3 font-medium text-gray-700">
                 <ImagePlus className="w-4 h-4" />
                 Selecionar da galeria
                 <input type="file" accept="image/*" className="hidden" onChange={onPickGallery} />
@@ -386,21 +390,21 @@ export default function FoodAnalysis() {
             <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-red-700 text-sm">{mediaPipeError}</div>
           )}
 
-          {streamActive && <video ref={videoRef} className="w-full rounded-2xl" autoPlay playsInline muted />}
+          {streamActive && <video ref={videoRef} className="w-full rounded-2xl object-cover" autoPlay playsInline muted />}
           {preview && (
             <img
               src={preview}
               alt="Prévia do alimento"
               loading="lazy"
               decoding="async"
-              className="w-full rounded-2xl"
+              className="w-full rounded-2xl object-cover"
             />
           )}
           <canvas ref={canvasRef} className="hidden" />
         </Card>
 
         {loading && (
-          <Card tone="soft" className="p-6">
+          <Card tone="soft" className="p-5 sm:p-6">
             <div className="flex items-center justify-center gap-2 text-emerald-700">
               <LoadingBall size="md" />
               Processando imagem e calculando nutrientes...
@@ -425,9 +429,9 @@ export default function FoodAnalysis() {
               </Card>
             )}
 
-            <Card className="p-5 space-y-4">
+            <Card className="space-y-4 p-4 sm:p-5">
               <h2 className="fl-title-card">Resumo nutricional</h2>
-              <div className="grid grid-cols-2 gap-3 text-sm">
+              <div className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
                 <Metric label="Calorias" value={`${result.totals.calories} kcal`} />
                 <Metric label="Energia" value={`${result.totals.energy_kj} kJ`} />
                 <Metric label="Proteínas" value={`${result.totals.protein} g`} />
@@ -440,7 +444,7 @@ export default function FoodAnalysis() {
               <MacroBar label={`Gorduras ${macroBars.fats}%`} value={macroBars.fats} color="bg-amber-500" />
             </Card>
 
-            <Card className="p-5 space-y-3">
+            <Card className="space-y-3 p-4 sm:p-5">
               <h3 className="font-semibold text-gray-900">Itens identificados</h3>
               {result.items.map((item, index) => (
                 <div key={`${item.food_name}-${index}`} className="rounded-xl border border-gray-200 p-3 text-sm">
@@ -452,7 +456,7 @@ export default function FoodAnalysis() {
               ))}
             </Card>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <Button onClick={() => { setPreview(null); setResult(null); setError(null); }} variant="secondary" className="w-full">
                 <RefreshCw className="w-4 h-4" />
                 Refazer foto
@@ -464,10 +468,8 @@ export default function FoodAnalysis() {
             </div>
           </>
         )}
-      </div>
-
-      <BottomNav active="missions" />
-    </div>
+      </section>
+    </AppPageShell>
   );
 }
 

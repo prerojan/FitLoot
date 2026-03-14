@@ -7,8 +7,8 @@ export const MATERIAL_SYMBOLS_HREF =
 export const STEPS_TARGET = 15000;
 
 export const DESKTOP_NAV_ITEMS = [
-  { id: "dashboard", label: "Dashboard", icon: "dashboard", path: "/dashboard", matches: ["/dashboard", "/home"] },
-  { id: "arena", label: "Arena", icon: "swords", path: "/minigames", matches: ["/minigames"] },
+  { id: "dashboard", label: "Dashboard", icon: "dashboard", path: "/dashboard", matches: ["/dashboard", "/home", "/ai-chat", "/food-analysis"] },
+  { id: "arena", label: "Arena", icon: "swords", path: "/minigames", matches: ["/minigames", "/friends"] },
   { id: "ranking", label: "Ranking", icon: "leaderboard", path: "/ranking", matches: ["/ranking"] },
   { id: "shop", label: "Loja", icon: "storefront", path: "/shop", matches: ["/shop"] },
   { id: "profile", label: "Perfil", icon: "person", path: "/profile", matches: ["/profile"] },
@@ -173,6 +173,17 @@ export function buildWeekDates(baseDate: Date): Date[] {
   return Array.from({ length: 7 }, (_, index) => {
     const date = new Date(weekStart);
     date.setDate(weekStart.getDate() + index);
+    return date;
+  });
+}
+
+export function buildCenteredDates(baseDate: Date, radius = 2): Date[] {
+  const normalizedBaseDate = new Date(baseDate);
+  normalizedBaseDate.setHours(0, 0, 0, 0);
+
+  return Array.from({ length: radius * 2 + 1 }, (_, index) => {
+    const date = new Date(normalizedBaseDate);
+    date.setDate(normalizedBaseDate.getDate() + index - radius);
     return date;
   });
 }

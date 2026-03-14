@@ -1,13 +1,13 @@
 ﻿import { useCallback, useEffect, useState } from "react";
 import { useAuth } from "@/react-app/contexts/auth";
 import { useNavigate } from "react-router";
-import BottomNav from "@/react-app/components/BottomNav";
+import AppPageShell from "@/react-app/components/AppPageShell";
 import { Badge } from "@/react-app/components/ui/badge";
 import { Avatar } from "@/react-app/components/ui/avatar";
 import { Button } from "@/react-app/components/ui/button";
 import { Card } from "@/react-app/components/ui/card";
 import { Users, Search, UserPlus, Check, X, Swords, TrendingUp } from "lucide-react";
-import PageLoader from "@/react-app/components/PageLoader";
+import LoadingBall from "@/react-app/components/LoadingBall";
 import { api } from "@/react-app/utils/api";
 
 interface Friend {
@@ -185,34 +185,39 @@ export default function Friends() {
   };
 
   if (loading) {
-    return <PageLoader />;
+    return (
+      <AppPageShell bottomNavActive="arena" className="bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50">
+        <div className="fl-app-container py-6 sm:py-10">
+          <div className="fl-card flex items-center justify-center p-6">
+            <LoadingBall size="md" />
+          </div>
+        </div>
+      </AppPageShell>
+    );
   }
 
   if (error) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 pb-24">
-        <div className="px-6 py-12 text-center">
+      <AppPageShell bottomNavActive="arena" className="bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50">
+        <div className="fl-app-container py-10 text-center sm:py-12">
           <p className="text-red-600 mb-4">{error}</p>
           <button onClick={() => { setLoading(true); void loadFriends(); }} className="fl-btn-primary rounded-xl px-4 py-2">
             Tentar novamente
           </button>
         </div>
-        <BottomNav active="arena" />
-      </div>
+      </AppPageShell>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 pb-24">
-      {/* Header */}
-      <div className="bg-white/80 backdrop-blur-sm border-b border-gray-200 sticky top-0 z-10">
-        <div className="max-w-screen-xl mx-auto px-4 py-6">
+    <AppPageShell bottomNavActive="arena" className="bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50">
+      <section className="fl-app-container py-4 sm:py-6">
+        <div className="rounded-[1.75rem] border border-white/60 bg-white/80 px-4 py-5 shadow-xl backdrop-blur-sm sm:rounded-[2rem] sm:px-6 sm:py-6">
           <div className="flex items-center gap-3 mb-4">
-            <Users className="w-8 h-8 text-emerald-600" />
+            <Users className="h-7 w-7 text-emerald-600 sm:h-8 sm:w-8" />
             <h1 className="fl-title-page">Amigos</h1>
           </div>
 
-          {/* Search Bar */}
           <div className="relative">
             <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
             <input
@@ -221,23 +226,22 @@ export default function Friends() {
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               onKeyPress={(e) => e.key === 'Enter' && searchUsers()}
-              className="w-full pl-12 pr-4 py-3 rounded-full border-2 border-gray-200 focus:border-emerald-500 focus:outline-none"
+              className="min-h-11 w-full rounded-full border-2 border-gray-200 py-3 pl-12 pr-[7.5rem] focus:border-emerald-500 focus:outline-none sm:pr-32"
             />
             <Button
               onClick={searchUsers}
               disabled={searching}
               variant="primary"
-              className="absolute right-2 top-1/2 transform -translate-y-1/2 h-10 min-w-[96px] rounded-full disabled:opacity-50 flex items-center justify-center"
+              className="absolute right-2 top-1/2 flex min-h-10 min-w-[88px] -translate-y-1/2 items-center justify-center rounded-full disabled:opacity-50 sm:min-w-[96px]"
             >
               {searching ? "..." : "Buscar"}
             </Button>
           </div>
 
-          {/* Search Results */}
           {searchResults.length > 0 && (
             <Card className="mt-4 p-4 space-y-2">
               {searchResults.map((result) => (
-                <div key={result.user_id} className="flex items-center justify-between p-3 hover:bg-gray-50 rounded-xl">
+                <div key={result.user_id} className="flex flex-col gap-3 rounded-xl p-3 hover:bg-gray-50 sm:flex-row sm:items-center sm:justify-between">
                   <div className="flex items-center gap-3">
                     <Avatar name={result.full_name || result.username} className="h-10 w-10 text-sm bg-emerald-100 text-emerald-700" />
                     <div>
@@ -249,7 +253,7 @@ export default function Friends() {
                   <Button
                     onClick={() => sendFriendRequest(result.user_id)}
                     variant="primary"
-                    className="px-4 py-2 rounded-full flex items-center gap-2"
+                    className="flex min-h-11 items-center gap-2 rounded-full px-4 py-2"
                   >
                     <UserPlus className="w-4 h-4" />
                     Adicionar
@@ -259,16 +263,15 @@ export default function Friends() {
             </Card>
           )}
         </div>
-      </div>
+      </section>
 
-      <div className="max-w-screen-xl mx-auto px-4 py-6">
-        {/* Pending Requests */}
+      <section className="fl-app-container py-2 pb-6 sm:py-3">
         {pendingRequests.length > 0 && (
           <div className="mb-6">
             <h2 className="fl-title-card mb-4">SolicitaÃ§Ãµes Pendentes ({pendingRequests.length})</h2>
             <div className="space-y-3">
               {pendingRequests.map((request) => (
-                <div key={request.id} className="fl-card p-4 flex items-center justify-between">
+                <div key={request.id} className="fl-card flex items-center justify-between gap-3 p-4">
                   <div>
                     <div className="font-bold text-gray-900">{request.friend_username}</div>
                     <div className="text-sm text-gray-500">{request.friend_full_name}</div>
@@ -276,13 +279,13 @@ export default function Friends() {
                   <div className="flex gap-2">
                     <button
                       onClick={() => acceptFriendRequest(request.id)}
-                      className="fl-btn-primary p-2 rounded-full"
+                      className="fl-btn-primary min-h-11 min-w-11 rounded-full p-2"
                     >
                       <Check className="w-5 h-5" />
                     </button>
                     <button
                       onClick={() => rejectFriendRequest(request.id)}
-                      className="bg-red-500 text-white p-2 rounded-full hover:bg-red-600"
+                      className="min-h-11 min-w-11 rounded-full bg-red-500 p-2 text-white hover:bg-red-600"
                     >
                       <X className="w-5 h-5" />
                     </button>
@@ -293,7 +296,6 @@ export default function Friends() {
           </div>
         )}
 
-        {/* Friends List */}
         <h2 className="fl-title-card mb-4">Meus Amigos ({friends.length})</h2>
         
         {friends.length === 0 ? (
@@ -303,9 +305,9 @@ export default function Friends() {
             <p className="text-gray-400 text-sm">Use a busca acima para encontrar usuÃ¡rios</p>
           </div>
         ) : (
-          <div className="grid md:grid-cols-2 gap-4">
+          <div className="grid gap-4 md:grid-cols-2">
             {friends.map((friend) => (
-              <div key={friend.id} className="fl-card p-6 hover:shadow-xl transition-shadow">
+              <div key={friend.id} className="fl-card p-5 transition-shadow hover:shadow-xl sm:p-6">
                 <div className="flex items-start justify-between mb-4">
                   <div>
                     <div className="font-bold text-xl text-gray-900">{friend.friend_username}</div>
@@ -328,7 +330,7 @@ export default function Friends() {
 
                 <button
                   onClick={() => createChallenge(friend.friend_user_id)}
-                  className="w-full bg-gradient-to-r from-purple-500 to-pink-600 text-white py-3 rounded-full font-semibold hover:shadow-lg transition-all flex items-center justify-center gap-2"
+                  className="flex min-h-11 w-full items-center justify-center gap-2 rounded-full bg-gradient-to-r from-purple-500 to-pink-600 py-3 font-semibold text-white transition-all hover:shadow-lg"
                 >
                   <Swords className="w-5 h-5" />
                   Desafiar para Mini-Game
@@ -337,10 +339,8 @@ export default function Friends() {
             ))}
           </div>
         )}
-      </div>
-
-      <BottomNav active="arena" />
-    </div>
+      </section>
+    </AppPageShell>
   );
 }
 

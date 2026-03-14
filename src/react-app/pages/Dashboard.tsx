@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useLocation, useNavigate } from "react-router";
-import { Avatar } from "@/react-app/components/ui/avatar";
+import { useNavigate } from "react-router";
 import { useAuth } from "@/react-app/contexts/auth";
-import BottomNav from "@/react-app/components/BottomNav";
+import AppPageShell from "@/react-app/components/AppPageShell";
 import MissionCard from "@/react-app/components/MissionCard";
 import LevelUpModal from "@/react-app/components/LevelUpModal";
 import AIRecommendations from "@/react-app/components/AIRecommendations";
@@ -21,19 +20,16 @@ import {
 } from "@/react-app/utils/api";
 import {
   MetricCard,
-  MaterialIcon,
   SectionHeader,
 } from "@/react-app/pages/dashboardHelpers";
 import {
-  DESKTOP_NAV_ITEMS,
   PANEL_STYLE,
   PRIMARY_GLOW_STYLE,
   STEPS_TARGET,
   SUBTLE_PANEL_STYLE,
-  buildWeekDates,
+  buildCenteredDates,
   capitalizeLabel,
   clamp,
-  ensureMaterialSymbolsLoaded,
   extractDateKey,
   formatDateKey,
   formatNumber,
@@ -60,7 +56,6 @@ const DEFAULT_LOADING_STATE: DashboardLoadingState = {
 export default function Dashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const location = useLocation();
 
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [progression, setProgression] = useState<UserProgression | null>(null);
@@ -170,10 +165,6 @@ export default function Dashboard() {
 
     if (hasRequestError) return;
   }, [navigate, setSectionLoading]);
-
-  useEffect(() => {
-    ensureMaterialSymbolsLoaded();
-  }, []);
 
   useEffect(() => {
     if (!quickActionsOpen) return;
@@ -299,11 +290,19 @@ export default function Dashboard() {
     [aiSpecialMissions, allDailyMissions, failedMissions, monthlyMissions, weeklyMissions],
   );
 
+  const levelValue = progression?.level ?? 1;
+  const xpForNextLevel = Math.max(100, levelValue * 100);
+  const xpProgress = clamp((Math.max(0, progression?.xp ?? 0) / xpForNextLevel) * 100, 0, 100);
   const stepsValue = metrics?.steps ?? 0;
   const caloriesValue = metrics?.calories_burned ?? 0;
   const stepsProgress = clamp((stepsValue / STEPS_TARGET) * 100, 0, 100);
   const todayKey = useMemo(() => formatDateKey(new Date()), []);
-  const weekDates = useMemo(() => buildWeekDates(new Date()), []);
+  const todayDate = useMemo(() => {
+    const date = new Date();
+    date.setHours(0, 0, 0, 0);
+    return date;
+  }, []);
+  const calendarDates = useMemo(() => buildCenteredDates(new Date(), 2), []);
   const currentDateLabel = useMemo(() => {
     const label = new Intl.DateTimeFormat("pt-BR", { weekday: "long", day: "numeric", month: "short" }).format(new Date());
     return capitalizeLabel(label.replace(".", ""));
@@ -353,7 +352,6 @@ export default function Dashboard() {
 
   const displayName = profile?.full_name ?? user?.name ?? "Seu dashboard";
   const usernameLabel = profile?.username ? `@${profile.username}` : user?.email ?? "fitloot";
-  const avatarName = profile?.full_name ?? user?.name ?? profile?.username ?? "FitLoot";
 
   const scrollToSection = useCallback((sectionId: string) => {
     const section = document.getElementById(sectionId);
@@ -365,85 +363,23 @@ export default function Dashboard() {
   }, [navigate]);
 
   return (
-    <div className="min-h-screen pb-32 md:pb-14">
-      <header
-        className="sticky top-0 z-40 hidden md:block"
-        style={{
-          background: "color-mix(in srgb, var(--fl-surface-strong) 90%, transparent)",
-          borderBottom: "1px solid color-mix(in srgb, var(--app-primary-color) 18%, transparent)",
-          backdropFilter: "blur(18px)",
-        }}
-      >
-        <div className="mx-auto grid max-w-[82rem] grid-cols-[auto_1fr_auto] items-center gap-6 px-6 py-4 lg:px-12">
-          <button type="button" onClick={() => navigate(ROUTE_PATHS.dashboard)} className="flex items-center gap-4" aria-label="Abrir dashboard">
-            <div style={{ color: "var(--app-primary-color)" }}>
-              <svg fill="none" viewBox="0 0 48 48" className="h-8 w-8" xmlns="http://www.w3.org/2000/svg">
-                <path d="M4 4H17.3334V17.3334H30.6666V30.6666H44V44H4V4Z" fill="currentColor" />
-              </svg>
-            </div>
-            <span className="text-xl font-bold uppercase tracking-[0.12em]" style={{ color: "var(--fl-color-text)" }}>FitLoot</span>
-          </button>
-
-          <div className="flex items-center justify-center gap-4">
-            <div
-              className="inline-flex items-center rounded-full border px-3 py-1.5 text-xs font-black uppercase tracking-[0.22em]"
-              style={{
-                borderColor: "color-mix(in srgb, var(--app-primary-color) 20%, transparent)",
-                background: "color-mix(in srgb, var(--fl-surface-strong) 74%, transparent)",
-                color: "var(--fl-color-text)",
-              }}
-            >
-              {loadingState.progression ? <LoadingBall size="sm" /> : `LVL ${progression?.level ?? 1}`}
-            </div>
-
-            <nav className="flex items-center gap-1">
-              {DESKTOP_NAV_ITEMS.map((item) => {
-                const isActive = item.matches.some((path) => path === location.pathname);
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => navigate(item.path)}
-                    className="flex items-center gap-2 rounded-2xl px-4 py-3 text-sm font-bold transition-colors hover:opacity-85"
-                    style={isActive ? {
-                      background: "var(--app-primary-color)",
-                      color: "var(--fl-nav-item-active-text)",
-                      boxShadow: "0 0 22px color-mix(in srgb, var(--app-primary-color) 34%, transparent)",
-                    } : { color: "var(--fl-nav-item-muted)" }}
-                  >
-                    <MaterialIcon name={item.icon} filled={isActive} className="text-xl" />
-                    <span>{item.label}</span>
-                  </button>
-                );
-              })}
-            </nav>
-          </div>
-
-          <div className="flex items-center gap-4">
-            <button
-              type="button"
-              onClick={() => navigate(ROUTE_PATHS.profile)}
-              className="flex h-11 w-11 items-center justify-center rounded-full"
-              style={{ background: "color-mix(in srgb, var(--app-primary-color) 16%, transparent)", color: "var(--app-primary-color)" }}
-              aria-label="Abrir configuracoes"
-            >
-              <MaterialIcon name="settings" filled className="text-2xl" />
-            </button>
-            <button type="button" onClick={() => navigate(ROUTE_PATHS.profile)} className="rounded-full" aria-label="Abrir perfil">
-              <span className="flex rounded-full border-2 p-[2px]" style={{ borderColor: "var(--app-primary-color)" }}>
-                <Avatar src={user?.avatar_url ?? null} name={avatarName} className="h-10 w-10 object-cover" />
-              </span>
-            </button>
-          </div>
-        </div>
-      </header>
-
-      <main className="mx-auto max-w-[46rem] px-4 pb-16 pt-4 md:px-8 md:pt-8">
-        <div className="space-y-6">
+    <AppPageShell bottomNavActive="missions" profile={profile} progression={progression}>
+      <main className="mx-auto max-w-[48rem] px-4 pb-16 pt-4 sm:px-5 md:px-8 md:pt-8">
+        <div className="space-y-5 md:space-y-6">
           <div className="flex items-center justify-between gap-4 px-1">
             <div>
-              <p className="text-sm font-semibold" style={{ color: "var(--fl-color-text)" }}>{displayName}</p>
+              <p className="text-sm font-semibold md:text-base" style={{ color: "var(--fl-color-text)" }}>{displayName}</p>
               <p className="text-xs" style={{ color: "var(--fl-color-text-muted)" }}>{usernameLabel}</p>
+              <div
+                className="mt-2 inline-flex items-center rounded-full border px-3 py-1 text-[0.68rem] font-black uppercase tracking-[0.18em] md:hidden"
+                style={{
+                  borderColor: "color-mix(in srgb, var(--app-primary-color) 22%, transparent)",
+                  background: "color-mix(in srgb, var(--fl-surface-strong) 82%, transparent)",
+                  color: "var(--fl-color-text)",
+                }}
+              >
+                {loadingState.progression ? <LoadingBall size="sm" /> : `LVL ${levelValue}`}
+              </div>
             </div>
             {loadingState.titles ? <LoadingBall size="sm" /> : activeTitle ? (
               <div
@@ -469,10 +405,10 @@ export default function Dashboard() {
           ) : null}
 
           <section className="space-y-4">
-            <div className="rounded-[2rem] px-6 py-6 md:px-8" style={PRIMARY_GLOW_STYLE}>
-              <div className="flex min-h-[9.25rem] items-center justify-between gap-6">
-                <div className="flex flex-1 flex-col justify-center gap-5">
-                  <div className="inline-flex items-center gap-2 text-[0.68rem] font-black uppercase tracking-[0.28em]">
+            <div className="rounded-[2rem] px-4 py-5 sm:px-6 sm:py-6 md:px-8" style={PRIMARY_GLOW_STYLE}>
+              <div className="flex min-h-[9rem] flex-col gap-8 sm:min-h-[9.25rem] sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex flex-1 flex-col justify-center gap-4 sm:gap-5">
+                  <div className="inline-flex items-center gap-2 text-[0.64rem] font-black uppercase tracking-[0.24em] sm:text-[0.68rem] sm:tracking-[0.28em]">
                     <Cloud className="h-3.5 w-3.5" />
                     <span>Experience Points</span>
                   </div>
@@ -480,21 +416,41 @@ export default function Dashboard() {
                     <Flame className="h-4 w-4" />
                     <span>{loadingState.progression ? <LoadingBall size="sm" /> : `${progression?.current_streak ?? 0}-Day Streak`}</span>
                   </div>
+                  <div className="md:hidden text-xs font-bold uppercase tracking-[0.18em] opacity-75">
+                    {loadingState.progression ? <LoadingBall size="sm" /> : `${formatNumber(Math.max(0, progression?.xp ?? 0))} / ${formatNumber(xpForNextLevel)} para o proximo nivel`}
+                  </div>
                 </div>
 
-                <div className="relative flex h-[6.6rem] w-[12.5rem] shrink-0 items-end justify-center">
-                  <svg viewBox="0 0 176 104" className="absolute inset-x-0 top-0 h-[5.5rem] w-full">
-                    <path d="M26 86 A62 62 0 0 1 150 86" fill="none" stroke="var(--fl-nav-item-active-text)" strokeLinecap="round" strokeWidth="14" />
+                <div className="relative mx-auto flex h-[6rem] w-[10.5rem] shrink-0 items-end justify-center sm:mx-0 sm:h-[6.6rem] sm:w-[12.5rem]">
+                  <svg viewBox="0 0 176 104" className="absolute inset-0 h-full w-full" aria-hidden="true">
+                    <path
+                      d="M26 86 A62 62 0 0 1 150 86"
+                      fill="none"
+                      stroke="color-mix(in srgb, var(--fl-nav-item-active-text) 24%, transparent)"
+                      strokeLinecap="round"
+                      strokeWidth="14"
+                    />
+                    <path
+                      d="M26 86 A62 62 0 0 1 150 86"
+                      fill="none"
+                      pathLength={100}
+                      stroke="var(--fl-nav-item-active-text)"
+                      strokeDasharray={`${xpProgress} 100`}
+                      strokeLinecap="round"
+                      strokeWidth="14"
+                    />
                   </svg>
-                  <div className="absolute bottom-0 flex items-end gap-1">
-                    <span className="text-[2.35rem] font-black leading-none">{loadingState.progression ? <LoadingBall size="sm" /> : formatNumber(progression?.xp ?? 0)}</span>
-                    <span className="pb-1 text-xs font-black uppercase opacity-75">XP</span>
+                  <div className="absolute inset-x-0 bottom-[0.1rem] flex items-end justify-center gap-1 sm:bottom-0">
+                    <span className="text-[2rem] font-black leading-none sm:text-[2.35rem]">
+                      {loadingState.progression ? <LoadingBall size="sm" /> : formatNumber(Math.max(0, progression?.xp ?? 0))}
+                    </span>
+                    <span className="pb-1 text-[0.7rem] font-black uppercase opacity-75 sm:text-xs">XP</span>
                   </div>
                 </div>
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <MetricCard
                 label="Passos"
                 value={formatNumber(stepsValue)}
@@ -519,12 +475,13 @@ export default function Dashboard() {
             </div>
           </section>
 
-          <section className="px-2 pt-1">
-            <div className="grid grid-cols-7 gap-2">
-              {weekDates.map((date) => {
+          <section className="px-1 pt-1 sm:px-2">
+            <div className="grid grid-cols-5 gap-2 sm:gap-3">
+              {calendarDates.map((date) => {
                 const dateKey = formatDateKey(date);
                 const isCurrentDay = dateKey === todayKey;
                 const isCompletedDay = completedWeekKeys.has(dateKey);
+                const isPastDay = date.getTime() < todayDate.getTime();
                 const weekdayLabel = new Intl.DateTimeFormat("pt-BR", { weekday: "short" }).format(date).replace(".", "").toUpperCase();
                 return (
                   <div
@@ -534,7 +491,10 @@ export default function Dashboard() {
                       background: "var(--app-primary-color)",
                       color: "var(--fl-nav-item-active-text)",
                       boxShadow: "0 12px 26px color-mix(in srgb, var(--app-primary-color) 18%, transparent)",
-                    } : { color: "var(--fl-color-text-muted)" }}
+                    } : {
+                      color: isPastDay ? "color-mix(in srgb, var(--fl-color-text-muted) 82%, transparent)" : "var(--fl-nav-item-muted)",
+                      opacity: isPastDay ? 0.76 : 1,
+                    }}
                   >
                     <span className="text-[0.64rem] font-black uppercase tracking-[0.18em]">{weekdayLabel}</span>
                     <span className="mt-1 text-lg font-black">{String(date.getDate()).padStart(2, "0")}</span>
@@ -572,9 +532,9 @@ export default function Dashboard() {
 
           <section>
             <SectionHeader title="Passos" actionLabel="Ver todos" onAction={() => scrollToSection("assistant-tools")} />
-            <div className="flex items-center gap-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
               <div className="shrink-0 whitespace-nowrap">
-                <span className="text-[1.8rem] font-black" style={{ color: "var(--fl-color-text)" }}>{loadingState.metrics ? <LoadingBall size="sm" /> : formatNumber(stepsValue)}</span>
+                <span className="text-[1.55rem] font-black sm:text-[1.8rem]" style={{ color: "var(--fl-color-text)" }}>{loadingState.metrics ? <LoadingBall size="sm" /> : formatNumber(stepsValue)}</span>
                 <span className="ml-2 text-sm font-bold" style={{ color: "var(--fl-color-text-muted)" }}>/ {formatNumber(STEPS_TARGET)}</span>
               </div>
               <div className="relative h-3 flex-1 overflow-hidden rounded-full" style={{ background: "color-mix(in srgb, var(--fl-color-text) 6%, transparent)" }}>
@@ -616,10 +576,10 @@ export default function Dashboard() {
 
       <div
         ref={quickActionsRef}
-        className="fixed bottom-24 left-4 z-50 flex flex-col items-start gap-3 md:bottom-8 md:left-8"
+        className="fl-z-fab fixed bottom-24 right-4 flex flex-col items-end gap-3 md:bottom-8 md:right-8"
       >
         <div
-          className={`flex flex-col items-start gap-3 transition-all duration-200 ${quickActionsOpen ? "translate-y-0 opacity-100" : "pointer-events-none translate-y-4 opacity-0"}`}
+          className={`flex flex-col items-end gap-3 transition-all duration-200 ${quickActionsOpen ? "translate-y-0 opacity-100" : "pointer-events-none translate-y-4 opacity-0"}`}
         >
           <button
             type="button"
@@ -664,8 +624,7 @@ export default function Dashboard() {
         </button>
       </div>
 
-      <div className="md:hidden"><BottomNav active="missions" /></div>
       {showLevelUp ? <LevelUpModal level={newLevel} onClose={() => setShowLevelUp(false)} /> : null}
-    </div>
+    </AppPageShell>
   );
 }
