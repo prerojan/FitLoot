@@ -1,4 +1,8 @@
 import type { AchievementWithUnlock } from "@/shared/types";
+import {
+  repairKnownMojibake,
+  repairKnownMojibakeString,
+} from "@/shared/textEncoding";
 
 type AchievementRarity = "COMUM" | "INCOMUM" | "RARO" | "MITICO" | "SECRETO";
 
@@ -16,11 +20,35 @@ type ShowcaseToken = {
 };
 
 function normalizeToken(value: string): string {
-  return value
+  return repairKnownMojibakeString(value)
     .normalize("NFD")
     .replace(/\p{Diacritic}/gu, "")
     .trim()
     .toLowerCase();
+}
+
+export function sanitizeAchievementForDisplay(
+  achievement: AchievementWithUnlock,
+): AchievementWithUnlock {
+  return {
+    ...achievement,
+    name: repairKnownMojibakeString(achievement.name),
+    description:
+      typeof achievement.description === "string"
+        ? repairKnownMojibakeString(achievement.description)
+        : achievement.description,
+    rarity: repairKnownMojibakeString(achievement.rarity),
+    reference:
+      typeof achievement.reference === "string"
+        ? repairKnownMojibake(achievement.reference) ?? achievement.reference
+        : achievement.reference,
+  };
+}
+
+export function sanitizeAchievementsForDisplay(
+  achievements: AchievementWithUnlock[],
+): AchievementWithUnlock[] {
+  return achievements.map((achievement) => sanitizeAchievementForDisplay(achievement));
 }
 
 function normalizeRarity(value: string | null | undefined): AchievementRarity {
@@ -115,7 +143,7 @@ export function resolveShowcasedAchievement(
     });
   });
 
-  return matchedAchievement ?? null;
+  return matchedAchievement ? sanitizeAchievementForDisplay(matchedAchievement) : null;
 }
 
 export function getAchievementShowcaseStyle(rarity: string | null | undefined) {

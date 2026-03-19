@@ -46,6 +46,7 @@ import {
 import {
   getAchievementShowcaseStyle,
   resolveShowcasedAchievement,
+  sanitizeAchievementsForDisplay,
 } from "@/react-app/utils/achievementShowcase";
 
 type DashboardLoadingState = {
@@ -98,7 +99,13 @@ export default function Dashboard() {
     const cacheMetrics = readCachedJson<DailyMetrics>("/api/metrics/today");
     const cacheTitles = readCachedJson<Array<Title & { is_active?: number | undefined }>>("/api/titles");
 
-    if (cacheAchievements) setAchievements(Array.isArray(cacheAchievements.data) ? cacheAchievements.data : []);
+    if (cacheAchievements) {
+      setAchievements(
+        Array.isArray(cacheAchievements.data)
+          ? sanitizeAchievementsForDisplay(cacheAchievements.data)
+          : [],
+      );
+    }
     if (cacheProfile) setProfile(cacheProfile.data);
     if (cacheProgression) setProgression(cacheProgression.data);
     if (cacheMissions) setMissions(Array.isArray(cacheMissions.data) ? cacheMissions.data : []);
@@ -158,7 +165,7 @@ export default function Dashboard() {
 
     await Promise.all([
       runRequest<AchievementWithUnlock[]>("achievements", "/api/achievements", Boolean(cacheAchievements), Boolean(cacheAchievements?.stale), (payload) => {
-        setAchievements(Array.isArray(payload) ? payload : []);
+        setAchievements(Array.isArray(payload) ? sanitizeAchievementsForDisplay(payload) : []);
       }),
       runRequest<UserProfile>("profile", "/api/profile", Boolean(cacheProfile), Boolean(cacheProfile?.stale), setProfile, () => {
         shouldRedirectToOnboarding = true;
@@ -394,7 +401,7 @@ export default function Dashboard() {
 
   return (
     <AppPageShell bottomNavActive="missions" profile={profile} progression={progression}>
-      <main className="mx-auto max-w-[48rem] px-3 pb-6 pt-3 sm:px-4 md:px-6 md:pt-6 lg:px-8 lg:pb-8">
+      <main className="mx-auto max-w-[48rem] px-3 pb-4 pt-3 sm:px-4 md:px-6 md:pt-6 lg:px-8 lg:pb-6">
         <div className="space-y-3 md:space-y-5 lg:space-y-6">
           <div className="flex w-full items-start justify-between gap-3 px-1 md:gap-4">
             <div className="flex flex-col">

@@ -18,6 +18,7 @@ type AppPageShellProps = {
 
 const CHROMELESS_ROUTES = new Set<string>([
   ROUTE_PATHS.aiChat,
+  ROUTE_PATHS.foodAnalysis,
 ]);
 
 export default function AppPageShell({
@@ -41,7 +42,7 @@ export default function AppPageShell({
       data-route={location.pathname}
     >
       {!hideNavigation ? <DesktopAppNavbar profile={profile} progression={progression} /> : null}
-      <div className={cn("relative fl-z-card", contentClassName)}>
+      <div className={cn("relative fl-z-card flex min-h-0 flex-1 flex-col", contentClassName)}>
         {children}
       </div>
       {!hideNavigation ? (

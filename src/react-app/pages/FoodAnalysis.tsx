@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState, useEffect, type ChangeEventHandler } from "react";
 import { useNavigate } from "react-router";
-import { Camera, AlertTriangle, CheckCircle2, Bolt, ShieldCheck, ImageIcon } from "lucide-react";
+import { Camera, AlertTriangle, CheckCircle2, Bolt, ShieldCheck, ImageIcon, ArrowLeft } from "lucide-react";
 import AppPageShell from "@/react-app/components/AppPageShell";
 import LoadingBall from "@/react-app/components/LoadingBall";
 import { api } from "@/react-app/utils/api";
@@ -338,6 +338,7 @@ export default function FoodAnalysis() {
   };
 
   const macroBars = useMemo(() => result?.totals.macro_percentages ?? { protein: 0, carbs: 0, fats: 0 }, [result]);
+  const handleBack = () => navigate(-1);
 
   return (
     <AppPageShell bottomNavActive="missions" className="fl-theme-page overflow-hidden w-full flex flex-col font-display antialiased">
@@ -385,31 +386,32 @@ export default function FoodAnalysis() {
       {(!streamActive && !preview && !result) ? (
         <div className="flex-1 flex flex-col relative z-20 overflow-y-auto custom-scrollbar">
           {/* Header */}
-          <header className="sticky top-0 z-10 flex items-center justify-between border-b p-4 sm:p-6 backdrop-blur-md" style={{ borderColor: "var(--fl-border-soft)", backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 84%, transparent)" }}>
+          <header className="sticky top-0 z-10 flex items-center justify-between border-b p-3 sm:p-4 lg:p-6 backdrop-blur-md" style={{ borderColor: "var(--fl-border-soft)", backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 84%, transparent)" }}>
             <button 
-              onClick={() => navigate("/app")}
+              onClick={handleBack}
               className="fl-theme-surface-soft flex h-10 w-10 items-center justify-center rounded-full fl-theme-text-muted transition-opacity hover:opacity-85"
+              aria-label="Voltar"
             >
-              <Camera className="h-5 w-5 rotate-180" />
+              <ArrowLeft className="h-5 w-5" />
             </button>
-            <h1 className="text-xs font-bold uppercase tracking-[0.2em]" style={{ color: "var(--fl-color-text)" }}>Scanner de Alimentos</h1>
+            <h1 className="text-[0.68rem] font-bold uppercase tracking-[0.2em] sm:text-xs" style={{ color: "var(--fl-color-text)" }}>Scanner de Alimentos</h1>
             <div className="w-10 h-10" /> {/* Spacer */}
           </header>
 
           {/* Hero Section */}
-          <div className="px-6 py-10 text-center">
-            <h2 className="text-4xl font-bold tracking-tight mb-2">Scanner IA</h2>
+          <div className="px-4 py-8 text-center sm:px-6 sm:py-10">
+            <h2 className="mb-2 text-3xl font-bold tracking-tight sm:text-4xl">Scanner IA</h2>
             <p className="text-sm font-medium" style={{ color: 'var(--app-primary-color)' }}>
               Selecione o portal de entrada para análise
             </p>
           </div>
 
           {/* Cards Section */}
-          <div className="px-6 space-y-8 flex-1">
+          <div className="flex-1 space-y-6 px-4 sm:space-y-8 sm:px-6">
             {/* Primary Card - Camera */}
             <div className="group relative">
               <div className="absolute -inset-1 bg-primary rounded-3xl blur opacity-10 card-glow-bg group-hover:opacity-30 transition-opacity" style={{ backgroundColor: 'var(--app-primary-color)' }}></div>
-              <div className="fl-theme-surface relative rounded-3xl p-8 flex flex-col items-center overflow-hidden">
+              <div className="fl-theme-surface relative flex flex-col items-center overflow-hidden rounded-3xl p-5 sm:p-6 lg:p-8">
                 <div 
                   className="w-20 h-20 rounded-full flex items-center justify-center mb-6 relative"
                   style={{ backgroundColor: 'color-mix(in srgb, var(--app-primary-color) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--app-primary-color) 40%, transparent)' }}
@@ -418,7 +420,7 @@ export default function FoodAnalysis() {
                   <div className="absolute inset-0 rounded-full blur-md opacity-40" style={{ backgroundColor: 'var(--app-primary-color)' }}></div>
                 </div>
                 
-                <h3 className="text-2xl font-bold mb-2 uppercase tracking-wide">Abrir Câmera</h3>
+                <h3 className="mb-2 text-xl font-bold uppercase tracking-wide sm:text-2xl">Abrir Câmera</h3>
                 <p className="mb-8 max-w-[200px] text-sm" style={{ color: 'var(--fl-color-text-muted)' }}>
                   Aponte seu portal visual para o alimento
                 </p>
@@ -440,7 +442,7 @@ export default function FoodAnalysis() {
                 const input = document.getElementById('gallery-input');
                 if (input) input.click();
               }}
-              className="fl-theme-surface-soft w-full relative overflow-hidden p-6 rounded-3xl flex items-center justify-between group transition-all border-l-4"
+              className="fl-theme-surface-soft group relative flex w-full items-center justify-between overflow-hidden rounded-3xl border-l-4 p-4 transition-all sm:p-6"
               style={{ borderLeftColor: 'color-mix(in srgb, var(--app-primary-color) 40%, transparent)' }}
             >
               <div className="text-left">
@@ -455,7 +457,7 @@ export default function FoodAnalysis() {
           </div>
 
           {/* Footer Badge */}
-          <div className="p-10 flex justify-center mt-auto">
+          <div className="mt-auto flex justify-center px-4 pb-6 pt-8 sm:px-6 sm:pb-8">
             <div className="fl-theme-surface-soft inline-flex items-center gap-2 rounded-full px-4 py-2 backdrop-blur-sm">
               <ShieldCheck className="w-4 h-4" style={{ color: 'var(--app-primary-color)' }} />
               <span className="text-[10px] font-bold uppercase tracking-[0.15em]" style={{ color: "var(--fl-color-text-muted)" }}>Tecnologia Neural Ativa</span>
@@ -464,16 +466,17 @@ export default function FoodAnalysis() {
         </div>
       ) : result ? (
         /* Results Screen (Full screen, no black void) */
-        <div className="custom-scrollbar flex flex-1 flex-col overflow-y-auto p-4 pb-6 sm:p-6 sm:pb-8 animate-in fade-in slide-in-from-bottom-5 duration-500" style={{ backgroundColor: "var(--app-bg-color)" }}>
+        <div className="custom-scrollbar flex flex-1 flex-col overflow-y-auto p-3 pb-4 sm:p-4 sm:pb-5 lg:p-6 animate-in fade-in slide-in-from-bottom-5 duration-500" style={{ backgroundColor: "var(--app-bg-color)" }}>
           {/* Header */}
           <div className="flex items-center justify-between mb-8">
             <button 
-              onClick={() => { setPreview(null); setResult(null); setError(null); startCamera(); }}
+              onClick={handleBack}
               className="fl-theme-surface-soft flex h-10 w-10 items-center justify-center rounded-full transition-opacity hover:opacity-85"
+              aria-label="Voltar"
             >
-              <Camera className="h-5 w-5 rotate-180" style={{ color: "var(--fl-color-text-muted)" }} />
+              <ArrowLeft className="h-5 w-5" style={{ color: "var(--fl-color-text-muted)" }} />
             </button>
-            <h2 className="text-xs font-bold uppercase tracking-[0.2em]" style={{ color: "var(--fl-color-text-muted)" }}>Análise Completa</h2>
+            <h2 className="text-[0.68rem] font-bold uppercase tracking-[0.2em] sm:text-xs" style={{ color: "var(--fl-color-text-muted)" }}>Análise Completa</h2>
             <div className="w-10 h-10" />
           </div>
 
@@ -481,7 +484,7 @@ export default function FoodAnalysis() {
           <div className="flex justify-between items-start mb-8">
             <div>
               <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.2em]" style={{ color: "var(--fl-color-text-muted)" }}>Energia Estimada</p>
-              <h3 className="text-5xl font-bold tracking-tight" style={{ color: 'var(--app-primary-color)' }}>
+              <h3 className="text-4xl font-bold tracking-tight sm:text-5xl" style={{ color: 'var(--app-primary-color)' }}>
                 {result.totals.calories} <span className="ml-1 text-xl font-medium tracking-normal" style={{ color: "var(--fl-color-text-soft)" }}>kcal</span>
               </h3>
             </div>
@@ -492,7 +495,7 @@ export default function FoodAnalysis() {
           </div>
 
           {/* Macros Grid */}
-          <div className="grid grid-cols-3 gap-3 mb-10">
+          <div className="mb-8 grid grid-cols-3 gap-2 sm:mb-10 sm:gap-3">
             <MacroCard label="Proteínas" value={`${result.totals.protein}g`} percentage={macroBars.protein} />
             <MacroCard label="Carbs" value={`${result.totals.carbs}g`} percentage={macroBars.carbs} />
             <MacroCard label="Gorduras" value={`${result.totals.fats}g`} percentage={macroBars.fats} />
@@ -510,7 +513,7 @@ export default function FoodAnalysis() {
           </div>
 
           {/* Ingredients Section */}
-          <div className="mb-12">
+          <div className="mb-10 sm:mb-12">
             <h4 className="mb-4 text-[10px] font-bold uppercase tracking-[0.2em]" style={{ color: "var(--fl-color-text-muted)" }}>Ingredientes Detectados</h4>
             <div className="space-y-3">
               {result.items.map((item, i) => (
@@ -537,7 +540,7 @@ export default function FoodAnalysis() {
           </div>
 
           {/* Action Buttons (Fixed or scroll end) */}
-          <div className="grid grid-cols-2 gap-4 mt-auto pt-4">
+          <div className="mt-auto grid grid-cols-2 gap-3 pt-4 sm:gap-4">
             <button 
               onClick={() => { setPreview(null); setResult(null); setError(null); startCamera(); }}
               className="fl-theme-input h-14 rounded-2xl border font-bold text-xs tracking-widest uppercase transition-opacity active:scale-95 hover:opacity-85"
@@ -588,10 +591,22 @@ export default function FoodAnalysis() {
             {/* Header Overlay (In Scanner) */}
             <header className="absolute top-0 left-0 right-0 p-6 flex justify-between items-center z-10 bg-gradient-to-b from-black/70 to-transparent">
               <button 
-                onClick={() => preview ? (setPreview(null), setResult(null), setError(null), startCamera()) : (stopCamera(), setStreamActive(false))}
+                onClick={() => {
+                  if (preview) {
+                    setPreview(null);
+                    setResult(null);
+                    setError(null);
+                    void startCamera();
+                    return;
+                  }
+                  stopCamera();
+                  setStreamActive(false);
+                  handleBack();
+                }}
                 className="w-10 h-10 rounded-full bg-white/10 backdrop-blur-md flex items-center justify-center border border-white/20 transition-all hover:bg-white/20"
+                aria-label="Voltar"
               >
-                <Camera className="w-5 h-5 text-white rotate-180" />
+                <ArrowLeft className="w-5 h-5 text-white" />
               </button>
               <h1 className="text-sm font-bold tracking-widest uppercase text-white/90">AI Vision ACTIVE</h1>
               <div className="w-10 h-10" />

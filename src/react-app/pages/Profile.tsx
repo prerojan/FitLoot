@@ -22,6 +22,7 @@ import { useAuth } from "@/react-app/contexts/auth";
 import { useTheme } from "@/react-app/contexts/theme";
 import AppPageShell from "@/react-app/components/AppPageShell";
 import LoadingBall from "@/react-app/components/LoadingBall";
+import PageLoader from "@/react-app/components/PageLoader";
 import { Avatar } from "@/react-app/components/ui/avatar";
 import { ROUTE_PATHS } from "@/react-app/constants/auth";
 
@@ -37,6 +38,7 @@ import { ApiRequestError, api, clearJsonCache, fetchAndCacheJson, readCachedJson
 import {
   getAchievementShowcaseStyle,
   resolveShowcasedAchievement,
+  sanitizeAchievementsForDisplay,
 } from "@/react-app/utils/achievementShowcase";
 import { applyProfileTheme } from "@/react-app/utils/theme";
 
@@ -48,11 +50,11 @@ function isFeedbackType(value: string): value is FeedbackType {
 }
 
 const ATTRIBUTE_META = [
-  { key: "strength", label: "FOR", sigla: "STR", icon: Shield, color: "from-primary/80 to-primary" },
-  { key: "constitution", label: "CON", sigla: "CON", icon: Zap, color: "from-blue-500 to-cyan-500" },
-  { key: "vitality", label: "VIT", sigla: "VIT", icon: Flame, color: "from-green-500 to-emerald-500" },
-  { key: "dexterity", label: "DES", sigla: "DEX", icon: Target, color: "from-purple-500 to-pink-500" },
-  { key: "focus", label: "FOCO", sigla: "FOC", icon: Award, color: "from-yellow-500 to-amber-500" },
+  { key: "strength", label: "FOR", sigla: "STR", icon: Shield, fill: "linear-gradient(90deg, color-mix(in srgb, var(--app-primary-color) 78%, transparent), var(--app-primary-color))" },
+  { key: "constitution", label: "CON", sigla: "CON", icon: Zap, fill: "linear-gradient(90deg, color-mix(in srgb, var(--app-secondary-color) 70%, #38bdf8), #38bdf8)" },
+  { key: "vitality", label: "VIT", sigla: "VIT", icon: Flame, fill: "linear-gradient(90deg, color-mix(in srgb, var(--app-primary-color) 58%, #22c55e), #22c55e)" },
+  { key: "dexterity", label: "DES", sigla: "DEX", icon: Target, fill: "linear-gradient(90deg, #8b5cf6, #ec4899)" },
+  { key: "focus", label: "FOCO", sigla: "FOC", icon: Award, fill: "linear-gradient(90deg, #facc15, #f59e0b)" },
 ] as const;
 
 export default function Profile() {
@@ -93,7 +95,13 @@ export default function Profile() {
     if (cachedAttributes) setAttributes(cachedAttributes.data);
     if (cachedProgression) setProgression(cachedProgression.data);
     if (cachedSkills) setSkills(Array.isArray(cachedSkills.data) ? cachedSkills.data : []);
-    if (cachedAchievements) setAchievements(Array.isArray(cachedAchievements.data) ? cachedAchievements.data : []);
+    if (cachedAchievements) {
+      setAchievements(
+        Array.isArray(cachedAchievements.data)
+          ? sanitizeAchievementsForDisplay(cachedAchievements.data)
+          : [],
+      );
+    }
     if (cachedTitles) setTitles(Array.isArray(cachedTitles.data) ? cachedTitles.data : []);
 
     const hasCache = Boolean(cachedProfile && cachedAttributes && cachedProgression);
@@ -113,7 +121,7 @@ export default function Profile() {
       setAttributes(a);
       setProgression(pr);
       setSkills(Array.isArray(s) ? s : []);
-      setAchievements(Array.isArray(ach) ? ach : []);
+      setAchievements(Array.isArray(ach) ? sanitizeAchievementsForDisplay(ach) : []);
       setTitles(Array.isArray(t) ? t : []);
     } catch (loadError) {
       if (loadError instanceof ApiRequestError && (loadError.status === 401 || loadError.status === 403)) {
@@ -179,9 +187,7 @@ export default function Profile() {
   if (loading && !profile) {
     return (
       <AppPageShell bottomNavActive="profile" className="fl-theme-page">
-        <div className="flex-1 flex items-center justify-center">
-          <LoadingBall size="md" />
-        </div>
+        <PageLoader />
       </AppPageShell>
     );
   }
@@ -402,10 +408,10 @@ export default function Profile() {
                             </div>
                             <span className="text-sm font-black tracking-tighter">{value}</span>
                           </div>
-                          <div className="h-3.5 w-full rounded-full border p-0.5" style={{ borderColor: "var(--fl-border-soft)", backgroundColor: "color-mix(in srgb, var(--fl-surface-muted) 74%, transparent)" }}>
+                          <div className="h-3.5 w-full overflow-hidden rounded-full border p-0.5" style={{ borderColor: "var(--fl-border-soft)", backgroundColor: "color-mix(in srgb, var(--fl-surface-muted) 74%, transparent)" }}>
                             <div 
-                              className={`h-full bg-gradient-to-r ${attr.color} rounded-full transition-all duration-1000 shadow-[0_0_10px_rgba(var(--app-primary-color-rgb),0.2)]`} 
-                              style={{ width: `${Math.min(value, 100)}%` }}
+                              className="h-full rounded-full transition-all duration-1000 shadow-[0_0_10px_rgba(var(--app-primary-color-rgb),0.2)]" 
+                              style={{ width: `${Math.min(value, 100)}%`, background: attr.fill }}
                             ></div>
                           </div>
                         </div>

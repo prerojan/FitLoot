@@ -14,9 +14,10 @@ import {
   Crown,
 } from "lucide-react";
 import AppPageShell from "@/react-app/components/AppPageShell";
-import LoadingBall from "@/react-app/components/LoadingBall";
+import PageLoader from "@/react-app/components/PageLoader";
 import { fetchAndCacheJson } from "@/react-app/utils/api";
 import type { AchievementWithUnlock, UserProfile, UserProgression } from "@/shared/types";
+import { sanitizeAchievementsForDisplay } from "@/react-app/utils/achievementShowcase";
 
 type RarityFilter = "ALL" | "COMUM" | "INCOMUM" | "RARO" | "MITICO" | "SECRETO";
 type NormalizedRarity = Exclude<RarityFilter, "ALL">;
@@ -62,7 +63,7 @@ export default function Achievements() {
         fetchAndCacheJson<UserProgression>("/api/progression"),
       ]);
 
-      setAchievements(Array.isArray(nextAchievements) ? nextAchievements : []);
+      setAchievements(Array.isArray(nextAchievements) ? sanitizeAchievementsForDisplay(nextAchievements) : []);
       setProfile(nextProfile);
       setProgression(nextProgression);
     } catch (loadError) {
@@ -99,9 +100,7 @@ export default function Achievements() {
   if (loading) {
     return (
       <AppPageShell bottomNavActive="missions" className="fl-theme-page">
-        <div className="flex flex-1 items-center justify-center">
-          <LoadingBall size="md" />
-        </div>
+        <PageLoader />
       </AppPageShell>
     );
   }

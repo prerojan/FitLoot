@@ -21,6 +21,10 @@ import {
   type PromoCodeEffect,
 } from "../shared/types";
 import {
+  repairKnownMojibake,
+  repairKnownMojibakeString,
+} from "../shared/textEncoding";
+import {
   MISSION_LIMITS,
   classifyMission,
   formatMissionGoal,
@@ -1299,10 +1303,15 @@ async function ensureGamificationCatalog(db: D1Database) {
   }
 
   for (const achievement of achievementSeeds) {
+    const achievementName = repairKnownMojibakeString(achievement.name);
+    const achievementDescription = repairKnownMojibake(achievement.description) ?? achievement.description;
+    const achievementRarity = repairKnownMojibakeString(achievement.rarity);
+    const achievementReference = repairKnownMojibake(achievement.reference) ?? achievement.reference;
+
     await db.prepare(`INSERT INTO achievements (name, description, rarity, icon, requirement_type, requirement_value, category, color, secret, condition, reference, updated_at)
       SELECT ?,?,?,?,?,?,?,?,?,?,?, datetime('now')
       WHERE NOT EXISTS (SELECT 1 FROM achievements WHERE name = ?)`)
-      .bind(achievement.name, achievement.description, achievement.rarity, achievement.icon, "event", 1, achievement.category, achievement.color, achievement.secret, achievement.condition, achievement.reference, achievement.name)
+      .bind(achievementName, achievementDescription, achievementRarity, achievement.icon, "event", 1, achievement.category, achievement.color, achievement.secret, achievement.condition, achievementReference, achievementName)
       .run();
   }
 
@@ -1385,7 +1394,8 @@ async function unlockTitleIfNeeded(db: D1Database, userId: string, titleName: st
 }
 
 async function unlockAchievementIfNeeded(db: D1Database, userId: string, achievementName: string, progressCurrent = 1, progressRequired = 1) {
-  const achievement = await db.prepare("SELECT id FROM achievements WHERE name = ?").bind(achievementName).first<{ id: number }>();
+  const normalizedAchievementName = repairKnownMojibakeString(achievementName);
+  const achievement = await db.prepare("SELECT id FROM achievements WHERE name = ? OR name = ? LIMIT 1").bind(normalizedAchievementName, achievementName).first<{ id: number }>();
   if (!achievement?.id) return;
   const normalizedCurrent = Math.max(1, Math.floor(progressCurrent));
   const normalizedRequired = Math.max(1, Math.floor(progressRequired));
@@ -4870,18 +4880,34 @@ app.get("/api/achievements", authMiddleware, async (c) => {
   ).bind(user.id).all<Record<string, unknown>>();
 
   const mapped = achievements.results.map((achievement) => {
+    const normalizedAchievement = {
+      ...achievement,
+      name: typeof achievement.name === "string" ? repairKnownMojibakeString(achievement.name) : achievement.name,
+      description:
+        typeof achievement.description === "string"
+          ? repairKnownMojibakeString(achievement.description)
+          : achievement.description,
+      rarity:
+        typeof achievement.rarity === "string"
+          ? repairKnownMojibakeString(achievement.rarity)
+          : achievement.rarity,
+      reference:
+        typeof achievement.reference === "string"
+          ? repairKnownMojibakeString(achievement.reference)
+          : achievement.reference,
+    };
     const unlocked = Number(achievement.unlocked ?? 0) === 1;
     const isSecret = Number(achievement.secret ?? 0) === 1;
     if (isSecret && !unlocked) {
       return {
-        ...achievement,
+        ...normalizedAchievement,
         name: "?",
         description: "Conquista secreta",
         condition: null,
         icon: "Ã¢Ââ€œ",
       };
     }
-    return achievement;
+    return normalizedAchievement;
   });
 
   return c.json(mapped);

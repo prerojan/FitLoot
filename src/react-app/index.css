@@ -18,6 +18,7 @@
   --fl-color-accent-secondary: var(--app-secondary-color);
   --fl-color-accent-rgb: var(--app-primary-color-rgb);
   --fl-color-accent-secondary-rgb: var(--app-secondary-color-rgb);
+  --fl-bottom-nav-clearance: calc(env(safe-area-inset-bottom, 0px) + 5.25rem);
   --fl-noise-pattern: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160' viewBox='0 0 160 160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='0.32'/%3E%3C/svg%3E");
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -48,11 +49,11 @@
   --fl-auth-input-ring: rgba(var(--fl-color-accent-rgb), 0.16);
   --fl-auth-chip-bg: rgba(255, 255, 255, 0.72);
   --fl-auth-chip-border: rgba(var(--fl-color-accent-rgb), 0.18);
-  --fl-nav-shell-bg: rgba(7, 14, 12, 0.82);
-  --fl-nav-shell-border: rgba(255, 255, 255, 0.08);
-  --fl-nav-item-muted: rgba(214, 227, 222, 0.66);
+  --fl-nav-shell-bg: rgba(255, 255, 255, 0.92);
+  --fl-nav-shell-border: rgba(15, 23, 42, 0.08);
+  --fl-nav-item-muted: rgba(15, 23, 42, 0.62);
   --fl-nav-item-active-text: #04100b;
-  --fl-nav-shadow: 0 18px 46px rgba(0, 0, 0, 0.28);
+  --fl-nav-shadow: 0 18px 46px rgba(15, 23, 42, 0.16);
 }
 
 [data-theme="dark"] {
@@ -376,9 +377,12 @@ body {
 
 @layer utilities {
   .fl-app-page {
+    display: flex;
     min-height: 100vh;
+    min-height: 100dvh;
+    flex-direction: column;
     overflow-x: hidden;
-    padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 6rem);
+    padding-bottom: var(--fl-bottom-nav-clearance);
   }
 
   .fl-app-container {
@@ -389,6 +393,7 @@ body {
 
   .fl-theme-page {
     min-height: 100vh;
+    min-height: 100dvh;
     color: var(--fl-color-text);
     background:
       radial-gradient(circle at 12% 14%, color-mix(in srgb, var(--app-primary-color) 8%, transparent), transparent 28%),
@@ -1482,7 +1487,7 @@ body {
 }
 
 .fl-bottom-nav-item:hover {
-  color: #f8fafc;
+  color: var(--fl-color-text);
 }
 
 .fl-bottom-nav-item-active {
@@ -1509,7 +1514,7 @@ body {
 
 @media (min-width: 768px) {
   .fl-app-page {
-    padding-bottom: 2rem;
+    padding-bottom: 1.5rem;
   }
 
   .fl-app-container {
