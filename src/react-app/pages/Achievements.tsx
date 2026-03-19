@@ -108,6 +108,19 @@ export default function Achievements() {
     () => resolveShowcasedAchievement(profile?.showcased_achievements ?? user?.showcased_achievements ?? null, achievements),
     [achievements, profile?.showcased_achievements, user?.showcased_achievements],
   );
+  const showcasedAchievementTone = useMemo(() => {
+    if (!showcasedAchievement) return null;
+
+    const rarityStyle = RARITY_CONFIG[normalizeRarity(showcasedAchievement.rarity)];
+
+    return {
+      style: {
+        borderColor: `color-mix(in srgb, ${rarityStyle.color} 42%, transparent)`,
+        color: rarityStyle.color,
+        backgroundColor: `color-mix(in srgb, ${rarityStyle.color} 18%, transparent)`,
+      },
+    };
+  }, [showcasedAchievement]);
 
   const unlockedCount = achievements.filter((achievement) => achievement.unlocked === 1).length;
   const progressPercent = achievements.length > 0 ? (unlockedCount / achievements.length) * 100 : 0;
@@ -170,9 +183,9 @@ export default function Achievements() {
               <span>Voltar</span>
             </button>
 
-            {showcasedAchievement ? (
-              <div className="inline-flex max-w-full items-center gap-2 self-start rounded-full border px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.16em] sm:self-auto" style={{ borderColor: "color-mix(in srgb, var(--app-primary-color) 20%, transparent)", color: "var(--app-primary-color)", backgroundColor: "color-mix(in srgb, var(--app-primary-color) 8%, transparent)" }}>
-                <Trophy className="h-3.5 w-3.5 shrink-0" />
+            {showcasedAchievement && showcasedAchievementTone ? (
+              <div className="inline-flex max-w-full items-center gap-2 self-start rounded-full border px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.16em] sm:self-auto" style={showcasedAchievementTone.style}>
+                <Award className="h-3.5 w-3.5 shrink-0" />
                 <span className="truncate">Honrada: {showcasedAchievement.name}</span>
               </div>
             ) : null}
@@ -442,7 +455,15 @@ function AchievementSection({
                   {isLocked ? <Lock className="h-6 w-6 fl-theme-text-muted" /> : <Award className="h-8 w-8" style={{ color: rarityStyle.color }} />}
                 </div>
                 {isShowcased ? (
-                  <span className="rounded-full px-2 py-1 text-[9px] font-bold uppercase tracking-[0.16em]" style={{ color: "var(--app-primary-color)", backgroundColor: "color-mix(in srgb, var(--app-primary-color) 14%, transparent)" }}>
+                  <span
+                    className="inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[9px] font-bold uppercase tracking-[0.16em]"
+                    style={{
+                      borderColor: `color-mix(in srgb, ${rarityStyle.color} 42%, transparent)`,
+                      color: rarityStyle.color,
+                      backgroundColor: `color-mix(in srgb, ${rarityStyle.color} 18%, transparent)`,
+                    }}
+                  >
+                    <Award className="h-3 w-3 shrink-0" />
                     Honrada
                   </span>
                 ) : !isLocked ? (

@@ -7,7 +7,7 @@ import LevelUpModal from "@/react-app/components/LevelUpModal";
 import AIRecommendations from "@/react-app/components/AIRecommendations";
 import AIMissionGenerator from "@/react-app/components/AIMissionGenerator";
 import LoadingBall from "@/react-app/components/LoadingBall";
-import { Bot, CalendarDays, Camera, Cloud, Flame, Zap } from "lucide-react";
+import { Award, Bot, CalendarDays, Camera, Cloud, Flame, Zap } from "lucide-react";
 import { ROUTE_PATHS } from "@/react-app/constants/auth";
 import type {
   AchievementWithUnlock,
@@ -397,22 +397,52 @@ export default function Dashboard() {
       .toUpperCase();
 
     if (normalizedRarity === "RARO") {
-      return { rarityClass: "border-blue-500 text-blue-400" };
+      return {
+        style: {
+          borderColor: "color-mix(in srgb, #3b82f6 42%, transparent)",
+          color: "#60a5fa",
+          backgroundColor: "color-mix(in srgb, #3b82f6 18%, transparent)",
+        },
+      };
     }
 
     if (normalizedRarity === "EPICO" || normalizedRarity === "MITICO") {
-      return { rarityClass: "border-purple-500 text-purple-400" };
+      return {
+        style: {
+          borderColor: "color-mix(in srgb, #8b5cf6 42%, transparent)",
+          color: "#c084fc",
+          backgroundColor: "color-mix(in srgb, #8b5cf6 18%, transparent)",
+        },
+      };
     }
 
     if (normalizedRarity === "LENDARIO") {
-      return { rarityClass: "border-amber-500 text-amber-400" };
+      return {
+        style: {
+          borderColor: "color-mix(in srgb, #f59e0b 42%, transparent)",
+          color: "#fbbf24",
+          backgroundColor: "color-mix(in srgb, #f59e0b 18%, transparent)",
+        },
+      };
     }
 
     if (normalizedRarity === "SECRETO") {
-      return { rarityClass: "border-primary text-primary" };
+      return {
+        style: {
+          borderColor: "color-mix(in srgb, var(--app-primary-color) 42%, transparent)",
+          color: "var(--app-primary-color)",
+          backgroundColor: "color-mix(in srgb, var(--app-primary-color) 18%, transparent)",
+        },
+      };
     }
 
-    return { rarityClass: "border-slate-500 text-slate-400" };
+    return {
+      style: {
+        borderColor: "color-mix(in srgb, #64748b 42%, transparent)",
+        color: "#94a3b8",
+        backgroundColor: "color-mix(in srgb, #64748b 18%, transparent)",
+      },
+    };
   }, [showcasedAchievement]);
 
   return (
@@ -474,8 +504,8 @@ export default function Dashboard() {
                   </div>
                   {showcasedAchievement && showcasedAchievementDisplay ? (
                     <div className="min-w-0">
-                      <div className={`inline-flex max-w-full items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] sm:text-xs font-bold ${showcasedAchievementDisplay.rarityClass}`}>
-                        <span className="shrink-0">{"\u{1F3C6}"}</span>
+                      <div className="inline-flex max-w-full items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] sm:text-xs font-bold" style={showcasedAchievementDisplay.style}>
+                        <Award className="h-3.5 w-3.5 shrink-0" />
                         <span className="max-w-full truncate">{showcasedAchievement.name}</span>
                       </div>
                     </div>
