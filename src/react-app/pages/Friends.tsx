@@ -215,23 +215,23 @@ export default function Friends() {
       <div className="flex flex-1 min-h-0 flex-col overflow-hidden md:flex-row">
         
         {/* Main Content */}
-        <div className="flex-1 overflow-y-auto custom-scrollbar p-4 sm:p-6 md:p-8">
+        <div className="flex-1 overflow-y-auto custom-scrollbar p-4 pb-[98px] sm:p-6 md:p-8 min-w-0">
           
           {/* Header */}
-          <header className="mb-10">
-            <h1 className="mb-2 text-3xl font-black leading-none tracking-[0.2em] tracking-tight sm:text-4xl lg:text-5xl" style={{ color: "var(--fl-color-text)" }}>Social Hub</h1>
-            <p className="font-bold text-[10px] uppercase tracking-[0.3em]" style={{ color: 'var(--app-primary-color)' }}>Sua rede de elite e alianças estratégicas.</p>
+          <header className="mb-6 sm:mb-10 min-w-0">
+            <h1 className="mb-1 sm:mb-2 text-2xl sm:text-4xl lg:text-5xl font-black leading-none tracking-[0.1em] sm:tracking-[0.2em] truncate" style={{ color: "var(--fl-color-text)" }}>Social Hub</h1>
+            <p className="font-bold text-[9px] sm:text-[10px] uppercase tracking-[0.2em] sm:tracking-[0.3em] truncate">Sua rede de elite e alianças estratégicas.</p>
             {error && (
-              <div className="mt-4 p-4 rounded-2xl bg-red-500/10 border border-red-500/20 text-red-500 text-[10px] font-bold uppercase tracking-widest">
+              <div className="mt-4 p-3 sm:p-4 rounded-2xl bg-red-500/10 border border-red-500/20 text-red-500 text-[9px] sm:text-[10px] font-bold uppercase tracking-widest">
                 {error}
               </div>
             )}
           </header>
 
           {/* Search Area */}
-          <div className="relative mb-10 group">
-            <div className="absolute inset-y-0 left-5 flex items-center pointer-events-none">
-              <Search className="w-5 h-5 transition-colors group-focus-within:text-primary" style={{ color: "var(--fl-color-text-muted)" }} />
+          <div className="relative mb-8 sm:mb-10 group min-w-0">
+            <div className="absolute inset-y-0 left-4 sm:left-5 flex items-center pointer-events-none">
+              <Search className="w-4 h-4 sm:w-5 sm:h-5 transition-colors group-focus-within:text-primary" style={{ color: "var(--fl-color-text-muted)" }} />
             </div>
             <input 
               type="text" 
@@ -239,12 +239,12 @@ export default function Friends() {
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && searchUsers()}
-              className="fl-theme-input w-full rounded-2xl py-5 pl-14 pr-6 placeholder-slate-600 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all text-sm font-medium"
+              className="fl-theme-input w-full rounded-2xl py-4 sm:py-5 pl-11 sm:pl-14 pr-4 sm:pr-6 placeholder-slate-600 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all text-xs sm:text-sm font-medium"
             />
             <button 
               onClick={searchUsers}
               disabled={searching}
-              className="absolute right-3 top-1/2 -translate-y-1/2 rounded-xl px-6 py-2.5 text-[10px] font-black uppercase tracking-widest shadow-lg transition-all hover:scale-105 active:scale-95"
+              className="absolute right-2 top-1/2 -translate-y-1/2 rounded-xl px-4 sm:px-6 py-2 sm:py-2.5 text-[9px] sm:text-[10px] font-black uppercase tracking-widest shadow-lg transition-all hover:scale-105 active:scale-95"
               style={{ backgroundColor: 'var(--app-primary-color)', color: 'var(--fl-nav-item-active-text)' }}
             >
               {searching ? <LoadingBall size="sm" /> : 'Buscar'}
@@ -322,9 +322,9 @@ export default function Friends() {
                   </div>
                   
                   {onlineFriends.length > 0 ? (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5 min-w-0">
                       {onlineFriends.map((friend) => (
-                        <div key={friend.id} className="fl-theme-surface rounded-[2rem] p-5 group hover:border-primary/30 transition-all relative overflow-hidden">
+                        <div key={friend.id} className="fl-theme-surface rounded-[1.5rem] sm:rounded-[2rem] p-4 sm:p-5 group hover:border-primary/30 transition-all relative overflow-hidden min-w-0">
                           <div className="absolute top-0 right-0 p-3 opacity-0 group-hover:opacity-100 transition-opacity">
                             <button className="fl-theme-text-muted transition-opacity hover:opacity-85"><MoreVertical className="w-4 h-4" /></button>
                           </div>

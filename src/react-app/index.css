@@ -382,7 +382,7 @@ body {
     min-height: 100dvh;
     flex-direction: column;
     overflow-x: hidden;
-    padding-bottom: var(--fl-bottom-nav-clearance);
+    padding-bottom: 0px;
   }
 
   .fl-app-container {

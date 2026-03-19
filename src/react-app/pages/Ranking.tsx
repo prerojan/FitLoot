@@ -129,13 +129,13 @@ export default function Ranking() {
 
   return (
     <AppPageShell bottomNavActive="ranking" className="fl-theme-page">
-      <div className="flex flex-1 flex-col overflow-y-auto p-4 sm:p-6 lg:p-8">
-        <header className="mb-8 flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h1 className="mb-1 text-2xl font-bold uppercase tracking-[0.2em]">
+      <div className="flex flex-1 flex-col overflow-y-auto p-4 pb-[98px] sm:p-6 lg:p-8 min-w-0">
+        <header className="mb-4 sm:mb-8 flex flex-wrap items-center justify-between gap-3 min-w-0">
+          <div className="min-w-0">
+            <h1 className="mb-1 text-xl sm:text-2xl font-bold uppercase tracking-[0.15em] sm:tracking-[0.2em] truncate">
               {mode === "global" ? "Ranking Global" : "Ranking de Amigos"}
             </h1>
-            <p className="fl-theme-text-muted text-[10px] font-bold uppercase tracking-widest">
+            <p className="fl-theme-text-muted text-[9px] sm:text-[10px] font-bold uppercase tracking-widest truncate">
               Os guerreiros mais consistentes do FitLoot.
             </p>
           </div>
@@ -157,8 +157,8 @@ export default function Ranking() {
           </div>
         ) : null}
 
-        <div className="mb-10">
-          <div className="fl-theme-surface-soft flex max-w-[320px] rounded-2xl p-1.5">
+        <div className="mb-6 sm:mb-10">
+          <div className="fl-theme-surface-soft flex max-w-[320px] rounded-2xl p-1.5 min-w-0">
             <button
               type="button"
               onClick={() => setMode("global")}
@@ -179,10 +179,10 @@ export default function Ranking() {
         </div>
 
         {currentUserEntry ? (
-          <section className="fl-theme-surface mb-10 rounded-[2rem] p-5 sm:p-6">
-            <div className="mb-5 flex items-center gap-3">
-              <Trophy className="h-5 w-5" style={{ color: "var(--app-primary-color)" }} />
-              <h2 className="text-[10px] font-bold uppercase tracking-[0.3em]">Sua posição atual</h2>
+          <section className="fl-theme-surface mb-6 sm:mb-10 rounded-[1.5rem] sm:rounded-[2rem] p-4 sm:p-6 min-w-0">
+            <div className="mb-4 sm:mb-5 flex items-center gap-3">
+              <Trophy className="h-4 w-4 sm:h-5 sm:w-5 shrink-0" style={{ color: "var(--app-primary-color)" }} />
+              <h2 className="text-[9px] sm:text-[10px] font-bold uppercase tracking-[0.2em] sm:tracking-[0.3em] truncate">Sua posição atual</h2>
             </div>
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div className="flex min-w-0 items-center gap-4">
@@ -213,7 +213,7 @@ export default function Ranking() {
           </section>
         ) : null}
 
-        <div className="mx-auto mb-12 flex w-full max-w-[720px] items-end justify-center gap-2 px-2 pt-10 sm:gap-6 sm:px-4">
+        <div className="mx-auto mb-8 sm:mb-12 flex w-full max-w-[720px] items-end justify-center gap-1.5 sm:gap-6 px-1 sm:px-4 pt-6 sm:pt-10 min-w-0">
           <PodiumCard entry={top3[1]} position={2} highlightColor="#64748b" />
           <PodiumCard entry={top3[0]} position={1} highlightColor="var(--app-primary-color)" featured />
           <PodiumCard entry={top3[2]} position={3} highlightColor="#92400e" />
@@ -233,7 +233,7 @@ export default function Ranking() {
             return (
               <div
                 key={`${player.username}-${position}`}
-                className={`relative flex items-center rounded-2xl border p-4 transition-all duration-300 ${isCurrentUser ? "overflow-hidden" : ""}`}
+                className={`relative flex items-center rounded-2xl border p-3 sm:p-4 transition-all duration-300 min-w-0 ${isCurrentUser ? "overflow-hidden" : ""}`}
                 style={{
                   borderColor: isCurrentUser
                     ? "color-mix(in srgb, var(--app-primary-color) 30%, transparent)"
@@ -247,13 +247,13 @@ export default function Ranking() {
                   <div className="absolute inset-y-0 left-0 w-1.5" style={{ backgroundColor: "var(--app-primary-color)" }} />
                 ) : null}
                 <span
-                  className="w-8 text-sm font-bold sm:w-10"
+                  className="w-6 sm:w-10 text-[10px] sm:text-sm font-bold shrink-0"
                   style={{ color: isCurrentUser ? "var(--app-primary-color)" : "var(--fl-color-text-muted)" }}
                 >
                   {position}
                 </span>
                 <div
-                  className="mx-4 size-12 shrink-0 overflow-hidden rounded-full border"
+                  className="mx-2 sm:mx-4 size-10 sm:size-12 shrink-0 overflow-hidden rounded-full border"
                   style={{ borderColor: isCurrentUser ? "var(--app-primary-color)" : "var(--fl-border-soft)" }}
                 >
                   <Avatar name={player.username} className="h-full w-full" />
@@ -266,9 +266,9 @@ export default function Ranking() {
                     {player.current_streak} dias de streak
                   </p>
                 </div>
-                <div className="shrink-0 text-right">
-                  <p className="text-base font-bold">LVL {player.level}</p>
-                  <p className="text-[10px] font-bold uppercase tracking-[0.15em]" style={{ color: "var(--app-primary-color)" }}>
+                <div className="shrink-0 text-right min-w-0">
+                  <p className="text-xs sm:text-base font-bold truncate">LVL {player.level}</p>
+                  <p className="text-[8px] sm:text-[10px] font-bold uppercase tracking-[0.1em] sm:tracking-[0.15em] truncate" style={{ color: "var(--app-primary-color)" }}>
                     {(player.xp / 1000).toFixed(1)}K XP
                   </p>
                 </div>
@@ -309,18 +309,18 @@ function PodiumCard({
         {featured ? (
           <Crown className="absolute -top-10 left-1/2 h-12 w-12 -translate-x-1/2" style={{ color: highlightColor }} />
         ) : null}
-        <div className={`overflow-hidden rounded-full border-4 ${featured ? "size-28" : "size-20"}`} style={{ borderColor: highlightColor }}>
+        <div className={`overflow-hidden rounded-full border-4 ${featured ? "size-20 sm:size-28" : "size-16 sm:size-20"}`} style={{ borderColor: highlightColor }}>
           <Avatar name={entry.username} className="h-full w-full" />
         </div>
         <div
-          className="absolute -bottom-2 left-1/2 -translate-x-1/2 rounded-full px-4 py-1 text-[9px] font-bold uppercase tracking-[0.2em]"
+          className="absolute -bottom-2 left-1/2 -translate-x-1/2 rounded-full px-2 py-0.5 sm:px-4 sm:py-1 text-[8px] sm:text-[9px] font-bold uppercase tracking-[0.1em] sm:tracking-[0.2em] truncate"
           style={{ backgroundColor: highlightColor, color: "var(--fl-nav-item-active-text)" }}
         >
           {position === 1 ? "Campeão" : `${position}º`}
         </div>
       </div>
       <div
-        className={`w-full rounded-t-[2rem] border-x border-t p-4 text-center ${featured ? "h-36" : "h-24"}`}
+        className={`w-full rounded-t-[1.5rem] sm:rounded-t-[2rem] border-x border-t p-2 sm:p-4 text-center ${featured ? "h-28 sm:h-36" : "h-20 sm:h-24"}`}
         style={{
           borderColor: "var(--fl-border-soft)",
           backgroundColor: featured

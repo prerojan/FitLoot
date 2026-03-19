@@ -369,35 +369,35 @@ function MissionExecutionModal({
   const sessionXp = Math.max(0, Math.round((mission.xp_reward * activeProgress) / 100));
 
   return (
-    <div className="fl-z-mission-screen fixed inset-0 flex flex-col overflow-x-hidden font-display antialiased" style={{ backgroundColor: "var(--app-bg-color)", color: "var(--fl-color-text)" }}>
-      <div className="layout-container flex h-full grow flex-col">
+    <div className="fl-z-mission-screen fixed inset-0 flex flex-col overflow-x-hidden font-display antialiased min-w-0" style={{ backgroundColor: "var(--app-bg-color)", color: "var(--fl-color-text)" }}>
+      <div className="layout-container flex h-full grow flex-col min-w-0">
         {/* Header */}
-        <header className="flex items-center justify-between border-b px-6 py-4" style={{ borderColor: "var(--fl-border-soft)" }}>
-          <div className="flex items-center gap-3">
-            <div className="flex size-8 items-center justify-center rounded" style={{ backgroundColor: "var(--app-primary-color)", color: "var(--fl-nav-item-active-text)" }}>
-              <Dumbbell className="w-5 h-5" strokeWidth={2.5} />
+        <header className="flex items-center justify-between border-b px-3 py-2 sm:px-4 sm:py-3 md:px-6 md:py-4" style={{ borderColor: "var(--fl-border-soft)" }}>
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+            <div className="flex size-7 sm:size-8 items-center justify-center rounded shrink-0" style={{ backgroundColor: "var(--app-primary-color)", color: "var(--fl-nav-item-active-text)" }}>
+              <Dumbbell className="w-4 h-4 sm:w-5 sm:h-5" strokeWidth={2.5} />
             </div>
-            <h2 className="text-xl font-bold tracking-tight">FitLoot</h2>
+            <h2 className="text-lg sm:text-xl font-bold tracking-tight truncate">FitLoot</h2>
           </div>
-          <div className="flex gap-2">
-            <button type="button" className="flex size-10 items-center justify-center rounded-full border transition-opacity hover:opacity-80" onClick={resetExecution} style={{ backgroundColor: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)", color: "var(--app-primary-color)", borderColor: "color-mix(in srgb, var(--app-primary-color) 20%, transparent)" }}>
-              <Info className="w-5 h-5" />
+          <div className="flex gap-1 sm:gap-2 shrink-0">
+            <button type="button" className="flex size-8 sm:size-10 items-center justify-center rounded-full border transition-opacity hover:opacity-80" onClick={resetExecution} style={{ backgroundColor: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)", color: "var(--app-primary-color)", borderColor: "color-mix(in srgb, var(--app-primary-color) 20%, transparent)" }}>
+              <Info className="w-4 h-4 sm:w-5 sm:h-5" />
             </button>
-            <button type="button" className="flex size-10 items-center justify-center rounded-full border transition-opacity hover:opacity-80" onClick={onClose} style={{ backgroundColor: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)", color: "var(--app-primary-color)", borderColor: "color-mix(in srgb, var(--app-primary-color) 20%, transparent)" }}>
-              <X className="w-5 h-5" />
+            <button type="button" className="flex size-8 sm:size-10 items-center justify-center rounded-full border transition-opacity hover:opacity-80" onClick={onClose} style={{ backgroundColor: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)", color: "var(--app-primary-color)", borderColor: "color-mix(in srgb, var(--app-primary-color) 20%, transparent)" }}>
+              <X className="w-4 h-4 sm:w-5 sm:h-5" />
             </button>
           </div>
         </header>
 
-        <main className="flex-1 max-w-2xl mx-auto w-full px-6 py-8 flex flex-col">
+        <main className="flex-1 max-w-2xl mx-auto w-full px-3 py-4 sm:px-6 sm:py-8 flex flex-col min-w-0">
           {/* Progress Bar */}
-          <div className="mb-10">
-            <div className="flex justify-between items-end mb-3">
-              <div>
-                <p className="text-sm font-medium uppercase tracking-widest" style={{ color: "var(--app-primary-color)" }}>Missão Ativa</p>
-                <h1 className="text-3xl font-bold mt-1">{mission.title}</h1>
+          <div className="mb-6 sm:mb-10">
+            <div className="flex justify-between items-end mb-2 sm:mb-3 gap-2">
+              <div className="min-w-0 overflow-hidden">
+                <p className="text-[10px] sm:text-xs md:text-sm font-medium uppercase tracking-widest truncate" style={{ color: "var(--app-primary-color)" }}>Missão Ativa</p>
+                <h1 className="text-lg sm:text-xl md:text-2xl lg:text-3xl font-bold mt-0.5 sm:mt-1 truncate">{mission.title}</h1>
               </div>
-              <p className="text-lg font-bold" style={{ color: "var(--app-primary-color)" }}>{Math.round(activeProgress)}%</p>
+              <p className="text-base sm:text-lg md:text-xl font-bold shrink-0" style={{ color: "var(--app-primary-color)" }}>{Math.round(activeProgress)}%</p>
             </div>
             <div className="h-3 w-full overflow-hidden rounded-full" style={{ backgroundColor: "color-mix(in srgb, var(--fl-color-text) 8%, transparent)" }}>
               <div 
@@ -414,39 +414,39 @@ function MissionExecutionModal({
           <div className="flex-1 flex flex-col items-center justify-center py-10">
             {/* Rest Timer */}
             {(isTimeMission || state.resting) && (
-              <div className="text-center mb-12">
-                <p className="text-lg mb-4" style={{ color: "var(--fl-color-text-muted)" }}>
+              <div className="text-center mb-6 sm:mb-12">
+                <p className="text-xs sm:text-sm md:text-base lg:text-lg mb-2 sm:mb-4" style={{ color: "var(--fl-color-text-muted)" }}>
                   {state.resting ? "Timer de Descanso" : "Timer de Série"}
                 </p>
-                <div className="flex items-center justify-center gap-4">
+                <div className="flex items-center justify-center gap-2 sm:gap-4">
                   <div className="flex flex-col items-center">
                     <div 
-                      className="rounded-2xl w-28 h-28 flex items-center justify-center border transition-all"
+                      className="rounded-xl sm:rounded-2xl w-16 h-16 sm:w-20 sm:h-20 md:w-24 md:h-24 lg:w-28 lg:h-28 flex items-center justify-center border transition-all"
                       style={{ 
                         backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 82%, transparent)",
                         borderColor: displaySeconds > 59 ? "color-mix(in srgb, var(--app-primary-color) 20%, transparent)" : "var(--fl-border-soft)",
                         boxShadow: displaySeconds > 59 ? "0 0 0 2px color-mix(in srgb, var(--app-primary-color) 20%, transparent)" : "none",
                       }}
                     >
-                      <span className="text-5xl font-bold" style={{ color: displaySeconds > 59 ? "var(--app-primary-color)" : "var(--fl-color-text)" }}>{m}</span>
+                      <span className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-bold" style={{ color: displaySeconds > 59 ? "var(--app-primary-color)" : "var(--fl-color-text)" }}>{m}</span>
                     </div>
-                    <span className="text-xs mt-3 uppercase tracking-widest" style={{ color: "var(--fl-color-text-muted)" }}>Min</span>
+                    <span className="text-[10px] mt-2 sm:mt-3 uppercase tracking-widest" style={{ color: "var(--fl-color-text-muted)" }}>Min</span>
                   </div>
                   
-                  <span className="text-4xl font-bold pb-8" style={{ color: "var(--fl-color-text-soft)" }}>:</span>
+                  <span className="text-xl sm:text-2xl md:text-3xl lg:text-4xl font-bold pb-6 sm:pb-8" style={{ color: "var(--fl-color-text-soft)" }}>:</span>
                   
                   <div className="flex flex-col items-center">
                     <div 
-                      className="rounded-2xl w-28 h-28 flex items-center justify-center border transition-all"
+                      className="rounded-xl sm:rounded-2xl w-16 h-16 sm:w-20 sm:h-20 md:w-24 md:h-24 lg:w-28 lg:h-28 flex items-center justify-center border transition-all"
                       style={{ 
                         backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 82%, transparent)",
                         borderColor: displaySeconds <= 59 ? "color-mix(in srgb, var(--app-primary-color) 20%, transparent)" : "var(--fl-border-soft)",
                         boxShadow: displaySeconds <= 59 ? "0 0 0 2px color-mix(in srgb, var(--app-primary-color) 20%, transparent)" : "none",
                       }}
                     >
-                      <span className="text-5xl font-bold" style={{ color: displaySeconds <= 59 ? "var(--app-primary-color)" : "var(--fl-color-text)" }}>{s}</span>
+                      <span className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-bold" style={{ color: displaySeconds <= 59 ? "var(--app-primary-color)" : "var(--fl-color-text)" }}>{s}</span>
                     </div>
-                    <span className="text-xs mt-3 uppercase tracking-widest" style={{ color: "var(--fl-color-text-muted)" }}>Seg</span>
+                    <span className="text-[10px] mt-2 sm:mt-3 uppercase tracking-widest" style={{ color: "var(--fl-color-text-muted)" }}>Seg</span>
                   </div>
                 </div>
               </div>
@@ -476,22 +476,22 @@ function MissionExecutionModal({
                 <button
                   type="button"
                   onClick={toggleRunning}
-                  className="size-20 rounded-full flex items-center justify-center hover:scale-110 transition-transform shadow-xl"
+                  className="size-14 sm:size-20 rounded-full flex items-center justify-center hover:scale-110 transition-transform shadow-xl"
                   style={{ backgroundColor: "var(--app-primary-color)", color: "var(--fl-nav-item-active-text)", boxShadow: "0 20px 25px -5px color-mix(in srgb, var(--app-primary-color) 30%, transparent)" }}
                 >
                   {state.running && !state.resting ? (
-                    <Pause className="w-8 h-8 fill-current" strokeWidth={1} />
+                    <Pause className="w-6 h-6 sm:w-8 sm:h-8 fill-current" strokeWidth={1} />
                   ) : (
-                    <Play className="w-8 h-8 fill-current ml-1" strokeWidth={1} />
+                    <Play className="w-6 h-6 sm:w-8 sm:h-8 fill-current ml-1" strokeWidth={1} />
                   )}
                 </button>
               </div>
               
-              <div className="absolute bottom-4 left-4 right-4 flex items-center justify-between">
-                <span className="rounded-full border px-4 py-1.5 text-xs font-bold backdrop-blur-md" style={{ backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 88%, transparent)", borderColor: "var(--fl-border-soft)" }}>
+              <div className="absolute bottom-2 sm:bottom-4 left-2 sm:left-4 right-2 sm:right-4 flex items-center justify-between gap-1">
+                <span className="rounded-full border px-2 py-1 sm:px-4 sm:py-1.5 text-[9px] sm:text-xs font-bold backdrop-blur-md truncate" style={{ backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 88%, transparent)", borderColor: "var(--fl-border-soft)" }}>
                   VERIFICAR FORMA
                 </span>
-                <span className="rounded-full border px-4 py-1.5 text-xs font-bold backdrop-blur-md" style={{ backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 88%, transparent)", borderColor: "var(--fl-border-soft)" }}>
+                <span className="rounded-full border px-2 py-1 sm:px-4 sm:py-1.5 text-[9px] sm:text-xs font-bold backdrop-blur-md shrink-0" style={{ backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 88%, transparent)", borderColor: "var(--fl-border-soft)" }}>
                   SÉRIE {state.currentSet}/{sets}
                 </span>
               </div>
@@ -517,14 +517,14 @@ function MissionExecutionModal({
             
             {/* Input Overlay for Reps Manual count */}
             {isCounterMission && !isTimeMission && (
-               <div className="mt-6 w-full max-w-md flex flex-col items-center justify-center space-y-2">
-                 <p className="text-sm uppercase tracking-widest font-bold" style={{ color: "var(--app-primary-color)" }}>Repetições</p>
-                 <div className="flex items-center gap-6">
-                    <button type="button" onClick={decrementRep} disabled={state.resting} className="size-14 rounded-full border text-2xl active:scale-95 disabled:opacity-50" style={{ borderColor: "var(--fl-border-soft)", backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 78%, transparent)" }}>-</button>
-                   <span className="text-5xl font-bold w-20 text-center">{state.repsDone}</span>
-                    <button type="button" onClick={incrementRep} disabled={state.resting} className="size-14 rounded-full border text-2xl active:scale-95 disabled:opacity-50" style={{ borderColor: "var(--fl-border-soft)", backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 78%, transparent)" }}>+</button>
+               <div className="mt-4 sm:mt-6 w-full max-w-md flex flex-col items-center justify-center space-y-2 min-w-0">
+                 <p className="text-[10px] sm:text-xs md:text-sm uppercase tracking-widest font-bold" style={{ color: "var(--app-primary-color)" }}>Repetições</p>
+                 <div className="flex items-center gap-4 sm:gap-6 min-w-0">
+                    <button type="button" onClick={decrementRep} disabled={state.resting} className="size-10 sm:size-14 rounded-full border text-lg sm:text-2xl active:scale-95 disabled:opacity-50" style={{ borderColor: "var(--fl-border-soft)", backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 78%, transparent)" }}>-</button>
+                   <span className="text-3xl sm:text-5xl font-bold w-16 sm:w-20 text-center">{state.repsDone}</span>
+                    <button type="button" onClick={incrementRep} disabled={state.resting} className="size-10 sm:size-14 rounded-full border text-lg sm:text-2xl active:scale-95 disabled:opacity-50" style={{ borderColor: "var(--fl-border-soft)", backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 78%, transparent)" }}>+</button>
                  </div>
-                 <p className="text-xs" style={{ color: "var(--fl-color-text-muted)" }}>
+                 <p className="text-[10px] sm:text-xs text-center" style={{ color: "var(--fl-color-text-muted)" }}>
                    Meta da série: {setGoal} | Progresso: {totalCounterProgress}/{totalGoal}
                  </p>
                </div>
@@ -533,43 +533,42 @@ function MissionExecutionModal({
           </div>
 
           {/* Action Buttons */}
-          <div className="grid grid-cols-2 gap-4 mt-auto pt-8">
+          <div className="grid grid-cols-2 gap-2 sm:gap-4 mt-auto pt-4 sm:pt-8 min-w-0">
             <button 
-              className="col-span-2 h-16 rounded-2xl font-bold text-xl flex items-center justify-center gap-2 shadow-lg active:scale-[0.98] transition-all disabled:opacity-50 disabled:grayscale" 
+              className="col-span-2 h-12 sm:h-16 rounded-xl sm:rounded-2xl font-bold text-base sm:text-xl flex items-center justify-center gap-2 shadow-lg active:scale-[0.98] transition-all disabled:opacity-50 disabled:grayscale" 
               style={{ backgroundColor: "var(--app-primary-color)", color: "var(--fl-nav-item-active-text)", boxShadow: "0 10px 15px -3px color-mix(in srgb, var(--app-primary-color) 20%, transparent)" }}
               onClick={isCounterMission ? completeCurrentSet : advanceTimedSet}
               disabled={isCounterMission ? state.resting || state.repsDone <= 0 : state.finished}
             >
-              <FastForward className="w-6 h-6 fill-current" strokeWidth={1} />
+              <FastForward className="w-5 h-5 sm:w-6 sm:h-6 fill-current" strokeWidth={1} />
               PRÓXIMA SÉRIE
             </button>
             
             <button 
-              className="h-14 rounded-2xl font-bold flex items-center justify-center gap-2 border transition-colors active:scale-95 hover:bg-white/10"
+              className="h-10 sm:h-14 rounded-xl sm:rounded-2xl font-bold text-xs sm:text-sm md:text-base flex items-center justify-center gap-1 sm:gap-2 border transition-colors active:scale-95 hover:bg-white/10 truncate"
               style={{ backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 82%, transparent)", borderColor: "var(--fl-border-soft)", color: "var(--fl-color-text-muted)" }}
               onClick={toggleRunning}
               disabled={state.finished || isDistanceMission}
             >
-              {state.running ? <Pause className="w-5 h-5 fill-current" strokeWidth={1} /> : <Play className="w-5 h-5 fill-current" strokeWidth={1} />}
+              {state.running ? <Pause className="w-4 h-4 sm:w-5 sm:h-5 fill-current" strokeWidth={1} /> : <Play className="w-4 h-4 sm:w-5 sm:h-5 fill-current" strokeWidth={1} />}
               {isDistanceMission ? "SEM TIMER" : state.running ? "PAUSAR" : "RETOMAR"}
             </button>
             
             <button 
-              className="h-14 rounded-2xl font-bold flex items-center justify-center gap-2 border transition-colors active:scale-95 disabled:opacity-50 disabled:grayscale"
+              className="h-10 sm:h-14 rounded-xl sm:rounded-2xl font-bold text-xs sm:text-sm md:text-base flex items-center justify-center gap-1 sm:gap-2 border transition-colors active:scale-95 disabled:opacity-50 disabled:grayscale truncate"
               style={{ backgroundColor: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)", borderColor: "color-mix(in srgb, var(--app-primary-color) 22%, transparent)", color: "var(--app-primary-color)" }}
               onClick={() => { void finishMission(); }}
               disabled={!canFinishMission}
             >
-              <Square className="w-4 h-4 fill-current" strokeWidth={2} />
+              <Square className="w-3 h-3 sm:w-4 sm:h-4 fill-current" strokeWidth={2} />
               {isDistanceMission ? "REGISTRAR" : "FINALIZAR"}
             </button>
           </div>
         </main>
 
         {/* Footer */}
-        <footer className="mt-auto py-6 flex justify-center uppercase tracking-[0.3em] font-medium" style={{ color: "var(--fl-color-text-muted)", fontSize: 0 }}>
-          <span className="text-[10px]">Loot desta sessao: {sessionXp} / {mission.xp_reward} XP</span>
-          Loot desta sessão: {mission.xp_reward} XP
+        <footer className="mt-auto py-3 sm:py-6 flex justify-center uppercase tracking-[0.2em] sm:tracking-[0.3em] font-medium" style={{ color: "var(--fl-color-text-muted)", fontSize: 0 }}>
+          <span className="text-[9px] sm:text-[10px]">Loot desta sessao: {sessionXp} / {mission.xp_reward} XP</span>
         </footer>
       </div>
     </div>
@@ -716,10 +715,10 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
           <Dumbbell className="h-5 w-5" />
         </div>
         <div className="min-w-0">
-          <h3 className="truncate text-base font-bold" style={{ color: "var(--fl-color-text)" }}>
+          <h3 className="truncate text-xs sm:text-sm md:text-base font-bold" style={{ color: "var(--fl-color-text)" }}>
             {mission.title}
           </h3>
-          <p className="truncate text-[11px] font-medium" style={{ color: "var(--fl-color-text-muted)" }}>
+          <p className="truncate text-[10px] sm:text-xs font-medium" style={{ color: "var(--fl-color-text-muted)" }}>
             {compactSummary}
           </p>
         </div>
@@ -736,7 +735,7 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
           type="button"
           onClick={() => { void openDetails(); }}
           disabled={completing}
-          className="shrink-0 text-xs font-bold transition-opacity hover:opacity-80 disabled:opacity-50"
+          className="shrink-0 text-[10px] sm:text-xs font-bold transition-opacity hover:opacity-80 disabled:opacity-50"
           style={{ color: "var(--app-primary-color)" }}
         >
           {completing ? "Abrindo..." : compactActionLabel}

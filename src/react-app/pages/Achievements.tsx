@@ -108,17 +108,17 @@ export default function Achievements() {
   return (
     <AppPageShell bottomNavActive="missions" className="fl-theme-page" profile={profile ?? undefined} progression={progression ?? undefined}>
       <div className="flex flex-1 flex-col overflow-hidden">
-        <div className="flex-1 overflow-y-auto p-6 md:p-8">
+        <div className="flex-1 overflow-y-auto p-4 pb-4 sm:p-6 md:p-8 min-w-0">
           <div className="mb-12 grid grid-cols-1 gap-8 lg:grid-cols-[1fr_400px]">
             <div>
-              <header className="mb-8">
-                <h1 className="mb-2 text-4xl font-black uppercase tracking-[0.2em] md:text-5xl">Hall of Fame</h1>
-                <p className="text-[10px] font-bold uppercase tracking-[0.3em]" style={{ color: "var(--app-primary-color)" }}>
+              <header className="mb-6 sm:mb-8 min-w-0">
+                <h1 className="mb-1 sm:mb-2 text-2xl sm:text-4xl font-black uppercase tracking-[0.1em] sm:tracking-[0.2em] md:text-5xl truncate">Hall of Fame</h1>
+                <p className="text-[9px] sm:text-[10px] font-bold uppercase tracking-[0.2em] sm:tracking-[0.3em] truncate" style={{ color: "var(--app-primary-color)" }}>
                   Seu legado imortalizado em conquistas épicas.
                 </p>
               </header>
 
-              <div className="flex flex-wrap gap-4">
+              <div className="flex flex-wrap gap-3 sm:gap-4 min-w-0">
                 <StatsCard icon={Trophy} label="Concluídas" value={`${unlockedCount} / ${achievements.length}`} />
                 <StatsCard icon={Flame} label="Rank Atual" value="ELITE IV" />
               </div>
@@ -313,14 +313,14 @@ function StatsCard({
   value: string;
 }) {
   return (
-    <div className="fl-theme-surface min-w-[200px] rounded-2xl p-5">
-      <div className="flex items-center gap-4">
-        <div className="flex size-12 items-center justify-center rounded-xl" style={{ backgroundColor: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)" }}>
-          <Icon className="h-6 w-6" style={{ color: "var(--app-primary-color)" }} />
+    <div className="fl-theme-surface min-w-[140px] sm:min-w-[200px] flex-1 rounded-2xl p-4 sm:p-5 min-w-0">
+      <div className="flex items-center gap-3 sm:gap-4">
+        <div className="flex size-10 sm:size-12 items-center justify-center rounded-xl" style={{ backgroundColor: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)" }}>
+          <Icon className="h-5 w-5 sm:h-6 sm:w-6" style={{ color: "var(--app-primary-color)" }} />
         </div>
-        <div>
-          <span className="fl-theme-text-muted mb-1 block text-[10px] font-bold uppercase tracking-widest">{label}</span>
-          <span className="text-2xl font-black">{value}</span>
+        <div className="min-w-0">
+          <span className="fl-theme-text-muted mb-0.5 sm:mb-1 block text-[8px] sm:text-[10px] font-bold uppercase tracking-widest truncate">{label}</span>
+          <span className="text-lg sm:text-2xl font-black truncate">{value}</span>
         </div>
       </div>
     </div>

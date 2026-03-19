@@ -344,10 +344,10 @@ export default function AIChat() {
             </button>
 
             <div className="min-w-0 flex-1 text-center">
-              <h1 className="truncate text-base font-black tracking-tight sm:text-lg">
+              <h1 className="truncate text-sm sm:text-lg font-black tracking-tight">
                 FitBot <span style={{ color: "var(--app-primary-color)" }}>AI</span>
               </h1>
-              <div className="mt-1 flex items-center justify-center gap-1.5">
+              <div className="mt-1 flex items-center justify-center gap-1 sm:gap-1.5">
                 <span className="relative flex h-2 w-2">
                   <span
                     className="absolute inline-flex h-full w-full animate-ping rounded-full opacity-75"
@@ -378,7 +378,7 @@ export default function AIChat() {
           </div>
         </header>
 
-        <main className="custom-scrollbar mx-auto flex min-h-0 w-full max-w-5xl flex-1 flex-col gap-4 overflow-y-auto px-3 py-4 pb-3 sm:px-4 sm:pb-4 lg:px-8 lg:py-6 lg:pb-5">
+        <main className="custom-scrollbar mx-auto flex min-h-0 w-full max-w-5xl flex-1 flex-col gap-4 overflow-y-auto px-3 py-4 pb-4 sm:px-4 sm:pb-4 lg:px-8 lg:py-6 lg:pb-5 min-w-0">
           {messages.map((message, index) =>
             message.role === "assistant" ? (
               <div
@@ -399,7 +399,7 @@ export default function AIChat() {
                       minute: "2-digit",
                     })}
                   </span>
-                  <div className="fl-theme-surface rounded-2xl rounded-bl-none p-3 text-sm leading-relaxed whitespace-pre-wrap sm:p-4 sm:text-base">
+                  <div className="fl-theme-surface rounded-2xl rounded-bl-none p-3 text-[13px] sm:text-base leading-relaxed whitespace-pre-wrap sm:p-4">
                     {renderMessageContent(message.content)}
                   </div>
                 </div>
@@ -419,7 +419,7 @@ export default function AIChat() {
                       })}
                     </span>
                     <div
-                      className="rounded-2xl rounded-br-none p-3 text-sm font-semibold shadow-lg whitespace-pre-wrap sm:p-4 sm:text-base"
+                      className="rounded-2xl rounded-br-none p-3 text-[13px] sm:text-base font-semibold shadow-lg whitespace-pre-wrap sm:p-4"
                       style={{
                         backgroundColor: "var(--app-primary-color)",
                         color: "var(--fl-nav-item-active-text)",

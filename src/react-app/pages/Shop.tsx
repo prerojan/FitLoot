@@ -200,19 +200,19 @@ export default function Shop() {
         </header>
 
         {/* Shop Body */}
-        <div className="custom-scrollbar flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
+        <div className="custom-scrollbar flex-1 overflow-y-auto p-4 pb-[98px] sm:p-6 lg:p-8 min-w-0">
           {/* Hero Promo */}
-          <div className="group relative mb-8 h-52 w-full overflow-hidden rounded-3xl border sm:h-64" style={{ borderColor: "var(--fl-border-soft)" }}>
+          <div className="group relative mb-6 sm:mb-8 h-44 sm:h-64 w-full overflow-hidden rounded-[1.5rem] sm:rounded-3xl border min-w-0" style={{ borderColor: "var(--fl-border-soft)" }}>
             <div className="absolute inset-0 bg-gradient-to-r from-black via-black/50 to-transparent z-10"></div>
             <img 
               src="https://images.unsplash.com/photo-1517836357463-d25dfeac3438?auto=format&fit=crop&q=80" 
               alt="Promo"
               className="absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition-transform duration-700"
             />
-            <div className="relative z-20 h-full flex flex-col justify-center px-10">
-              <span className="mb-3 w-fit rounded-full bg-primary px-3 py-1 text-[10px] font-bold uppercase tracking-wider" style={{ backgroundColor: 'var(--app-primary-color)', color: 'var(--fl-nav-item-active-text)' }}>Tempo Limitado</span>
-              <h2 className="mb-2 text-3xl font-bold tracking-tight text-white sm:text-4xl">Summer Fitness Drop</h2>
-              <p className="max-w-sm text-sm font-medium text-white/80">Ganhe 20% de desconto em equipamentos selecionados até 31 de outubro.</p>
+            <div className="relative z-20 h-full flex flex-col justify-center px-6 sm:px-10 min-w-0">
+              <span className="mb-2 sm:mb-3 w-fit rounded-full bg-primary px-2 py-0.5 sm:px-3 sm:py-1 text-[8px] sm:text-[10px] font-bold uppercase tracking-wider" style={{ backgroundColor: 'var(--app-primary-color)', color: 'var(--fl-nav-item-active-text)' }}>Tempo Limitado</span>
+              <h2 className="mb-1 sm:mb-2 text-xl sm:text-4xl font-bold tracking-tight text-white truncate text-wrap">Summer Fitness Drop</h2>
+              <p className="max-w-xs sm:max-w-sm text-[10px] sm:text-sm font-medium text-white/80 line-clamp-2">Ganhe 20% de desconto em equipamentos selecionados até 31 de outubro.</p>
             </div>
           </div>
 
@@ -252,10 +252,10 @@ export default function Shop() {
 
           {activeTab === 'shop' ? (
             <div className="mb-14">
-              <div className="flex items-center justify-between mb-8">
-                <h3 className="text-2xl font-bold tracking-tight" style={{ color: "var(--fl-color-text)" }}>Recompensas em Destaque</h3>
-                <button className="text-primary text-sm font-bold flex items-center gap-1 hover:underline" style={{ color: 'var(--app-primary-color)' }}>
-                  Ver Todos <ArrowRight className="w-4 h-4" />
+              <div className="flex items-center justify-between mb-4 sm:mb-8 min-w-0">
+                <h3 className="text-xl sm:text-2xl font-bold tracking-tight truncate" style={{ color: "var(--fl-color-text)" }}>Recompensas em Destaque</h3>
+                <button className="text-primary text-[10px] sm:text-sm font-bold flex items-center gap-1 hover:underline shrink-0" style={{ color: 'var(--app-primary-color)' }}>
+                  Ver Todos <ArrowRight className="w-3 h-3 sm:w-4 sm:h-4" />
                 </button>
               </div>
 
@@ -339,7 +339,7 @@ function CategoryItem({ active, onClick, icon, label }: { active: boolean, onCli
   return (
     <button 
       onClick={onClick}
-      className={`flex items-center gap-2 px-6 py-2.5 rounded-full font-bold whitespace-nowrap transition-all border ${
+      className={`flex items-center gap-1.5 sm:gap-2 px-4 sm:px-6 py-2 sm:py-2.5 rounded-full font-bold whitespace-nowrap transition-all border ${
         active 
           ? "bg-primary border-primary shadow-[0_4px_12px_rgba(57,224,121,0.2)]" 
           : "fl-theme-surface fl-theme-text-muted hover:opacity-85"
@@ -351,7 +351,7 @@ function CategoryItem({ active, onClick, icon, label }: { active: boolean, onCli
       }}
     >
       {icon}
-      <span className="text-xs uppercase tracking-wider">{label}</span>
+      <span className="text-[10px] sm:text-xs uppercase tracking-wider">{label}</span>
     </button>
   );
 }
@@ -368,7 +368,7 @@ function ProductCard({
   const canAfford = userPoints >= product.points_cost;
 
   return (
-    <div className="fl-theme-surface rounded-3xl overflow-hidden group hover:border-primary/20 transition-all flex flex-col shadow-xl">
+    <div className="fl-theme-surface rounded-[1.5rem] sm:rounded-3xl overflow-hidden group hover:border-primary/20 transition-all flex flex-col shadow-xl min-w-0">
       <div className="h-48 relative overflow-hidden" style={{ backgroundColor: "color-mix(in srgb, var(--fl-surface-muted) 70%, transparent)" }}>
         {product.image_url ? (
           <img
@@ -386,18 +386,18 @@ function ProductCard({
           <span className="text-[10px] font-bold" style={{ color: "var(--fl-color-text)" }}>{product.points_cost.toLocaleString()}</span>
         </div>
       </div>
-      <div className="flex flex-1 flex-col p-5" style={{ color: "var(--fl-color-text)" }}>
-        <p className="text-[10px] font-bold mb-1 uppercase tracking-[0.2em]" style={{ color: 'var(--app-primary-color)' }}>
+      <div className="flex flex-1 flex-col p-4 sm:p-5 min-w-0" style={{ color: "var(--fl-color-text)" }}>
+        <p className="text-[9px] sm:text-[10px] font-bold mb-1 uppercase tracking-[0.1em] sm:tracking-[0.2em] truncate" style={{ color: 'var(--app-primary-color)' }}>
           {product.partner_name || "FitLoot Partner"}
         </p>
-        <h4 className="mb-2 text-lg font-bold leading-tight transition-colors group-hover:opacity-85">{product.name}</h4>
-        <p className="mb-6 line-clamp-2 text-xs leading-relaxed" style={{ color: "var(--fl-color-text-muted)" }}>
+        <h4 className="mb-2 text-base sm:text-lg font-bold leading-tight transition-colors group-hover:opacity-85 truncate text-wrap">{product.name}</h4>
+        <p className="mb-4 sm:mb-6 line-clamp-2 text-[10px] sm:text-xs leading-relaxed" style={{ color: "var(--fl-color-text-muted)" }}>
           {product.description || "Resgate esta oferta exclusiva e aproveite os benefícios da sua rotina fitness."}
         </p>
         <button
           onClick={() => onPurchase(product.id)}
           disabled={!canAfford}
-          className={`mt-auto w-full py-4 rounded-2xl font-bold text-xs uppercase tracking-[0.2em] transition-all active:scale-95 disabled:opacity-50 disabled:grayscale ${
+          className={`mt-auto w-full py-3 sm:py-4 rounded-xl sm:rounded-2xl font-bold text-[10px] sm:text-xs uppercase tracking-[0.1em] sm:tracking-[0.2em] transition-all active:scale-95 disabled:opacity-50 disabled:grayscale ${
             canAfford ? "neon-glow" : "cursor-not-allowed border"
           }`}
           style={{
@@ -408,7 +408,7 @@ function ProductCard({
             borderColor: canAfford ? 'transparent' : 'var(--fl-border-soft)',
           }}
         >
-          {canAfford ? "Resgatar Loot" : "Saldo Insuficiente"}
+          {canAfford ? "Resgatar Loot" : "Saldo"}
         </button>
       </div>
     </div>

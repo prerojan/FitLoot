@@ -417,17 +417,17 @@ export default function Dashboard() {
 
   return (
     <AppPageShell bottomNavActive="missions" profile={profile} progression={progression}>
-      <main className="mx-auto max-w-[48rem] px-4 pb-16 pt-4 sm:px-5 md:px-8 md:pt-8">
-        <div className="space-y-3 md:space-y-6">
+      <main className="mx-auto max-w-[48rem] px-4 pb-[98px] pt-4 sm:px-5 md:px-8 md:pt-8 min-w-0">
+        <div className="space-y-2 sm:space-y-4 md:space-y-6 min-w-0">
           <div className="flex w-full items-start justify-between gap-4 px-1">
             <div className="flex flex-col">
-              <p className="text-sm font-semibold md:text-base" style={{ color: "var(--fl-color-text)" }}>{displayName}</p>
-              <p className="text-[0.7rem] sm:text-xs text-slate-400 font-medium" style={{ color: "var(--fl-color-text-muted)" }}>{usernameLabel}</p>
+              <p className="text-xs sm:text-sm md:text-base font-bold truncate" style={{ color: "var(--fl-color-text)" }}>{displayName}</p>
+              <p className="text-[10px] sm:text-xs text-slate-400 font-medium truncate" style={{ color: "var(--fl-color-text-muted)" }}>{usernameLabel}</p>
             </div>
             <div className="flex flex-col items-end gap-1 md:flex-row md:items-center md:gap-2">
               {loadingState.titles ? <LoadingBall size="sm" /> : activeTitle ? (
                 <div
-                  className="rounded-full px-3 py-1 text-[0.68rem] font-bold uppercase tracking-[0.16em]"
+                  className="rounded-full px-2 py-0.5 sm:px-3 sm:py-1 text-[9px] sm:text-[0.68rem] font-bold uppercase tracking-[0.16em] truncate"
                   style={{
                     background: "color-mix(in srgb, var(--app-primary-color) 14%, transparent)",
                     color: "var(--app-primary-color)",
@@ -438,7 +438,7 @@ export default function Dashboard() {
                 </div>
               ) : null}
               <div
-                className="inline-flex items-center rounded-full border px-2 py-0.5 text-[0.6rem] font-black uppercase tracking-[0.15em] md:hidden"
+                className="inline-flex items-center rounded-full border px-2 py-0.5 text-[9px] sm:text-[0.6rem] font-black uppercase tracking-[0.15em] md:hidden shrink-0"
                 style={{
                   borderColor: "color-mix(in srgb, var(--app-primary-color) 22%, transparent)",
                   background: "color-mix(in srgb, var(--fl-surface-strong) 82%, transparent)",
@@ -451,41 +451,41 @@ export default function Dashboard() {
           </div>
 
           {error ? (
-            <div className="flex flex-col gap-3 rounded-[1.75rem] p-4 sm:flex-row sm:items-center sm:justify-between" style={SUBTLE_PANEL_STYLE}>
-              <span className="text-sm" style={{ color: "var(--fl-color-text)" }}>{error}</span>
-              <button type="button" onClick={() => { void refreshData(); }} className="rounded-xl px-4 py-2 text-sm font-semibold" style={PRIMARY_GLOW_STYLE}>
+            <div className="flex flex-col gap-2 rounded-2xl p-3 sm:flex-row sm:items-center sm:justify-between sm:p-4 min-w-0" style={SUBTLE_PANEL_STYLE}>
+              <span className="text-xs sm:text-sm truncate" style={{ color: "var(--fl-color-text)" }}>{error}</span>
+              <button type="button" onClick={() => { void refreshData(); }} className="rounded-xl px-3 py-1.5 sm:px-4 sm:py-2 text-[10px] sm:text-sm font-semibold shrink-0" style={PRIMARY_GLOW_STYLE}>
                 Tentar novamente
               </button>
             </div>
           ) : null}
 
           {showcasedAchievement && showcasedAchievementDisplay ? (
-            <div className="flex items-center gap-2 px-1">
-              <span className={`text-xs font-bold px-3 py-1 rounded-full border ${showcasedAchievementDisplay.rarityClass}`}>
+            <div className="flex items-center gap-2 px-1 min-w-0">
+              <span className={`text-[10px] sm:text-xs font-bold px-2 py-0.5 sm:px-3 sm:py-1 rounded-full border truncate ${showcasedAchievementDisplay.rarityClass}`}>
                 {showcasedAchievementDisplay.rarityIcon} {showcasedAchievement.name}
               </span>
             </div>
           ) : null}
 
-          <section className="space-y-4">
-            <div className="rounded-[2rem] px-4 py-5 md:px-8 md:py-6" style={PRIMARY_GLOW_STYLE}>
-              <div className="flex min-h-[9.5rem] flex-row items-center justify-between gap-2 sm:min-h-[10rem]">
-                <div className="flex flex-col justify-center gap-3 md:gap-4 pl-1">
-                  <div className="inline-flex items-center gap-2 text-[0.64rem] font-black uppercase tracking-[0.24em] sm:text-[0.68rem] sm:tracking-[0.28em] text-black/80">
+          <section className="space-y-2 sm:space-y-4 min-w-0">
+            <div className="rounded-[1.5rem] sm:rounded-[2rem] px-3 py-4 sm:px-4 sm:py-5 md:px-8 md:py-6 min-w-0" style={PRIMARY_GLOW_STYLE}>
+              <div className="flex min-h-[7.5rem] sm:min-h-[9.5rem] md:min-h-[10rem] flex-row items-center justify-between gap-1 sm:gap-2 min-w-0">
+                <div className="flex flex-col justify-center gap-2 sm:gap-3 md:gap-4 pl-1 min-w-0">
+                  <div className="inline-flex items-center gap-1.5 sm:gap-2 text-[9px] sm:text-[0.64rem] md:text-[0.68rem] font-black uppercase tracking-[0.2em] sm:tracking-[0.24em] md:tracking-[0.28em] text-black/80">
                     <Cloud className="h-4 w-4" />
                     <span>Experience Points</span>
                   </div>
-                  <div className="inline-flex w-fit items-center gap-2 rounded-full px-3 py-1.5 md:px-4 md:py-3 text-xs md:text-sm font-black bg-black/10 text-black">
+                  <div className="inline-flex w-fit items-center gap-1.5 sm:gap-2 rounded-full px-2 py-1 md:px-4 md:py-3 text-[10px] sm:text-xs md:text-sm font-black bg-black/10 text-black">
                     <Flame className="h-4 w-4" />
                     <span>{loadingState.progression ? <LoadingBall size="sm" /> : `${progression?.current_streak ?? 0}-Day Streak`}</span>
                   </div>
-                  <div className="mt-2 text-[0.6rem] md:text-xs font-black uppercase tracking-[0.2em] text-black/60">
+                  <div className="mt-1 sm:mt-2 text-[8px] sm:text-[0.6rem] md:text-xs font-black uppercase tracking-[0.15em] sm:tracking-[0.2em] text-black/60 truncate">
                     {loadingState.progression ? <LoadingBall size="sm" /> : `${formatNumber(Math.max(0, progression?.xp ?? 0))} / ${formatNumber(xpForNextLevel)} PARA O PROXIMO NIVEL`}
                   </div>
                 </div>
 
-                <div className="relative flex shrink-0 items-center justify-center">
-                  <div className="h-[8rem] w-[9rem] sm:h-[9.5rem] sm:w-[11rem] relative">
+                <div className="relative flex shrink-0 items-center justify-center min-w-0">
+                  <div className="h-[6.5rem] w-[7.5rem] sm:h-[8rem] sm:w-[9rem] md:h-[9.5rem] md:w-[11rem] relative shrink-0">
                     <svg viewBox="0 0 176 104" className="absolute inset-0 h-full w-full" aria-hidden="true">
                       <path
                         d="M18 86 A70 70 0 0 1 158 86"
@@ -504,7 +504,7 @@ export default function Dashboard() {
                         strokeWidth="18"
                       />
                     </svg>
-                    <div className="absolute inset-x-0 bottom-4 flex items-baseline justify-center gap-1 sm:bottom-5">
+                    <div className="absolute inset-x-0 bottom-3 flex items-baseline justify-center gap-0.5 sm:bottom-4 md:bottom-5">
                       <span className={`${xpTextSizeClass} font-black leading-none text-black drop-shadow-sm transition-all`}>
                         {loadingState.progression ? <LoadingBall size="sm" /> : formatNumber(xpDisplayValue)}
                       </span>
@@ -515,14 +515,15 @@ export default function Dashboard() {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-2 md:gap-3">
+            <div className="grid grid-cols-2 gap-1.5 sm:gap-2 md:gap-3 min-w-0">
+              <div className="min-w-0">
               <MetricCard
                 label="Passos"
                 value={formatNumber(stepsValue)}
                 icon="directions_walk"
                 loading={loadingState.metrics}
                 footer={
-                  <div className="mt-3 flex h-9 items-end gap-1">
+                  <div className="mt-2 sm:mt-3 flex h-7 sm:h-9 items-end gap-1">
                     {stepBars.map((bar, index) => (
                       <div
                         key={`${bar.value}-${index}`}
@@ -535,13 +536,16 @@ export default function Dashboard() {
                     ))}
                   </div>
                 }
-              />
-              <MetricCard label="Calorias" value={`${formatNumber(caloriesValue)} kcal`} icon="local_fire_department" sublabel="Queimadas hoje" loading={loadingState.metrics} />
+                />
+              </div>
+              <div className="min-w-0">
+                <MetricCard label="Calorias" value={`${formatNumber(caloriesValue)} kcal`} icon="local_fire_department" sublabel="Queimadas hoje" loading={loadingState.metrics} />
+              </div>
             </div>
           </section>
 
-          <section className="px-1 pt-1 sm:px-2">
-            <div className="flex w-full gap-2 justify-center">
+          <section className="px-1 pt-1 sm:px-2 min-w-0">
+            <div className="flex w-full gap-1.5 sm:gap-2 justify-center min-w-0 overflow-x-auto pb-1">
               {calendarDates.map((date) => {
                 const dateKey = formatDateKey(date);
                 const isCurrentDay = dateKey === todayKey;
@@ -551,7 +555,7 @@ export default function Dashboard() {
                     key={dateKey}
                     type="button"
                     onClick={() => scrollToSection("mission-feed")}
-                    className={`flex h-12 w-12 shrink-0 flex-col items-center justify-center rounded-xl ${
+                    className={`flex h-10 w-10 sm:h-12 sm:w-12 shrink-0 flex-col items-center justify-center rounded-lg sm:rounded-xl ${
                       isCurrentDay
                         ? "bg-[var(--app-primary-color)] text-[var(--fl-background-color,#0f172a)] shadow-lg"
                         : "bg-transparent text-slate-400"
@@ -561,8 +565,8 @@ export default function Dashboard() {
                       boxShadow: "0 8px 20px color-mix(in srgb, var(--app-primary-color) 20%, transparent)"
                     } : {}}
                   >
-                    <span className="text-[0.6rem] font-black uppercase tracking-[0.1em]">{weekdayLabel}</span>
-                    <span className="mt-0.5 text-base font-black leading-none">{String(date.getDate()).padStart(2, "0")}</span>
+                    <span className="text-[9px] sm:text-[0.6rem] font-black uppercase tracking-[0.05em] sm:tracking-[0.1em]">{weekdayLabel}</span>
+                    <span className="mt-0.5 text-sm sm:text-base font-black leading-none">{String(date.getDate()).padStart(2, "0")}</span>
                   </button>
                 );
               })}
@@ -574,7 +578,7 @@ export default function Dashboard() {
             <div className="rounded-[2rem] p-3 md:p-5" style={SUBTLE_PANEL_STYLE}>
               <div className="mb-5 inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-[0.68rem] font-bold" style={{ background: "color-mix(in srgb, var(--fl-surface-strong) 86%, transparent)", color: "var(--fl-color-text-muted)", border: "1px solid var(--fl-border-soft)" }}>
                 <CalendarDays className="h-3.5 w-3.5" />
-                <span>{currentDateLabel}</span>
+                <span className="truncate">{currentDateLabel}</span>
               </div>
 
               {loadingState.missions ? (
@@ -584,12 +588,12 @@ export default function Dashboard() {
                   {visibleDailyMissions.map((mission, index) => (
                     <div key={mission.id}>
                       <MissionCard mission={mission} onComplete={handleMissionComplete} layout="compact" />
-                      {index < visibleDailyMissions.length - 1 ? <div className="mt-4 h-px w-full" style={{ background: "color-mix(in srgb, var(--fl-color-text) 10%, transparent)" }} /> : null}
+                      {index < visibleDailyMissions.length - 1 ? <div className="mt-3 sm:mt-4 h-px w-full" style={{ background: "color-mix(in srgb, var(--fl-color-text) 10%, transparent)" }} /> : null}
                     </div>
                   ))}
                 </div>
               ) : (
-                <div className="rounded-[1.5rem] p-5 text-sm" style={PANEL_STYLE}>Nenhuma missao disponivel para hoje no momento.</div>
+                <div className="rounded-[1.25rem] sm:rounded-[1.5rem] p-4 sm:p-5 text-xs sm:text-sm" style={PANEL_STYLE}>Nenhuma missao disponivel para hoje no momento.</div>
               )}
             </div>
           </section>
@@ -614,13 +618,13 @@ export default function Dashboard() {
               <SectionHeader title="Explorar Missoes" />
               {missionFeedSections.map((section) => (
                 <div key={section.title}>
-                  <h3 className="mb-3 text-sm font-black uppercase tracking-[0.18em]" style={{ color: "var(--fl-color-text-muted)" }}>{section.title}</h3>
-                  <div className="rounded-[2rem] p-3 md:p-5" style={SUBTLE_PANEL_STYLE}>
+                  <h3 className="mb-2 sm:mb-3 text-[10px] sm:text-xs md:text-sm font-black uppercase tracking-[0.12em] sm:tracking-[0.18em] truncate" style={{ color: "var(--fl-color-text-muted)" }}>{section.title}</h3>
+                  <div className="rounded-[1.5rem] sm:rounded-[2rem] p-2 sm:p-3 md:p-5 min-w-0" style={SUBTLE_PANEL_STYLE}>
                     <div className="space-y-4">
                       {section.missions.map((mission, index) => (
                         <div key={mission.id}>
                           <MissionCard mission={mission} onComplete={handleMissionComplete} layout="compact" />
-                          {index < section.missions.length - 1 ? <div className="mt-4 h-px w-full" style={{ background: "color-mix(in srgb, var(--fl-color-text) 10%, transparent)" }} /> : null}
+                          {index < section.missions.length - 1 ? <div className="mt-3 sm:mt-4 h-px w-full" style={{ background: "color-mix(in srgb, var(--fl-color-text) 10%, transparent)" }} /> : null}
                         </div>
                       ))}
                     </div>
@@ -630,7 +634,7 @@ export default function Dashboard() {
             </section>
           ) : null}
 
-          <section id="assistant-tools" className="space-y-4">
+          <section id="assistant-tools" className="space-y-2 sm:space-y-4 min-w-0">
             <SectionHeader title="Ferramentas de IA" />
             <AIMissionGenerator onMissionsGenerated={() => { void refreshData(); }} {...(profile?.initial_conditioning ? { conditioning: profile.initial_conditioning } : {})} />
             <AIRecommendations />

@@ -262,7 +262,7 @@ export default function Profile() {
 
   return (
     <AppPageShell bottomNavActive="profile" className="fl-theme-page">
-      <main className="custom-scrollbar flex flex-1 flex-col gap-6 overflow-y-auto p-4 sm:gap-8 sm:p-6 lg:flex-row lg:gap-12 lg:p-10">
+      <main className="custom-scrollbar flex flex-1 flex-col gap-5 sm:gap-8 overflow-y-auto p-4 pb-[98px] sm:p-6 lg:flex-row lg:gap-12 lg:p-10 min-w-0">
         {error ? (
           <div className="lg:hidden rounded-3xl border px-5 py-4 text-[11px] font-bold uppercase tracking-widest" style={{ borderColor: "color-mix(in srgb, var(--app-primary-color) 24%, transparent)", backgroundColor: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)", color: "var(--app-primary-color)" }}>
             {error}
@@ -281,11 +281,11 @@ export default function Profile() {
             ) : null}
             <div className="absolute top-0 left-0 w-full h-1 bg-primary/20 group-hover:bg-primary transition-colors" style={{ backgroundColor: 'var(--app-primary-color-20)' }}></div>
             
-            <div className="relative mb-8">
-              <div className="size-40 rounded-full border-4 border-primary p-1 shadow-[0_0_30px_rgba(var(--app-primary-color-rgb),0.2)] animate-pulse-slow" style={{ borderColor: 'var(--app-primary-color)' }}>
-                <Avatar name={profile?.username || "Guerreiro"} className="w-full h-full text-4xl" />
+            <div className="relative mb-6 sm:mb-8">
+              <div className="size-32 sm:size-40 rounded-full border-4 border-primary p-1 shadow-[0_0_30px_rgba(var(--app-primary-color-rgb),0.2)] animate-pulse-slow" style={{ borderColor: 'var(--app-primary-color)' }}>
+                <Avatar name={profile?.username || "Guerreiro"} className="w-full h-full text-3xl sm:text-4xl" />
               </div>
-              <div className="absolute bottom-1 right-1 flex size-12 items-center justify-center rounded-full border-4 text-lg font-bold shadow-xl" style={{ backgroundColor: 'var(--app-primary-color)', color: 'var(--fl-nav-item-active-text)', borderColor: 'var(--fl-surface-strong)' }}>
+              <div className="absolute bottom-1 right-1 flex size-10 sm:size-12 items-center justify-center rounded-full border-4 text-base font-bold shadow-xl" style={{ backgroundColor: 'var(--app-primary-color)', color: 'var(--fl-nav-item-active-text)', borderColor: 'var(--fl-surface-strong)' }}>
                 {progression?.level || 1}
               </div>
             </div>
@@ -302,27 +302,27 @@ export default function Profile() {
               ) : null}
             </div>
 
-            <div className="flex w-full flex-wrap gap-2 border-t pt-6 sm:gap-3 sm:pt-8" style={{ borderColor: "var(--fl-border-soft)" }}>
+            <div className="flex w-full flex-wrap gap-2 border-t pt-5 sm:gap-3 sm:pt-8 min-w-0" style={{ borderColor: "var(--fl-border-soft)" }}>
               <button 
                 onClick={() => navigate(ROUTE_PATHS.achievements)}
-                className="fl-theme-input flex min-w-[8.5rem] flex-1 items-center justify-center gap-1.5 rounded-2xl px-3 py-3 fl-theme-text-muted transition-opacity group hover:opacity-85 sm:min-w-0 sm:gap-2 sm:py-4"
+                className="fl-theme-input flex min-w-[7.5rem] flex-1 items-center justify-center gap-1.5 rounded-2xl px-2 py-3 fl-theme-text-muted transition-opacity group hover:opacity-85 sm:min-w-0 sm:gap-2 sm:py-4"
               >
                 <Trophy className="size-3.5 shrink-0 transition-colors sm:size-4" style={{ color: 'var(--app-primary-color)' }} />
-                <span className="text-[9px] font-bold uppercase tracking-[0.16em] sm:text-[10px] sm:tracking-widest">Conquistas</span>
+                <span className="text-[8px] font-bold uppercase tracking-[0.1em] sm:text-[10px] sm:tracking-widest truncate">Conquistas</span>
               </button>
               <button 
                 onClick={() => navigate(ROUTE_PATHS.shop)}
-                className="fl-theme-input flex min-w-[8.5rem] flex-1 items-center justify-center gap-1.5 rounded-2xl px-3 py-3 fl-theme-text-muted transition-opacity group hover:opacity-85 sm:min-w-0 sm:gap-2 sm:py-4"
+                className="fl-theme-input flex min-w-[7.5rem] flex-1 items-center justify-center gap-1.5 rounded-2xl px-2 py-3 fl-theme-text-muted transition-opacity group hover:opacity-85 sm:min-w-0 sm:gap-2 sm:py-4"
               >
                 <Box className="size-3.5 shrink-0 transition-colors sm:size-4" style={{ color: 'var(--app-primary-color)' }} />
-                <span className="text-[9px] font-bold uppercase tracking-[0.16em] sm:text-[10px] sm:tracking-widest">Loot</span>
+                <span className="text-[8px] font-bold uppercase tracking-[0.1em] sm:text-[10px] sm:tracking-widest truncate">Loot</span>
               </button>
               <button 
                 onClick={() => navigate(ROUTE_PATHS.friends)}
-                className="fl-theme-input flex min-w-[8.5rem] flex-1 items-center justify-center gap-1.5 rounded-2xl px-3 py-3 fl-theme-text-muted transition-opacity group hover:opacity-85 sm:min-w-0 sm:gap-2 sm:py-4"
+                className="fl-theme-input flex min-w-[7.5rem] flex-1 items-center justify-center gap-1.5 rounded-2xl px-2 py-3 fl-theme-text-muted transition-opacity group hover:opacity-85 sm:min-w-0 sm:gap-2 sm:py-4"
               >
                 <Users className="size-3.5 shrink-0 transition-colors sm:size-4" style={{ color: 'var(--app-primary-color)' }} />
-                <span className="text-[9px] font-bold uppercase tracking-[0.16em] sm:text-[10px] sm:tracking-widest">Amigos</span>
+                <span className="text-[8px] font-bold uppercase tracking-[0.1em] sm:text-[10px] sm:tracking-widest truncate">Amigos</span>
               </button>
             </div>
           </section>

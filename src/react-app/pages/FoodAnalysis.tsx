@@ -384,7 +384,7 @@ export default function FoodAnalysis() {
 
       {/* Welcome Screen (Initial State) */}
       {(!streamActive && !preview && !result) ? (
-        <div className="flex-1 flex flex-col relative z-20 overflow-y-auto custom-scrollbar">
+        <div className="flex-1 flex flex-col relative z-20 overflow-y-auto custom-scrollbar pb-4 min-w-0">
           {/* Header */}
           <header className="sticky top-0 z-10 flex items-center justify-between border-b p-3 sm:p-4 lg:p-6 backdrop-blur-md" style={{ borderColor: "var(--fl-border-soft)", backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 84%, transparent)" }}>
             <button 
@@ -399,9 +399,9 @@ export default function FoodAnalysis() {
           </header>
 
           {/* Hero Section */}
-          <div className="px-4 py-8 text-center sm:px-6 sm:py-10">
-            <h2 className="mb-2 text-3xl font-bold tracking-tight sm:text-4xl">Scanner IA</h2>
-            <p className="text-sm font-medium" style={{ color: 'var(--app-primary-color)' }}>
+          <div className="px-4 py-6 text-center sm:px-6 sm:py-10 min-w-0">
+            <h2 className="mb-1 text-2xl sm:text-4xl font-bold tracking-tight">Scanner IA</h2>
+            <p className="text-[11px] sm:text-sm font-medium" style={{ color: 'var(--app-primary-color)' }}>
               Selecione o portal de entrada para análise
             </p>
           </div>
@@ -411,26 +411,26 @@ export default function FoodAnalysis() {
             {/* Primary Card - Camera */}
             <div className="group relative">
               <div className="absolute -inset-1 bg-primary rounded-3xl blur opacity-10 card-glow-bg group-hover:opacity-30 transition-opacity" style={{ backgroundColor: 'var(--app-primary-color)' }}></div>
-              <div className="fl-theme-surface relative flex flex-col items-center overflow-hidden rounded-3xl p-5 sm:p-6 lg:p-8">
+              <div className="fl-theme-surface relative flex flex-col items-center overflow-hidden rounded-[1.5rem] sm:rounded-3xl p-5 sm:p-6 lg:p-8 min-w-0">
                 <div 
-                  className="w-20 h-20 rounded-full flex items-center justify-center mb-6 relative"
+                  className="w-16 h-16 sm:w-20 sm:h-20 rounded-full flex items-center justify-center mb-4 sm:mb-6 relative"
                   style={{ backgroundColor: 'color-mix(in srgb, var(--app-primary-color) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--app-primary-color) 40%, transparent)' }}
                 >
-                  <Camera className="w-8 h-8" style={{ color: 'var(--app-primary-color)' }} />
+                  <Camera className="w-6 h-6 sm:w-8 sm:h-8" style={{ color: 'var(--app-primary-color)' }} />
                   <div className="absolute inset-0 rounded-full blur-md opacity-40" style={{ backgroundColor: 'var(--app-primary-color)' }}></div>
                 </div>
                 
-                <h3 className="mb-2 text-xl font-bold uppercase tracking-wide sm:text-2xl">Abrir Câmera</h3>
-                <p className="mb-8 max-w-[200px] text-sm" style={{ color: 'var(--fl-color-text-muted)' }}>
+                <h3 className="mb-1 sm:mb-2 text-lg sm:text-2xl font-bold uppercase tracking-wide">Abrir Câmera</h3>
+                <p className="mb-6 sm:mb-8 max-w-[200px] text-[11px] sm:text-sm" style={{ color: 'var(--fl-color-text-muted)' }}>
                   Aponte seu portal visual para o alimento
                 </p>
 
                 <button 
                   onClick={startCamera}
-                  className="neon-glow flex w-full items-center justify-center gap-3 rounded-2xl py-4 text-sm font-bold uppercase tracking-widest transition-all active:scale-95"
+                  className="neon-glow flex w-full items-center justify-center gap-2 sm:gap-3 rounded-2xl py-3.5 sm:py-4 text-[11px] sm:text-sm font-bold uppercase tracking-widest transition-all active:scale-95"
                   style={{ backgroundColor: 'var(--app-primary-color)', color: 'var(--fl-nav-item-active-text)' }}
                 >
-                  <Bolt className="w-5 h-5 fill-current" />
+                  <Bolt className="w-4 h-4 sm:w-5 sm:h-5 fill-current" />
                   Iniciar Scan
                 </button>
               </div>
@@ -466,7 +466,7 @@ export default function FoodAnalysis() {
         </div>
       ) : result ? (
         /* Results Screen (Full screen, no black void) */
-        <div className="custom-scrollbar flex flex-1 flex-col overflow-y-auto p-3 pb-4 sm:p-4 sm:pb-5 lg:p-6 animate-in fade-in slide-in-from-bottom-5 duration-500" style={{ backgroundColor: "var(--app-bg-color)" }}>
+        <div className="custom-scrollbar flex flex-1 flex-col overflow-y-auto p-3 pb-4 sm:p-4 sm:pb-5 lg:p-6 animate-in fade-in slide-in-from-bottom-5 duration-500 min-w-0" style={{ backgroundColor: "var(--app-bg-color)" }}>
           {/* Header */}
           <div className="flex items-center justify-between mb-8">
             <button 
