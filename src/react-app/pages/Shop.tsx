@@ -278,8 +278,10 @@ export default function Shop() {
               </div>
 
               {displayProducts.length === 0 && (
-                <div className="text-center py-10">
-                  <p className="text-slate-500">Nenhum resultado encontrado para sua busca.</p>
+                <div className="text-center py-20 bg-[#161616] rounded-3xl border border-dashed border-white/10">
+                  <Package className="w-16 h-16 text-white/5 mx-auto mb-4" />
+                  <p className="text-slate-500 font-bold text-xs uppercase tracking-[0.2em] px-4">Novas Recompensas em Breve</p>
+                  <p className="text-[10px] text-slate-700 uppercase tracking-widest mt-2">Estamos preparando o melhor portal de loot para você.</p>
                 </div>
               )}
 
@@ -289,12 +291,13 @@ export default function Shop() {
                   <Star className="w-5 h-5 text-yellow-500 fill-yellow-500" />
                   Marcas Parceiras
                 </h3>
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-4">
-                  {['NIKE', 'ADIDAS', 'MYPROTEIN', 'GARMIN', 'GNC', 'UNDER ARMOUR'].map((brand) => (
-                    <div key={brand} className="h-16 bg-[#161616] rounded-2xl flex items-center justify-center grayscale hover:grayscale-0 transition-all cursor-default border border-white/5 hover:border-primary/30 group">
-                      <span className="text-xs font-bold text-white/20 group-hover:text-white/80 transition-colors tracking-widest">{brand}</span>
-                    </div>
-                  ))}
+                <div className="p-10 bg-[#161616] rounded-3xl border border-white/5 flex flex-col items-center justify-center text-center">
+                  <div className="flex gap-4 mb-4 opacity-20 grayscale">
+                    <div className="w-12 h-12 rounded-xl bg-white/10" />
+                    <div className="w-12 h-12 rounded-xl bg-white/10" />
+                    <div className="w-12 h-12 rounded-xl bg-white/10" />
+                  </div>
+                  <span className="text-xs font-bold text-white/30 tracking-[0.3em] uppercase">Parcerias em Breve</span>
                 </div>
               </div>
             </div>
