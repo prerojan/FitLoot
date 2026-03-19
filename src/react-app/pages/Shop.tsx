@@ -127,7 +127,7 @@ export default function Shop() {
       <AppPageShell
         bottomNavActive="shop"
         progression={progression}
-        className="bg-[#0A0A0A]"
+        className="fl-theme-page"
       >
         <div className="fl-app-container py-10 flex items-center justify-center min-h-[50vh]">
           <LoadingBall size="md" />
@@ -141,7 +141,7 @@ export default function Shop() {
       <AppPageShell
         bottomNavActive="shop"
         progression={progression}
-        className="bg-[#0A0A0A]"
+        className="fl-theme-page"
       >
         <div className="fl-app-container py-10 text-center">
           <p className="text-red-600 mb-4">{error}</p>
@@ -167,11 +167,11 @@ export default function Shop() {
     <AppPageShell
       bottomNavActive="shop"
       progression={progression}
-      className="bg-[#0A0A0A]"
+      className="fl-theme-page"
     >
       <div className="flex-1 flex flex-col overflow-hidden min-h-screen">
         {/* Inner Header (Search + Points) */}
-        <header className="sticky top-0 z-30 h-20 border-b border-white/5 px-6 flex items-center justify-between bg-[#0A0A0A]/80 backdrop-blur-xl">
+        <header className="sticky top-0 z-10 h-20 border-b border-white/5 px-6 flex items-center justify-between backdrop-blur-xl" style={{ backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 82%, transparent)" }}>
           <div className="flex-1 max-w-xl">
             <div className="relative group">
               <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500 group-focus-within:text-primary transition-colors" style={{ color: searchQuery ? 'var(--app-primary-color)' : '' }} />
@@ -180,20 +180,20 @@ export default function Shop() {
                 placeholder="Buscar recompensas, marcas ou equipamentos..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full bg-[#161616] border border-white/5 focus:ring-1 focus:ring-primary rounded-xl pl-12 pr-4 py-2.5 text-slate-100 placeholder:text-slate-500 text-sm focus:outline-none transition-all"
+                className="fl-theme-input w-full focus:ring-1 focus:ring-primary rounded-xl pl-12 pr-4 py-2.5 placeholder:text-slate-500 text-sm focus:outline-none transition-all"
                 style={{ borderColor: searchQuery ? 'rgba(var(--app-primary-color-rgb), 0.3)' : '' }}
               />
             </div>
           </div>
           <div className="flex items-center gap-4 ml-6">
-            <div className="hidden sm:flex items-center gap-2 bg-[#161616] border border-white/5 rounded-xl px-4 py-2 shadow-inner">
+            <div className="fl-theme-surface hidden sm:flex items-center gap-2 rounded-xl px-4 py-2 shadow-inner">
               <Coins className="w-5 h-5" style={{ color: 'var(--app-primary-color)' }} />
               <span className="font-bold text-white tracking-tight">{progression?.points?.toLocaleString() || 0} <span className="text-[10px] text-slate-500 uppercase ml-1">Pts</span></span>
             </div>
-            <button className="w-10 h-10 flex items-center justify-center rounded-full bg-[#161616] border border-white/5 text-slate-400 hover:text-primary transition-colors">
+            <button className="fl-theme-surface-soft w-10 h-10 flex items-center justify-center rounded-full fl-theme-text-muted hover:text-primary transition-colors">
               <ShoppingCart className="w-5 h-5" />
             </button>
-            <button className="w-10 h-10 flex items-center justify-center rounded-full bg-[#161616] border border-white/5 text-slate-400 hover:text-primary transition-colors">
+            <button className="fl-theme-surface-soft w-10 h-10 flex items-center justify-center rounded-full fl-theme-text-muted hover:text-primary transition-colors">
               <Bell className="w-5 h-5" />
             </button>
           </div>
@@ -278,7 +278,7 @@ export default function Shop() {
               </div>
 
               {displayProducts.length === 0 && (
-                <div className="text-center py-20 bg-[#161616] rounded-3xl border border-dashed border-white/10">
+                <div className="fl-theme-surface text-center py-20 rounded-3xl border border-dashed border-white/10">
                   <Package className="w-16 h-16 text-white/5 mx-auto mb-4" />
                   <p className="text-slate-500 font-bold text-xs uppercase tracking-[0.2em] px-4">Novas Recompensas em Breve</p>
                   <p className="text-[10px] text-slate-700 uppercase tracking-widest mt-2">Estamos preparando o melhor portal de loot para você.</p>
@@ -291,7 +291,7 @@ export default function Shop() {
                   <Star className="w-5 h-5 text-yellow-500 fill-yellow-500" />
                   Marcas Parceiras
                 </h3>
-                <div className="p-10 bg-[#161616] rounded-3xl border border-white/5 flex flex-col items-center justify-center text-center">
+                <div className="fl-theme-surface p-10 rounded-3xl flex flex-col items-center justify-center text-center">
                   <div className="flex gap-4 mb-4 opacity-20 grayscale">
                     <div className="w-12 h-12 rounded-xl bg-white/10" />
                     <div className="w-12 h-12 rounded-xl bg-white/10" />
@@ -309,7 +309,7 @@ export default function Shop() {
               </div>
               
               {orders.length === 0 ? (
-                <div className="text-center py-20 bg-[#161616] rounded-3xl border border-dashed border-white/10 text-white">
+                <div className="fl-theme-surface text-center py-20 rounded-3xl border border-dashed border-white/10">
                   <Package className="w-16 h-16 text-white/5 mx-auto mb-4" />
                   <p className="text-slate-500 font-bold text-xs uppercase tracking-widest px-4">Nenhum cupom adquirido ainda. Vá até a loja e use seus pontos!</p>
                   <button
@@ -341,7 +341,7 @@ function CategoryItem({ active, onClick, icon, label }: { active: boolean, onCli
       className={`flex items-center gap-2 px-6 py-2.5 rounded-full font-bold whitespace-nowrap transition-all border ${
         active 
           ? "bg-primary text-black border-primary shadow-[0_4px_12px_rgba(57,224,121,0.2)]" 
-          : "bg-[#161616] border-white/5 text-slate-400 hover:border-white/10 hover:text-white"
+          : "fl-theme-surface fl-theme-text-muted hover:border-white/10 hover:text-white"
       }`}
       style={{ 
         backgroundColor: active ? 'var(--app-primary-color)' : '',
@@ -366,8 +366,8 @@ function ProductCard({
   const canAfford = userPoints >= product.points_cost;
 
   return (
-    <div className="bg-[#161616] border border-white/5 rounded-3xl overflow-hidden group hover:border-primary/20 transition-all flex flex-col shadow-xl">
-      <div className="h-48 relative overflow-hidden bg-[#0A0A0A]">
+    <div className="fl-theme-surface rounded-3xl overflow-hidden group hover:border-primary/20 transition-all flex flex-col shadow-xl">
+      <div className="h-48 relative overflow-hidden" style={{ backgroundColor: "color-mix(in srgb, var(--fl-surface-muted) 70%, transparent)" }}>
         {product.image_url ? (
           <img
             src={product.image_url}
@@ -411,7 +411,7 @@ function OrderCard({ order }: { order: ShopOrderView }) {
   const isRedeemed = order.is_redeemed === 1;
 
   return (
-    <div className={`relative bg-[#161616] border border-white/5 rounded-3xl flex items-stretch p-2 transition-all ${isRedeemed ? 'opacity-40 grayscale pointer-events-none' : 'hover:border-primary/20 shadow-xl'}`}>
+    <div className={`fl-theme-surface relative rounded-3xl flex items-stretch p-2 transition-all ${isRedeemed ? 'opacity-40 grayscale pointer-events-none' : 'hover:border-primary/20 shadow-xl'}`}>
       {/* Ticket QR Section */}
       <div className="w-28 sm:w-32 bg-white rounded-2xl flex flex-col items-center justify-center p-3">
         {order.qr_code ? (

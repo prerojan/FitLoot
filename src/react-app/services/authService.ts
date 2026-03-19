@@ -33,7 +33,8 @@ export function prefetchCoreRoutes(): void {
     void Promise.all([
       import(`@/react-app/pages/Dashboard`),
       import(`@/react-app/pages/Profile`),
-      import(`@/react-app/pages/Arena`),
+      import(`@/react-app/pages/MiniGames`),
+      import(`@/react-app/pages/Friends`),
     ]);
   };
 

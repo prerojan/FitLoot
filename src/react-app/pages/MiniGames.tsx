@@ -1,26 +1,26 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/react-app/contexts/auth";
 import { useNavigate, useSearchParams } from "react-router";
 import AppPageShell from "@/react-app/components/AppPageShell";
 import LoadingBall from "@/react-app/components/LoadingBall";
-import { 
-  Swords, 
-  Trophy, 
-  Clock, 
-  Zap, 
-  Target, 
-  Users, 
-  ChevronRight, 
-  Search as SearchIcon, 
-  UserPlus as UserPlusIcon, 
-  Check, 
-  X, 
-  Shield, 
+import {
+  Trophy,
+  Clock,
+  Zap,
+  Target,
+  Users,
+  ChevronRight,
+  Search as SearchIcon,
+  UserPlus as UserPlusIcon,
+  Check,
+  X,
+  Shield,
   Info as InfoIcon,
-  Plus as PlusIcon
+  Plus as PlusIcon,
 } from "lucide-react";
 import { ApiRequestError, api, fetchAndCacheJson, readCachedJson } from "@/react-app/utils/api";
 import { Avatar } from "@/react-app/components/ui/avatar";
+import { Badge } from "@/react-app/components/ui/badge";
 
 interface MiniGame {
   id: number;
@@ -45,12 +45,11 @@ interface MiniGameSkill {
   difficulty: string;
 }
 
-interface Friend {
+interface FriendRequest {
   id: number;
   friend_user_id: string;
   friend_username: string;
   friend_full_name: string;
-  status: string;
 }
 
 interface SearchResult {
@@ -60,30 +59,40 @@ interface SearchResult {
   level: number;
 }
 
+type OpponentType = "friend" | "random";
+type ViewMode = "live" | "tournaments";
+type SelectedOpponent = { userId: string; username: string } | null;
+
 export default function MiniGames() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const challengeUserId = searchParams.get('challenge');
-  
+  const challengeUserId = searchParams.get("challenge");
+
   const [activeGames, setActiveGames] = useState<MiniGame[]>([]);
   const [completedGames, setCompletedGames] = useState<MiniGame[]>([]);
   const [skills, setSkills] = useState<MiniGameSkill[]>([]);
+  const [pendingRequests, setPendingRequests] = useState<FriendRequest[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showCreateForm, setShowCreateForm] = useState(!!challengeUserId);
+  const [showCreateForm, setShowCreateForm] = useState(Boolean(challengeUserId));
   const [error, setError] = useState<string | null>(null);
-  
-  // Arena Dashboard States
-  const [pendingRequests, setPendingRequests] = useState<Friend[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [searching, setSearching] = useState(false);
-  const [viewMode, setViewMode] = useState<'live' | 'tournaments'>('live');
-
-  // Create challenge form
+  const [viewMode, setViewMode] = useState<ViewMode>("live");
   const [selectedSkill, setSelectedSkill] = useState<number | null>(null);
   const [targetReps, setTargetReps] = useState(20);
-  const [opponentType, setOpponentType] = useState<'friend' | 'random'>(challengeUserId ? 'friend' : 'random');
+  const [opponentType, setOpponentType] = useState<OpponentType>(challengeUserId ? "friend" : "random");
+  const [selectedOpponent, setSelectedOpponent] = useState<SelectedOpponent>(
+    challengeUserId ? { userId: challengeUserId, username: "Rival selecionado" } : null,
+  );
+
+  const liveGames = useMemo(
+    () => activeGames.filter((game) => game.status === "pending" || game.status === "active"),
+    [activeGames],
+  );
+  const acceptedGames = useMemo(() => liveGames.filter((game) => game.status === "active"), [liveGames]);
+  const pendingGames = useMemo(() => liveGames.filter((game) => game.status === "pending"), [liveGames]);
 
   const loadGames = useCallback(async () => {
     setError(null);
@@ -94,9 +103,7 @@ export default function MiniGames() {
       setActiveGames(list.filter((game) => game.status !== "completed"));
       setCompletedGames(list.filter((game) => game.status === "completed").slice(0, 10));
       setLoading(false);
-      if (!cacheGames.stale) {
-        return;
-      }
+      if (!cacheGames.stale) return;
     }
 
     try {
@@ -111,7 +118,7 @@ export default function MiniGames() {
       }
       console.error("Error loading games:", loadError);
       if (!cacheGames) {
-        setError("Não foi possível carregar os mini-games agora.");
+        setError("Nao foi possivel carregar os duelos agora.");
       }
     } finally {
       setLoading(false);
@@ -120,6 +127,7 @@ export default function MiniGames() {
 
   const loadSkills = useCallback(async () => {
     const cacheSkills = readCachedJson<MiniGameSkill[]>("/api/skills");
+
     if (cacheSkills) {
       setSkills(Array.isArray(cacheSkills.data) ? cacheSkills.data : []);
       if (!cacheSkills.stale) return;
@@ -135,26 +143,28 @@ export default function MiniGames() {
       }
       console.error("Error loading skills:", loadError);
       if (!cacheSkills) {
-        setError("Não foi possível carregar habilidades para desafio.");
+        setError("Nao foi possivel carregar as habilidades da arena.");
       }
     }
   }, [navigate]);
 
   const loadArenaData = useCallback(async () => {
     try {
-      const requestsRes = await api("/api/friends/requests");
+      const response = await api("/api/friends/requests");
 
-      if (requestsRes.status === 401) {
+      if (response.status === 401 || response.status === 403) {
         navigate("/app");
         return;
       }
 
-      if (requestsRes.ok) {
-        const requestsData = await requestsRes.json();
-        setPendingRequests(Array.isArray(requestsData) ? requestsData : []);
+      if (!response.ok) {
+        throw new Error("Failed to load requests");
       }
-    } catch (err) {
-      console.error("Error loading arena dashboard data:", err);
+
+      const payload = (await response.json()) as FriendRequest[];
+      setPendingRequests(Array.isArray(payload) ? payload : []);
+    } catch (loadError) {
+      console.error("Error loading arena requests:", loadError);
     }
   }, [navigate]);
 
@@ -163,48 +173,51 @@ export default function MiniGames() {
       navigate("/app");
       return;
     }
+
     void loadGames();
     void loadSkills();
     void loadArenaData();
-  }, [user, navigate, loadGames, loadSkills, loadArenaData]);
+  }, [user, navigate, loadArenaData, loadGames, loadSkills]);
 
   const searchUsers = async () => {
     if (!searchQuery.trim()) {
       setSearchResults([]);
       return;
     }
+
     setSearching(true);
+    setError(null);
     try {
       const response = await api(`/api/friends/search?username=${encodeURIComponent(searchQuery.trim())}`);
-      if (response.ok) {
-        const data = await response.json();
-        setSearchResults(Array.isArray(data) ? data : []);
+
+      if (response.status === 401 || response.status === 403) {
+        navigate("/app");
+        return;
       }
-    } catch (err) {
-      console.error("Error searching users:", err);
+
+      if (!response.ok) {
+        throw new Error("Search failed");
+      }
+
+      const payload = (await response.json()) as SearchResult[];
+      setSearchResults(Array.isArray(payload) ? payload : []);
+    } catch (searchError) {
+      console.error("Error searching users:", searchError);
+      setError("Nao foi possivel buscar rivais agora.");
     } finally {
       setSearching(false);
     }
   };
 
-  const sendFriendRequest = async (friendUserId: string) => {
-    try {
-      const response = await api("/api/friends/request", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ friend_user_id: friendUserId })
-      });
-      if (response.ok) {
-        setSearchQuery("");
-        setSearchResults([]);
-        alert("Solicitação enviada!");
-      } else {
-        const errorData = await response.json().catch(() => ({}));
-        alert(errorData.error || "Erro ao enviar solicitação.");
-      }
-    } catch (err) {
-      console.error("Error sending request:", err);
-    }
+  const prepareChallenge = (friendUserId: string) => {
+    const opponent = searchResults.find((result) => result.user_id === friendUserId);
+    setSelectedOpponent({
+      userId: friendUserId,
+      username: opponent?.username ?? "Rival selecionado",
+    });
+    setOpponentType("friend");
+    setShowCreateForm(true);
+    setError(null);
   };
 
   const manageRequest = async (requestId: number, accept: boolean) => {
@@ -214,55 +227,87 @@ export default function MiniGames() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ request_id: requestId }),
       });
-      if (response.ok) {
-        void loadArenaData();
+
+      if (response.status === 401 || response.status === 403) {
+        navigate("/app");
+        return;
       }
-    } catch (err) {
-      console.error("Error managing request:", err);
+
+      if (!response.ok) {
+        throw new Error("Request response failed");
+      }
+
+      await loadArenaData();
+    } catch (requestError) {
+      console.error("Error managing request:", requestError);
+      setError("Nao foi possivel responder a solicitacao agora.");
     }
   };
 
   const createChallenge = async () => {
     if (!selectedSkill) {
-      alert("Selecione uma habilidade!");
+      setError("Selecione uma habilidade antes de criar o duelo.");
+      return;
+    }
+
+    if (opponentType === "friend" && !selectedOpponent?.userId) {
+      setError("Selecione um rival antes de criar um duelo privado.");
       return;
     }
 
     try {
+      setError(null);
       const response = await api("/api/mini-games/challenge", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          challenged_user_id: challengeUserId || null,
+          challenged_user_id: opponentType === "friend" ? selectedOpponent?.userId ?? challengeUserId ?? null : null,
           skill_id: selectedSkill,
           target_reps: targetReps,
-          opponent_type: opponentType
-        })
+          opponent_type: opponentType,
+        }),
       });
 
-      if (response.ok) {
-        alert("Desafio criado com sucesso!");
-        setShowCreateForm(false);
-        void loadGames();
-      } else {
-        const responseError = await response.json().catch(() => ({}));
-        alert(responseError?.error || "Erro ao criar desafio");
+      if (response.status === 401 || response.status === 403) {
+        navigate("/app");
+        return;
       }
-    } catch (error) {
-      console.error("Error creating challenge:", error);
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as { error?: string | undefined } | null;
+        setError(payload?.error ?? "Nao foi possivel criar o desafio.");
+        return;
+      }
+
+      setShowCreateForm(false);
+      setSearchResults([]);
+      setSearchQuery("");
+      setSelectedSkill(null);
+      setTargetReps(20);
+      await loadGames();
+    } catch (challengeError) {
+      console.error("Error creating challenge:", challengeError);
+      setError("Nao foi possivel criar o desafio agora.");
     }
   };
 
   const acceptChallenge = async (gameId: number) => {
     try {
-      const response = await api(`/api/mini-games/${gameId}/accept`, {
-        method: "POST"
-      });
-      if (response.ok) {
-        void loadGames();
+      const response = await api(`/api/mini-games/${gameId}/accept`, { method: "POST" });
+
+      if (response.status === 401 || response.status === 403) {
+        navigate("/app");
+        return;
       }
-    } catch (err) {
-      console.error("Error accepting challenge:", err);
+
+      if (!response.ok) {
+        throw new Error("Accept failed");
+      }
+
+      await loadGames();
+    } catch (acceptError) {
+      console.error("Error accepting challenge:", acceptError);
+      setError("Nao foi possivel aceitar o duelo agora.");
     }
   };
 
@@ -273,21 +318,30 @@ export default function MiniGames() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           reps_completed: repsCompleted,
-          time_seconds: timeSeconds
-        })
+          time_seconds: timeSeconds,
+        }),
       });
-      if (response.ok) {
-        void loadGames();
+
+      if (response.status === 401 || response.status === 403) {
+        navigate("/app");
+        return;
       }
-    } catch (err) {
-      console.error("Error completing challenge:", err);
+
+      if (!response.ok) {
+        throw new Error("Complete failed");
+      }
+
+      await loadGames();
+    } catch (completeError) {
+      console.error("Error completing challenge:", completeError);
+      setError("Nao foi possivel concluir o duelo agora.");
     }
   };
 
   if (loading) {
     return (
-      <AppPageShell bottomNavActive="arena" className="bg-[#0A0A0A]">
-        <div className="flex-1 flex items-center justify-center">
+      <AppPageShell bottomNavActive="arena" className="fl-theme-page">
+        <div className="flex flex-1 items-center justify-center">
           <LoadingBall size="md" />
         </div>
       </AppPageShell>
@@ -295,239 +349,405 @@ export default function MiniGames() {
   }
 
   return (
-    <AppPageShell bottomNavActive="arena" className="bg-[#0A0A0A]">
-      <div className="flex-1 flex flex-col overflow-y-auto custom-scrollbar p-6 sm:p-8">
-        
-        {/* Header Hero Section */}
+    <AppPageShell bottomNavActive="arena" className="fl-theme-page">
+      <div className="flex flex-1 flex-col overflow-y-auto p-6 sm:p-8">
         <section className="mb-12">
-          <div className="flex flex-col gap-6 sm:flex-row sm:items-center sm:justify-between mb-10">
+          <div className="mb-10 flex flex-col gap-6 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <h1 className="text-4xl font-bold tracking-tight text-white uppercase tracking-[0.2em] mb-2">Battle Ground</h1>
-              <p className="text-slate-500 text-xs font-bold uppercase tracking-widest">A glória espera por você no Coliseu Digital.</p>
+              <h1 className="mb-2 text-4xl font-bold uppercase tracking-[0.2em]">Battle Ground</h1>
+              <p className="fl-theme-text-muted text-xs font-bold uppercase tracking-widest">
+                A gloria espera por voce no coliseu digital.
+              </p>
             </div>
-            
-            <div className="flex bg-[#161616] p-1.5 rounded-full border border-white/5 self-start">
-              <button 
-                onClick={() => setViewMode('live')}
-                className={`px-6 py-2.5 rounded-full font-bold text-[10px] uppercase tracking-[0.15em] transition-all duration-300 ${viewMode === 'live' ? 'bg-primary text-black shadow-lg shadow-primary/20' : 'text-slate-500 hover:text-slate-300'}`}
-                style={{ backgroundColor: viewMode === 'live' ? 'var(--app-primary-color)' : '' }}
+
+            <div className="fl-theme-surface-soft flex self-start rounded-full p-1.5">
+              <button
+                type="button"
+                onClick={() => setViewMode("live")}
+                className={`rounded-full px-6 py-2.5 text-[10px] font-bold uppercase tracking-[0.15em] transition-all duration-300 ${viewMode === "live" ? "text-black shadow-lg shadow-primary/20" : "fl-theme-text-muted"}`}
+                style={{ backgroundColor: viewMode === "live" ? "var(--app-primary-color)" : undefined }}
               >
                 Duelos Ao Vivo
               </button>
-              <button 
-                onClick={() => setViewMode('tournaments')}
-                className={`px-6 py-2.5 rounded-full font-bold text-[10px] uppercase tracking-[0.15em] transition-all duration-300 ${viewMode === 'tournaments' ? 'bg-primary text-black shadow-lg shadow-primary/20' : 'text-slate-500 hover:text-slate-300'}`}
-                style={{ backgroundColor: viewMode === 'tournaments' ? 'var(--app-primary-color)' : '' }}
+              <button
+                type="button"
+                onClick={() => setViewMode("tournaments")}
+                className={`rounded-full px-6 py-2.5 text-[10px] font-bold uppercase tracking-[0.15em] transition-all duration-300 ${viewMode === "tournaments" ? "text-black shadow-lg shadow-primary/20" : "fl-theme-text-muted"}`}
+                style={{ backgroundColor: viewMode === "tournaments" ? "var(--app-primary-color)" : undefined }}
               >
                 Torneios
               </button>
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {/* Live Battle Cards */}
-            {activeGames.map((game) => (
-              <BattleCard 
-                key={game.id} 
-                game={game} 
-                onAccept={acceptChallenge} 
-                onComplete={completeChallenge} 
-                userId={user?.id || ""} 
-              />
-            ))}
-
-            {/* Create Duel Card */}
-            <button 
-              onClick={() => setShowCreateForm(true)}
-              className="flex flex-col justify-center items-center p-8 rounded-[2.5rem] border-2 border-dashed border-white/10 bg-[#161616]/30 group hover:border-primary/30 hover:bg-primary/[0.02] transition-all duration-500 min-h-[220px]"
-            >
-              <div className="size-16 rounded-full bg-primary/10 flex items-center justify-center mb-5 group-hover:scale-110 group-hover:bg-primary/20 transition-all duration-500">
-                <PlusIcon className="w-8 h-8 text-primary" style={{ color: 'var(--app-primary-color)' }} />
-              </div>
-              <h4 className="font-bold text-white uppercase text-[11px] tracking-[0.25em]">Criar Duelo Privado</h4>
-              <p className="text-slate-500 text-[9px] text-center mt-3 uppercase tracking-widest leading-relaxed max-w-[200px]">Desafie um guerreiro específico e defina as regras do combate.</p>
-            </button>
+          <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
+            <SummaryCard icon={Trophy} label="Duelos ativos" value={String(acceptedGames.length)} helper="Confrontos em andamento" />
+            <SummaryCard icon={Clock} label="Pendentes" value={String(pendingGames.length)} helper="Esperando resposta" />
+            <SummaryCard icon={Zap} label="Historico" value={String(completedGames.length)} helper="Resultados recentes" />
           </div>
         </section>
 
-        {/* Modal Overlay for Challenge Creation */}
-        {showCreateForm && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-black/90 backdrop-blur-md animate-fadeIn">
-            <div className="bg-[#111111] border border-white/10 w-full max-w-xl rounded-[3rem] p-10 shadow-3xl">
-               <div className="flex justify-between items-start mb-10">
-                 <div>
-                   <h2 className="text-2xl font-bold text-white uppercase tracking-[0.2em] mb-2">Novo Desafio</h2>
-                   <p className="text-slate-500 text-[10px] font-bold uppercase tracking-widest">Configure os parâmetros da sua vitória.</p>
-                 </div>
-                 <button onClick={() => setShowCreateForm(false)} className="text-slate-500 hover:text-white transition-colors">
-                   <X className="w-6 h-6" />
-                 </button>
-               </div>
-               
-               <div className="space-y-10">
-                 <div>
-                    <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-[0.25em] mb-5">Seletor de Oponente</label>
-                    <div className="flex gap-4">
-                       <button onClick={() => setOpponentType('friend')} className={`flex-1 py-4 rounded-2xl font-bold text-[10px] uppercase tracking-widest transition-all border ${opponentType === 'friend' ? 'bg-primary text-black border-primary' : 'bg-[#0A0A0A] text-slate-500 border-white/5 hover:border-white/10'}`} style={{ backgroundColor: opponentType === 'friend' ? 'var(--app-primary-color)' : '', borderColor: opponentType === 'friend' ? 'var(--app-primary-color)' : '' }}>Amigo</button>
-                       <button onClick={() => setOpponentType('random')} className={`flex-1 py-4 rounded-2xl font-bold text-[10px] uppercase tracking-widest transition-all border ${opponentType === 'random' ? 'bg-primary text-black border-primary' : 'bg-[#0A0A0A] text-slate-500 border-white/5 hover:border-white/10'}`} style={{ backgroundColor: opponentType === 'random' ? 'var(--app-primary-color)' : '', borderColor: opponentType === 'random' ? 'var(--app-primary-color)' : '' }}>Aleatório</button>
+        {error ? (
+          <div className="mb-8 rounded-3xl border px-5 py-4 text-[11px] font-bold uppercase tracking-widest" style={{ borderColor: "color-mix(in srgb, var(--app-primary-color) 24%, transparent)", backgroundColor: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)", color: "var(--app-primary-color)" }}>
+            {error}
+          </div>
+        ) : null}
+
+        {showCreateForm ? (
+          <div className="fl-z-modal fixed inset-0 flex items-center justify-center bg-black/90 p-6 backdrop-blur-md">
+            <div className="fl-theme-surface w-full max-w-xl rounded-[3rem] p-10 shadow-3xl">
+              <div className="mb-10 flex items-start justify-between">
+                <div>
+                  <h2 className="mb-2 text-2xl font-bold uppercase tracking-[0.2em]">Novo Desafio</h2>
+                  <p className="fl-theme-text-muted text-[10px] font-bold uppercase tracking-widest">
+                    Configure os parametros da sua vitoria.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowCreateForm(false)}
+                  className="fl-theme-text-muted transition-colors hover:opacity-80"
+                >
+                  <X className="h-6 w-6" />
+                </button>
+              </div>
+
+              <div className="space-y-10">
+                <div>
+                  <label className="fl-theme-text-muted mb-5 block text-[10px] font-bold uppercase tracking-[0.25em]">
+                    Seletor de Oponente
+                  </label>
+                  <div className="flex gap-4">
+                    <button
+                      type="button"
+                      onClick={() => setOpponentType("friend")}
+                      className={`flex-1 rounded-2xl border py-4 text-[10px] font-bold uppercase tracking-widest transition-all ${opponentType === "friend" ? "text-black" : "fl-theme-input fl-theme-text-muted"}`}
+                      style={{ backgroundColor: opponentType === "friend" ? "var(--app-primary-color)" : undefined, borderColor: opponentType === "friend" ? "var(--app-primary-color)" : undefined }}
+                    >
+                      Amigo
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setOpponentType("random");
+                        setSelectedOpponent(null);
+                      }}
+                      className={`flex-1 rounded-2xl border py-4 text-[10px] font-bold uppercase tracking-widest transition-all ${opponentType === "random" ? "text-black" : "fl-theme-input fl-theme-text-muted"}`}
+                      style={{ backgroundColor: opponentType === "random" ? "var(--app-primary-color)" : undefined, borderColor: opponentType === "random" ? "var(--app-primary-color)" : undefined }}
+                    >
+                      Aleatorio
+                    </button>
+                  </div>
+
+                  {opponentType === "friend" ? (
+                    <div className="mt-4 rounded-2xl border px-4 py-3 text-[10px] font-bold uppercase tracking-[0.2em]" style={{ borderColor: "var(--fl-border-soft)", backgroundColor: "color-mix(in srgb, var(--fl-surface-muted) 68%, transparent)", color: selectedOpponent ? "var(--app-primary-color)" : "var(--fl-color-text-muted)" }}>
+                      {selectedOpponent ? `Rival selecionado: ${selectedOpponent.username}` : "Escolha um rival pela busca abaixo."}
                     </div>
-                 </div>
-                 
-                 <div>
-                    <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-[0.25em] mb-4">Habilidade Especial</label>
-                    <div className="relative">
-                      <select 
-                        value={selectedSkill || ''} 
-                        onChange={(e) => setSelectedSkill(parseInt(e.target.value))}
-                        className="w-full bg-[#0A0A0A] border border-white/5 rounded-2xl p-5 text-white text-[11px] font-bold uppercase tracking-widest focus:ring-1 focus:ring-primary focus:outline-none appearance-none"
-                      >
-                        <option value="">Selecione Técnica de Combate...</option>
-                        {skills.map(s => <option key={s.id} value={s.id}>{s.name} ({s.difficulty})</option>)}
-                      </select>
-                      <ChevronRight className="absolute right-5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-600 rotate-90" />
-                    </div>
-                 </div>
-                 
-                 <div>
-                    <div className="flex justify-between items-center mb-5">
-                      <label className="text-[10px] font-bold text-slate-500 uppercase tracking-[0.25em]">Meta de Intensidade</label>
-                      <span className="text-primary font-bold text-lg tracking-widest" style={{ color: 'var(--app-primary-color)' }}>{targetReps} REPS</span>
-                    </div>
-                    <input type="range" min="10" max="100" step="5" value={targetReps} onChange={(e) => setTargetReps(parseInt(e.target.value))} className="w-full h-1.5 bg-white/5 rounded-full appearance-none cursor-pointer accent-primary" style={{ accentColor: 'var(--app-primary-color)' }} />
-                 </div>
-                 
-                 <div className="flex gap-4 pt-6">
-                    <button onClick={createChallenge} className="flex-1 py-5 rounded-full font-bold text-xs uppercase tracking-[0.25em] bg-primary text-black shadow-xl shadow-primary/20 hover:scale-[1.02] transition-all duration-300" style={{ backgroundColor: 'var(--app-primary-color)' }}>Lançar Desafio</button>
-                 </div>
-               </div>
+                  ) : null}
+                </div>
+
+                <div>
+                  <label className="fl-theme-text-muted mb-4 block text-[10px] font-bold uppercase tracking-[0.25em]">
+                    Habilidade Especial
+                  </label>
+                  <div className="relative">
+                    <select
+                      value={selectedSkill ?? ""}
+                      onChange={(event) => setSelectedSkill(Number.parseInt(event.target.value, 10))}
+                      className="fl-theme-input w-full appearance-none rounded-2xl p-5 text-[11px] font-bold uppercase tracking-widest focus:outline-none"
+                    >
+                      <option value="">Selecione Tecnica de Combate...</option>
+                      {skills.map((skill) => (
+                        <option key={skill.id} value={skill.id}>
+                          {skill.name} ({skill.difficulty})
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronRight className="absolute right-5 top-1/2 h-4 w-4 -translate-y-1/2 rotate-90 fl-theme-text-muted" />
+                  </div>
+                </div>
+
+                <div>
+                  <div className="mb-5 flex items-center justify-between">
+                    <label className="fl-theme-text-muted text-[10px] font-bold uppercase tracking-[0.25em]">
+                      Meta de Intensidade
+                    </label>
+                    <span className="text-lg font-bold tracking-widest" style={{ color: "var(--app-primary-color)" }}>
+                      {targetReps} REPS
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min="10"
+                    max="100"
+                    step="5"
+                    value={targetReps}
+                    onChange={(event) => setTargetReps(Number.parseInt(event.target.value, 10))}
+                    className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-white/5 accent-primary"
+                    style={{ accentColor: "var(--app-primary-color)" }}
+                  />
+                </div>
+
+                <div className="flex gap-4 pt-6">
+                  <button
+                    type="button"
+                    onClick={createChallenge}
+                    className="flex-1 rounded-full py-5 text-xs font-bold uppercase tracking-[0.25em] text-black shadow-xl shadow-primary/20 transition-all duration-300 hover:scale-[1.02]"
+                    style={{ backgroundColor: "var(--app-primary-color)" }}
+                  >
+                    Lancar Desafio
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
-        )}
+        ) : null}
 
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 items-start">
-          {/* Main Content Column */}
-          <div className="lg:col-span-8 space-y-12">
+        <div className="grid grid-cols-1 items-start gap-10 lg:grid-cols-12">
+          <div className="space-y-12 lg:col-span-8">
             <section>
-              <div className="flex items-center gap-3 mb-8">
-                <SearchIcon className="w-5 h-5 text-primary" style={{ color: 'var(--app-primary-color)' }} />
-                <h3 className="text-xl font-bold tracking-tight text-white uppercase tracking-[0.2em]">Encontrar Guerreiros</h3>
+              <div className="mb-8 flex items-center gap-3">
+                <SearchIcon className="h-5 w-5" style={{ color: "var(--app-primary-color)" }} />
+                <h3 className="text-xl font-bold uppercase tracking-[0.2em]">Encontrar Guerreiros</h3>
               </div>
-              
-              <div className="bg-[#161616] border border-white/5 rounded-[2.5rem] overflow-hidden shadow-2xl">
-                 <div className="p-6 border-b border-white/5 flex gap-4 bg-[#0A0A0A]/30">
-                    <div className="relative flex-1">
-                       <SearchIcon className="absolute left-5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-600" />
-                       <input 
-                         type="text" 
-                         placeholder="Username ou Ranking..." 
-                         value={searchQuery}
-                         onChange={(e) => setSearchQuery(e.target.value)}
-                         onKeyPress={(e) => e.key === 'Enter' && searchUsers()}
-                         className="w-full bg-[#0A0A0A] border border-white/5 rounded-2xl pl-12 pr-4 py-4 text-xs font-bold uppercase tracking-widest text-white placeholder:text-slate-700 focus:ring-1 focus:ring-primary focus:outline-none transition-all"
-                       />
+
+              <div className="fl-theme-surface overflow-hidden rounded-[2.5rem] shadow-2xl">
+                <div className="flex gap-4 border-b p-6" style={{ borderColor: "var(--fl-border-soft)", backgroundColor: "color-mix(in srgb, var(--fl-surface-muted) 35%, transparent)" }}>
+                  <div className="relative flex-1">
+                    <SearchIcon className="absolute left-5 top-1/2 h-4 w-4 -translate-y-1/2 fl-theme-text-muted" />
+                    <input
+                      type="text"
+                      placeholder="Username ou ranking..."
+                      value={searchQuery}
+                      onChange={(event) => setSearchQuery(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") void searchUsers();
+                      }}
+                      className="fl-theme-input w-full rounded-2xl py-4 pl-12 pr-4 text-xs font-bold uppercase tracking-widest focus:outline-none"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void searchUsers();
+                    }}
+                    className="rounded-2xl px-8 text-[10px] font-bold uppercase tracking-[0.2em] text-black transition-all duration-300 hover:brightness-110"
+                    style={{ backgroundColor: "var(--app-primary-color)" }}
+                  >
+                    {searching ? "..." : "Buscar"}
+                  </button>
+                </div>
+
+                <div className="divide-y divide-white/5">
+                  {searchResults.length === 0 ? (
+                    <div className="p-16 text-center">
+                      <Users className="mx-auto mb-5 h-12 w-12 text-white/5" />
+                      <p className="fl-theme-text-muted text-[10px] font-bold uppercase tracking-[0.2em]">
+                        Inicie uma busca e encontre novos rivais.
+                      </p>
                     </div>
-                    <button onClick={searchUsers} className="bg-primary px-8 rounded-2xl text-black text-[10px] font-bold uppercase tracking-[0.2em] hover:brightness-110 transition-all transition-all duration-300" style={{ backgroundColor: 'var(--app-primary-color)' }}>
-                      {searching ? "..." : "Buscar"}
-                    </button>
-                 </div>
-                 
-                 <div className="divide-y divide-white/5">
-                    {searchResults.length === 0 ? (
-                      <div className="p-16 text-center">
-                        <Users className="w-12 h-12 text-white/5 mx-auto mb-5" />
-                        <p className="text-[10px] text-slate-600 font-bold uppercase tracking-[0.2em]">Inicie uma busca e encontre novos rivais.</p>
-                      </div>
-                    ) : (
-                      searchResults.map((res) => (
-                        <div key={res.user_id} className="p-6 flex items-center justify-between hover:bg-white/[0.02] transition-colors group">
-                           <div className="flex items-center gap-5">
-                              <Avatar name={res.full_name || res.username} className="size-14 rounded-full border border-white/10 bg-[#0A0A0A]" />
-                              <div>
-                                 <h5 className="font-bold text-white group-hover:text-primary transition-colors text-base tracking-tight">{res.username}</h5>
-                                 <div className="flex items-center gap-2 mt-1.5">
-                                    <Badge className="bg-primary/10 text-primary border border-primary/20 text-[8px] font-bold uppercase px-2 py-0.5" style={{ color: 'var(--app-primary-color)' }}>Nv. {res.level}</Badge>
-                                    <p className="text-[9px] text-slate-500 font-bold uppercase tracking-[0.1em]">{res.level > 10 ? 'Mestre da Arena' : 'Explorador'}</p>
-                                 </div>
-                              </div>
-                           </div>
-                           <button onClick={() => sendFriendRequest(res.user_id)} className="bg-primary/10 text-primary border border-primary/20 hover:bg-primary hover:text-black px-8 py-3 rounded-2xl text-[10px] font-bold uppercase tracking-[0.2em] transition-all duration-300" style={{ color: 'var(--app-primary-color)' }}>Desafiar</button>
+                  ) : (
+                    searchResults.map((result) => (
+                      <div key={result.user_id} className="group flex items-center justify-between p-6 transition-colors hover:bg-white/[0.02]">
+                        <div className="flex items-center gap-5">
+                          <Avatar name={result.full_name || result.username} className="size-14 rounded-full border border-white/10" />
+                          <div>
+                            <h5 className="text-base font-bold tracking-tight transition-colors group-hover:text-primary">{result.username}</h5>
+                            <div className="mt-1.5 flex items-center gap-2">
+                              <Badge className="border border-primary/20 bg-primary/10 px-2 py-0.5 text-[8px] font-bold uppercase" style={{ color: "var(--app-primary-color)" }}>
+                                Nv. {result.level}
+                              </Badge>
+                              <p className="fl-theme-text-muted text-[9px] font-bold uppercase tracking-[0.1em]">
+                                {result.level > 10 ? "Mestre da Arena" : "Explorador"}
+                              </p>
+                            </div>
+                          </div>
                         </div>
-                      ))
-                    )}
-                 </div>
+                        <button
+                          type="button"
+                          onClick={() => prepareChallenge(result.user_id)}
+                          className="rounded-2xl border px-8 py-3 text-[10px] font-bold uppercase tracking-[0.2em] transition-all duration-300 hover:text-black"
+                          style={{ color: "var(--app-primary-color)", borderColor: "color-mix(in srgb, var(--app-primary-color) 20%, transparent)", backgroundColor: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)" }}
+                          onMouseEnter={(event) => {
+                            event.currentTarget.style.backgroundColor = "var(--app-primary-color)";
+                          }}
+                          onMouseLeave={(event) => {
+                            event.currentTarget.style.backgroundColor = "color-mix(in srgb, var(--app-primary-color) 10%, transparent)";
+                          }}
+                        >
+                          Selecionar rival
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
               </div>
             </section>
+            {viewMode === "live" ? (
+              <section>
+                <div className="mb-8 flex items-center gap-3">
+                  <Target className="h-5 w-5" style={{ color: "var(--app-primary-color)" }} />
+                  <h3 className="text-xl font-bold uppercase tracking-[0.2em]">Duelos em Curso</h3>
+                </div>
+
+                <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+                  {liveGames.map((game) => (
+                    <BattleCard
+                      key={game.id}
+                      game={game}
+                      onAccept={acceptChallenge}
+                      onComplete={completeChallenge}
+                      userId={user?.id ?? ""}
+                    />
+                  ))}
+
+                  <button
+                    type="button"
+                    onClick={() => setShowCreateForm(true)}
+                    className="fl-theme-surface-soft flex min-h-[220px] flex-col items-center justify-center rounded-[2.5rem] border-2 border-dashed p-8 transition-all duration-500 hover:border-primary/30 hover:bg-primary/[0.02]"
+                  >
+                    <div className="mb-5 flex size-16 items-center justify-center rounded-full" style={{ backgroundColor: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)" }}>
+                      <PlusIcon className="h-8 w-8" style={{ color: "var(--app-primary-color)" }} />
+                    </div>
+                    <h4 className="text-[11px] font-bold uppercase tracking-[0.25em]">Criar Duelo Privado</h4>
+                    <p className="fl-theme-text-muted mt-3 max-w-[200px] text-center text-[9px] uppercase tracking-widest leading-relaxed">
+                      Desafie um guerreiro especifico e defina as regras do combate.
+                    </p>
+                  </button>
+                </div>
+
+                {liveGames.length === 0 ? (
+                  <div className="fl-theme-surface-muted mt-6 rounded-[2rem] p-8 text-center">
+                    <Check className="mx-auto mb-4 h-10 w-10" style={{ color: "var(--app-primary-color)" }} />
+                    <p className="text-[10px] font-bold uppercase tracking-[0.25em]">
+                      Nenhum duelo ativo no momento.
+                    </p>
+                  </div>
+                ) : null}
+              </section>
+            ) : (
+              <section>
+                <div className="mb-8 flex items-center gap-3">
+                  <Check className="h-5 w-5" style={{ color: "var(--app-primary-color)" }} />
+                  <h3 className="text-xl font-bold uppercase tracking-[0.2em]">Historico de Torneios</h3>
+                </div>
+
+                <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+                  {completedGames.map((game) => (
+                    <TournamentResultCard key={game.id} game={game} userId={user?.id ?? ""} />
+                  ))}
+
+                  <div className="rounded-[3rem] border p-8" style={{ borderColor: "var(--fl-border-soft)", background: "linear-gradient(160deg, color-mix(in srgb, var(--app-primary-color) 12%, transparent), color-mix(in srgb, var(--fl-surface-strong) 96%, transparent))" }}>
+                    <div className="mb-6 inline-flex rounded-full border px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.2em]" style={{ borderColor: "color-mix(in srgb, var(--app-primary-color) 18%, transparent)", color: "var(--app-primary-color)" }}>
+                      Agenda da Arena
+                    </div>
+                    <h4 className="mb-2 text-2xl font-bold uppercase tracking-tight">Weekend Brawl</h4>
+                    <p className="fl-theme-text-muted text-[10px] font-bold uppercase tracking-[0.2em]">Season 4 • Final Match</p>
+                    <div className="mt-8 space-y-4 text-[10px] font-bold uppercase tracking-widest">
+                      <div className="flex items-center gap-3">
+                        <Zap className="h-4 w-4" style={{ color: "var(--app-primary-color)" }} />
+                        <span>Prize Pool: 50.000 Points</span>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <Clock className="h-4 w-4" style={{ color: "var(--app-primary-color)" }} />
+                        <span>23 Marco, 20:00</span>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      className="mt-8 w-full rounded-full py-4 text-[10px] font-bold uppercase tracking-[0.3em] text-black shadow-2xl transition-all duration-300 hover:scale-[1.03] active:scale-95"
+                      style={{ backgroundColor: "var(--app-primary-color)" }}
+                    >
+                      Pre-registrar
+                    </button>
+                  </div>
+                </div>
+
+                {completedGames.length === 0 ? (
+                  <div className="fl-theme-surface-muted mt-6 rounded-[2rem] p-8 text-center">
+                    <Clock className="mx-auto mb-4 h-10 w-10" style={{ color: "var(--app-primary-color)" }} />
+                    <p className="text-[10px] font-bold uppercase tracking-[0.25em]">
+                      Ainda nao existem resultados finalizados para exibir.
+                    </p>
+                  </div>
+                ) : null}
+              </section>
+            )}
           </div>
 
-          {/* Sidebar Column */}
-          <div className="lg:col-span-4 space-y-10">
+          <div className="space-y-10 lg:col-span-4">
             <section>
-              <div className="flex items-center gap-3 mb-8">
-                <UserPlusIcon className="w-5 h-5 text-primary" style={{ color: 'var(--app-primary-color)' }} />
-                <h3 className="text-xl font-bold tracking-tight text-white uppercase tracking-[0.2em]">Solicitações</h3>
+              <div className="mb-8 flex items-center gap-3">
+                <UserPlusIcon className="h-5 w-5" style={{ color: "var(--app-primary-color)" }} />
+                <h3 className="text-xl font-bold uppercase tracking-[0.2em]">Solicitacoes</h3>
               </div>
-              
+
               <div className="flex flex-col gap-5">
                 {pendingRequests.length === 0 ? (
-                  <div className="p-10 text-center bg-[#161616] rounded-3xl border border-dashed border-white/5">
-                    <InfoIcon className="w-10 h-10 text-white/5 mx-auto mb-4" />
-                    <p className="text-[9px] text-slate-600 font-bold uppercase tracking-[0.2em]">Nenhuma solicitação de duelo recebida.</p>
+                  <div className="fl-theme-surface-muted rounded-3xl border border-dashed p-10 text-center">
+                    <InfoIcon className="mx-auto mb-4 h-10 w-10 text-white/5" />
+                    <p className="fl-theme-text-muted text-[9px] font-bold uppercase tracking-[0.2em]">
+                      Nenhuma solicitacao de duelo recebida.
+                    </p>
                   </div>
                 ) : (
-                  pendingRequests.map((req) => (
-                    <div key={req.id} className="bg-[#161616] border border-white/5 p-6 rounded-[2.5rem] shadow-xl group">
-                       <div className="flex items-center gap-4 mb-6">
-                         <Avatar name={req.friend_full_name} className="size-12 rounded-full border border-white/10 shadow-lg" />
-                         <div>
-                            <h5 className="font-bold text-sm text-white tracking-tight">{req.friend_username}</h5>
-                            <p className="text-[9px] text-primary font-bold uppercase tracking-[0.2em] mt-1" style={{ color: 'var(--app-primary-color)' }}>Desafio Recebido</p>
-                         </div>
-                       </div>
-                       <div className="flex gap-3">
-                          <button onClick={() => manageRequest(req.id, true)} className="flex-1 bg-primary text-black font-bold py-3.5 rounded-2xl text-[10px] uppercase tracking-[0.2em] hover:brightness-110 transition-all duration-300 shadow-lg shadow-primary/10" style={{ backgroundColor: 'var(--app-primary-color)' }}>Aceitar</button>
-                          <button onClick={() => manageRequest(req.id, false)} className="flex-1 bg-white/5 text-slate-500 font-bold py-3.5 rounded-2xl text-[10px] uppercase tracking-[0.2em] hover:bg-white/10 hover:text-white transition-all duration-300">Recusar</button>
-                       </div>
+                  pendingRequests.map((request) => (
+                    <div key={request.id} className="fl-theme-surface rounded-[2.5rem] p-6 shadow-xl">
+                      <div className="mb-6 flex items-center gap-4">
+                        <Avatar name={request.friend_full_name} className="size-12 rounded-full border border-white/10 shadow-lg" />
+                        <div>
+                          <h5 className="text-sm font-bold tracking-tight">{request.friend_username}</h5>
+                          <p className="mt-1 text-[9px] font-bold uppercase tracking-[0.2em]" style={{ color: "var(--app-primary-color)" }}>
+                            Desafio Recebido
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex gap-3">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            void manageRequest(request.id, true);
+                          }}
+                          className="flex-1 rounded-2xl py-3.5 text-[10px] font-bold uppercase tracking-[0.2em] text-black transition-all duration-300 hover:brightness-110"
+                          style={{ backgroundColor: "var(--app-primary-color)" }}
+                        >
+                          Aceitar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            void manageRequest(request.id, false);
+                          }}
+                          className="fl-theme-input fl-theme-text-muted flex-1 rounded-2xl py-3.5 text-[10px] font-bold uppercase tracking-[0.2em] transition-all duration-300 hover:opacity-90"
+                        >
+                          Recusar
+                        </button>
+                      </div>
                     </div>
                   ))
                 )}
               </div>
             </section>
-
-            {/* Tournament Side Banner */}
-            <section>
-              <div className="rounded-[3rem] bg-gradient-to-br from-[#122017] to-[#0A0A0A] border border-white/5 p-10 text-white overflow-hidden relative group shadow-3xl">
-                <div className="absolute top-0 right-0 w-40 h-40 bg-primary/20 blur-[80px] -mr-20 -mt-20 group-hover:bg-primary/30 transition-all duration-700" style={{ backgroundColor: 'rgba(57, 224, 121, 0.2)' }}></div>
-                <Trophy className="absolute -right-8 -bottom-8 size-48 text-white/5 group-hover:scale-110 group-hover:text-primary/10 transition-all duration-700" />
-                
-                <h3 className="text-2xl font-bold mb-3 tracking-tighter uppercase italic">Weekend Brawl</h3>
-                <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-primary mb-8 ml-1" style={{ color: 'var(--app-primary-color)' }}>Season 4 • Final Match</p>
-                
-                <div className="space-y-4 mb-10 text-[10px] font-bold uppercase tracking-widest text-slate-400">
-                  <div className="flex items-center gap-3">
-                    <div className="size-1.5 rounded-full bg-primary" style={{ backgroundColor: 'var(--app-primary-color)' }}></div>
-                    <span>Prize Pool: 50,000 Points</span>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <div className="size-1.5 rounded-full bg-primary" style={{ backgroundColor: 'var(--app-primary-color)' }}></div>
-                    <span>Data: 23 Março, 20:00</span>
-                  </div>
-                </div>
-
-                <button className="w-full bg-white text-black font-bold py-4 rounded-full text-[10px] uppercase tracking-[0.3em] shadow-2xl hover:bg-primary hover:text-black hover:scale-[1.03] active:scale-95 transition-all duration-300" style={{ ':hover': { backgroundColor: 'var(--app-primary-color)' } } as any}>
-                  Pré-registrar
-                </button>
+            <section className="fl-theme-surface-muted rounded-[3rem] p-8">
+              <div className="mb-4 flex items-center gap-3">
+                <Trophy className="h-5 w-5" style={{ color: "var(--app-primary-color)" }} />
+                <h3 className="text-[10px] font-bold uppercase tracking-[0.3em]">Estado da Arena</h3>
+              </div>
+              <div className="space-y-4 text-[10px] font-bold uppercase tracking-widest">
+                <ArenaMetric label="Duelos ao vivo" value={acceptedGames.length} />
+                <ArenaMetric label="Aguardando" value={pendingGames.length} />
+                <ArenaMetric label="Resultados" value={completedGames.length} />
               </div>
             </section>
           </div>
         </div>
 
-        {/* Desktop Footer */}
-        <footer className="mt-32 pt-12 border-t border-white/5 flex flex-col md:flex-row justify-between items-center text-slate-600 text-[10px] font-bold uppercase tracking-[0.3em] gap-8 pb-16">
-          <p>© 2024 FitLoot Arena • Desafie Seus Limites.</p>
-          <div className="flex gap-10">
-            <a href="#" className="hover:text-primary transition-all duration-300">Regras do Coliseu</a>
-            <a href="#" className="hover:text-primary transition-all duration-300">Suporte</a>
-            <a href="#" className="hover:text-primary transition-all duration-300">Condições</a>
+        <footer className="mt-24 flex flex-col items-center justify-between gap-8 border-t border-white/5 pb-16 pt-12 text-[10px] font-bold uppercase tracking-[0.3em] md:flex-row">
+          <p className="fl-theme-text-muted">© 2026 FitLoot Arena • Desafie seus limites.</p>
+          <div className="flex gap-10 fl-theme-text-muted">
+            <a href="#" className="transition-all duration-300 hover:text-primary">Regras</a>
+            <a href="#" className="transition-all duration-300 hover:text-primary">Suporte</a>
+            <a href="#" className="transition-all duration-300 hover:text-primary">Condicoes</a>
           </div>
         </footer>
       </div>
@@ -535,68 +755,156 @@ export default function MiniGames() {
   );
 }
 
-function BattleCard({ game, onAccept, onComplete, userId }: { 
-  game: MiniGame, 
-  onAccept: (id: number) => void, 
-  onComplete: (id: number, r: number, t: number) => void,
-  userId: string 
+function SummaryCard({
+  icon: Icon,
+  label,
+  value,
+  helper,
+}: {
+  icon: typeof Trophy;
+  label: string;
+  value: string;
+  helper: string;
+}) {
+  return (
+    <div className="fl-theme-surface rounded-[2rem] p-6">
+      <div className="mb-5 flex items-center justify-between">
+        <div className="flex size-12 items-center justify-center rounded-2xl" style={{ backgroundColor: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)" }}>
+          <Icon className="h-6 w-6" style={{ color: "var(--app-primary-color)" }} />
+        </div>
+        <span className="text-3xl font-bold tracking-tight">{value}</span>
+      </div>
+      <p className="mb-2 text-[10px] font-bold uppercase tracking-[0.2em]" style={{ color: "var(--app-primary-color)" }}>
+        {label}
+      </p>
+      <p className="fl-theme-text-muted text-xs font-medium">{helper}</p>
+    </div>
+  );
+}
+
+function ArenaMetric({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="flex items-center justify-between rounded-2xl border px-4 py-3" style={{ borderColor: "var(--fl-border-soft)" }}>
+      <span className="fl-theme-text-muted">{label}</span>
+      <span style={{ color: "var(--app-primary-color)" }}>{value}</span>
+    </div>
+  );
+}
+
+function BattleCard({
+  game,
+  onAccept,
+  onComplete,
+  userId,
+}: {
+  game: MiniGame;
+  onAccept: (id: number) => void;
+  onComplete: (id: number, reps: number, timeSeconds: number) => void;
+  userId: string;
 }) {
   const isChallenger = game.challenger_user_id === userId;
-  const isPending = game.status === 'pending';
-  const isActive = game.status === 'active';
+  const isPending = game.status === "pending";
+  const isActive = game.status === "active";
 
   return (
-    <div className="relative group overflow-hidden rounded-[3rem] bg-[#161616] border border-white/10 transition-all duration-500 hover:shadow-3xl hover:shadow-primary/10 hover:border-primary/20">
-      <div 
-        className="aspect-[16/10] w-full bg-cover bg-center group-hover:scale-110 transition-transform duration-1000 opacity-50 grayscale group-hover:grayscale-0" 
-        style={{ backgroundImage: `url('https://images.unsplash.com/photo-1534438327276-14e5300c3a48?auto=format&fit=crop&q=80')` }}
-      ></div>
-      <div className="absolute inset-0 bg-gradient-to-t from-[#0A0A0A] via-[#0A0A0A]/60 to-transparent"></div>
-      
-      <div className="absolute top-6 left-6 flex gap-2">
-        <span className={`px-4 py-1.5 rounded-full text-[9px] font-bold uppercase tracking-[0.2em] border shadow-2xl ${isPending ? 'bg-amber-500/10 text-amber-500 border-amber-500/20' : 'bg-primary/10 text-primary border-primary/20'}`} style={{ color: isPending ? '' : 'var(--app-primary-color)', borderColor: isPending ? '' : 'rgba(57, 224, 121, 0.2)' }}>
-          {isPending ? 'Aguardando' : 'Live Arena'}
+    <div className="relative overflow-hidden rounded-[3rem] border transition-all duration-500 hover:border-primary/20 hover:shadow-3xl hover:shadow-primary/10" style={{ borderColor: "var(--fl-border-soft)", background: "linear-gradient(180deg, color-mix(in srgb, var(--fl-surface-muted) 84%, transparent), color-mix(in srgb, var(--fl-surface-strong) 96%, transparent))" }}>
+      <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
+      <div className="relative p-8">
+        <div className="mb-8 flex items-center justify-between gap-3">
+          <span className="rounded-full border px-4 py-1.5 text-[9px] font-bold uppercase tracking-[0.2em]" style={{ borderColor: isPending ? "rgba(245, 158, 11, 0.3)" : "color-mix(in srgb, var(--app-primary-color) 20%, transparent)", color: isPending ? "#f59e0b" : "var(--app-primary-color)", backgroundColor: isPending ? "rgba(245, 158, 11, 0.12)" : "color-mix(in srgb, var(--app-primary-color) 10%, transparent)" }}>
+            {isPending ? "Aguardando" : "Live Arena"}
+          </span>
+          <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.2em] fl-theme-text-muted">
+            <Clock className="h-4 w-4" />
+            <span>{new Date(game.deadline).toLocaleDateString("pt-BR")}</span>
+          </div>
+        </div>
+
+        <h4 className="mb-2 text-2xl font-bold tracking-tight">{game.skill_name}</h4>
+        <div className="mb-6 flex items-center gap-4 text-[10px] font-bold uppercase tracking-[0.15em] fl-theme-text-muted">
+          <span className="flex items-center gap-1.5">
+            <Trophy className="h-3.5 w-3.5 text-amber-500" /> {game.points_reward} Loot
+          </span>
+          <span className="flex items-center gap-1.5">
+            <Shield className="h-3.5 w-3.5" style={{ color: "var(--app-primary-color)" }} /> {game.target_reps} Reps
+          </span>
+        </div>
+
+        <p className="mb-8 text-[10px] font-bold uppercase tracking-[0.15em] fl-theme-text-muted">
+          vs {isChallenger ? game.challenged_username : game.challenger_username}
+        </p>
+
+        <div className="flex flex-col items-end gap-2">
+          {isPending && !isChallenger ? (
+            <button
+              type="button"
+              onClick={() => onAccept(game.id)}
+              className="rounded-2xl px-8 py-3 text-[10px] font-bold uppercase tracking-[0.2em] text-black shadow-xl transition-all duration-300 hover:scale-105 active:scale-95"
+              style={{ backgroundColor: "var(--app-primary-color)" }}
+            >
+              Aceitar
+            </button>
+          ) : null}
+
+          {isActive ? (
+            <button
+              type="button"
+              onClick={() => {
+                const reps = Number.parseInt(prompt(`Meta: ${game.target_reps}. Quantas completou?`) ?? "0", 10);
+                const time = Number.parseInt(prompt("Tempo em segundos?") ?? "0", 10);
+                if (reps > 0) onComplete(game.id, reps, time);
+              }}
+              className="rounded-2xl px-8 py-3 text-[10px] font-bold uppercase tracking-[0.2em] text-black shadow-xl transition-all duration-300 hover:scale-105 active:scale-95"
+              style={{ backgroundColor: "var(--app-primary-color)" }}
+            >
+              Vencer
+            </button>
+          ) : null}
+
+          {isPending && isChallenger ? (
+            <div className="rounded-2xl border px-6 py-3" style={{ borderColor: "var(--fl-border-soft)", backgroundColor: "color-mix(in srgb, var(--fl-surface-muted) 70%, transparent)" }}>
+              <span className="fl-theme-text-muted animate-pulse text-[9px] font-bold uppercase tracking-widest">Pendente</span>
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TournamentResultCard({ game, userId }: { game: MiniGame; userId: string }) {
+  const didWin = game.winner_user_id === userId;
+
+  return (
+    <div className="fl-theme-surface rounded-[2.5rem] p-7">
+      <div className="mb-5 flex items-center justify-between">
+        <span className="rounded-full border px-3 py-1.5 text-[9px] font-bold uppercase tracking-[0.2em]" style={{ borderColor: didWin ? "color-mix(in srgb, var(--app-primary-color) 20%, transparent)" : "rgba(239, 68, 68, 0.25)", backgroundColor: didWin ? "color-mix(in srgb, var(--app-primary-color) 10%, transparent)" : "rgba(239, 68, 68, 0.12)", color: didWin ? "var(--app-primary-color)" : "#ef4444" }}>
+          {didWin ? "Vitoria" : "Derrota"}
+        </span>
+        <span className="fl-theme-text-muted text-[10px] font-bold uppercase tracking-[0.2em]">
+          {new Date(game.created_at).toLocaleDateString("pt-BR")}
         </span>
       </div>
 
-      <div className="absolute bottom-0 left-0 p-8 w-full">
-        <div className="flex justify-between items-end gap-4">
-          <div className="flex-1">
-            <h4 className="text-xl font-bold text-white mb-2 tracking-tight group-hover:text-primary transition-colors">{game.skill_name}</h4>
-            <div className="flex items-center gap-4 text-[10px] font-bold uppercase tracking-[0.15em] text-slate-400">
-               <span className="flex items-center gap-1.5"><Trophy className="w-3.5 h-3.5 text-amber-500" /> {game.points_reward} Loot</span>
-               <span className="flex items-center gap-1.5"><Shield className="w-3.5 h-3.5 text-primary" style={{ color: 'var(--app-primary-color)' }} /> {game.target_reps} Reps</span>
-            </div>
-            <p className="text-[10px] text-slate-600 mt-4 tracking-[0.15em] uppercase font-bold">vs {isChallenger ? game.challenged_username : game.challenger_username}</p>
-          </div>
-          
-          <div className="flex flex-col items-end gap-2">
-            {isPending && !isChallenger && (
-              <button onClick={() => onAccept(game.id)} className="bg-primary text-black font-bold py-3 px-8 rounded-2xl text-[10px] uppercase tracking-[0.2em] shadow-xl hover:scale-105 active:scale-95 transition-all duration-300" style={{ backgroundColor: 'var(--app-primary-color)' }}>Aceitar</button>
-            )}
-            
-            {isActive && (
-              <button 
-                onClick={() => {
-                  const r = parseInt(prompt(`Meta: ${game.target_reps}. Quantas completou?`) || '0');
-                  const t = parseInt(prompt(`Tempo (seg)?`) || '0');
-                  if (r > 0) onComplete(game.id, r, t);
-                }}
-                className="bg-primary text-black font-bold py-3 px-8 rounded-2xl text-[10px] uppercase tracking-[0.2em] shadow-xl hover:scale-105 active:scale-95 transition-all duration-300"
-                style={{ backgroundColor: 'var(--app-primary-color)' }}
-              >
-                Vencer
-              </button>
-            )}
-            
-            {isPending && isChallenger && (
-              <div className="bg-white/5 border border-white/5 py-3 px-6 rounded-2xl">
-                 <span className="text-[9px] font-bold text-slate-600 uppercase tracking-widest animate-pulse">Pendente</span>
-              </div>
-            )}
-          </div>
-        </div>
+      <h4 className="mb-2 text-xl font-bold tracking-tight">{game.skill_name}</h4>
+      <p className="fl-theme-text-muted mb-6 text-[10px] font-bold uppercase tracking-[0.2em]">
+        Contra {game.challenger_user_id === userId ? game.challenged_username : game.challenger_username}
+      </p>
+
+      <div className="grid grid-cols-3 gap-3 text-center">
+        <ResultMetric label="Meta" value={`${game.target_reps}`} />
+        <ResultMetric label="XP" value={`${game.xp_reward}`} />
+        <ResultMetric label="Loot" value={`${game.points_reward}`} />
       </div>
+    </div>
+  );
+}
+
+function ResultMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-2xl border px-3 py-4" style={{ borderColor: "var(--fl-border-soft)", backgroundColor: "color-mix(in srgb, var(--fl-surface-muted) 62%, transparent)" }}>
+      <p className="fl-theme-text-muted mb-1 text-[9px] font-bold uppercase tracking-[0.15em]">{label}</p>
+      <p className="text-sm font-bold">{value}</p>
     </div>
   );
 }

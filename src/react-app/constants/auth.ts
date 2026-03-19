@@ -13,6 +13,7 @@ export const ROUTE_PATHS = {
   checkout: "/checkout",
   dashboard: "/dashboard",
   profile: "/profile",
+  friends: "/friends",
   shop: "/shop",
   ranking: "/ranking",
   achievements: "/achievements",

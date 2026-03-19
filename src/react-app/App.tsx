@@ -6,6 +6,7 @@ import PageLoader from "@/react-app/components/PageLoader";
 import LoadingBall from "@/react-app/components/LoadingBall";
 import { ROUTE_PATHS, AUTHENTICATED_HINT_KEY } from "@/react-app/constants/auth";
 import { AuthContext, useAuth } from "@/react-app/contexts/auth";
+import { AppChromeContext } from "@/react-app/contexts/appChrome";
 import { ThemeContext } from "@/react-app/contexts/theme";
 import { useAuthBootstrap } from "@/react-app/hooks/useAuthBootstrap";
 import {
@@ -25,6 +26,7 @@ const Checkout = lazy(() => import("@/react-app/pages/Checkout"));
 const PaymentPending = lazy(() => import("@/react-app/pages/PaymentPending"));
 const Dashboard = lazy(() => import("@/react-app/pages/Dashboard"));
 const Profile = lazy(() => import("@/react-app/pages/Profile"));
+const Friends = lazy(() => import("@/react-app/pages/Friends"));
 const Shop = lazy(() => import("@/react-app/pages/Shop"));
 const Ranking = lazy(() => import("@/react-app/pages/Ranking"));
 const MiniGames = lazy(() => import("@/react-app/pages/MiniGames"));
@@ -106,6 +108,8 @@ export default function App({ initialThemeMode = DEFAULT_APP_THEME_MODE }: AppPr
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [themeMode, setThemeModeState] = useState<AppThemeMode>(initialThemeMode);
+  const [missionDetailsOpen, setMissionDetailsOpen] = useState(false);
+  const [missionExecutionOpen, setMissionExecutionOpen] = useState(false);
 
   const checkAuth = useAuthBootstrap({ setUser, setLoading });
   const setThemeMode = useCallback((mode: AppThemeMode) => {
@@ -133,126 +137,143 @@ export default function App({ initialThemeMode = DEFAULT_APP_THEME_MODE }: AppPr
 
   return (
     <ThemeContext.Provider value={{ themeMode, setThemeMode, toggleThemeMode }}>
-      <AuthContext.Provider value={{ user, loading, checkAuth, logout }}>
-        <Router>
-          <Suspense fallback={<PageLoader />}>
-            <Routes>
-              <Route path={ROUTE_PATHS.landing} element={<LandingPage />} />
-              <Route path={ROUTE_PATHS.publicLanding} element={<LandingPage />} />
-              <Route
-                path={ROUTE_PATHS.login}
-                element={
-                  <PublicAuthRoute>
-                    <HomePage />
-                  </PublicAuthRoute>
-                }
-              />
-              <Route path={ROUTE_PATHS.app} element={<AppEntryRoute />} />
-              <Route path={ROUTE_PATHS.onboarding} element={<Onboarding />} />
-              <Route
-                path={ROUTE_PATHS.payment}
-                element={
-                  <ProtectedRoute>
-                    <Checkout />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path={ROUTE_PATHS.paymentPending}
-                element={
-                  <ProtectedRoute>
-                    <PaymentPending />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path={ROUTE_PATHS.checkout}
-                element={
-                  <ProtectedRoute>
-                    <Checkout />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path={ROUTE_PATHS.home}
-                element={
-                  <ProtectedRoute>
-                    <Dashboard />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path={ROUTE_PATHS.dashboard}
-                element={
-                  <ProtectedRoute>
-                    <Dashboard />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path={ROUTE_PATHS.profile}
-                element={
-                  <ProtectedRoute>
-                    <Profile />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path={ROUTE_PATHS.shop}
-                element={
-                  <ProtectedRoute>
-                    <Shop />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path={ROUTE_PATHS.ranking}
-                element={
-                  <ProtectedRoute>
-                    <Ranking />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path={ROUTE_PATHS.achievements}
-                element={
-                  <ProtectedRoute>
-                    <Achievements />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path={ROUTE_PATHS.minigames}
-                element={
-                  <ProtectedRoute>
-                    <MiniGames />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path={ROUTE_PATHS.aiChat}
-                element={
-                  <ProtectedRoute>
-                    <AIChat />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path={ROUTE_PATHS.foodAnalysis}
-                element={
-                  <ProtectedRoute>
-                    <FoodAnalysis />
-                  </ProtectedRoute>
-                }
-              />
-              <Route path={ROUTE_PATHS.wildcard} element={<NotFoundPage />} />
-            </Routes>
-          </Suspense>
+      <AppChromeContext.Provider
+        value={{
+          missionDetailsOpen,
+          missionExecutionOpen,
+          setMissionDetailsOpen,
+          setMissionExecutionOpen,
+        }}
+      >
+        <AuthContext.Provider value={{ user, loading, checkAuth, logout }}>
+          <Router>
+            <Suspense fallback={<PageLoader />}>
+              <Routes>
+                <Route path={ROUTE_PATHS.landing} element={<LandingPage />} />
+                <Route path={ROUTE_PATHS.publicLanding} element={<LandingPage />} />
+                <Route
+                  path={ROUTE_PATHS.login}
+                  element={
+                    <PublicAuthRoute>
+                      <HomePage />
+                    </PublicAuthRoute>
+                  }
+                />
+                <Route path={ROUTE_PATHS.app} element={<AppEntryRoute />} />
+                <Route path={ROUTE_PATHS.onboarding} element={<Onboarding />} />
+                <Route
+                  path={ROUTE_PATHS.payment}
+                  element={
+                    <ProtectedRoute>
+                      <Checkout />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path={ROUTE_PATHS.paymentPending}
+                  element={
+                    <ProtectedRoute>
+                      <PaymentPending />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path={ROUTE_PATHS.checkout}
+                  element={
+                    <ProtectedRoute>
+                      <Checkout />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path={ROUTE_PATHS.home}
+                  element={
+                    <ProtectedRoute>
+                      <Dashboard />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path={ROUTE_PATHS.dashboard}
+                  element={
+                    <ProtectedRoute>
+                      <Dashboard />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path={ROUTE_PATHS.profile}
+                  element={
+                    <ProtectedRoute>
+                      <Profile />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path={ROUTE_PATHS.friends}
+                  element={
+                    <ProtectedRoute>
+                      <Friends />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path={ROUTE_PATHS.shop}
+                  element={
+                    <ProtectedRoute>
+                      <Shop />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path={ROUTE_PATHS.ranking}
+                  element={
+                    <ProtectedRoute>
+                      <Ranking />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path={ROUTE_PATHS.achievements}
+                  element={
+                    <ProtectedRoute>
+                      <Achievements />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path={ROUTE_PATHS.minigames}
+                  element={
+                    <ProtectedRoute>
+                      <MiniGames />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path={ROUTE_PATHS.aiChat}
+                  element={
+                    <ProtectedRoute>
+                      <AIChat />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path={ROUTE_PATHS.foodAnalysis}
+                  element={
+                    <ProtectedRoute>
+                      <FoodAnalysis />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route path={ROUTE_PATHS.wildcard} element={<NotFoundPage />} />
+              </Routes>
+            </Suspense>
 
-          <Analytics />
-          <SpeedInsights />
-        </Router>
-      </AuthContext.Provider>
+            <Analytics />
+            <SpeedInsights />
+          </Router>
+        </AuthContext.Provider>
+      </AppChromeContext.Provider>
     </ThemeContext.Provider>
   );
 }

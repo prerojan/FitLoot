@@ -1,27 +1,43 @@
-// ====================================
-// src/react-app/pages/AIChat.tsx
-// Componente de Chatbot com IA
-// ====================================
-
-import { useState, useRef, useEffect } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router";
 import { useAuth } from "@/react-app/contexts/auth";
 import AppPageShell from "@/react-app/components/AppPageShell";
-import { Bot, History, Settings, Dumbbell, LineChart, Gift, Utensils, Mic, Paperclip, ArrowUp } from "lucide-react";
+import {
+  Bot,
+  History,
+  Settings,
+  Dumbbell,
+  LineChart,
+  Gift,
+  Utensils,
+  Mic,
+  Paperclip,
+  ArrowUp,
+} from "lucide-react";
 import { api } from "@/react-app/utils/api";
 
-interface Message {
+type Message = {
   role: "user" | "assistant";
   content: string;
-  timestamp: Date;
-}
+  timestamp: string;
+};
+
+type QuickQuestion = {
+  text: string;
+  icon: typeof Dumbbell;
+};
 
 function renderMessageContent(text: string) {
   const parts = text.split(/(\*\*.*?\*\*)/g);
-  return parts.map((part, i) => {
-    if (part.startsWith('**') && part.endsWith('**')) {
-      return <span key={i} className="font-bold italic" style={{ color: "var(--app-primary-color)" }}>{part.slice(2, -2)}</span>;
+  return parts.map((part, index) => {
+    if (part.startsWith("**") && part.endsWith("**")) {
+      return (
+        <span key={index} className="font-bold italic" style={{ color: "var(--app-primary-color)" }}>
+          {part.slice(2, -2)}
+        </span>
+      );
     }
+
     return part;
   });
 }
@@ -29,19 +45,13 @@ function renderMessageContent(text: string) {
 function parseAIResponse(text: string): string {
   if (!text) return "";
 
-  const lines = text
+  return text
     .replace(/^\s*#{1,6}\s*/gm, "")
-    .split("\n");
-
-  const normalized = lines
+    .split("\n")
     .map((line) => {
       const trimmed = line.trim();
       if (!trimmed) return "";
-
-      if (/^\|?\s*-{3,}/.test(trimmed) || /^\|[-\s:|]+\|$/.test(trimmed)) {
-        return "";
-      }
-
+      if (/^\|?\s*-{3,}/.test(trimmed) || /^\|[-\s:|]+\|$/.test(trimmed)) return "";
       if (trimmed.startsWith("|")) {
         return trimmed
           .split("|")
@@ -49,30 +59,37 @@ function parseAIResponse(text: string): string {
           .filter(Boolean)
           .join(" • ");
       }
-
       if (/^[-*]\s+/.test(trimmed)) {
         return `• ${trimmed.replace(/^[-*]\s+/, "")}`;
       }
-
       return line;
     })
     .join("\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
-
-  return normalized;
 }
+
+function getStorageKey(userId: string | undefined) {
+  return `fitloot_ai_chat_${userId ?? "guest"}`;
+}
+
+const QUICK_QUESTIONS: QuickQuestion[] = [
+  { text: "Sugerir proximo treino", icon: Dumbbell },
+  { text: "Como estao meus stats?", icon: LineChart },
+  { text: "Resgatar FitLoot", icon: Gift },
+  { text: "Recomendacoes de refeicao", icon: Utensils },
+];
+
+const DEFAULT_GREETING: Message = {
+  role: "assistant",
+  content: "Ola! Sou o FitBot. Como posso te ajudar hoje?",
+  timestamp: new Date().toISOString(),
+};
 
 export default function AIChat() {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      role: "assistant",
-      content: "Olá! Sou o FitBot. Como posso te ajudar hoje?",
-      timestamp: new Date(),
-    },
-  ]);
+  const [messages, setMessages] = useState<Message[]>([DEFAULT_GREETING]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [sessionMessageCount, setSessionMessageCount] = useState(0);
@@ -83,43 +100,57 @@ export default function AIChat() {
       navigate("/app");
       return;
     }
-  }, [user, navigate]);
+
+    try {
+      const stored = localStorage.getItem(getStorageKey(user.id));
+      if (!stored) return;
+      const parsed = JSON.parse(stored) as Message[];
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        setMessages(parsed);
+        setSessionMessageCount(parsed.filter((message) => message.role === "user").length);
+      }
+    } catch (storageError) {
+      console.error("Error restoring AI chat history:", storageError);
+    }
+  }, [navigate, user]);
 
   useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
-
-  const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  };
+    if (!user) return;
+    try {
+      localStorage.setItem(getStorageKey(user.id), JSON.stringify(messages));
+    } catch (storageError) {
+      console.error("Error saving AI chat history:", storageError);
+    }
+  }, [messages, user]);
 
-  const sendMessage = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!input.trim() || loading) return;
+  const submitMessage = async (content: string) => {
+    const messageContent = content.trim();
+    if (!messageContent || loading) return;
 
     const userMessage: Message = {
       role: "user",
-      content: input,
-      timestamp: new Date(),
+      content: messageContent,
+      timestamp: new Date().toISOString(),
     };
 
+    const nextMessages = [...messages, userMessage];
     const nextSessionCount = sessionMessageCount + 1;
-    setSessionMessageCount(nextSessionCount);
-    setMessages((prev) => [...prev, userMessage]);
+
+    setMessages(nextMessages);
     setInput("");
     setLoading(true);
+    setSessionMessageCount(nextSessionCount);
 
     try {
-      const history = messages.map((msg) => ({
-        role: msg.role,
-        content: msg.content,
-      }));
-
       const response = await api("/api/ai/chat", {
         method: "POST",
         body: JSON.stringify({
-          message: input,
-          history,
+          message: messageContent,
+          history: messages.map((message) => ({
+            role: message.role,
+            content: message.content,
+          })),
           session_count: nextSessionCount,
         }),
       });
@@ -134,41 +165,33 @@ export default function AIChat() {
         throw new Error(payload?.error || "Failed to get response");
       }
 
-      const data = await response.json();
-
-      const assistantMessage: Message = {
-        role: "assistant",
-        content: parseAIResponse(String(data.message || "")),
-        timestamp: new Date(),
-      };
-
-      setMessages((prev) => [...prev, assistantMessage]);
-    } catch (error) {
-      console.error("Chat error:", error);
-      const errorMessage: Message = {
-        role: "assistant",
-        content: "Desculpe, tive um problema ao processar sua mensagem. Tente novamente!",
-        timestamp: new Date(),
-      };
-      setMessages((prev) => [...prev, errorMessage]);
+      const payload = (await response.json()) as { message?: string | undefined };
+      setMessages((current) => [
+        ...current,
+        {
+          role: "assistant",
+          content: parseAIResponse(String(payload.message || "")),
+          timestamp: new Date().toISOString(),
+        },
+      ]);
+    } catch (chatError) {
+      console.error("Chat error:", chatError);
+      setMessages((current) => [
+        ...current,
+        {
+          role: "assistant",
+          content: "Desculpe, tive um problema ao processar sua mensagem. Tente novamente!",
+          timestamp: new Date().toISOString(),
+        },
+      ]);
     } finally {
       setLoading(false);
     }
   };
 
-  const quickQuestions = [
-    { text: "Sugerir próximo treino", icon: Dumbbell },
-    { text: "Como estão meus stats?", icon: LineChart },
-    { text: "Resgatar FitLoot", icon: Gift },
-    { text: "Recomendações de refeição", icon: Utensils },
-  ];
-
-  const handleQuickQuestion = (question: string) => {
-    setInput(question);
-    setTimeout(() => {
-      const form = document.getElementById("chat-form");
-      if (form) form.dispatchEvent(new Event("submit", { cancelable: true, bubbles: true }));
-    }, 50);
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    await submitMessage(input);
   };
 
   const getInitials = (name?: string) => {
@@ -177,44 +200,41 @@ export default function AIChat() {
   };
 
   return (
-    <AppPageShell bottomNavActive="missions" className="bg-background-light dark:bg-background-dark font-display text-slate-900 dark:text-slate-100 antialiased fl-z-mission-screen">
+    <AppPageShell bottomNavActive="missions" className="fl-theme-page">
       <style>{`
         .custom-scrollbar::-webkit-scrollbar { width: 4px; }
         .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--app-primary-color) 20%, transparent); border-radius: 10px; }
-        .glass-bot {
-            background: var(--fl-surface-strong, #1a1a1a);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-        }
-        `}</style>
-      <div className="relative flex h-screen w-full flex-col overflow-hidden" style={{ backgroundColor: "var(--app-bg-color, #060b08)" }}>
-        {/* Header */}
-        <header className="flex items-center justify-between border-b px-6 py-4 lg:px-20 sticky top-0 z-50 transition-all backdrop-blur-md" style={{ borderColor: "rgba(255, 255, 255, 0.05)", backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 80%, transparent)" }}>
+      `}</style>
+      <div className="relative flex h-screen w-full flex-col overflow-hidden" style={{ backgroundColor: "var(--app-bg-color)" }}>
+        <header className="fl-theme-topbar sticky top-0 z-10 flex items-center justify-between border-b px-6 py-4 lg:px-20 backdrop-blur-md">
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl" style={{ backgroundColor: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)", color: "var(--app-primary-color)" }}>
-              <Bot className="w-7 h-7" strokeWidth={2} />
+              <Bot className="h-7 w-7" strokeWidth={2} />
             </div>
             <div>
-              <h1 className="text-xl font-bold tracking-tight text-white">
+              <h1 className="text-xl font-bold tracking-tight">
                 FitBot <span style={{ color: "var(--app-primary-color)" }}>AI</span>
               </h1>
               <div className="flex items-center gap-1.5">
                 <span className="relative flex h-2 w-2">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75" style={{ backgroundColor: "var(--app-primary-color)" }}></span>
-                  <span className="relative inline-flex rounded-full h-2 w-2" style={{ backgroundColor: "var(--app-primary-color)" }}></span>
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full opacity-75" style={{ backgroundColor: "var(--app-primary-color)" }} />
+                  <span className="relative inline-flex h-2 w-2 rounded-full" style={{ backgroundColor: "var(--app-primary-color)" }} />
                 </span>
-                <span className="text-[10px] uppercase tracking-widest font-bold" style={{ color: "var(--app-primary-color)" }}>System Online</span>
+                <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: "var(--app-primary-color)" }}>
+                  System Online
+                </span>
               </div>
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <button className="flex h-10 w-10 items-center justify-center rounded-full bg-white/5 text-slate-300 transition-all hover:opacity-80">
-              <History className="w-5 h-5" />
+            <button className="fl-theme-surface-soft flex h-10 w-10 items-center justify-center rounded-full fl-theme-text-muted transition-all hover:opacity-80">
+              <History className="h-5 w-5" />
             </button>
-            <button className="flex h-10 w-10 items-center justify-center rounded-full bg-white/5 text-slate-300 transition-all hover:opacity-80">
-              <Settings className="w-5 h-5" />
+            <button className="fl-theme-surface-soft flex h-10 w-10 items-center justify-center rounded-full fl-theme-text-muted transition-all hover:opacity-80">
+              <Settings className="h-5 w-5" />
             </button>
-            <div className="flex h-10 w-10 items-center justify-center rounded-full border-2 p-0.5 overflow-hidden font-bold" style={{ borderColor: "var(--app-primary-color)", backgroundColor: "color-mix(in srgb, var(--app-primary-color) 20%, transparent)", color: "var(--app-primary-color)" }}>
+            <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full border-2 p-0.5 font-bold" style={{ borderColor: "var(--app-primary-color)", backgroundColor: "color-mix(in srgb, var(--app-primary-color) 20%, transparent)", color: "var(--app-primary-color)" }}>
               {user?.avatar_url ? (
                 <img src={user.avatar_url} alt="User Avatar" className="h-full w-full rounded-full object-cover" />
               ) : (
@@ -224,37 +244,34 @@ export default function AIChat() {
           </div>
         </header>
 
-        {/* Chat Container */}
-        <main className="flex-1 overflow-y-auto p-4 lg:p-10 space-y-8 max-w-5xl mx-auto w-full custom-scrollbar pb-32">
-          {messages.map((message, index) => (
+        <main className="custom-scrollbar mx-auto flex w-full max-w-5xl flex-1 flex-col gap-8 overflow-y-auto p-4 pb-32 lg:p-10">
+          {messages.map((message, index) =>
             message.role === "assistant" ? (
-              /* Bot Message */
-              <div key={index} className="flex items-end gap-4 max-w-[85%]">
-                <div className="h-10 w-10 shrink-0 rounded-full glass-bot flex items-center justify-center">
-                  <Bot className="w-6 h-6" style={{ color: "var(--app-primary-color)" }} />
+              <div key={`${message.timestamp}-${index}`} className="flex max-w-[85%] items-end gap-4">
+                <div className="fl-theme-surface flex h-10 w-10 shrink-0 items-center justify-center rounded-full">
+                  <Bot className="h-6 w-6" style={{ color: "var(--app-primary-color)" }} />
                 </div>
                 <div className="flex flex-col gap-1.5">
-                  <span className="text-xs font-medium text-slate-500 ml-1 uppercase tracking-tighter">
-                    FitBot AI • {message.timestamp.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
+                  <span className="fl-theme-text-muted ml-1 text-xs font-medium uppercase tracking-tighter">
+                    FitBot AI • {new Date(message.timestamp).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
                   </span>
-                  <div className="glass-bot p-5 rounded-2xl rounded-bl-none text-slate-200 leading-relaxed shadow-xl text-sm whitespace-pre-wrap">
+                  <div className="fl-theme-surface rounded-2xl rounded-bl-none p-5 text-sm leading-relaxed whitespace-pre-wrap">
                     {renderMessageContent(message.content)}
                   </div>
                 </div>
               </div>
             ) : (
-              /* User Message */
-              <div key={index} className="flex flex-col items-end gap-1.5 ml-auto max-w-[80%]">
+              <div key={`${message.timestamp}-${index}`} className="ml-auto flex max-w-[80%] flex-col items-end gap-1.5">
                 <div className="flex items-end gap-4">
-                  <div className="flex flex-col gap-1.5 items-end">
-                    <span className="text-xs font-medium text-slate-500 mr-1 uppercase tracking-tighter">
-                      Você • {message.timestamp.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
+                  <div className="flex flex-col items-end gap-1.5">
+                    <span className="fl-theme-text-muted mr-1 text-xs font-medium uppercase tracking-tighter">
+                      Voce • {new Date(message.timestamp).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
                     </span>
-                    <div className="p-5 rounded-2xl rounded-br-none font-semibold shadow-lg text-sm" style={{ backgroundColor: "var(--app-primary-color)", color: "#000", boxShadow: "0 10px 15px -3px color-mix(in srgb, var(--app-primary-color) 10%, transparent)" }}>
+                    <div className="rounded-2xl rounded-br-none p-5 text-sm font-semibold text-black shadow-lg" style={{ backgroundColor: "var(--app-primary-color)" }}>
                       {message.content}
                     </div>
                   </div>
-                  <div className="flex h-10 w-10 items-center justify-center shrink-0 rounded-full border-2 p-0.5 overflow-hidden font-bold" style={{ borderColor: "var(--app-primary-color)", backgroundColor: "color-mix(in srgb, var(--app-primary-color) 20%, transparent)", color: "var(--app-primary-color)" }}>
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full border-2 p-0.5 font-bold" style={{ borderColor: "var(--app-primary-color)", backgroundColor: "color-mix(in srgb, var(--app-primary-color) 20%, transparent)", color: "var(--app-primary-color)" }}>
                     {user?.avatar_url ? (
                       <img src={user.avatar_url} alt="User Avatar" className="h-full w-full rounded-full object-cover" />
                     ) : (
@@ -263,72 +280,65 @@ export default function AIChat() {
                   </div>
                 </div>
               </div>
-            )
-          ))}
+            ),
+          )}
 
-          {/* Typing Indicator */}
-          {loading && (
-            <div className="flex items-end gap-4 max-w-[85%]">
-              <div className="h-10 w-10 shrink-0 rounded-full glass-bot flex items-center justify-center">
-                <Bot className="w-6 h-6" style={{ color: "var(--app-primary-color)" }} />
+          {loading ? (
+            <div className="flex max-w-[85%] items-end gap-4">
+              <div className="fl-theme-surface flex h-10 w-10 shrink-0 items-center justify-center rounded-full">
+                <Bot className="h-6 w-6" style={{ color: "var(--app-primary-color)" }} />
               </div>
               <div className="flex flex-col gap-1.5">
-                <span className="text-xs font-medium text-slate-500 ml-1 uppercase tracking-tighter">
+                <span className="fl-theme-text-muted ml-1 text-xs font-medium uppercase tracking-tighter">
                   FitBot AI • {new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
                 </span>
-                <div className="glass-bot p-4 rounded-2xl rounded-bl-none shadow-xl flex gap-1 items-center justify-center w-16 h-12">
-                  <span className="h-2 w-2 rounded-full animate-bounce" style={{ backgroundColor: "var(--app-primary-color)", animationDelay: "0ms" }}></span>
-                  <span className="h-2 w-2 rounded-full animate-bounce" style={{ backgroundColor: "var(--app-primary-color)", animationDelay: "150ms" }}></span>
-                  <span className="h-2 w-2 rounded-full animate-bounce" style={{ backgroundColor: "var(--app-primary-color)", animationDelay: "300ms" }}></span>
+                <div className="fl-theme-surface flex h-12 w-16 items-center justify-center gap-1 rounded-2xl rounded-bl-none p-4 shadow-xl">
+                  <span className="h-2 w-2 animate-bounce rounded-full" style={{ backgroundColor: "var(--app-primary-color)", animationDelay: "0ms" }} />
+                  <span className="h-2 w-2 animate-bounce rounded-full" style={{ backgroundColor: "var(--app-primary-color)", animationDelay: "150ms" }} />
+                  <span className="h-2 w-2 animate-bounce rounded-full" style={{ backgroundColor: "var(--app-primary-color)", animationDelay: "300ms" }} />
                 </div>
               </div>
             </div>
-          )}
+          ) : null}
 
           <div ref={messagesEndRef} />
         </main>
 
-        {/* Bottom Actions & Input */}
-        <div className="absolute bottom-0 w-full p-4 lg:px-20 lg:pb-8 border-t backdrop-blur-xl" style={{ borderColor: "rgba(255, 255, 255, 0.05)", backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 80%, transparent)" }}>
-          
-          {/* Suggested Questions */}
-          {messages.length <= 1 && !loading && (
-            <div className="flex gap-3 mb-4 overflow-x-auto pb-2 custom-scrollbar">
-              {quickQuestions.map((q, index) => (
+        <div className="fl-theme-topbar absolute bottom-0 w-full border-t p-4 backdrop-blur-xl lg:px-20 lg:pb-8">
+          {messages.length <= 1 && !loading ? (
+            <div className="custom-scrollbar mb-4 flex gap-3 overflow-x-auto pb-2">
+              {QUICK_QUESTIONS.map((question) => (
                 <button
-                  key={index}
-                  onClick={() => handleQuickQuestion(q.text)}
+                  key={question.text}
                   type="button"
-                  className="flex h-10 shrink-0 items-center justify-center gap-2 rounded-full border border-white/10 bg-white/5 px-5 text-sm font-semibold text-slate-300 transition-all hover:text-black whitespace-nowrap"
-                  style={{ '--tw-hover-bg': 'var(--app-primary-color)' } as React.CSSProperties}
-                  onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "var(--app-primary-color)"; e.currentTarget.style.color = "#000"; e.currentTarget.style.borderColor = "var(--app-primary-color)"; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "rgba(255, 255, 255, 0.05)"; e.currentTarget.style.color = "rgb(203 213 225)"; e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.1)"; }}
+                  onClick={() => {
+                    void submitMessage(question.text);
+                  }}
+                  className="fl-theme-surface-soft flex h-10 shrink-0 items-center justify-center gap-2 rounded-full px-5 text-sm font-semibold transition-all hover:opacity-90 whitespace-nowrap"
                 >
-                  <q.icon className="w-5 h-5" />
-                  {q.text}
+                  <question.icon className="h-5 w-5" />
+                  {question.text}
                 </button>
               ))}
             </div>
-          )}
+          ) : null}
 
-          {/* Input Box */}
-          <form id="chat-form" onSubmit={sendMessage} className="relative flex items-center max-w-5xl mx-auto w-full">
-            <div className="flex-1 relative">
+          <form onSubmit={(event) => { void handleSubmit(event); }} className="relative mx-auto flex w-full max-w-5xl items-center">
+            <div className="relative flex-1">
               <input
                 type="text"
                 value={input}
-                onChange={(e) => setInput(e.target.value)}
+                onChange={(event) => setInput(event.target.value)}
                 disabled={loading}
-                className="w-full rounded-2xl border-none bg-white/5 py-4 pl-6 pr-24 text-white placeholder:text-slate-500 focus:ring-1 transition-all outline-none"
-                style={{ '--tw-ring-color': 'color-mix(in srgb, var(--app-primary-color) 50%, transparent)' } as React.CSSProperties}
+                className="fl-theme-input w-full rounded-2xl py-4 pl-6 pr-24 outline-none"
                 placeholder="Mensagem para o FitBot..."
               />
-              <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-2">
-                <button type="button" className="text-slate-500 transition-colors" onMouseEnter={(e) => e.currentTarget.style.color="var(--app-primary-color)"} onMouseLeave={(e) => e.currentTarget.style.color="rgb(100 116 139)"}>
-                  <Mic className="w-5 h-5" />
+              <div className="absolute right-4 top-1/2 flex -translate-y-1/2 items-center gap-2">
+                <button type="button" className="fl-theme-text-muted transition-colors hover:text-primary">
+                  <Mic className="h-5 w-5" />
                 </button>
-                <button type="button" className="text-slate-500 transition-colors" onMouseEnter={(e) => e.currentTarget.style.color="var(--app-primary-color)"} onMouseLeave={(e) => e.currentTarget.style.color="rgb(100 116 139)"}>
-                  <Paperclip className="w-5 h-5" />
+                <button type="button" className="fl-theme-text-muted transition-colors hover:text-primary">
+                  <Paperclip className="h-5 w-5" />
                 </button>
               </div>
             </div>
@@ -336,9 +346,9 @@ export default function AIChat() {
               type="submit"
               disabled={loading || !input.trim()}
               className="ml-3 flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl text-black shadow-lg transition-transform hover:scale-105 active:scale-95 disabled:opacity-50 disabled:grayscale"
-              style={{ backgroundColor: "var(--app-primary-color)", boxShadow: "0 10px 15px -3px color-mix(in srgb, var(--app-primary-color) 20%, transparent)" }}
+              style={{ backgroundColor: "var(--app-primary-color)" }}
             >
-              <ArrowUp className="w-6 h-6" strokeWidth={3} />
+              <ArrowUp className="h-6 w-6" strokeWidth={3} />
             </button>
           </form>
         </div>

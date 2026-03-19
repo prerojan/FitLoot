@@ -1,6 +1,8 @@
 import type { ReactNode } from "react";
+import { useLocation } from "react-router";
 import BottomNav from "@/react-app/components/BottomNav";
 import DesktopAppNavbar from "@/react-app/components/DesktopAppNavbar";
+import { useAppChrome } from "@/react-app/contexts/appChrome";
 import type { UserProfile, UserProgression } from "@/shared/types";
 import { cn } from "@/react-app/utils";
 
@@ -21,15 +23,24 @@ export default function AppPageShell({
   profile,
   progression,
 }: AppPageShellProps) {
+  const location = useLocation();
+  const { missionDetailsOpen, missionExecutionOpen } = useAppChrome();
+  const hideNavigation = missionExecutionOpen || missionDetailsOpen;
+
   return (
-    <div className={cn("fl-app-page", className)}>
-      <DesktopAppNavbar profile={profile} progression={progression} />
+    <div
+      className={cn("fl-app-page", hideNavigation ? "pb-0" : undefined, className)}
+      data-route={location.pathname}
+    >
+      {!hideNavigation ? <DesktopAppNavbar profile={profile} progression={progression} /> : null}
       <div className={cn("relative fl-z-card", contentClassName)}>
         {children}
       </div>
-      <div className="md:hidden">
-        <BottomNav active={bottomNavActive} />
-      </div>
+      {!hideNavigation ? (
+        <div className="md:hidden">
+          <BottomNav active={bottomNavActive} />
+        </div>
+      ) : null}
     </div>
   );
 }

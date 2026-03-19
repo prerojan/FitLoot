@@ -192,7 +192,8 @@ export default function Dashboard() {
 
   useEffect(() => {
     void import("@/react-app/pages/Profile");
-    void import("@/react-app/pages/Arena");
+    void import("@/react-app/pages/MiniGames");
+    void import("@/react-app/pages/Friends");
     void import("@/react-app/pages/Shop");
     void import("@/react-app/pages/Ranking");
     void import("@/react-app/pages/AIChat");
@@ -486,20 +487,23 @@ export default function Dashboard() {
                 const isCurrentDay = dateKey === todayKey;
                 const weekdayLabel = new Intl.DateTimeFormat("pt-BR", { weekday: "short" }).format(date).replace(".", "").toUpperCase();
                 return (
-                  <div
+                  <button
                     key={dateKey}
+                    type="button"
+                    onClick={() => scrollToSection("mission-feed")}
                     className={`flex h-12 w-12 shrink-0 flex-col items-center justify-center rounded-xl ${
                       isCurrentDay
                         ? "bg-[var(--app-primary-color)] text-[var(--fl-background-color,#0f172a)] shadow-lg"
                         : "bg-transparent text-slate-400"
                     }`}
+                    aria-label={`Abrir missoes de ${weekdayLabel} ${String(date.getDate()).padStart(2, "0")}`}
                     style={isCurrentDay ? {
                       boxShadow: "0 8px 20px color-mix(in srgb, var(--app-primary-color) 20%, transparent)"
                     } : {}}
                   >
                     <span className="text-[0.6rem] font-black uppercase tracking-[0.1em]">{weekdayLabel}</span>
                     <span className="mt-0.5 text-base font-black leading-none">{String(date.getDate()).padStart(2, "0")}</span>
-                  </div>
+                  </button>
                 );
               })}
             </div>

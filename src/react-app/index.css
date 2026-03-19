@@ -387,6 +387,62 @@ body {
     padding-inline: 1rem;
   }
 
+  .fl-theme-page {
+    min-height: 100vh;
+    color: var(--fl-color-text);
+    background:
+      radial-gradient(circle at 12% 14%, color-mix(in srgb, var(--app-primary-color) 8%, transparent), transparent 28%),
+      radial-gradient(circle at 84% 10%, color-mix(in srgb, var(--app-secondary-color) 8%, transparent), transparent 24%),
+      linear-gradient(180deg, color-mix(in srgb, var(--app-bg-color) 94%, transparent), color-mix(in srgb, var(--fl-body-bg) 100%, transparent));
+  }
+
+  .fl-theme-surface {
+    background: color-mix(in srgb, var(--fl-surface-strong) 94%, transparent);
+    border: 1px solid var(--fl-border-soft);
+    color: var(--fl-color-text);
+    box-shadow: var(--fl-shadow-glass);
+  }
+
+  .fl-theme-surface-muted {
+    background: color-mix(in srgb, var(--fl-surface-muted) 92%, transparent);
+    border: 1px solid var(--fl-border-soft);
+    color: var(--fl-color-text);
+  }
+
+  .fl-theme-surface-soft {
+    background: color-mix(in srgb, var(--fl-surface-strong) 78%, transparent);
+    border: 1px solid color-mix(in srgb, var(--app-primary-color) 16%, var(--fl-border-soft));
+    color: var(--fl-color-text);
+  }
+
+  .fl-theme-topbar {
+    background: color-mix(in srgb, var(--fl-surface-strong) 88%, transparent);
+    border-color: var(--fl-border-soft);
+    color: var(--fl-color-text);
+  }
+
+  .fl-theme-input {
+    background: color-mix(in srgb, var(--fl-surface-strong) 84%, transparent);
+    border: 1px solid var(--fl-border-soft);
+    color: var(--fl-color-text);
+  }
+
+  .fl-theme-input::placeholder {
+    color: var(--fl-color-text-soft);
+  }
+
+  .fl-theme-text-muted {
+    color: var(--fl-color-text-muted);
+  }
+
+  .fl-theme-text-soft {
+    color: var(--fl-color-text-soft);
+  }
+
+  .fl-theme-divider {
+    border-color: var(--fl-border-soft);
+  }
+
   .fl-z-base {
     z-index: 0;
   }
@@ -403,8 +459,12 @@ body {
     z-index: 40;
   }
 
-  .fl-z-modal {
+  .fl-z-drawer {
     z-index: 50;
+  }
+
+  .fl-z-modal {
+    z-index: 60;
   }
 
   .fl-z-mission-screen {

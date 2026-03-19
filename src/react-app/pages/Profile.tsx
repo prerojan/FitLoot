@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
 import { 
   Settings, 
@@ -14,12 +14,16 @@ import {
   Flame,
   Lock,
   Activity,
-  User as UserIcon
+  Moon,
+  Sun,
+  X
 } from "lucide-react";
 import { useAuth } from "@/react-app/contexts/auth";
+import { useTheme } from "@/react-app/contexts/theme";
 import AppPageShell from "@/react-app/components/AppPageShell";
 import LoadingBall from "@/react-app/components/LoadingBall";
 import { Avatar } from "@/react-app/components/ui/avatar";
+import { ROUTE_PATHS } from "@/react-app/constants/auth";
 
 import type {
   AchievementWithUnlock,
@@ -32,6 +36,13 @@ import type {
 import { ApiRequestError, api, clearJsonCache, fetchAndCacheJson, readCachedJson } from "@/react-app/utils/api";
 import { applyProfileTheme } from "@/react-app/utils/theme";
 
+const FEEDBACK_TYPES = ["Sugestao", "Bug", "Elogio", "Outro"] as const;
+type FeedbackType = (typeof FEEDBACK_TYPES)[number];
+
+function isFeedbackType(value: string): value is FeedbackType {
+  return FEEDBACK_TYPES.includes(value as FeedbackType);
+}
+
 const ATTRIBUTE_META = [
   { key: "strength", label: "FOR", sigla: "STR", icon: Shield, color: "from-primary/80 to-primary" },
   { key: "constitution", label: "CON", sigla: "CON", icon: Zap, color: "from-blue-500 to-cyan-500" },
@@ -42,6 +53,7 @@ const ATTRIBUTE_META = [
 
 export default function Profile() {
   const { user, logout } = useAuth();
+  const { themeMode, toggleThemeMode } = useTheme();
   const navigate = useNavigate();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [attributes, setAttributes] = useState<UserAttributes | null>(null);
@@ -53,7 +65,7 @@ export default function Profile() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [feedbackType, setFeedbackType] = useState<"Sugestao" | "Bug" | "Elogio" | "Outro">("Sugestao");
+  const [feedbackType, setFeedbackType] = useState<FeedbackType>("Sugestao");
   const [feedbackMessage, setFeedbackMessage] = useState("");
   const [feedbackSending, setFeedbackSending] = useState(false);
   const [feedbackStatus, setFeedbackStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
@@ -160,7 +172,7 @@ export default function Profile() {
 
   if (loading && !profile) {
     return (
-      <AppPageShell bottomNavActive="profile" className="bg-[#0A0A0A]">
+      <AppPageShell bottomNavActive="profile" className="fl-theme-page">
         <div className="flex-1 flex items-center justify-center">
           <LoadingBall size="md" />
         </div>
@@ -217,14 +229,24 @@ export default function Profile() {
 
 
   return (
-    <AppPageShell bottomNavActive="profile" className="bg-[#0A0A0A]">
+    <AppPageShell bottomNavActive="profile" className="fl-theme-page">
       <main className="flex-1 flex flex-col lg:flex-row p-6 sm:p-8 lg:p-12 gap-8 lg:gap-12 overflow-y-auto custom-scrollbar">
+        {error ? (
+          <div className="lg:hidden rounded-3xl border px-5 py-4 text-[11px] font-bold uppercase tracking-widest" style={{ borderColor: "color-mix(in srgb, var(--app-primary-color) 24%, transparent)", backgroundColor: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)", color: "var(--app-primary-color)" }}>
+            {error}
+          </div>
+        ) : null}
         
         {/* Sidebar Identity Column */}
         <aside className="w-full lg:w-[360px] flex flex-col gap-6 shrink-0">
           
           {/* Identity Card */}
-          <section className="bg-[#161616] border border-white/5 rounded-3xl p-8 flex flex-col items-center text-center relative overflow-hidden group">
+          <section className="fl-theme-surface rounded-3xl p-8 flex flex-col items-center text-center relative overflow-hidden group">
+            {error ? (
+              <div className="mb-6 w-full rounded-2xl border px-4 py-3 text-[10px] font-bold uppercase tracking-widest" style={{ borderColor: "color-mix(in srgb, var(--app-primary-color) 24%, transparent)", backgroundColor: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)", color: "var(--app-primary-color)" }}>
+                {error}
+              </div>
+            ) : null}
             <div className="absolute top-0 left-0 w-full h-1 bg-primary/20 group-hover:bg-primary transition-colors" style={{ backgroundColor: 'var(--app-primary-color-20)' }}></div>
             
             <div className="relative mb-8">
@@ -251,15 +273,15 @@ export default function Profile() {
 
             <div className="w-full border-t border-white/5 pt-8 grid grid-cols-2 gap-4">
               <button 
-                onClick={() => navigate('/minigames')}
-                className="flex items-center gap-3 bg-[#0A0A0A] border border-white/5 rounded-2xl px-4 py-4 text-slate-400 hover:text-white hover:border-white/10 transition-all group"
+                onClick={() => navigate(ROUTE_PATHS.friends)}
+                className="fl-theme-input flex items-center gap-3 rounded-2xl px-4 py-4 fl-theme-text-muted hover:text-white transition-all group"
               >
                 <Users className="size-4 group-hover:text-primary transition-colors" style={{ color: 'var(--app-primary-color)' }} />
                 <span className="text-[10px] font-bold uppercase tracking-widest">Amigos</span>
               </button>
               <button 
-                onClick={() => navigate('/shop')}
-                className="flex items-center gap-3 bg-[#0A0A0A] border border-white/5 rounded-2xl px-4 py-4 text-slate-400 hover:text-white hover:border-white/10 transition-all group"
+                onClick={() => navigate(ROUTE_PATHS.shop)}
+                className="fl-theme-input flex items-center gap-3 rounded-2xl px-4 py-4 fl-theme-text-muted hover:text-white transition-all group"
               >
                 <Box className="size-4 group-hover:text-primary transition-colors" style={{ color: 'var(--app-primary-color)' }} />
                 <span className="text-[10px] font-bold uppercase tracking-widest">Loot</span>
@@ -268,12 +290,12 @@ export default function Profile() {
           </section>
 
           {/* XP Progress Card */}
-          <section className="bg-[#161616] border border-white/5 rounded-3xl p-8">
+          <section className="fl-theme-surface rounded-3xl p-8">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-[0.2em]">Experiência (XP)</h3>
               <span className="text-[10px] font-bold text-primary" style={{ color: 'var(--app-primary-color)' }}>{progression?.xp || 0} / {Math.max(100, (progression?.level || 1) * 100)}</span>
             </div>
-            <div className="h-2.5 w-full bg-[#0A0A0A] rounded-full overflow-hidden border border-white/5">
+            <div className="h-2.5 w-full rounded-full overflow-hidden border border-white/5" style={{ backgroundColor: "color-mix(in srgb, var(--fl-surface-muted) 70%, transparent)" }}>
               <div 
                 className="h-full bg-primary relative shadow-[0_0_15px_rgba(var(--app-primary-color-rgb),0.4)] transition-all duration-1000" 
                 style={{ width: `${levelProgress}%`, backgroundColor: 'var(--app-primary-color)' }}
@@ -287,7 +309,7 @@ export default function Profile() {
           <div className="flex flex-col gap-3">
              <button 
                 onClick={() => setSettingsOpen(true)}
-                className="flex items-center justify-center gap-3 bg-[#161616] border border-white/5 rounded-2xl py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest hover:text-white hover:bg-white/5 transition-all"
+                className="fl-theme-surface flex items-center justify-center gap-3 rounded-2xl py-4 text-[10px] font-bold fl-theme-text-muted uppercase tracking-widest hover:text-white transition-all"
               >
                 <Settings className="size-4" /> Configurações
              </button>
@@ -364,7 +386,7 @@ export default function Profile() {
                 </div>
 
                 {/* Radar Chart Visualizer */}
-                <div className="flex flex-col items-center justify-center bg-[#161616]/40 border border-white/5 rounded-3xl p-10 backdrop-blur-sm relative overflow-hidden group">
+                <div className="fl-theme-surface-muted flex flex-col items-center justify-center rounded-3xl p-10 backdrop-blur-sm relative overflow-hidden group">
                    <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(var(--app-primary-color-rgb),0.05)_0%,transparent_70%)]"></div>
                    
                    <div className="relative size-60 sm:size-72">
@@ -437,7 +459,7 @@ export default function Profile() {
 
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-6 gap-4">
                   {skills.length === 0 ? (
-                    <div className="col-span-full py-12 text-center bg-[#161616] rounded-3xl border border-dashed border-white/5">
+                    <div className="fl-theme-surface col-span-full py-12 text-center rounded-3xl border border-dashed border-white/5">
                       <p className="text-xs font-bold text-slate-600 uppercase tracking-widest">Nenhuma skill dominada ainda.</p>
                     </div>
                   ) : skills.map((skill) => {
@@ -464,17 +486,6 @@ export default function Profile() {
                     )
                   })}
 
-                  {/* Mocked locked skills for visual completion if array is short */}
-                  {skills.length < 6 && [1, 2, 3].map(i => (
-                    <div key={i} className="relative flex flex-col items-center gap-4 p-5 rounded-3xl border bg-slate-900/50 border-white/5 grayscale opacity-50">
-                       <div className="size-14 rounded-2xl bg-white/5 text-slate-600 flex items-center justify-center">
-                          <Lock className="size-6" />
-                       </div>
-                       <div className="text-center w-full">
-                         <span className="text-[9px] font-black uppercase tracking-widest block truncate text-slate-500">Skill Oculta</span>
-                       </div>
-                    </div>
-                  ))}
                 </div>
               </div>
             )}
@@ -486,15 +497,15 @@ export default function Profile() {
 
       {/* Settings Modal */}
       {settingsOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-md p-4 sm:p-6 animate-fadeIn">
-          <div className="bg-[#161616] border border-white/10 w-full max-w-2xl rounded-[2.5rem] overflow-hidden shadow-2xl animate-scaleIn max-h-[90vh] flex flex-col">
+        <div className="fl-z-modal fixed inset-0 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 sm:p-6 animate-fadeIn">
+          <div className="fl-theme-surface w-full max-w-2xl rounded-[2.5rem] overflow-hidden shadow-2xl animate-scaleIn max-h-[90vh] flex flex-col">
             <header className="p-8 border-b border-white/5 flex items-center justify-between shrink-0">
               <h2 className="text-xl font-bold text-white tracking-tight uppercase tracking-widest">Configurações</h2>
               <button 
                 onClick={() => setSettingsOpen(false)}
                 className="size-10 flex items-center justify-center rounded-xl bg-white/5 text-slate-400 hover:text-white transition-colors"
               >
-                <Lock className="size-5" />
+                <X className="size-5" />
               </button>
             </header>
 
@@ -503,11 +514,11 @@ export default function Profile() {
               <section className="space-y-4">
                 <h3 className="text-[10px] font-bold text-primary uppercase tracking-[0.3em]" style={{ color: 'var(--app-primary-color)' }}>Sua Conta</h3>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className="bg-[#0A0A0A] border border-white/5 rounded-2xl p-4">
+                  <div className="fl-theme-input rounded-2xl p-4">
                     <p className="text-[9px] font-bold text-slate-500 uppercase mb-1">Nome Real</p>
                     <p className="text-sm font-bold text-white uppercase">{profile?.full_name}</p>
                   </div>
-                  <div className="bg-[#0A0A0A] border border-white/5 rounded-2xl p-4">
+                  <div className="fl-theme-input rounded-2xl p-4">
                     <p className="text-[9px] font-bold text-slate-500 uppercase mb-1">Username</p>
                     <p className="text-sm font-bold text-white uppercase">@{profile?.username}</p>
                   </div>
@@ -522,12 +533,48 @@ export default function Profile() {
                     <button 
                       key={focus}
                       onClick={() => updateFocus(focus)}
-                      className={`py-4 rounded-2xl text-[10px] font-bold uppercase tracking-widest transition-all ${profile?.active_skill_focus === focus ? 'bg-primary text-black' : 'bg-[#0A0A0A] border border-white/5 text-slate-400 hover:text-white'}`}
+                      className={`py-4 rounded-2xl text-[10px] font-bold uppercase tracking-widest transition-all ${profile?.active_skill_focus === focus ? 'bg-primary text-black' : 'fl-theme-input fl-theme-text-muted hover:text-white'}`}
                       style={{ backgroundColor: profile?.active_skill_focus === focus ? 'var(--app-primary-color)' : '' }}
                     >
                       {focus === 'calistenia' ? 'Foco Calistenia' : 'Foco Yoga'}
                     </button>
                   ))}
+                </div>
+              </section>
+
+              <section className="space-y-4">
+                <h3 className="text-[10px] font-bold text-primary uppercase tracking-[0.3em]" style={{ color: 'var(--app-primary-color)' }}>Aparencia</h3>
+                <div className="fl-theme-input rounded-[1.75rem] p-5 flex items-center justify-between gap-4">
+                  <div className="min-w-0">
+                    <p className="text-xs font-bold text-white uppercase tracking-widest">
+                      {themeMode === "dark" ? "Tema Escuro" : "Tema Claro"}
+                    </p>
+                    <p className="text-[10px] font-bold text-slate-500 uppercase tracking-[0.18em] mt-2">
+                      Aplicacao imediata em todo o app
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={toggleThemeMode}
+                    role="switch"
+                    aria-checked={themeMode === "dark"}
+                    aria-label={themeMode === "dark" ? "Tema Escuro" : "Tema Claro"}
+                    className="relative flex h-12 w-24 shrink-0 items-center rounded-full border px-1 transition-all"
+                    style={{
+                      backgroundColor: themeMode === "dark" ? "color-mix(in srgb, var(--app-primary-color) 18%, transparent)" : "rgba(255,255,255,0.06)",
+                      borderColor: themeMode === "dark" ? "color-mix(in srgb, var(--app-primary-color) 30%, transparent)" : "rgba(255,255,255,0.08)",
+                    }}
+                  >
+                    <span
+                      className="absolute top-1 flex size-10 items-center justify-center rounded-full text-black shadow-lg transition-all"
+                      style={{
+                        left: themeMode === "dark" ? "calc(100% - 2.75rem)" : "0.25rem",
+                        backgroundColor: "var(--app-primary-color)",
+                      }}
+                    >
+                      {themeMode === "dark" ? <Moon className="size-4" /> : <Sun className="size-4" />}
+                    </span>
+                  </button>
                 </div>
               </section>
 
@@ -537,8 +584,12 @@ export default function Profile() {
                 <div className="space-y-3">
                   <select 
                     value={feedbackType} 
-                    onChange={(e) => setFeedbackType(e.target.value as any)}
-                    className="w-full bg-[#0A0A0A] border border-white/5 rounded-2xl px-6 py-4 text-xs font-bold text-white uppercase tracking-widest focus:ring-1 focus:ring-primary outline-none transition-all"
+                    onChange={(e) => {
+                      if (isFeedbackType(e.target.value)) {
+                        setFeedbackType(e.target.value);
+                      }
+                    }}
+                    className="fl-theme-input w-full rounded-2xl px-6 py-4 text-xs font-bold text-white uppercase tracking-widest focus:ring-1 focus:ring-primary outline-none transition-all"
                   >
                     <option value="Sugestao">Sugestão</option>
                     <option value="Bug">Reportar Bug</option>
@@ -549,7 +600,7 @@ export default function Profile() {
                     value={feedbackMessage}
                     onChange={(e) => setFeedbackMessage(e.target.value)}
                     placeholder="Sugestões de novas skills ou melhorias..."
-                    className="w-full bg-[#0A0A0A] border border-white/5 rounded-2xl px-6 py-4 text-xs font-bold text-white uppercase tracking-widest focus:ring-1 focus:ring-primary outline-none transition-all min-h-[120px]"
+                    className="fl-theme-input w-full rounded-2xl px-6 py-4 text-xs font-bold text-white uppercase tracking-widest focus:ring-1 focus:ring-primary outline-none transition-all min-h-[120px]"
                   />
                   {feedbackStatus && (
                     <p className={`text-[10px] font-bold uppercase tracking-widest ${feedbackStatus.type === 'success' ? 'text-primary' : 'text-red-400'}`} style={{ color: feedbackStatus.type === 'success' ? 'var(--app-primary-color)' : '' }}>
@@ -567,7 +618,7 @@ export default function Profile() {
               </section>
             </div>
 
-            <footer className="p-8 border-t border-white/5 shrink-0 bg-[#0A0A0A]/50">
+            <footer className="p-8 border-t border-white/5 shrink-0" style={{ backgroundColor: "color-mix(in srgb, var(--fl-surface-muted) 58%, transparent)" }}>
                <button 
                 onClick={() => setSettingsOpen(false)}
                 className="w-full py-5 rounded-2xl bg-primary text-black font-black text-xs uppercase tracking-[0.3em] shadow-lg shadow-primary/20 hover:scale-[1.02] transition-all"

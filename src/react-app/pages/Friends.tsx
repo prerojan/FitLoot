@@ -199,7 +199,7 @@ export default function Friends() {
 
   if (loading) {
     return (
-      <AppPageShell bottomNavActive="arena" className="bg-[#0A0A0A]">
+      <AppPageShell bottomNavActive="arena" className="fl-theme-page">
         <div className="flex-1 flex items-center justify-center">
           <LoadingBall size="md" />
         </div>
@@ -211,8 +211,8 @@ export default function Friends() {
   const offlineFriends = friends.filter(f => !f.is_online);
 
   return (
-    <AppPageShell bottomNavActive="arena" className="bg-[#0A0A0A]">
-      <div className="flex-1 flex flex-col md:flex-row h-full overflow-hidden bg-[#0A0A0A]">
+    <AppPageShell bottomNavActive="arena" className="fl-theme-page">
+      <div className="flex-1 flex flex-col md:flex-row h-full overflow-hidden">
         
         {/* Main Content */}
         <div className="flex-1 overflow-y-auto custom-scrollbar p-6 md:p-8">
@@ -239,7 +239,7 @@ export default function Friends() {
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && searchUsers()}
-              className="w-full bg-[#161616] border border-white/5 rounded-2xl py-5 pl-14 pr-6 text-white placeholder-slate-600 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all text-sm font-medium"
+              className="fl-theme-input w-full rounded-2xl py-5 pl-14 pr-6 placeholder-slate-600 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all text-sm font-medium"
             />
             <button 
               onClick={searchUsers}
@@ -260,7 +260,7 @@ export default function Friends() {
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {searchResults.map((result) => (
-                  <div key={result.user_id} className="bg-[#161616] border border-white/5 rounded-2xl p-4 flex items-center justify-between group hover:border-primary/20 transition-all">
+                  <div key={result.user_id} className="fl-theme-surface rounded-2xl p-4 flex items-center justify-between group hover:border-primary/20 transition-all">
                     <div className="flex items-center gap-4">
                       <div className="size-12 rounded-full border-2 border-white/5 overflow-hidden group-hover:border-primary/30 transition-all">
                         <Avatar name={result.username} className="w-full h-full" />
@@ -324,7 +324,7 @@ export default function Friends() {
                   {onlineFriends.length > 0 ? (
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
                       {onlineFriends.map((friend) => (
-                        <div key={friend.id} className="bg-[#161616] border border-white/5 rounded-[2rem] p-5 group hover:border-primary/30 transition-all relative overflow-hidden">
+                        <div key={friend.id} className="fl-theme-surface rounded-[2rem] p-5 group hover:border-primary/30 transition-all relative overflow-hidden">
                           <div className="absolute top-0 right-0 p-3 opacity-0 group-hover:opacity-100 transition-opacity">
                             <button className="text-slate-600 hover:text-white"><MoreVertical className="w-4 h-4" /></button>
                           </div>
@@ -333,7 +333,7 @@ export default function Friends() {
                               <div className="w-full h-full rounded-full border-2 overflow-hidden shadow-[0_0_15px_rgba(var(--app-primary-color-rgb),0.2)]" style={{ borderColor: 'var(--app-primary-color)' }}>
                                 <Avatar name={friend.friend_username} className="w-full h-full" />
                               </div>
-                              <div className="absolute -bottom-1 -right-1 size-5 rounded-full bg-[#161616] flex items-center justify-center border border-white/10">
+                              <div className="fl-theme-surface absolute -bottom-1 -right-1 size-5 flex items-center justify-center rounded-full">
                                 <ShieldCheck className="w-3 h-3" style={{ color: 'var(--app-primary-color)' }} />
                               </div>
                             </div>
@@ -351,9 +351,17 @@ export default function Friends() {
                                 <span className="text-sm font-black tracking-tight">{friend.friend_streak}</span>
                               </div>
                             </div>
-                            <div className="flex flex-col items-end">
+                            <div className="flex flex-col items-end gap-3">
                               <span className="text-[9px] font-bold text-slate-600 uppercase tracking-widest mb-1">NÍVEL</span>
                               <span className="text-sm font-black text-white">{friend.friend_level}</span>
+                              <button
+                                type="button"
+                                onClick={() => navigate(`${ROUTE_PATHS.minigames}?challenge=${friend.friend_user_id}`)}
+                                className="rounded-full px-4 py-2 text-[9px] font-black uppercase tracking-[0.18em] text-black"
+                                style={{ backgroundColor: "var(--app-primary-color)" }}
+                              >
+                                Desafiar
+                              </button>
                             </div>
                           </div>
                         </div>
@@ -373,7 +381,7 @@ export default function Friends() {
                   
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                     {offlineFriends.map((friend) => (
-                      <div key={friend.id} className="bg-[#161616]/40 border border-white/5 rounded-xl p-4 flex items-center justify-between opacity-60 hover:opacity-100 transition-all">
+                      <div key={friend.id} className="fl-theme-surface-muted rounded-xl p-4 flex items-center justify-between opacity-60 hover:opacity-100 transition-all">
                         <div className="flex items-center gap-4">
                           <div className="size-11 rounded-full border border-white/10 overflow-hidden grayscale">
                             <Avatar name={friend.friend_username} className="w-full h-full" />
@@ -383,9 +391,19 @@ export default function Friends() {
                             <span className="text-slate-600 text-[9px] font-bold uppercase tracking-widest">Lv {friend.friend_level} • {friend.friend_streak}d</span>
                           </div>
                         </div>
-                        <button className="p-2 rounded-lg text-slate-600 hover:text-white transition-colors">
-                          <MoreVertical className="w-4 h-4" />
-                        </button>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => navigate(`${ROUTE_PATHS.minigames}?challenge=${friend.friend_user_id}`)}
+                            className="rounded-lg px-3 py-2 text-[9px] font-black uppercase tracking-[0.16em] text-black"
+                            style={{ backgroundColor: "var(--app-primary-color)" }}
+                          >
+                            Duelo
+                          </button>
+                          <button className="p-2 rounded-lg text-slate-600 hover:text-white transition-colors">
+                            <MoreVertical className="w-4 h-4" />
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -398,7 +416,7 @@ export default function Friends() {
                 {receivedRequests.length > 0 ? (
                   <div className="space-y-4 max-w-2xl mx-auto">
                     {receivedRequests.map((request) => (
-                      <div key={request.id} className="bg-[#161616] border border-white/5 rounded-3xl p-6 flex flex-col sm:flex-row items-center gap-6 group hover:border-primary/30 transition-all">
+                      <div key={request.id} className="fl-theme-surface rounded-3xl p-6 flex flex-col sm:flex-row items-center gap-6 group hover:border-primary/30 transition-all">
                         <div className="size-16 rounded-full border-2 border-white/5 overflow-hidden group-hover:border-primary/20 transition-all">
                           <Avatar name={request.friend_username} className="w-full h-full text-xl" />
                         </div>
@@ -419,7 +437,7 @@ export default function Friends() {
                           </button>
                           <button 
                             onClick={() => respondRequest(request.id, false)}
-                            className="bg-[#222] text-white px-6 py-3 rounded-full text-[10px] font-black uppercase tracking-widest hover:bg-red-950 hover:text-red-500 transition-all"
+                            className="fl-theme-input px-6 py-3 rounded-full text-[10px] font-black uppercase tracking-widest hover:bg-red-950 hover:text-red-500 transition-all"
                           >
                             Recusar
                           </button>
@@ -451,14 +469,14 @@ export default function Friends() {
         </div>
 
         {/* Sidebar Info */}
-        <aside className="w-full md:w-[340px] border-l border-white/5 bg-[#0a0a0a]/50 p-6 md:p-8 flex flex-col gap-8 hidden lg:flex">
+        <aside className="w-full md:w-[340px] border-l border-white/5 p-6 md:p-8 flex flex-col gap-8 hidden lg:flex" style={{ backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 78%, transparent)" }}>
           
           <section className="space-y-6">
             <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-[0.3em]">Pedidos Pendentes</h3>
             {receivedRequests.length > 0 ? (
               <div className="space-y-3">
                 {receivedRequests.slice(0, 3).map((r) => (
-                  <div key={r.id} className="flex items-center justify-between p-3 bg-[#161616] rounded-2xl border border-white/5">
+                  <div key={r.id} className="fl-theme-surface flex items-center justify-between p-3 rounded-2xl">
                     <div className="flex items-center gap-3">
                       <Avatar name={r.friend_username} className="size-8 text-[10px]" />
                       <span className="text-white font-bold text-xs truncate max-w-[80px]">{r.friend_username}</span>
@@ -484,7 +502,7 @@ export default function Friends() {
 
           <section className="relative group overflow-hidden rounded-[2.5rem]">
             <div className="absolute inset-0 bg-gradient-to-br from-primary/20 via-transparent to-transparent opacity-50 transition-opacity group-hover:opacity-80" style={{ background: 'linear-gradient(to bottom right, color-mix(in srgb, var(--app-primary-color) 20%, transparent), transparent, transparent)' }}></div>
-            <div className="relative p-8 bg-[#161616] border border-white/10 flex flex-col items-center text-center">
+            <div className="fl-theme-surface relative p-8 flex flex-col items-center text-center">
               <div className="size-16 rounded-3xl bg-primary/10 flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
                 <UserPlus2 className="size-8 shadow-[0_0_15px_var(--app-primary-color)]" style={{ color: 'var(--app-primary-color)' }} />
               </div>

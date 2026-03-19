@@ -17,6 +17,7 @@ import {
 import { Card } from "@/react-app/components/ui/card";
 import { Button } from "@/react-app/components/ui/button";
 import { Badge } from "@/react-app/components/ui/badge";
+import { useAppChrome } from "@/react-app/contexts/appChrome";
 import LoadingBall from "@/react-app/components/LoadingBall";
 import { formatMissionGoal } from "@/constants/missionMetrics";
 import type { CircuitTask, Mission, MissionMetricType } from "@/shared/types";
@@ -172,15 +173,19 @@ function MissionExecutionModal({
   const setDuration = metricType === "duration_seconds" || metricType === "duration_minutes"
     ? Math.max(1, Math.floor(totalTimeSeconds / sets))
     : 0;
+  const isTimeMission = metricType === "duration_seconds" || metricType === "duration_minutes";
+  const isCounterMission = metricType === "repetitions" || metricType === "sets_reps";
+  const isDistanceMission = metricType === "steps" || metricType === "distance_meters";
+  const initialExecutionState = useMemo<MissionExecutionState>(() => ({
+    ...DEFAULT_EXECUTION_STATE,
+    remainingSeconds: setDuration,
+    running: isTimeMission,
+  }), [isTimeMission, setDuration]);
 
   useEffect(() => {
     if (!open) return;
-    setState({
-      ...DEFAULT_EXECUTION_STATE,
-      remainingSeconds: setDuration,
-      running: metricType === "duration_seconds" || metricType === "duration_minutes",
-    });
-  }, [metricType, open, setDuration]);
+    setState(initialExecutionState);
+  }, [initialExecutionState, open]);
 
   useEffect(() => {
     if (!open) return;
@@ -247,10 +252,6 @@ function MissionExecutionModal({
     return () => window.clearInterval(restTimer);
   }, [metricType, open, state.restSeconds, state.resting]);
 
-  const isTimeMission = metricType === "duration_seconds" || metricType === "duration_minutes";
-  const isCounterMission = metricType === "repetitions" || metricType === "sets_reps";
-  const isDistanceMission = metricType === "steps" || metricType === "distance_meters";
-
   const incrementRep = () => {
     if (!isCounterMission) return;
     setState((current) => ({ ...current, repsDone: current.repsDone + 1 }));
@@ -293,6 +294,42 @@ function MissionExecutionModal({
     });
   };
 
+  const advanceTimedSet = () => {
+    setState((current) => {
+      if (!isTimeMission) return current;
+      if (current.currentSet >= sets) {
+        return {
+          ...current,
+          remainingSeconds: 0,
+          restSeconds: 0,
+          resting: false,
+          running: false,
+          finished: true,
+        };
+      }
+
+      return {
+        ...current,
+        currentSet: current.currentSet + 1,
+        remainingSeconds: restSecondsConfigured > 0 ? 0 : setDuration,
+        restSeconds: restSecondsConfigured,
+        resting: restSecondsConfigured > 0,
+        running: true,
+      };
+    });
+  };
+
+  const resetExecution = () => {
+    setState(initialExecutionState);
+  };
+
+  const toggleRunning = () => {
+    setState((current) => {
+      if (current.finished || isDistanceMission) return current;
+      return { ...current, running: !current.running };
+    });
+  };
+
   const canFinishInputMission = isDistanceMission && Number(state.inputValue) > 0;
   const totalCounterProgress = state.totalRepsDone + state.repsDone;
   const canFinishCounterMission = isCounterMission && state.finished;
@@ -320,26 +357,33 @@ function MissionExecutionModal({
     activeProgress = 100;
   } else if (isCounterMission) {
     activeProgress = Math.min(100, (totalCounterProgress / totalGoal) * 100 || 0);
+  } else if (isDistanceMission) {
+    activeProgress = Math.min(100, (Number(state.inputValue || 0) / totalGoal) * 100 || 0);
   } else {
-    activeProgress = Math.min(100, ((state.currentSet - 1) / sets) * 100 || 0);
+    const completedSets = Math.max(0, state.currentSet - 1);
+    const currentSetProgress = setDuration > 0 && !state.resting
+      ? Math.max(0, (setDuration - state.remainingSeconds) / setDuration)
+      : 0;
+    activeProgress = Math.min(100, ((completedSets + currentSetProgress) / sets) * 100 || 0);
   }
+  const sessionXp = Math.max(0, Math.round((mission.xp_reward * activeProgress) / 100));
 
   return (
-    <div className="fl-z-mission-screen fixed inset-0 flex flex-col overflow-x-hidden font-display antialiased z-[100]" style={{ backgroundColor: "var(--app-bg-color, #0a0a0a)", color: "var(--fl-color-text, #f1f5f9)" }}>
+    <div className="fl-z-mission-screen fixed inset-0 flex flex-col overflow-x-hidden font-display antialiased" style={{ backgroundColor: "var(--app-bg-color)", color: "var(--fl-color-text)" }}>
       <div className="layout-container flex h-full grow flex-col">
         {/* Header */}
-        <header className="flex items-center justify-between px-6 py-4 border-b" style={{ borderColor: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)" }}>
+        <header className="flex items-center justify-between border-b px-6 py-4" style={{ borderColor: "var(--fl-border-soft)" }}>
           <div className="flex items-center gap-3">
-            <div className="size-8 rounded flex items-center justify-center" style={{ backgroundColor: "var(--app-primary-color)", color: "var(--app-bg-color, #0a0a0a)" }}>
+            <div className="flex size-8 items-center justify-center rounded" style={{ backgroundColor: "var(--app-primary-color)", color: "var(--fl-nav-item-active-text)" }}>
               <Dumbbell className="w-5 h-5" strokeWidth={2.5} />
             </div>
             <h2 className="text-xl font-bold tracking-tight">FitLoot</h2>
           </div>
           <div className="flex gap-2">
-            <button className="flex size-10 items-center justify-center rounded-full border transition-opacity hover:opacity-80" style={{ backgroundColor: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)", color: "var(--app-primary-color)", borderColor: "color-mix(in srgb, var(--app-primary-color) 20%, transparent)" }}>
+            <button type="button" className="flex size-10 items-center justify-center rounded-full border transition-opacity hover:opacity-80" onClick={resetExecution} style={{ backgroundColor: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)", color: "var(--app-primary-color)", borderColor: "color-mix(in srgb, var(--app-primary-color) 20%, transparent)" }}>
               <Info className="w-5 h-5" />
             </button>
-            <button className="flex size-10 items-center justify-center rounded-full border transition-opacity hover:opacity-80" onClick={onClose} style={{ backgroundColor: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)", color: "var(--app-primary-color)", borderColor: "color-mix(in srgb, var(--app-primary-color) 20%, transparent)" }}>
+            <button type="button" className="flex size-10 items-center justify-center rounded-full border transition-opacity hover:opacity-80" onClick={onClose} style={{ backgroundColor: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)", color: "var(--app-primary-color)", borderColor: "color-mix(in srgb, var(--app-primary-color) 20%, transparent)" }}>
               <X className="w-5 h-5" />
             </button>
           </div>
@@ -355,7 +399,7 @@ function MissionExecutionModal({
               </div>
               <p className="text-lg font-bold" style={{ color: "var(--app-primary-color)" }}>{Math.round(activeProgress)}%</p>
             </div>
-            <div className="h-3 w-full rounded-full overflow-hidden" style={{ backgroundColor: "rgba(255, 255, 255, 0.05)" }}>
+            <div className="h-3 w-full overflow-hidden rounded-full" style={{ backgroundColor: "color-mix(in srgb, var(--fl-color-text) 8%, transparent)" }}>
               <div 
                 className="h-full rounded-full transition-all duration-500" 
                 style={{ 
@@ -371,7 +415,7 @@ function MissionExecutionModal({
             {/* Rest Timer */}
             {(isTimeMission || state.resting) && (
               <div className="text-center mb-12">
-                <p className="text-lg mb-4" style={{ color: "var(--fl-color-text-muted, #94a3b8)" }}>
+                <p className="text-lg mb-4" style={{ color: "var(--fl-color-text-muted)" }}>
                   {state.resting ? "Timer de Descanso" : "Timer de Série"}
                 </p>
                 <div className="flex items-center justify-center gap-4">
@@ -379,53 +423,61 @@ function MissionExecutionModal({
                     <div 
                       className="rounded-2xl w-28 h-28 flex items-center justify-center border transition-all"
                       style={{ 
-                        backgroundColor: "rgba(255, 255, 255, 0.05)", 
-                        borderColor: displaySeconds > 59 ? "color-mix(in srgb, var(--app-primary-color) 20%, transparent)" : "rgba(255, 255, 255, 0.1)",
+                        backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 82%, transparent)",
+                        borderColor: displaySeconds > 59 ? "color-mix(in srgb, var(--app-primary-color) 20%, transparent)" : "var(--fl-border-soft)",
                         boxShadow: displaySeconds > 59 ? "0 0 0 2px color-mix(in srgb, var(--app-primary-color) 20%, transparent)" : "none",
                       }}
                     >
-                      <span className="text-5xl font-bold" style={{ color: displaySeconds > 59 ? "var(--app-primary-color)" : "var(--fl-color-text, #f1f5f9)" }}>{m}</span>
+                      <span className="text-5xl font-bold" style={{ color: displaySeconds > 59 ? "var(--app-primary-color)" : "var(--fl-color-text)" }}>{m}</span>
                     </div>
-                    <span className="text-xs mt-3 uppercase tracking-widest" style={{ color: "var(--fl-color-text-muted, #64748b)" }}>Min</span>
+                    <span className="text-xs mt-3 uppercase tracking-widest" style={{ color: "var(--fl-color-text-muted)" }}>Min</span>
                   </div>
                   
-                  <span className="text-4xl font-bold pb-8" style={{ color: "var(--fl-color-text-soft, #334155)" }}>:</span>
+                  <span className="text-4xl font-bold pb-8" style={{ color: "var(--fl-color-text-soft)" }}>:</span>
                   
                   <div className="flex flex-col items-center">
                     <div 
                       className="rounded-2xl w-28 h-28 flex items-center justify-center border transition-all"
                       style={{ 
-                        backgroundColor: "rgba(255, 255, 255, 0.05)", 
-                        borderColor: displaySeconds <= 59 ? "color-mix(in srgb, var(--app-primary-color) 20%, transparent)" : "rgba(255, 255, 255, 0.1)",
+                        backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 82%, transparent)",
+                        borderColor: displaySeconds <= 59 ? "color-mix(in srgb, var(--app-primary-color) 20%, transparent)" : "var(--fl-border-soft)",
                         boxShadow: displaySeconds <= 59 ? "0 0 0 2px color-mix(in srgb, var(--app-primary-color) 20%, transparent)" : "none",
                       }}
                     >
-                      <span className="text-5xl font-bold" style={{ color: displaySeconds <= 59 ? "var(--app-primary-color)" : "var(--fl-color-text, #f1f5f9)" }}>{s}</span>
+                      <span className="text-5xl font-bold" style={{ color: displaySeconds <= 59 ? "var(--app-primary-color)" : "var(--fl-color-text)" }}>{s}</span>
                     </div>
-                    <span className="text-xs mt-3 uppercase tracking-widest" style={{ color: "var(--fl-color-text-muted, #64748b)" }}>Seg</span>
+                    <span className="text-xs mt-3 uppercase tracking-widest" style={{ color: "var(--fl-color-text-muted)" }}>Seg</span>
                   </div>
                 </div>
               </div>
             )}
 
             {/* Mission Media */}
-            <div className="w-full max-w-md aspect-video rounded-2xl overflow-hidden relative group border shadow-2xl" style={{ borderColor: "rgba(255, 255, 255, 0.1)", boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.5)" }}>
-              {detailMissionMediaUrl ? (
-                <div 
-                  className="absolute inset-0 bg-cover bg-center" 
-                  style={{ backgroundImage: `url("${detailMissionMediaUrl}")` }}
+            <div className="relative w-full max-w-md aspect-video overflow-hidden rounded-2xl border shadow-2xl" style={{ borderColor: "var(--fl-border-soft)", boxShadow: "var(--fl-shadow-glass)" }}>
+              {mission.video_url ? (
+                <video
+                  src={mission.video_url}
+                  poster={detailMissionMediaUrl ?? undefined}
+                  className="absolute inset-0 h-full w-full object-cover"
+                  autoPlay
+                  loop
+                  muted
+                  playsInline
                 />
+              ) : detailMissionMediaUrl ? (
+                <img src={detailMissionMediaUrl} alt={mission.title} className="absolute inset-0 h-full w-full object-cover" />
               ) : (
-                <div className="absolute inset-0 flex items-center justify-center" style={{ backgroundColor: "rgba(255, 255, 255, 0.02)" }}>
+                <div className="absolute inset-0 flex items-center justify-center" style={{ backgroundColor: "color-mix(in srgb, var(--fl-surface-muted) 60%, transparent)" }}>
                   <Dumbbell className="w-16 h-16 opacity-20" />
                 </div>
               )}
               
-              <div className="absolute inset-0 flex items-center justify-center backdrop-blur-[2px]" style={{ backgroundColor: "rgba(10, 10, 10, 0.4)" }}>
-                <button 
-                  onClick={() => setState((current) => ({ ...current, running: !current.running }))}
+              <div className="absolute inset-0 flex items-center justify-center backdrop-blur-[2px]" style={{ backgroundColor: "rgba(0, 0, 0, 0.32)" }}>
+                <button
+                  type="button"
+                  onClick={toggleRunning}
                   className="size-20 rounded-full flex items-center justify-center hover:scale-110 transition-transform shadow-xl"
-                  style={{ backgroundColor: "var(--app-primary-color)", color: "var(--app-bg-color, #0a0a0a)", boxShadow: "0 20px 25px -5px color-mix(in srgb, var(--app-primary-color) 30%, transparent)" }}
+                  style={{ backgroundColor: "var(--app-primary-color)", color: "var(--fl-nav-item-active-text)", boxShadow: "0 20px 25px -5px color-mix(in srgb, var(--app-primary-color) 30%, transparent)" }}
                 >
                   {state.running && !state.resting ? (
                     <Pause className="w-8 h-8 fill-current" strokeWidth={1} />
@@ -435,11 +487,11 @@ function MissionExecutionModal({
                 </button>
               </div>
               
-              <div className="absolute bottom-4 left-4 right-4 flex justify-between items-center">
-                <span className="backdrop-blur-md px-4 py-1.5 rounded-full text-xs font-bold border" style={{ backgroundColor: "rgba(10, 10, 10, 0.8)", borderColor: "rgba(255, 255, 255, 0.1)" }}>
+              <div className="absolute bottom-4 left-4 right-4 flex items-center justify-between">
+                <span className="rounded-full border px-4 py-1.5 text-xs font-bold backdrop-blur-md" style={{ backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 88%, transparent)", borderColor: "var(--fl-border-soft)" }}>
                   VERIFICAR FORMA
                 </span>
-                <span className="backdrop-blur-md px-4 py-1.5 rounded-full text-xs font-bold border" style={{ backgroundColor: "rgba(10, 10, 10, 0.8)", borderColor: "rgba(255, 255, 255, 0.1)" }}>
+                <span className="rounded-full border px-4 py-1.5 text-xs font-bold backdrop-blur-md" style={{ backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 88%, transparent)", borderColor: "var(--fl-border-soft)" }}>
                   SÉRIE {state.currentSet}/{sets}
                 </span>
               </div>
@@ -453,7 +505,7 @@ function MissionExecutionModal({
                  </p>
                  <input
                    type="number"
-                   className="w-full rounded-xl border-2 focus:outline-none px-4 py-3 bg-transparent text-center text-xl font-bold"
+                   className="w-full rounded-xl border-2 bg-transparent px-4 py-3 text-center text-xl font-bold focus:outline-none"
                    style={{ borderColor: "color-mix(in srgb, var(--app-primary-color) 30%, transparent)", color: "var(--app-primary-color)" }}
                    placeholder={metricType === "steps" ? "Passos" : "Metros"}
                    value={state.inputValue}
@@ -468,11 +520,11 @@ function MissionExecutionModal({
                <div className="mt-6 w-full max-w-md flex flex-col items-center justify-center space-y-2">
                  <p className="text-sm uppercase tracking-widest font-bold" style={{ color: "var(--app-primary-color)" }}>Repetições</p>
                  <div className="flex items-center gap-6">
-                   <button onClick={decrementRep} disabled={state.resting} className="size-14 rounded-full border border-white/10 bg-white/5 text-2xl active:scale-95 disabled:opacity-50">-</button>
+                    <button type="button" onClick={decrementRep} disabled={state.resting} className="size-14 rounded-full border text-2xl active:scale-95 disabled:opacity-50" style={{ borderColor: "var(--fl-border-soft)", backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 78%, transparent)" }}>-</button>
                    <span className="text-5xl font-bold w-20 text-center">{state.repsDone}</span>
-                   <button onClick={incrementRep} disabled={state.resting} className="size-14 rounded-full border border-white/10 bg-white/5 text-2xl active:scale-95 disabled:opacity-50">+</button>
+                    <button type="button" onClick={incrementRep} disabled={state.resting} className="size-14 rounded-full border text-2xl active:scale-95 disabled:opacity-50" style={{ borderColor: "var(--fl-border-soft)", backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 78%, transparent)" }}>+</button>
                  </div>
-                 <p className="text-xs" style={{ color: "var(--fl-color-text-muted, #94a3b8)" }}>
+                 <p className="text-xs" style={{ color: "var(--fl-color-text-muted)" }}>
                    Meta da série: {setGoal} | Progresso: {totalCounterProgress}/{totalGoal}
                  </p>
                </div>
@@ -484,9 +536,9 @@ function MissionExecutionModal({
           <div className="grid grid-cols-2 gap-4 mt-auto pt-8">
             <button 
               className="col-span-2 h-16 rounded-2xl font-bold text-xl flex items-center justify-center gap-2 shadow-lg active:scale-[0.98] transition-all disabled:opacity-50 disabled:grayscale" 
-              style={{ backgroundColor: "var(--app-primary-color)", color: "var(--app-bg-color, #0a0a0a)", boxShadow: "0 10px 15px -3px color-mix(in srgb, var(--app-primary-color) 20%, transparent)" }}
-              onClick={isCounterMission ? completeCurrentSet : () => setState((current) => ({ ...current, remainingSeconds: 0 }))}
-              disabled={isCounterMission && (state.resting || state.repsDone <= 0)}
+              style={{ backgroundColor: "var(--app-primary-color)", color: "var(--fl-nav-item-active-text)", boxShadow: "0 10px 15px -3px color-mix(in srgb, var(--app-primary-color) 20%, transparent)" }}
+              onClick={isCounterMission ? completeCurrentSet : advanceTimedSet}
+              disabled={isCounterMission ? state.resting || state.repsDone <= 0 : state.finished}
             >
               <FastForward className="w-6 h-6 fill-current" strokeWidth={1} />
               PRÓXIMA SÉRIE
@@ -494,17 +546,17 @@ function MissionExecutionModal({
             
             <button 
               className="h-14 rounded-2xl font-bold flex items-center justify-center gap-2 border transition-colors active:scale-95 hover:bg-white/10"
-              style={{ backgroundColor: "rgba(255, 255, 255, 0.05)", borderColor: "rgba(255, 255, 255, 0.1)", color: "var(--fl-color-text-muted, #cbd5e1)" }}
-              onClick={() => setState((current) => ({ ...current, running: !current.running }))}
-              disabled={state.finished}
+              style={{ backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 82%, transparent)", borderColor: "var(--fl-border-soft)", color: "var(--fl-color-text-muted)" }}
+              onClick={toggleRunning}
+              disabled={state.finished || isDistanceMission}
             >
               {state.running ? <Pause className="w-5 h-5 fill-current" strokeWidth={1} /> : <Play className="w-5 h-5 fill-current" strokeWidth={1} />}
-              {state.running ? "PAUSAR" : "RETOMAR"}
+              {isDistanceMission ? "SEM TIMER" : state.running ? "PAUSAR" : "RETOMAR"}
             </button>
             
             <button 
               className="h-14 rounded-2xl font-bold flex items-center justify-center gap-2 border transition-colors active:scale-95 disabled:opacity-50 disabled:grayscale"
-              style={{ backgroundColor: "rgba(239, 68, 68, 0.1)", borderColor: "rgba(239, 68, 68, 0.2)", color: "#ef4444" }}
+              style={{ backgroundColor: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)", borderColor: "color-mix(in srgb, var(--app-primary-color) 22%, transparent)", color: "var(--app-primary-color)" }}
               onClick={() => { void finishMission(); }}
               disabled={!canFinishMission}
             >
@@ -515,7 +567,8 @@ function MissionExecutionModal({
         </main>
 
         {/* Footer */}
-        <footer className="mt-auto py-6 flex justify-center text-[10px] uppercase tracking-[0.3em] font-medium" style={{ color: "var(--fl-color-text-muted, #475569)" }}>
+        <footer className="mt-auto py-6 flex justify-center uppercase tracking-[0.3em] font-medium" style={{ color: "var(--fl-color-text-muted)", fontSize: 0 }}>
+          <span className="text-[10px]">Loot desta sessao: {sessionXp} / {mission.xp_reward} XP</span>
           Loot desta sessão: {mission.xp_reward} XP
         </footer>
       </div>
@@ -524,6 +577,7 @@ function MissionExecutionModal({
 }
 
 function MissionCardComponent({ mission, onComplete, layout = "default" }: MissionCardProps) {
+  const { setMissionDetailsOpen, setMissionExecutionOpen } = useAppChrome();
   const [showDetails, setShowDetails] = useState(false);
   const [showExecution, setShowExecution] = useState(false);
   const [completing, setCompleting] = useState(false);
@@ -559,11 +613,12 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
   const monthlyProgressValue = Number((mission as Mission & { progress_value?: number | undefined }).progress_value ?? 0);
   const monthlyCurrent = isCompleted ? monthlyTarget : Math.max(0, Math.min(monthlyTarget, monthlyProgressValue));
   const monthlyProgress = Math.min(100, Math.round((monthlyCurrent / monthlyTarget) * 100));
-  const hasInlineDetails =
-    Array.isArray(mission.instructions) &&
-    mission.instructions.length > 0 &&
-    Array.isArray(mission.safety_tips) &&
-    mission.safety_tips.length > 0;
+  const hasInlineInstructions =
+    (Array.isArray(mission.instructions) && mission.instructions.length > 0) ||
+    (Array.isArray(mission.exercise_instructions_pt) && mission.exercise_instructions_pt.length > 0) ||
+    (Array.isArray(mission.exercise_instructions_en) && mission.exercise_instructions_en.length > 0);
+  const hasInlineMuscles = Array.isArray(mission.muscle_groups) && mission.muscle_groups.length > 0;
+  const hasInlineDetails = hasInlineInstructions && hasInlineMuscles && Array.isArray(mission.safety_tips) && mission.safety_tips.length > 0;
 
   const loadMissionDetails = useCallback(async (options?: { silent?: boolean }) => {
     if (hasInlineDetails) return;
@@ -611,12 +666,36 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
     void loadMissionDetails({ silent: true });
   }, [detailedMission, detailsLoading, hasInlineDetails, loadMissionDetails]);
 
+  useEffect(() => {
+    setMissionDetailsOpen(showDetails);
+    return () => {
+      setMissionDetailsOpen(false);
+    };
+  }, [setMissionDetailsOpen, showDetails]);
+
+  useEffect(() => {
+    setMissionExecutionOpen(showExecution);
+    return () => {
+      setMissionExecutionOpen(false);
+    };
+  }, [setMissionExecutionOpen, showExecution]);
+
   const missionDetails = detailedMission ?? mission;
   const detailMetricType = normalizeMetricType(missionDetails);
   const detailMissionMediaUrl = resolveMissionMediaUrl(missionDetails);
   const safetyTips = Array.isArray(missionDetails.safety_tips) && missionDetails.safety_tips.length > 0
     ? missionDetails.safety_tips
     : ["Mantenha alinhamento postural e interrompa em caso de dor aguda."];
+  const instructionList =
+    (Array.isArray(missionDetails.instructions) && missionDetails.instructions.length > 0
+      ? missionDetails.instructions
+      : Array.isArray(missionDetails.exercise_instructions_pt) && missionDetails.exercise_instructions_pt.length > 0
+        ? missionDetails.exercise_instructions_pt
+        : Array.isArray(missionDetails.exercise_instructions_en) && missionDetails.exercise_instructions_en.length > 0
+          ? missionDetails.exercise_instructions_en
+          : missionDetails.description
+            ? [missionDetails.description]
+            : ["Siga o movimento com controle e respire durante cada repeticao."]);
   const pixelOrLineArt = isPixelOrLineArtUrl(detailMissionMediaUrl);
   const gifLikeMedia = isGifUrl(detailMissionMediaUrl);
 
@@ -812,7 +891,7 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
   return (
     <>
       {triggerContent}      {showDetails && (
-        <div className="fl-z-modal fixed inset-0 bg-black/60 backdrop-blur-md flex items-center justify-center p-4 md:p-8 overflow-y-auto">
+        <div className="fl-z-drawer fixed inset-0 bg-black/60 backdrop-blur-md flex items-center justify-center p-4 md:p-8 overflow-y-auto">
           {/* Modal Container */}
           <div className="layout-content-container flex flex-col max-w-[600px] w-full rounded-xl shadow-2xl overflow-hidden relative" style={{ background: "var(--fl-surface-strong)", border: "1px solid color-mix(in srgb, var(--app-primary-color) 20%, transparent)" }}>
             
@@ -839,14 +918,33 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
                   className="relative w-full aspect-video rounded-xl overflow-hidden group"
                   style={{ background: "color-mix(in srgb, var(--app-primary-color) 5%, transparent)" }}
                 >
-                  {detailMissionMediaUrl ? (
+                  {missionDetails.video_url ? (
                     <>
-                      <div 
-                        className="absolute inset-0 bg-cover bg-center transition-transform duration-500 group-hover:scale-105" 
-                        style={{ 
-                          backgroundImage: `url("${detailMissionMediaUrl}")`,
+                      <video
+                        src={missionDetails.video_url}
+                        poster={detailMissionMediaUrl ?? undefined}
+                        className="absolute inset-0 h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+                        autoPlay
+                        loop
+                        muted
+                        playsInline
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent" />
+                      <div className="absolute bottom-4 left-4">
+                        <span className="text-black text-xs font-bold px-2 py-1 rounded-full uppercase tracking-wider" style={{ background: "var(--app-primary-color)" }}>
+                          {stateLabel}
+                        </span>
+                      </div>
+                    </>
+                  ) : detailMissionMediaUrl ? (
+                    <>
+                      <img
+                        src={detailMissionMediaUrl}
+                        alt={missionDetails.title}
+                        className="absolute inset-0 h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+                        style={{
                           imageRendering: pixelOrLineArt ? "crisp-edges" : "auto",
-                          filter: pixelOrLineArt || gifLikeMedia ? "blur(0px)" : "contrast(1.05) saturate(1.1) blur(0px)",
+                          filter: pixelOrLineArt || gifLikeMedia ? "none" : "contrast(1.05) saturate(1.1)",
                         }}
                       />
                       <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent" />
@@ -891,6 +989,23 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
                   {(missionDetails.muscle_groups?.length ? missionDetails.muscle_groups : [bodyAreaLabel(missionDetails.body_area)]).map((muscle, idx) => (
                     <div key={`${muscle}-${idx}`} className="flex items-center gap-2 rounded-full px-4 py-1.5 border" style={{ background: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)", borderColor: "color-mix(in srgb, var(--app-primary-color) 20%, transparent)" }}>
                       <span className="font-semibold text-sm" style={{ color: "var(--app-primary-color)" }}>{muscle}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="px-6 pt-8">
+                <h3 className="text-lg font-bold mb-3 flex items-center gap-2" style={{ color: "var(--fl-color-text)" }}>
+                  <Info className="w-5 h-5" style={{ color: "var(--app-primary-color)" }} />
+                  Execucao
+                </h3>
+                <div className="space-y-3">
+                  {instructionList.map((instruction, index) => (
+                    <div key={`${instruction}-${index}`} className="flex gap-3 rounded-lg border p-3" style={{ background: "color-mix(in srgb, var(--fl-surface-muted) 50%, transparent)", borderColor: "var(--fl-border-soft)" }}>
+                      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold" style={{ backgroundColor: "color-mix(in srgb, var(--app-primary-color) 18%, transparent)", color: "var(--app-primary-color)" }}>
+                        {index + 1}
+                      </span>
+                      <p className="text-sm" style={{ color: "var(--fl-color-text-muted)" }}>{instruction}</p>
                     </div>
                   ))}
                 </div>
@@ -950,6 +1065,7 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
                   if (isCircuitMission || isCompleted || visualState === "failed") {
                     setShowDetails(false);
                   } else {
+                    setShowDetails(false);
                     setShowExecution(true);
                   }
                 }}
@@ -982,7 +1098,7 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
       )}
 
       {showDetails && (
-        <div className="fl-z-modal fixed bottom-6 left-1/2 -translate-x-1/2 text-xs text-gray-500 flex items-center gap-2">
+        <div className="fl-z-drawer fixed bottom-6 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full border px-3 py-1.5 text-xs" style={{ color: "var(--fl-color-text-muted)", borderColor: "var(--fl-border-soft)", backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 86%, transparent)" }}>
           <MapPinned className="w-3 h-3" />
           <span>{bodyAreaLabel(mission.body_area)}</span>
           <Trophy className="w-3 h-3" />

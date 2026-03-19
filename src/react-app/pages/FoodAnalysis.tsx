@@ -340,7 +340,7 @@ export default function FoodAnalysis() {
   const macroBars = useMemo(() => result?.totals.macro_percentages ?? { protein: 0, carbs: 0, fats: 0 }, [result]);
 
   return (
-    <AppPageShell bottomNavActive="missions" className="bg-[#0A0A0A] overflow-hidden min-h-screen w-full flex flex-col font-display text-white antialiased">
+    <AppPageShell bottomNavActive="missions" className="fl-theme-page overflow-hidden min-h-screen w-full flex flex-col font-display text-white antialiased">
       <style>{`
         @keyframes pulse-border {
           0% { border-color: color-mix(in srgb, var(--app-primary-color) 40%, transparent); }
@@ -385,7 +385,7 @@ export default function FoodAnalysis() {
       {(!streamActive && !preview && !result) ? (
         <div className="flex-1 flex flex-col relative z-20 overflow-y-auto custom-scrollbar">
           {/* Header */}
-          <header className="sticky top-0 z-50 bg-[#0A0A0A]/60 backdrop-blur-md border-b border-white/5 p-6 flex justify-between items-center">
+          <header className="sticky top-0 z-10 border-b border-white/5 p-6 flex justify-between items-center backdrop-blur-md" style={{ backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 84%, transparent)" }}>
             <button 
               onClick={() => navigate("/app")}
               className="w-10 h-10 rounded-full hover:bg-white/5 flex items-center justify-center transition-colors"
@@ -409,7 +409,7 @@ export default function FoodAnalysis() {
             {/* Primary Card - Camera */}
             <div className="group relative">
               <div className="absolute -inset-1 bg-primary rounded-3xl blur opacity-10 card-glow-bg group-hover:opacity-30 transition-opacity" style={{ backgroundColor: 'var(--app-primary-color)' }}></div>
-              <div className="relative bg-[#161616] border border-white/5 rounded-3xl p-8 flex flex-col items-center overflow-hidden">
+              <div className="fl-theme-surface relative rounded-3xl p-8 flex flex-col items-center overflow-hidden">
                 <div 
                   className="w-20 h-20 rounded-full flex items-center justify-center mb-6 relative"
                   style={{ backgroundColor: 'color-mix(in srgb, var(--app-primary-color) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--app-primary-color) 40%, transparent)' }}
@@ -440,7 +440,7 @@ export default function FoodAnalysis() {
                 const input = document.getElementById('gallery-input');
                 if (input) input.click();
               }}
-              className="w-full relative overflow-hidden bg-white/5 border border-white/10 p-6 rounded-3xl flex items-center justify-between group hover:bg-white/10 transition-all border-l-4"
+              className="fl-theme-surface-soft w-full relative overflow-hidden p-6 rounded-3xl flex items-center justify-between group transition-all border-l-4"
               style={{ borderLeftColor: 'color-mix(in srgb, var(--app-primary-color) 40%, transparent)' }}
             >
               <div className="text-left">
@@ -456,7 +456,7 @@ export default function FoodAnalysis() {
 
           {/* Footer Badge */}
           <div className="p-10 flex justify-center mt-auto">
-            <div className="inline-flex items-center gap-2 bg-[#161616]/50 border border-white/5 rounded-full px-4 py-2 backdrop-blur-sm">
+            <div className="fl-theme-surface-soft inline-flex items-center gap-2 rounded-full px-4 py-2 backdrop-blur-sm">
               <ShieldCheck className="w-4 h-4" style={{ color: 'var(--app-primary-color)' }} />
               <span className="text-[10px] font-bold uppercase tracking-[0.15em] text-white/50">Tecnologia Neural Ativa</span>
             </div>
@@ -464,7 +464,7 @@ export default function FoodAnalysis() {
         </div>
       ) : result ? (
         /* Results Screen (Full screen, no black void) */
-        <div className="flex-1 flex flex-col bg-[#0A0A0A] overflow-y-auto custom-scrollbar p-6 pb-32 animate-in fade-in slide-in-from-bottom-5 duration-500">
+        <div className="flex-1 flex flex-col overflow-y-auto custom-scrollbar p-6 pb-32 animate-in fade-in slide-in-from-bottom-5 duration-500" style={{ backgroundColor: "var(--app-bg-color)" }}>
           {/* Header */}
           <div className="flex items-center justify-between mb-8">
             <button 
@@ -498,6 +498,17 @@ export default function FoodAnalysis() {
             <MacroCard label="Gorduras" value={`${result.totals.fats}g`} percentage={macroBars.fats} />
           </div>
 
+          <div className="mb-8">
+            <h4 className="mb-4 text-[10px] font-bold uppercase tracking-[0.2em] fl-theme-text-muted">Tags detectadas</h4>
+            <div className="flex flex-wrap gap-2">
+              {result.items.map((item) => (
+                <span key={`${item.food_name}-${item.portion_description}`} className="rounded-full border px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.18em]" style={{ borderColor: "color-mix(in srgb, var(--app-primary-color) 24%, transparent)", backgroundColor: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)", color: "var(--app-primary-color)" }}>
+                  {item.food_name}
+                </span>
+              ))}
+            </div>
+          </div>
+
           {/* Ingredients Section */}
           <div className="mb-12">
             <h4 className="text-[10px] font-bold text-white/30 uppercase tracking-[0.2em] mb-4">Ingredientes Detectados</h4>
@@ -505,7 +516,7 @@ export default function FoodAnalysis() {
               {result.items.map((item, i) => (
                 <div key={i} className="flex items-center justify-between bg-white/5 p-4 rounded-2xl border border-white/5 transition-all hover:border-white/10">
                   <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 rounded-xl flex items-center justify-center text-2xl bg-[#161616] border border-white/5">
+                    <div className="fl-theme-surface-soft w-12 h-12 rounded-xl flex items-center justify-center text-2xl">
                       {item.food_name.toLowerCase().includes('ovo') ? '🥚' : 
                        item.food_name.toLowerCase().includes('pão') ? '🍞' : 
                        item.food_name.toLowerCase().includes('carne') ? '🥩' : 
@@ -628,9 +639,9 @@ export default function FoodAnalysis() {
 
 function MacroCard({ label, value, percentage }: { label: string; value: string; percentage: number }) {
   return (
-    <div className="bg-[#1E1E1E] p-3 rounded-2xl border border-white/5 flex flex-col items-center">
-      <span className="text-[10px] text-white/40 uppercase font-medium">{label}</span>
-      <span className="text-xl font-bold text-white tracking-tight">{value}</span>
+    <div className="fl-theme-surface p-3 rounded-2xl flex flex-col items-center">
+      <span className="text-[10px] fl-theme-text-muted uppercase font-medium">{label}</span>
+      <span className="text-xl font-bold tracking-tight">{value}</span>
       <div className="w-full h-1 bg-white/10 rounded-full mt-2 overflow-hidden">
         <div 
           className="h-full transition-all duration-1000" 
