@@ -1,4 +1,4 @@
-﻿// ====================================
+// ====================================
 // src/react-app/pages/AIChat.tsx
 // Componente de Chatbot com IA
 // ====================================
@@ -7,9 +7,8 @@ import { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router";
 import { useAuth } from "@/react-app/contexts/auth";
 import AppPageShell from "@/react-app/components/AppPageShell";
-import { Send, Bot, User, Sparkles } from "lucide-react";
+import { Bot, History, Settings, Dumbbell, LineChart, Gift, Utensils, Mic, Paperclip, ArrowUp } from "lucide-react";
 import { api } from "@/react-app/utils/api";
-import LoadingBall from "@/react-app/components/LoadingBall";
 
 interface Message {
   role: "user" | "assistant";
@@ -17,12 +16,20 @@ interface Message {
   timestamp: Date;
 }
 
+function renderMessageContent(text: string) {
+  const parts = text.split(/(\*\*.*?\*\*)/g);
+  return parts.map((part, i) => {
+    if (part.startsWith('**') && part.endsWith('**')) {
+      return <span key={i} className="font-bold italic" style={{ color: "var(--app-primary-color)" }}>{part.slice(2, -2)}</span>;
+    }
+    return part;
+  });
+}
+
 function parseAIResponse(text: string): string {
   if (!text) return "";
 
   const lines = text
-    .replace(/\*\*(.*?)\*\*/g, "$1")
-    .replace(/\*(.*?)\*/g, "$1")
     .replace(/^\s*#{1,6}\s*/gm, "")
     .split("\n");
 
@@ -103,7 +110,6 @@ export default function AIChat() {
     setLoading(true);
 
     try {
-      // Build conversation history for context
       const history = messages.map((msg) => ({
         role: msg.role,
         content: msg.content,
@@ -151,131 +157,191 @@ export default function AIChat() {
   };
 
   const quickQuestions = [
-    "Como fazer flexões corretamente?",
-    "Qual treino para perder peso?",
-    "Dicas para manter motivação",
-    "Como aumentar força?",
+    { text: "Sugerir próximo treino", icon: Dumbbell },
+    { text: "Como estão meus stats?", icon: LineChart },
+    { text: "Resgatar FitLoot", icon: Gift },
+    { text: "Recomendações de refeição", icon: Utensils },
   ];
 
   const handleQuickQuestion = (question: string) => {
     setInput(question);
+    setTimeout(() => {
+      const form = document.getElementById("chat-form");
+      if (form) form.dispatchEvent(new Event("submit", { cancelable: true, bubbles: true }));
+    }, 50);
+  };
+
+  const getInitials = (name?: string) => {
+    if (!name) return "U";
+    return name.substring(0, 2).toUpperCase();
   };
 
   return (
-    <AppPageShell bottomNavActive="missions" className="bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50">
-      <section className="fl-app-container pt-4 md:pt-8">
-        <div className="rounded-[1.75rem] bg-gradient-to-r from-emerald-500 to-teal-600 px-4 py-5 text-white shadow-xl sm:px-6 sm:py-6">
+    <AppPageShell bottomNavActive="missions" className="bg-background-light dark:bg-background-dark font-display text-slate-900 dark:text-slate-100 antialiased fl-z-mission-screen">
+      <style>{`
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--app-primary-color) 20%, transparent); border-radius: 10px; }
+        .glass-bot {
+            background: var(--fl-surface-strong, #1a1a1a);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        `}</style>
+      <div className="relative flex h-screen w-full flex-col overflow-hidden" style={{ backgroundColor: "var(--app-bg-color, #060b08)" }}>
+        {/* Header */}
+        <header className="flex items-center justify-between border-b px-6 py-4 lg:px-20 sticky top-0 z-50 transition-all backdrop-blur-md" style={{ borderColor: "rgba(255, 255, 255, 0.05)", backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 80%, transparent)" }}>
           <div className="flex items-center gap-3">
-            <div className="rounded-full bg-white/20 p-3 backdrop-blur-sm">
-              <Bot className="h-5 w-5 sm:h-6 sm:w-6" />
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl" style={{ backgroundColor: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)", color: "var(--app-primary-color)" }}>
+              <Bot className="w-7 h-7" strokeWidth={2} />
             </div>
-            <div className="min-w-0">
-              <h1 className="text-xl font-bold sm:text-2xl">FitBot</h1>
-              <p className="mt-1 flex flex-wrap items-center gap-1 text-sm text-emerald-100">
-                <Sparkles className="h-3 w-3" />
-                Assistente Fitness com IA
-              </p>
+            <div>
+              <h1 className="text-xl font-bold tracking-tight text-white">
+                FitBot <span style={{ color: "var(--app-primary-color)" }}>AI</span>
+              </h1>
+              <div className="flex items-center gap-1.5">
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75" style={{ backgroundColor: "var(--app-primary-color)" }}></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2" style={{ backgroundColor: "var(--app-primary-color)" }}></span>
+                </span>
+                <span className="text-[10px] uppercase tracking-widest font-bold" style={{ color: "var(--app-primary-color)" }}>System Online</span>
+              </div>
             </div>
           </div>
-        </div>
-      </section>
-
-      <section className="fl-app-container pb-40 pt-5 md:pb-28">
-        <div className="mx-auto max-w-4xl space-y-4">
-        {messages.map((message, index) => (
-          <div
-            key={index}
-            className={`flex gap-3 ${
-              message.role === "user" ? "flex-row-reverse" : "flex-row"
-            }`}
-          >
-            <div
-              className={`shrink-0 self-start p-2 rounded-full ${
-                message.role === "user"
-                  ? "bg-emerald-500"
-                  : "bg-white shadow-md"
-              }`}
-            >
-              {message.role === "user" ? (
-                <User className="w-5 h-5 text-white" />
+          <div className="flex items-center gap-3">
+            <button className="flex h-10 w-10 items-center justify-center rounded-full bg-white/5 text-slate-300 transition-all hover:opacity-80">
+              <History className="w-5 h-5" />
+            </button>
+            <button className="flex h-10 w-10 items-center justify-center rounded-full bg-white/5 text-slate-300 transition-all hover:opacity-80">
+              <Settings className="w-5 h-5" />
+            </button>
+            <div className="flex h-10 w-10 items-center justify-center rounded-full border-2 p-0.5 overflow-hidden font-bold" style={{ borderColor: "var(--app-primary-color)", backgroundColor: "color-mix(in srgb, var(--app-primary-color) 20%, transparent)", color: "var(--app-primary-color)" }}>
+              {user?.avatar_url ? (
+                <img src={user.avatar_url} alt="User Avatar" className="h-full w-full rounded-full object-cover" />
               ) : (
-                <Bot className="w-5 h-5 text-emerald-600" />
+                user?.name ? getInitials(user.name) : "U"
               )}
             </div>
-            <div
-              className={`max-w-[85%] rounded-2xl p-3.5 sm:max-w-[75%] sm:p-4 ${
-                message.role === "user"
-                  ? "bg-emerald-500 text-white rounded-tr-none"
-                  : "bg-white shadow-md rounded-tl-none"
-              }`}
+          </div>
+        </header>
+
+        {/* Chat Container */}
+        <main className="flex-1 overflow-y-auto p-4 lg:p-10 space-y-8 max-w-5xl mx-auto w-full custom-scrollbar pb-32">
+          {messages.map((message, index) => (
+            message.role === "assistant" ? (
+              /* Bot Message */
+              <div key={index} className="flex items-end gap-4 max-w-[85%]">
+                <div className="h-10 w-10 shrink-0 rounded-full glass-bot flex items-center justify-center">
+                  <Bot className="w-6 h-6" style={{ color: "var(--app-primary-color)" }} />
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <span className="text-xs font-medium text-slate-500 ml-1 uppercase tracking-tighter">
+                    FitBot AI • {message.timestamp.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
+                  </span>
+                  <div className="glass-bot p-5 rounded-2xl rounded-bl-none text-slate-200 leading-relaxed shadow-xl text-sm whitespace-pre-wrap">
+                    {renderMessageContent(message.content)}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              /* User Message */
+              <div key={index} className="flex flex-col items-end gap-1.5 ml-auto max-w-[80%]">
+                <div className="flex items-end gap-4">
+                  <div className="flex flex-col gap-1.5 items-end">
+                    <span className="text-xs font-medium text-slate-500 mr-1 uppercase tracking-tighter">
+                      Você • {message.timestamp.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
+                    </span>
+                    <div className="p-5 rounded-2xl rounded-br-none font-semibold shadow-lg text-sm" style={{ backgroundColor: "var(--app-primary-color)", color: "#000", boxShadow: "0 10px 15px -3px color-mix(in srgb, var(--app-primary-color) 10%, transparent)" }}>
+                      {message.content}
+                    </div>
+                  </div>
+                  <div className="flex h-10 w-10 items-center justify-center shrink-0 rounded-full border-2 p-0.5 overflow-hidden font-bold" style={{ borderColor: "var(--app-primary-color)", backgroundColor: "color-mix(in srgb, var(--app-primary-color) 20%, transparent)", color: "var(--app-primary-color)" }}>
+                    {user?.avatar_url ? (
+                      <img src={user.avatar_url} alt="User Avatar" className="h-full w-full rounded-full object-cover" />
+                    ) : (
+                      user?.name ? getInitials(user.name) : "U"
+                    )}
+                  </div>
+                </div>
+              </div>
+            )
+          ))}
+
+          {/* Typing Indicator */}
+          {loading && (
+            <div className="flex items-end gap-4 max-w-[85%]">
+              <div className="h-10 w-10 shrink-0 rounded-full glass-bot flex items-center justify-center">
+                <Bot className="w-6 h-6" style={{ color: "var(--app-primary-color)" }} />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <span className="text-xs font-medium text-slate-500 ml-1 uppercase tracking-tighter">
+                  FitBot AI • {new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
+                </span>
+                <div className="glass-bot p-4 rounded-2xl rounded-bl-none shadow-xl flex gap-1 items-center justify-center w-16 h-12">
+                  <span className="h-2 w-2 rounded-full animate-bounce" style={{ backgroundColor: "var(--app-primary-color)", animationDelay: "0ms" }}></span>
+                  <span className="h-2 w-2 rounded-full animate-bounce" style={{ backgroundColor: "var(--app-primary-color)", animationDelay: "150ms" }}></span>
+                  <span className="h-2 w-2 rounded-full animate-bounce" style={{ backgroundColor: "var(--app-primary-color)", animationDelay: "300ms" }}></span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div ref={messagesEndRef} />
+        </main>
+
+        {/* Bottom Actions & Input */}
+        <div className="absolute bottom-0 w-full p-4 lg:px-20 lg:pb-8 border-t backdrop-blur-xl" style={{ borderColor: "rgba(255, 255, 255, 0.05)", backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 80%, transparent)" }}>
+          
+          {/* Suggested Questions */}
+          {messages.length <= 1 && !loading && (
+            <div className="flex gap-3 mb-4 overflow-x-auto pb-2 custom-scrollbar">
+              {quickQuestions.map((q, index) => (
+                <button
+                  key={index}
+                  onClick={() => handleQuickQuestion(q.text)}
+                  type="button"
+                  className="flex h-10 shrink-0 items-center justify-center gap-2 rounded-full border border-white/10 bg-white/5 px-5 text-sm font-semibold text-slate-300 transition-all hover:text-black whitespace-nowrap"
+                  style={{ '--tw-hover-bg': 'var(--app-primary-color)' } as React.CSSProperties}
+                  onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "var(--app-primary-color)"; e.currentTarget.style.color = "#000"; e.currentTarget.style.borderColor = "var(--app-primary-color)"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "rgba(255, 255, 255, 0.05)"; e.currentTarget.style.color = "rgb(203 213 225)"; e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.1)"; }}
+                >
+                  <q.icon className="w-5 h-5" />
+                  {q.text}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Input Box */}
+          <form id="chat-form" onSubmit={sendMessage} className="relative flex items-center max-w-5xl mx-auto w-full">
+            <div className="flex-1 relative">
+              <input
+                type="text"
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                disabled={loading}
+                className="w-full rounded-2xl border-none bg-white/5 py-4 pl-6 pr-24 text-white placeholder:text-slate-500 focus:ring-1 transition-all outline-none"
+                style={{ '--tw-ring-color': 'color-mix(in srgb, var(--app-primary-color) 50%, transparent)' } as React.CSSProperties}
+                placeholder="Mensagem para o FitBot..."
+              />
+              <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-2">
+                <button type="button" className="text-slate-500 transition-colors" onMouseEnter={(e) => e.currentTarget.style.color="var(--app-primary-color)"} onMouseLeave={(e) => e.currentTarget.style.color="rgb(100 116 139)"}>
+                  <Mic className="w-5 h-5" />
+                </button>
+                <button type="button" className="text-slate-500 transition-colors" onMouseEnter={(e) => e.currentTarget.style.color="var(--app-primary-color)"} onMouseLeave={(e) => e.currentTarget.style.color="rgb(100 116 139)"}>
+                  <Paperclip className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+            <button
+              type="submit"
+              disabled={loading || !input.trim()}
+              className="ml-3 flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl text-black shadow-lg transition-transform hover:scale-105 active:scale-95 disabled:opacity-50 disabled:grayscale"
+              style={{ backgroundColor: "var(--app-primary-color)", boxShadow: "0 10px 15px -3px color-mix(in srgb, var(--app-primary-color) 20%, transparent)" }}
             >
-              <p className="text-sm whitespace-pre-wrap">{message.content}</p>
-              <p
-                className={`text-xs mt-2 ${
-                  message.role === "user" ? "text-emerald-100" : "text-gray-400"
-                }`}
-              >
-                {message.timestamp.toLocaleTimeString("pt-BR", {
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })}
-              </p>
-            </div>
-          </div>
-        ))}
-
-        {loading && (
-          <div className="flex gap-3">
-            <div className="shrink-0 self-start p-2 rounded-full bg-white shadow-md">
-              <Bot className="w-5 h-5 text-emerald-600" />
-            </div>
-            <div className="bg-white shadow-md p-4 rounded-2xl rounded-tl-none">
-              <LoadingBall size="md" />
-            </div>
-          </div>
-        )}
-
-        <div ref={messagesEndRef} />
+              <ArrowUp className="w-6 h-6" strokeWidth={3} />
+            </button>
+          </form>
         </div>
-      </section>
-
-      {messages.length <= 1 && !loading && (
-        <section className="fl-app-container mb-4">
-          <div className="mx-auto max-w-4xl">
-          <p className="mb-2 text-xs text-gray-500">Perguntas rápidas:</p>
-          <div className="flex flex-wrap gap-2">
-            {quickQuestions.map((question, index) => (
-              <button
-                key={index}
-                onClick={() => handleQuickQuestion(question)}
-                className="min-h-11 rounded-full bg-white px-3 py-2 text-xs text-gray-700 shadow-sm transition-shadow hover:shadow-md"
-              >
-                {question}
-              </button>
-            ))}
-          </div>
-          </div>
-        </section>
-      )}
-
-      <div className="fixed bottom-24 left-0 right-0 fl-z-card px-4 pb-4 pt-4 md:bottom-6">
-        <form onSubmit={sendMessage} className="mx-auto flex w-full max-w-4xl gap-2 rounded-[1.6rem] border border-[var(--fl-border-soft)] bg-[color-mix(in_srgb,var(--fl-surface-strong)_90%,transparent)] p-2 shadow-lg backdrop-blur-xl">
-          <input
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder="Digite sua pergunta..."
-            className="h-11 flex-1 rounded-full border-2 border-emerald-200 bg-white px-4 py-3 outline-none shadow-sm focus:border-emerald-500"
-            disabled={loading}
-          />
-          <button
-            type="submit"
-            disabled={loading || !input.trim()}
-            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-lg transition-shadow hover:shadow-xl disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <Send className="w-5 h-5" />
-          </button>
-        </form>
       </div>
     </AppPageShell>
   );
