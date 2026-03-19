@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router";
-import { Crown, Filter as FilterIcon, Trophy } from "lucide-react";
+import { Crown, Trophy } from "lucide-react";
 import AppPageShell from "@/react-app/components/AppPageShell";
 import LoadingBall from "@/react-app/components/LoadingBall";
 import { Avatar } from "@/react-app/components/ui/avatar";
@@ -139,9 +139,6 @@ export default function Ranking() {
               Os guerreiros mais consistentes do FitLoot.
             </p>
           </div>
-          <button className="fl-theme-surface-soft rounded-2xl p-3.5 fl-theme-text-muted transition-all hover:opacity-90">
-            <FilterIcon className="h-5 w-5" />
-          </button>
         </header>
 
         {error ? (
@@ -158,7 +155,7 @@ export default function Ranking() {
         ) : null}
 
         <div className="mb-6 sm:mb-10">
-          <div className="fl-theme-surface-soft flex max-w-[320px] rounded-2xl p-1.5 min-w-0">
+          <div className="fl-theme-surface-soft mx-auto flex max-w-[320px] rounded-2xl p-1.5 min-w-0">
             <button
               type="button"
               onClick={() => setMode("global")}
@@ -213,7 +210,7 @@ export default function Ranking() {
           </section>
         ) : null}
 
-        <div className="mx-auto mb-8 sm:mb-12 flex w-full max-w-[720px] items-end justify-center gap-1.5 sm:gap-6 px-1 sm:px-4 pt-6 sm:pt-10 min-w-0">
+        <div className="mx-auto mb-16 sm:mb-24 flex w-full max-w-[720px] items-end justify-center gap-1.5 sm:gap-6 px-1 sm:px-4 pt-10 sm:pt-14 min-w-0">
           <PodiumCard entry={top3[1]} position={2} highlightColor="#64748b" />
           <PodiumCard entry={top3[0]} position={1} highlightColor="var(--app-primary-color)" featured />
           <PodiumCard entry={top3[2]} position={3} highlightColor="#92400e" />
@@ -304,12 +301,12 @@ function PodiumCard({
   if (!entry) return <div className="flex-1" />;
 
   return (
-    <div className={`flex flex-1 flex-col items-center ${featured ? "-mt-8 max-w-[180px]" : "max-w-[140px]"}`}>
+    <div className={`flex flex-1 flex-col items-center ${featured ? "-mt-10 sm:-mt-12 max-w-[140px] sm:max-w-[180px]" : "max-w-[100px] sm:max-w-[140px]"}`}>
       <div className="relative mb-5">
         {featured ? (
           <Crown className="absolute -top-10 left-1/2 h-12 w-12 -translate-x-1/2" style={{ color: highlightColor }} />
         ) : null}
-        <div className={`overflow-hidden rounded-full border-4 ${featured ? "size-20 sm:size-28" : "size-16 sm:size-20"}`} style={{ borderColor: highlightColor }}>
+        <div className={`overflow-hidden rounded-full border-4 ${featured ? "size-20 sm:size-28" : "size-12 sm:size-20"}`} style={{ borderColor: highlightColor }}>
           <Avatar name={entry.username} className="h-full w-full" />
         </div>
         <div
@@ -320,7 +317,7 @@ function PodiumCard({
         </div>
       </div>
       <div
-        className={`w-full rounded-t-[1.5rem] sm:rounded-t-[2rem] border-x border-t p-2 sm:p-4 text-center ${featured ? "h-28 sm:h-36" : "h-20 sm:h-24"}`}
+        className={`w-full rounded-t-[1.5rem] sm:rounded-t-[2rem] border-x border-t p-2 sm:p-4 text-center ${featured ? "h-20 sm:h-36" : "h-14 sm:h-24"}`}
         style={{
           borderColor: "var(--fl-border-soft)",
           backgroundColor: featured

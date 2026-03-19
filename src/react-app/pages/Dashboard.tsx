@@ -397,22 +397,22 @@ export default function Dashboard() {
       .toUpperCase();
 
     if (normalizedRarity === "RARO") {
-      return { rarityClass: "border-blue-500 text-blue-400", rarityIcon: "\u25C6" };
+      return { rarityClass: "border-blue-500 text-blue-600", rarityIcon: "\u25C6" };
     }
 
     if (normalizedRarity === "EPICO" || normalizedRarity === "MITICO") {
-      return { rarityClass: "border-purple-500 text-purple-400", rarityIcon: "\u2726" };
+      return { rarityClass: "border-purple-500 text-purple-600", rarityIcon: "\u2726" };
     }
 
     if (normalizedRarity === "LENDARIO") {
-      return { rarityClass: "border-amber-500 text-amber-400", rarityIcon: "\u2736" };
+      return { rarityClass: "border-amber-500 text-amber-600", rarityIcon: "\u2736" };
     }
 
     if (normalizedRarity === "SECRETO") {
-      return { rarityClass: "border-primary text-primary", rarityIcon: "\u2739" };
+      return { rarityClass: "border-black/40 text-black/70", rarityIcon: "\u2739" };
     }
 
-    return { rarityClass: "border-slate-500 text-slate-400", rarityIcon: "\u2022" };
+    return { rarityClass: "border-slate-500 text-slate-600", rarityIcon: "\u2022" };
   }, [showcasedAchievement]);
 
   return (
@@ -459,13 +459,6 @@ export default function Dashboard() {
             </div>
           ) : null}
 
-          {showcasedAchievement && showcasedAchievementDisplay ? (
-            <div className="flex items-center gap-2 px-1 min-w-0">
-              <span className={`text-[10px] sm:text-xs font-bold px-2 py-0.5 sm:px-3 sm:py-1 rounded-full border truncate ${showcasedAchievementDisplay.rarityClass}`}>
-                {showcasedAchievementDisplay.rarityIcon} {showcasedAchievement.name}
-              </span>
-            </div>
-          ) : null}
 
           <section className="space-y-2 sm:space-y-4 min-w-0">
             <div className="rounded-[1.5rem] sm:rounded-[2rem] px-3 py-4 sm:px-4 sm:py-5 md:px-8 md:py-6 min-w-0" style={PRIMARY_GLOW_STYLE}>
@@ -475,9 +468,18 @@ export default function Dashboard() {
                     <Cloud className="h-4 w-4" />
                     <span>Experience Points</span>
                   </div>
-                  <div className="inline-flex w-fit items-center gap-1.5 sm:gap-2 rounded-full px-2 py-1 md:px-4 md:py-3 text-[10px] sm:text-xs md:text-sm font-black bg-black/10 text-black">
-                    <Flame className="h-4 w-4" />
-                    <span>{loadingState.progression ? <LoadingBall size="sm" /> : `${progression?.current_streak ?? 0}-Day Streak`}</span>
+                  <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                    <div className="inline-flex w-fit items-center gap-1.5 sm:gap-2 rounded-full px-2 py-1 md:px-4 md:py-3 text-[10px] sm:text-xs md:text-sm font-black bg-black/10 text-black">
+                      <Flame className="h-4 w-4" />
+                      <span>{loadingState.progression ? <LoadingBall size="sm" /> : `${progression?.current_streak ?? 0}-Day Streak`}</span>
+                    </div>
+
+                    {showcasedAchievement && showcasedAchievementDisplay && (
+                      <div className={`inline-flex w-fit items-center gap-1 rounded-full px-2 py-0.5 sm:px-3 sm:py-1 text-[10px] sm:text-xs font-bold border transition-colors bg-white/10 ${showcasedAchievementDisplay.rarityClass}`}>
+                        <span className="shrink-0">{showcasedAchievementDisplay.rarityIcon}</span>
+                        <span className="truncate">{showcasedAchievement.name}</span>
+                      </div>
+                    )}
                   </div>
                   <div className="mt-1 sm:mt-2 text-[8px] sm:text-[0.6rem] md:text-xs font-black uppercase tracking-[0.15em] sm:tracking-[0.2em] text-black/60 truncate">
                     {loadingState.progression ? <LoadingBall size="sm" /> : `${formatNumber(Math.max(0, progression?.xp ?? 0))} / ${formatNumber(xpForNextLevel)} PARA O PROXIMO NIVEL`}

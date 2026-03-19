@@ -153,22 +153,22 @@ export default function Profile() {
       .toUpperCase();
 
     if (normalizedRarity === "RARO") {
-      return { rarityTextClass: "text-blue-400" };
+      return { rarityClass: "border-blue-500 text-blue-600" };
     }
 
     if (normalizedRarity === "EPICO" || normalizedRarity === "MITICO") {
-      return { rarityTextClass: "text-purple-400" };
+      return { rarityClass: "border-purple-500 text-purple-600" };
     }
 
     if (normalizedRarity === "LENDARIO") {
-      return { rarityTextClass: "text-amber-400" };
+      return { rarityClass: "border-amber-500 text-amber-600" };
     }
 
     if (normalizedRarity === "SECRETO") {
-      return { rarityTextClass: "text-primary" };
+      return { rarityClass: "border-black/40 text-black/70" };
     }
 
-    return { rarityTextClass: "text-slate-400" };
+    return { rarityClass: "border-slate-500 text-slate-600" };
   }, [showcasedAchievement]);
 
   const combatPower = useMemo(() => {
@@ -295,11 +295,13 @@ export default function Profile() {
               <p className="text-primary font-bold text-[10px] uppercase tracking-[0.3em]" style={{ color: 'var(--app-primary-color)' }}>
                 {activeTitle?.name || "RECRUTA FITLOOT"}
               </p>
-              {showcasedAchievement && showcasedAchievementTone ? (
-                <span className={`text-xs font-medium ${showcasedAchievementTone.rarityTextClass}`}>
-                  {"\u{1F3C6}"} {showcasedAchievement.name}
-                </span>
-              ) : null}
+              {showcasedAchievement && showcasedAchievementTone && (
+                <div className="mt-2 min-w-0">
+                  <span className={`inline-flex items-center text-[10px] sm:text-xs font-bold px-2 py-0.5 rounded-full border truncate ${showcasedAchievementTone.rarityClass}`}>
+                    🏆 {showcasedAchievement.name}
+                  </span>
+                </div>
+              )}
             </div>
 
             <div className="flex w-full flex-wrap gap-2 border-t pt-5 sm:gap-3 sm:pt-8 min-w-0" style={{ borderColor: "var(--fl-border-soft)" }}>

@@ -32,8 +32,8 @@ export default function BottomNav({ active }: BottomNavProps) {
                 className={`fl-bottom-nav-item ${isActive ? "fl-bottom-nav-item-active" : ""}`}
                 aria-label={label}
               >
-                <Icon className="h-5 w-5" />
-                <span className="fl-bottom-nav-label">{label}</span>
+                <Icon className="h-5 w-5 shrink-0" />
+                <span className="fl-bottom-nav-label truncate">{label}</span>
               </button>
             );
           })}
