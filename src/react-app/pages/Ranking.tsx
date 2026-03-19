@@ -1,14 +1,22 @@
-﻿import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { useAuth } from "@/react-app/contexts/auth";
 import AppPageShell from "@/react-app/components/AppPageShell";
 import LoadingBall from "@/react-app/components/LoadingBall";
 import { Avatar } from "@/react-app/components/ui/avatar";
-import { Card } from "@/react-app/components/ui/card";
-import { Trophy, Medal, Crown, Flame, Zap } from "lucide-react";
-import { ApiRequestError, fetchAndCacheJson, readCachedJson } from "@/react-app/utils/api";
+import { 
+  Trophy, 
+  Medal, 
+  Crown, 
+  Flame, 
+  Zap, 
+  Filter as FilterIcon,
+  Search as SearchIcon
+} from "lucide-react";
+import { ApiRequestError, api, fetchAndCacheJson, readCachedJson } from "@/react-app/utils/api";
 import type { RankingPlayer } from "@/shared/types";
-import { safeGet } from "@/utils/typeHelpers";
+
+type RankingMode = 'global' | 'friends';
 
 export default function Ranking() {
   const { user } = useAuth();
@@ -16,22 +24,21 @@ export default function Ranking() {
   const [ranking, setRanking] = useState<RankingPlayer[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [mode, setMode] = useState<RankingMode>('global');
 
-
-  const loadRanking = useCallback(async () => {
+  const loadRanking = useCallback(async (currentMode: RankingMode) => {
     setError(null);
-    const cacheRanking = readCachedJson<RankingPlayer[]>("/api/ranking/global");
+    const apiPath = currentMode === 'global' ? "/api/ranking/global" : "/api/friends";
+    const cacheRanking = readCachedJson<RankingPlayer[]>(apiPath);
 
     if (cacheRanking) {
       setRanking(Array.isArray(cacheRanking.data) ? cacheRanking.data : []);
       setLoading(false);
-      if (!cacheRanking.stale) {
-        return;
-      }
+      if (!cacheRanking.stale) return;
     }
 
     try {
-      const data = await fetchAndCacheJson<RankingPlayer[]>("/api/ranking/global");
+      const data = await fetchAndCacheJson<RankingPlayer[]>(apiPath);
       setRanking(Array.isArray(data) ? data : []);
     } catch (loadError) {
       if (loadError instanceof ApiRequestError && (loadError.status === 401 || loadError.status === 403)) {
@@ -53,140 +60,160 @@ export default function Ranking() {
       navigate("/app");
       return;
     }
-    void loadRanking();
-  }, [user, navigate, loadRanking]);
+    void loadRanking(mode);
+  }, [user, navigate, loadRanking, mode]);
 
-  if (loading) {
+  if (loading && ranking.length === 0) {
     return (
-      <AppPageShell bottomNavActive="ranking" className="bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50">
-        <div className="fl-app-container py-6 sm:py-10">
-          <div className="fl-card p-6 flex items-center justify-center">
-            <LoadingBall size="md" />
-          </div>
+      <AppPageShell bottomNavActive="ranking" className="bg-[#0A0A0A]">
+        <div className="flex-1 flex items-center justify-center">
+          <LoadingBall size="md" />
         </div>
       </AppPageShell>
     );
   }
 
-  if (error) {
-    return (
-      <AppPageShell bottomNavActive="ranking" className="bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50">
-        <div className="fl-app-container py-10 text-center sm:py-12">
-          <p className="text-red-600 mb-4">{error}</p>
-          <button onClick={loadRanking} className="fl-btn-primary rounded-xl px-4 py-2">
-            Tentar novamente
-          </button>
-        </div>
-      </AppPageShell>
-    );
-  }
+  const top3 = ranking.slice(0, 3);
+  const others = ranking.slice(3);
 
   return (
-    <AppPageShell bottomNavActive="ranking" className="bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50">
-      <section className="fl-app-container py-4 sm:py-6">
-        <div className="rounded-[1.75rem] bg-gradient-to-r from-emerald-500 to-teal-600 px-4 py-5 text-white shadow-xl sm:rounded-[2rem] sm:px-6 sm:py-6">
-          <div className="mb-6 text-center">
-            <div className="mb-4 inline-flex h-14 w-14 items-center justify-center rounded-full bg-white/20 backdrop-blur-sm sm:h-16 sm:w-16">
-              <Trophy className="h-7 w-7 sm:h-8 sm:w-8" />
-            </div>
-            <h1 className="fl-title-page mb-1 text-white">Ranking Global</h1>
-            <p className="text-sm text-emerald-100 sm:text-base">Top atletas do FitLoot</p>
+    <AppPageShell bottomNavActive="ranking" className="bg-[#0A0A0A]">
+      <div className="flex-1 flex flex-col overflow-y-auto custom-scrollbar p-6 sm:p-8">
+        
+        {/* Header Section */}
+        <header className="flex items-center justify-between mb-8">
+          <div>
+            <h1 className="text-2xl font-bold text-white tracking-tight uppercase tracking-[0.2em] mb-1">Ranking Global</h1>
+            <p className="text-slate-500 text-[10px] font-bold uppercase tracking-widest">Os guerreiros mais implacáveis do FitLoot.</p>
           </div>
+          <button className="p-3.5 rounded-2xl bg-[#161616] border border-white/5 text-slate-400 hover:text-white hover:bg-white/5 transition-all">
+            <FilterIcon className="w-5 h-5" />
+          </button>
+        </header>
 
-          {safeGet(ranking, 0) && safeGet(ranking, 1) && safeGet(ranking, 2) && (
-            <div className="mb-2 flex items-end justify-center gap-2 sm:mb-4">
-              <PodiumCard position={2} player={safeGet(ranking, 1)} height="h-24" />
-              <PodiumCard position={1} player={safeGet(ranking, 0)} height="h-32" />
-              <PodiumCard position={3} player={safeGet(ranking, 2)} height="h-20" />
+        {/* Mode Toggle */}
+        <div className="mb-12">
+          <div className="flex p-1.5 bg-[#161616] rounded-2xl border border-white/5 max-w-[300px]">
+            <button 
+              onClick={() => setMode('global')}
+              className={`flex-1 py-3 rounded-xl font-bold text-[10px] uppercase tracking-widest transition-all duration-300 ${mode === 'global' ? 'bg-primary text-black shadow-lg shadow-primary/20' : 'text-slate-400 hover:text-slate-200'}`}
+              style={{ backgroundColor: mode === 'global' ? 'var(--app-primary-color)' : '' }}
+            >
+              Global
+            </button>
+            <button 
+              onClick={() => setMode('friends')}
+              className={`flex-1 py-3 rounded-xl font-bold text-[10px] uppercase tracking-widest transition-all duration-300 ${mode === 'friends' ? 'bg-primary text-black shadow-lg shadow-primary/20' : 'text-slate-400 hover:text-slate-200'}`}
+              style={{ backgroundColor: mode === 'friends' ? 'var(--app-primary-color)' : '' }}
+            >
+              Amigos
+            </button>
+          </div>
+        </div>
+
+        {/* Podium Section */}
+        <div className="mb-16 flex items-end justify-center gap-2 sm:gap-6 pt-10 px-4">
+          {/* Rank 2 */}
+          {top3[1] && (
+            <div className="flex flex-col items-center flex-1 max-w-[140px]">
+              <div className="relative mb-5 group">
+                <div className="size-16 sm:size-20 rounded-full border-4 border-slate-600 overflow-hidden shadow-2xl group-hover:scale-105 transition-transform duration-500">
+                  <Avatar name={top3[1].username} className="w-full h-full text-lg" />
+                </div>
+                <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 bg-slate-600 text-white px-3 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-widest shadow-lg">2º</div>
+              </div>
+              <div className="h-24 sm:h-28 w-full bg-[#161616]/40 rounded-t-2xl flex flex-col items-center justify-center p-3 border-t border-x border-white/5 backdrop-blur-sm">
+                <span className="text-[10px] sm:text-xs font-bold text-white truncate w-full text-center mb-1">{top3[1].username}</span>
+                <span className="text-[9px] sm:text-[10px] font-bold text-primary uppercase tracking-widest" style={{ color: 'var(--app-primary-color)' }}>LVL {top3[1].level}</span>
+              </div>
+            </div>
+          )}
+
+          {/* Rank 1 */}
+          {top3[0] && (
+            <div className="flex flex-col items-center flex-1 max-w-[180px] -mt-8">
+              <div className="relative mb-6 group">
+                <Crown className="absolute -top-8 sm:-top-10 left-1/2 -translate-x-1/2 text-primary w-10 h-10 sm:w-12 sm:h-12 animate-bounce transition-transform" style={{ color: 'var(--app-primary-color)' }} />
+                <div className="size-20 sm:size-28 rounded-full border-4 border-primary overflow-hidden shadow-[0_0_30px_rgba(var(--app-primary-color-rgb),0.3)] group-hover:scale-105 transition-transform duration-500" style={{ borderColor: 'var(--app-primary-color)' }}>
+                  <Avatar name={top3[0].username} className="w-full h-full text-2xl" />
+                </div>
+                <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 bg-primary text-black px-4 py-1 rounded-full text-[9px] sm:text-[10px] font-bold uppercase tracking-[0.2em] shadow-xl whitespace-nowrap" style={{ backgroundColor: 'var(--app-primary-color)' }}>CAMPEÃO</div>
+              </div>
+              <div className="h-30 sm:h-36 w-full bg-primary/10 rounded-t-[2.5rem] flex flex-col items-center justify-center p-4 border-x border-t border-primary/20 backdrop-blur-md">
+                <span className="text-sm sm:text-base font-bold text-white truncate w-full text-center mb-1 tracking-tight">{top3[0].username}</span>
+                <span className="text-[10px] sm:text-xs font-bold text-primary uppercase tracking-widest" style={{ color: 'var(--app-primary-color)' }}>LVL {top3[0].level}</span>
+              </div>
+            </div>
+          )}
+
+          {/* Rank 3 */}
+          {top3[2] && (
+            <div className="flex flex-col items-center flex-1 max-w-[140px]">
+              <div className="relative mb-5 group">
+                <div className="size-16 sm:size-20 rounded-full border-4 border-orange-900 overflow-hidden shadow-2xl group-hover:scale-105 transition-transform duration-500">
+                  <Avatar name={top3[2].username} className="w-full h-full text-lg" />
+                </div>
+                <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 bg-orange-900 text-white px-3 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-widest shadow-lg">3º</div>
+              </div>
+              <div className="h-20 sm:h-24 w-full bg-[#161616]/40 rounded-t-2xl flex flex-col items-center justify-center p-3 border-t border-x border-white/5 backdrop-blur-sm">
+                <span className="text-[10px] sm:text-xs font-bold text-white truncate w-full text-center mb-1">{top3[2].username}</span>
+                <span className="text-[9px] sm:text-[10px] font-bold text-primary uppercase tracking-widest" style={{ color: 'var(--app-primary-color)' }}>LVL {top3[2].level}</span>
+              </div>
             </div>
           )}
         </div>
-      </section>
 
-      <section className="fl-app-container space-y-3 pb-6 pt-1 sm:space-y-4">
-        {ranking.slice(3).map((player, index) => (
-          <RankingCard key={index} position={index + 4} player={player} />
-        ))}
-
-        {ranking.length === 0 && (
-          <div className="text-center py-12">
-            <Trophy className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-            <p className="text-gray-500">Nenhum atleta no ranking ainda</p>
+        {/* Leaderboard List */}
+        <div className="flex flex-col gap-4 mb-24 max-w-[800px] mx-auto w-full">
+          <div className="flex items-center px-6 py-2 text-[10px] font-bold text-slate-500 uppercase tracking-[0.3em]">
+            <span className="w-8 sm:w-10">POS</span>
+            <span className="flex-1 px-4">USUÁRIO</span>
+            <span className="text-right">EXPERIÊNCIA</span>
           </div>
-        )}
-      </section>
+
+          {others.map((player, idx) => {
+            const position = idx + 4;
+            const isMe = player.username === user?.username;
+            
+            return (
+              <div 
+                key={player.username}
+                className={`flex items-center p-4 sm:p-5 rounded-2xl border transition-all duration-300 group ${isMe ? 'bg-primary/5 border-primary/30 relative overflow-hidden' : 'bg-[#161616]/40 border-white/5 hover:border-white/10'}`}
+              >
+                {isMe && <div className="absolute left-0 top-0 bottom-0 w-1 sm:w-1.5 bg-primary" style={{ backgroundColor: 'var(--app-primary-color)' }}></div>}
+                
+                <span className={`w-8 sm:w-10 font-bold text-sm ${isMe ? 'text-primary' : 'text-slate-500'}`} style={{ color: isMe ? 'var(--app-primary-color)' : '' }}>{position}</span>
+                
+                <div className={`size-10 sm:size-12 rounded-full overflow-hidden mx-2 sm:mx-4 shrink-0 transition-transform duration-500 group-hover:scale-110 ${isMe ? 'border-2 border-primary shadow-[0_0_15px_rgba(var(--app-primary-color-rgb),0.2)]' : 'border border-white/10'}`} style={{ borderColor: isMe ? 'var(--app-primary-color)' : '' }}>
+                  <Avatar name={player.username} className="w-full h-full" />
+                </div>
+                
+                <div className="flex-1 min-w-0">
+                  <p className={`text-sm sm:text-base font-bold truncate ${isMe ? 'text-white' : 'text-slate-200'}`}>{isMe ? `Você (${player.username})` : player.username}</p>
+                  <p className={`text-[9px] sm:text-[10px] font-bold uppercase tracking-widest mt-0.5 ${isMe ? 'text-primary' : 'text-slate-500'}`} style={{ color: isMe ? 'var(--app-primary-color)' : '' }}>
+                    {isMe ? 'TOP 5% GLOBALMENTE' : 'ATLETA ELITE'}
+                  </p>
+                </div>
+                
+                <div className="text-right shrink-0">
+                  <p className="text-sm sm:text-base font-bold text-white mb-0.5">LVL {player.level}</p>
+                  <p className="text-[10px] font-bold text-primary uppercase tracking-widest" style={{ color: 'var(--app-primary-color)' }}>
+                    {(player.xp / 1000).toFixed(1)}K XP
+                  </p>
+                </div>
+              </div>
+            );
+          })}
+
+          {ranking.length === 0 && !loading && (
+            <div className="flex flex-col items-center justify-center py-24 text-center">
+              <Trophy className="w-16 h-16 text-white/5 mb-6" />
+              <p className="text-[11px] font-bold text-slate-600 uppercase tracking-[0.2em]">Nenhum competidor encontrado.</p>
+            </div>
+          )}
+        </div>
+
+      </div>
     </AppPageShell>
   );
 }
-
-function PodiumCard({
-  position,
-  player,
-  height,
-}: {
-  position: number;
-  player: RankingPlayer | undefined;
-  height: string;
-}) {
-  if (!player) {
-    return null;
-  }
-  const getMedalIcon = () => {
-    if (position === 1) return <Crown className="w-6 h-6 text-yellow-400" />;
-    if (position === 2) return <Medal className="w-5 h-5 text-gray-300" />;
-    return <Medal className="w-5 h-5 text-orange-400" />;
-  };
-
-  const getBgColor = () => {
-    if (position === 1) return "from-yellow-400 to-yellow-500";
-    if (position === 2) return "from-gray-300 to-gray-400";
-    return "from-orange-400 to-orange-500";
-  };
-
-  return (
-    <div className="max-w-[92px] flex-1 sm:max-w-[100px]">
-      <Card tone="soft" className="p-3 mb-2 text-center shadow-xl">
-        <div className="flex justify-center mb-2">{getMedalIcon()}</div>
-        <p className="font-bold text-gray-900 text-sm truncate">{player.username}</p>
-        <p className="text-xs text-gray-600">Nv {player.level}</p>
-        <div className="flex items-center justify-center gap-1 mt-2 text-xs text-emerald-600">
-          <Flame className="w-3 h-3" />
-          <span>{player.current_streak}d</span>
-        </div>
-      </Card>
-      <div className={`bg-gradient-to-b ${getBgColor()} ${height} rounded-t-xl flex items-center justify-center font-bold text-white text-xl shadow-lg`}>
-        {position}
-      </div>
-    </div>
-  );
-}
-
-function RankingCard({ position, player }: { position: number; player: RankingPlayer }) {
-  return (
-    <Card tone="soft" className="flex items-center gap-3 p-4 transition-all hover:shadow-xl sm:gap-4">
-      <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 text-base font-bold text-white sm:h-12 sm:w-12 sm:text-lg">
-        {position}
-      </div>
-
-      <Avatar name={player.full_name || player.username} className="h-11 w-11 bg-emerald-100 text-emerald-700 text-sm" />
-
-      <div className="flex-1 min-w-0">
-        <h3 className="font-bold text-gray-900 truncate">{player.username}</h3>
-        <p className="text-sm text-gray-600">{player.full_name}</p>
-      </div>
-
-      <div className="text-right">
-        <div className="mb-1 flex items-center justify-end gap-1 font-bold text-emerald-600">
-          <Zap className="w-4 h-4" />
-          <span>Nv {player.level}</span>
-        </div>
-        <div className="flex items-center justify-end gap-1 text-sm text-orange-600">
-          <Flame className="w-3 h-3" />
-          <span>{player.current_streak}d</span>
-        </div>
-      </div>
-    </Card>
-  );
-}
-
-
