@@ -9,6 +9,10 @@ import {
   Star,
   Trophy,
   X,
+  Info,
+  Pause,
+  FastForward,
+  Square,
 } from "lucide-react";
 import { Card } from "@/react-app/components/ui/card";
 import { Button } from "@/react-app/components/ui/button";
@@ -293,8 +297,7 @@ function MissionExecutionModal({
   const totalCounterProgress = state.totalRepsDone + state.repsDone;
   const canFinishCounterMission = isCounterMission && state.finished;
   const canFinishMission = isDistanceMission ? canFinishInputMission : isTimeMission ? state.finished : canFinishCounterMission;
-  const finishButtonLabel = isDistanceMission ? "Registrar e Concluir" : "Concluir";
-
+  
   const finishMission = async () => {
     if (!canFinishMission) return;
     const value = isDistanceMission
@@ -307,98 +310,214 @@ function MissionExecutionModal({
 
   if (!open) return null;
 
-  return (
-    <div className="fl-z-mission-screen fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center px-4">
-      <div className="w-full max-w-md bg-white rounded-3xl shadow-2xl p-6 space-y-4">
-        <div className="flex items-center justify-between">
-          <h3 className="text-lg font-bold text-gray-900">Executar Missao</h3>
-          <button onClick={onClose} className="p-2 rounded-xl hover:bg-gray-100" aria-label="Fechar">
-            <X className="w-4 h-4" />
-          </button>
-        </div>
+  const detailMissionMediaUrl = resolveMissionMediaUrl(mission);
+  const displaySeconds = state.resting ? state.restSeconds : state.remainingSeconds;
+  const m = Math.floor(displaySeconds / 60).toString().padStart(2, '0');
+  const s = (displaySeconds % 60).toString().padStart(2, '0');
 
-        {isTimeMission && (
-          <div className="space-y-3">
-            <div className="rounded-2xl bg-emerald-50 border border-emerald-200 p-4 text-center">
-              <p className="text-xs text-emerald-700 mb-1">{state.resting ? "Descanso" : `Serie ${state.currentSet} de ${sets}`}</p>
-              <p className="text-4xl font-bold text-emerald-700">
-                {state.resting ? state.restSeconds : state.remainingSeconds}s
-              </p>
+  let activeProgress = 0;
+  if (state.finished) {
+    activeProgress = 100;
+  } else if (isCounterMission) {
+    activeProgress = Math.min(100, (totalCounterProgress / totalGoal) * 100 || 0);
+  } else {
+    activeProgress = Math.min(100, ((state.currentSet - 1) / sets) * 100 || 0);
+  }
+
+  return (
+    <div className="fl-z-mission-screen fixed inset-0 flex flex-col overflow-x-hidden font-display antialiased z-[100]" style={{ backgroundColor: "var(--app-bg-color, #0a0a0a)", color: "var(--fl-color-text, #f1f5f9)" }}>
+      <div className="layout-container flex h-full grow flex-col">
+        {/* Header */}
+        <header className="flex items-center justify-between px-6 py-4 border-b" style={{ borderColor: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)" }}>
+          <div className="flex items-center gap-3">
+            <div className="size-8 rounded flex items-center justify-center" style={{ backgroundColor: "var(--app-primary-color)", color: "var(--app-bg-color, #0a0a0a)" }}>
+              <Dumbbell className="w-5 h-5" strokeWidth={2.5} />
             </div>
-            <Button
+            <h2 className="text-xl font-bold tracking-tight">FitLoot</h2>
+          </div>
+          <div className="flex gap-2">
+            <button className="flex size-10 items-center justify-center rounded-full border transition-opacity hover:opacity-80" style={{ backgroundColor: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)", color: "var(--app-primary-color)", borderColor: "color-mix(in srgb, var(--app-primary-color) 20%, transparent)" }}>
+              <Info className="w-5 h-5" />
+            </button>
+            <button className="flex size-10 items-center justify-center rounded-full border transition-opacity hover:opacity-80" onClick={onClose} style={{ backgroundColor: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)", color: "var(--app-primary-color)", borderColor: "color-mix(in srgb, var(--app-primary-color) 20%, transparent)" }}>
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+        </header>
+
+        <main className="flex-1 max-w-2xl mx-auto w-full px-6 py-8 flex flex-col">
+          {/* Progress Bar */}
+          <div className="mb-10">
+            <div className="flex justify-between items-end mb-3">
+              <div>
+                <p className="text-sm font-medium uppercase tracking-widest" style={{ color: "var(--app-primary-color)" }}>Missão Ativa</p>
+                <h1 className="text-3xl font-bold mt-1">{mission.title}</h1>
+              </div>
+              <p className="text-lg font-bold" style={{ color: "var(--app-primary-color)" }}>{Math.round(activeProgress)}%</p>
+            </div>
+            <div className="h-3 w-full rounded-full overflow-hidden" style={{ backgroundColor: "rgba(255, 255, 255, 0.05)" }}>
+              <div 
+                className="h-full rounded-full transition-all duration-500" 
+                style={{ 
+                  width: `${activeProgress}%`, 
+                  backgroundColor: "var(--app-primary-color)",
+                  boxShadow: "0 0 15px color-mix(in srgb, var(--app-primary-color) 50%, transparent)" 
+                }} 
+              />
+            </div>
+          </div>
+
+          <div className="flex-1 flex flex-col items-center justify-center py-10">
+            {/* Rest Timer */}
+            {(isTimeMission || state.resting) && (
+              <div className="text-center mb-12">
+                <p className="text-lg mb-4" style={{ color: "var(--fl-color-text-muted, #94a3b8)" }}>
+                  {state.resting ? "Timer de Descanso" : "Timer de Série"}
+                </p>
+                <div className="flex items-center justify-center gap-4">
+                  <div className="flex flex-col items-center">
+                    <div 
+                      className="rounded-2xl w-28 h-28 flex items-center justify-center border transition-all"
+                      style={{ 
+                        backgroundColor: "rgba(255, 255, 255, 0.05)", 
+                        borderColor: displaySeconds > 59 ? "color-mix(in srgb, var(--app-primary-color) 20%, transparent)" : "rgba(255, 255, 255, 0.1)",
+                        boxShadow: displaySeconds > 59 ? "0 0 0 2px color-mix(in srgb, var(--app-primary-color) 20%, transparent)" : "none",
+                      }}
+                    >
+                      <span className="text-5xl font-bold" style={{ color: displaySeconds > 59 ? "var(--app-primary-color)" : "var(--fl-color-text, #f1f5f9)" }}>{m}</span>
+                    </div>
+                    <span className="text-xs mt-3 uppercase tracking-widest" style={{ color: "var(--fl-color-text-muted, #64748b)" }}>Min</span>
+                  </div>
+                  
+                  <span className="text-4xl font-bold pb-8" style={{ color: "var(--fl-color-text-soft, #334155)" }}>:</span>
+                  
+                  <div className="flex flex-col items-center">
+                    <div 
+                      className="rounded-2xl w-28 h-28 flex items-center justify-center border transition-all"
+                      style={{ 
+                        backgroundColor: "rgba(255, 255, 255, 0.05)", 
+                        borderColor: displaySeconds <= 59 ? "color-mix(in srgb, var(--app-primary-color) 20%, transparent)" : "rgba(255, 255, 255, 0.1)",
+                        boxShadow: displaySeconds <= 59 ? "0 0 0 2px color-mix(in srgb, var(--app-primary-color) 20%, transparent)" : "none",
+                      }}
+                    >
+                      <span className="text-5xl font-bold" style={{ color: displaySeconds <= 59 ? "var(--app-primary-color)" : "var(--fl-color-text, #f1f5f9)" }}>{s}</span>
+                    </div>
+                    <span className="text-xs mt-3 uppercase tracking-widest" style={{ color: "var(--fl-color-text-muted, #64748b)" }}>Seg</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Mission Media */}
+            <div className="w-full max-w-md aspect-video rounded-2xl overflow-hidden relative group border shadow-2xl" style={{ borderColor: "rgba(255, 255, 255, 0.1)", boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.5)" }}>
+              {detailMissionMediaUrl ? (
+                <div 
+                  className="absolute inset-0 bg-cover bg-center" 
+                  style={{ backgroundImage: `url("${detailMissionMediaUrl}")` }}
+                />
+              ) : (
+                <div className="absolute inset-0 flex items-center justify-center" style={{ backgroundColor: "rgba(255, 255, 255, 0.02)" }}>
+                  <Dumbbell className="w-16 h-16 opacity-20" />
+                </div>
+              )}
+              
+              <div className="absolute inset-0 flex items-center justify-center backdrop-blur-[2px]" style={{ backgroundColor: "rgba(10, 10, 10, 0.4)" }}>
+                <button 
+                  onClick={() => setState((current) => ({ ...current, running: !current.running }))}
+                  className="size-20 rounded-full flex items-center justify-center hover:scale-110 transition-transform shadow-xl"
+                  style={{ backgroundColor: "var(--app-primary-color)", color: "var(--app-bg-color, #0a0a0a)", boxShadow: "0 20px 25px -5px color-mix(in srgb, var(--app-primary-color) 30%, transparent)" }}
+                >
+                  {state.running && !state.resting ? (
+                    <Pause className="w-8 h-8 fill-current" strokeWidth={1} />
+                  ) : (
+                    <Play className="w-8 h-8 fill-current ml-1" strokeWidth={1} />
+                  )}
+                </button>
+              </div>
+              
+              <div className="absolute bottom-4 left-4 right-4 flex justify-between items-center">
+                <span className="backdrop-blur-md px-4 py-1.5 rounded-full text-xs font-bold border" style={{ backgroundColor: "rgba(10, 10, 10, 0.8)", borderColor: "rgba(255, 255, 255, 0.1)" }}>
+                  VERIFICAR FORMA
+                </span>
+                <span className="backdrop-blur-md px-4 py-1.5 rounded-full text-xs font-bold border" style={{ backgroundColor: "rgba(10, 10, 10, 0.8)", borderColor: "rgba(255, 255, 255, 0.1)" }}>
+                  SÉRIE {state.currentSet}/{sets}
+                </span>
+              </div>
+            </div>
+            
+            {/* Input Overlay for Distance Missions inside Media area or just below */}
+            {isDistanceMission && (
+               <div className="mt-6 w-full max-w-md space-y-3">
+                 <p className="text-sm text-center" style={{ color: "var(--fl-color-text-muted)" }}>
+                   Registre o valor atingido (Passos ou Metros)
+                 </p>
+                 <input
+                   type="number"
+                   className="w-full rounded-xl border-2 focus:outline-none px-4 py-3 bg-transparent text-center text-xl font-bold"
+                   style={{ borderColor: "color-mix(in srgb, var(--app-primary-color) 30%, transparent)", color: "var(--app-primary-color)" }}
+                   placeholder={metricType === "steps" ? "Passos" : "Metros"}
+                   value={state.inputValue}
+                   onChange={(event) => setState((current) => ({ ...current, inputValue: event.target.value }))}
+                   min={0}
+                 />
+               </div>
+            )}
+            
+            {/* Input Overlay for Reps Manual count */}
+            {isCounterMission && !isTimeMission && (
+               <div className="mt-6 w-full max-w-md flex flex-col items-center justify-center space-y-2">
+                 <p className="text-sm uppercase tracking-widest font-bold" style={{ color: "var(--app-primary-color)" }}>Repetições</p>
+                 <div className="flex items-center gap-6">
+                   <button onClick={decrementRep} disabled={state.resting} className="size-14 rounded-full border border-white/10 bg-white/5 text-2xl active:scale-95 disabled:opacity-50">-</button>
+                   <span className="text-5xl font-bold w-20 text-center">{state.repsDone}</span>
+                   <button onClick={incrementRep} disabled={state.resting} className="size-14 rounded-full border border-white/10 bg-white/5 text-2xl active:scale-95 disabled:opacity-50">+</button>
+                 </div>
+                 <p className="text-xs" style={{ color: "var(--fl-color-text-muted, #94a3b8)" }}>
+                   Meta da série: {setGoal} | Progresso: {totalCounterProgress}/{totalGoal}
+                 </p>
+               </div>
+            )}
+            
+          </div>
+
+          {/* Action Buttons */}
+          <div className="grid grid-cols-2 gap-4 mt-auto pt-8">
+            <button 
+              className="col-span-2 h-16 rounded-2xl font-bold text-xl flex items-center justify-center gap-2 shadow-lg active:scale-[0.98] transition-all disabled:opacity-50 disabled:grayscale" 
+              style={{ backgroundColor: "var(--app-primary-color)", color: "var(--app-bg-color, #0a0a0a)", boxShadow: "0 10px 15px -3px color-mix(in srgb, var(--app-primary-color) 20%, transparent)" }}
+              onClick={isCounterMission ? completeCurrentSet : () => setState((current) => ({ ...current, remainingSeconds: 0 }))}
+              disabled={isCounterMission && (state.resting || state.repsDone <= 0)}
+            >
+              <FastForward className="w-6 h-6 fill-current" strokeWidth={1} />
+              PRÓXIMA SÉRIE
+            </button>
+            
+            <button 
+              className="h-14 rounded-2xl font-bold flex items-center justify-center gap-2 border transition-colors active:scale-95 hover:bg-white/10"
+              style={{ backgroundColor: "rgba(255, 255, 255, 0.05)", borderColor: "rgba(255, 255, 255, 0.1)", color: "var(--fl-color-text-muted, #cbd5e1)" }}
               onClick={() => setState((current) => ({ ...current, running: !current.running }))}
-              variant="secondary"
-              className="w-full"
               disabled={state.finished}
             >
-              {state.running ? "Pausar" : "Retomar"}
-            </Button>
-          </div>
-        )}
-
-        {isCounterMission && (
-          <div className="space-y-3">
-            <div className="rounded-2xl bg-emerald-50 border border-emerald-200 p-4 text-center">
-              <p className="text-xs text-emerald-700 mb-1">{`Serie ${state.currentSet} de ${sets}`}</p>
-              <p className="text-4xl font-bold text-emerald-700">{state.repsDone}</p>
-              <p className="text-xs text-gray-500 mt-1">
-                Meta da serie: {setGoal} reps
-              </p>
-            </div>
-
-            <div className="grid grid-cols-2 gap-2">
-              <Button onClick={decrementRep} variant="secondary" className="w-full text-lg py-4" disabled={state.resting}>
-                -
-              </Button>
-              <Button onClick={incrementRep} className="w-full text-lg py-4" disabled={state.resting}>
-                +
-              </Button>
-            </div>
-
-            <Button
-              onClick={completeCurrentSet}
-              className="w-full"
-              variant="secondary"
-              disabled={state.resting || state.repsDone <= 0}
+              {state.running ? <Pause className="w-5 h-5 fill-current" strokeWidth={1} /> : <Play className="w-5 h-5 fill-current" strokeWidth={1} />}
+              {state.running ? "PAUSAR" : "RETOMAR"}
+            </button>
+            
+            <button 
+              className="h-14 rounded-2xl font-bold flex items-center justify-center gap-2 border transition-colors active:scale-95 disabled:opacity-50 disabled:grayscale"
+              style={{ backgroundColor: "rgba(239, 68, 68, 0.1)", borderColor: "rgba(239, 68, 68, 0.2)", color: "#ef4444" }}
+              onClick={() => { void finishMission(); }}
+              disabled={!canFinishMission}
             >
-              Serie Completa
-            </Button>
-
-            {state.resting ? (
-              <p className="text-center text-xs text-emerald-700 font-medium">
-                Descanso: {state.restSeconds}s
-              </p>
-            ) : null}
-
-            <p className="text-center text-xs text-gray-600">
-              Progresso total: {totalCounterProgress}/{totalGoal}
-            </p>
+              <Square className="w-4 h-4 fill-current" strokeWidth={2} />
+              {isDistanceMission ? "REGISTRAR" : "FINALIZAR"}
+            </button>
           </div>
-        )}
+        </main>
 
-        {isDistanceMission && (
-          <div className="space-y-3">
-            <p className="text-sm text-gray-600">
-              Use seu app de saude/relogio e registre o valor atingido aqui.
-            </p>
-            <input
-              type="number"
-              className="w-full rounded-xl border-2 border-emerald-200 focus:border-emerald-500 focus:outline-none px-4 py-3"
-              placeholder={metricType === "steps" ? "Passos" : "Metros"}
-              value={state.inputValue}
-              onChange={(event) => setState((current) => ({ ...current, inputValue: event.target.value }))}
-              min={0}
-            />
-          </div>
-        )}
-
-        <Button
-          onClick={() => { void finishMission(); }}
-          className="w-full"
-          disabled={!canFinishMission}
-        >
-          {finishButtonLabel}
-        </Button>
+        {/* Footer */}
+        <footer className="mt-auto py-6 flex justify-center text-[10px] uppercase tracking-[0.3em] font-medium" style={{ color: "var(--fl-color-text-muted, #475569)" }}>
+          Loot desta sessão: {mission.xp_reward} XP
+        </footer>
       </div>
     </div>
   );
