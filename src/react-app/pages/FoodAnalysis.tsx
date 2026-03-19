@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState, useEffect, type ChangeEventHandler } from "react";
 import { useNavigate } from "react-router";
-import { Camera, ImagePlus, RefreshCw, AlertTriangle, CheckCircle2 } from "lucide-react";
+import { Camera, RefreshCw, AlertTriangle, CheckCircle2, Bolt, ShieldCheck, ImageIcon } from "lucide-react";
 import AppPageShell from "@/react-app/components/AppPageShell";
 import LoadingBall from "@/react-app/components/LoadingBall";
 import { api } from "@/react-app/utils/api";
@@ -340,7 +340,7 @@ export default function FoodAnalysis() {
   const macroBars = useMemo(() => result?.totals.macro_percentages ?? { protein: 0, carbs: 0, fats: 0 }, [result]);
 
   return (
-    <AppPageShell bottomNavActive="missions" className="bg-[#0A0A0A] overflow-hidden h-screen w-full flex flex-col font-display text-white antialiased">
+    <AppPageShell bottomNavActive="missions" className="bg-[#0A0A0A] overflow-hidden min-h-screen w-full flex flex-col font-display text-white antialiased">
       <style>{`
         @keyframes pulse-border {
           0% { border-color: color-mix(in srgb, var(--app-primary-color) 40%, transparent); }
@@ -352,6 +352,11 @@ export default function FoodAnalysis() {
           10% { opacity: 1; }
           90% { opacity: 1; }
           100% { top: 100%; opacity: 0; }
+        }
+        @keyframes glow-pulse {
+          0% { opacity: 0.15; transform: scale(1); }
+          50% { opacity: 0.3; transform: scale(1.02); }
+          100% { opacity: 0.15; transform: scale(1); }
         }
         .scanner-line {
           height: 2px;
@@ -366,226 +371,280 @@ export default function FoodAnalysis() {
           border-top: 1px solid color-mix(in srgb, var(--app-primary-color) 20%, transparent);
         }
         .neon-glow {
-          box-shadow: 0 0 15px color-mix(in srgb, var(--app-primary-color) 30%, transparent);
+          box-shadow: 0 0 20px color-mix(in srgb, var(--app-primary-color) 40%, transparent);
+        }
+        .card-glow-bg {
+          animation: glow-pulse 4s ease-in-out infinite;
         }
         .custom-scrollbar::-webkit-scrollbar { width: 4px; }
         .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--app-primary-color) 20%, transparent); border-radius: 10px; }
       `}</style>
 
-      {/* Camera Viewfinder Section */}
-      <main className="relative flex-1 overflow-hidden">
-        {/* Simulated Camera Feed / Video Source */}
-        <div className="absolute inset-0 z-0 overflow-hidden flex items-center justify-center bg-black">
-          {!preview && streamActive ? (
-            <video ref={videoRef} className="h-full w-full object-cover" autoPlay playsInline muted />
-          ) : preview ? (
-            <img src={preview} alt="Captured food" className="h-full w-full object-cover" />
-          ) : (
-            <div className="flex flex-col items-center gap-4 text-slate-500">
-              <Camera className="w-16 h-16 opacity-20" />
-              <p className="text-sm uppercase tracking-widest font-bold">Câmera pronta</p>
-            </div>
-          )}
-
-          {/* Scanning Overlay Effects */}
-          <div className="absolute inset-0 bg-black/20"></div>
-
-          {/* Scanner Frame Corners */}
-          <div className="absolute inset-10 border-2 border-transparent pointer-events-none" style={{ animation: "pulse-border 2s infinite" }}>
-            <div className="absolute top-0 left-0 w-8 h-8 border-t-4 border-l-4 rounded-tl-xl" style={{ borderColor: 'var(--app-primary-color)' }}></div>
-            <div className="absolute top-0 right-0 w-8 h-8 border-t-4 border-r-4 rounded-tr-xl" style={{ borderColor: 'var(--app-primary-color)' }}></div>
-            <div className="absolute bottom-0 left-0 w-8 h-8 border-b-4 border-l-4 rounded-bl-xl" style={{ borderColor: 'var(--app-primary-color)' }}></div>
-            <div className="absolute bottom-0 right-0 w-8 h-8 border-b-4 border-r-4 rounded-br-xl" style={{ borderColor: 'var(--app-primary-color)' }}></div>
-            <div className="scanner-line"></div>
-          </div>
-
-          {/* Floating Detection Tags (Mocked placement for visual effect) */}
-          {(streamActive || preview) && !result && !error && !loading && (
-            <div className="absolute top-1/4 left-1/4 animate-bounce">
-              <div className="text-black text-[10px] font-bold px-2 py-0.5 rounded shadow-lg flex items-center gap-1" style={{ backgroundColor: 'var(--app-primary-color)' }}>
-                <span className="w-1.5 h-1.5 bg-black rounded-full"></span> 
-                ANALISANDO...
-              </div>
-            </div>
-          )}
-
-          {/* Detection Tags (Real Data) */}
-          {result && result.items && result.items.length > 0 && (
-            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 animate-pulse">
-               <div className="text-black text-[10px] font-bold px-3 py-1 rounded-full shadow-lg flex items-center gap-1.5" style={{ backgroundColor: 'var(--app-primary-color)' }}>
-                  <CheckCircle2 className="w-3 h-3" />
-                  {(result.items[0]?.food_name || "ALIMENTO").toUpperCase()} DETECTADO
-                </div>
-            </div>
-          )}
-        </div>
-
-        {/* Header Overlay */}
-        <header className="absolute top-0 left-0 right-0 p-6 flex justify-between items-center z-10 bg-gradient-to-b from-black/70 to-transparent">
-          <button 
-            onClick={() => preview ? (setPreview(null), setResult(null), setError(null)) : navigate("/app")}
-            className="w-10 h-10 rounded-full bg-white/10 backdrop-blur-md flex items-center justify-center border border-white/20 transition-all hover:bg-white/20"
-          >
-            <Camera className="w-5 h-5 text-white rotate-180" />
-          </button>
-          <h1 className="text-sm font-bold tracking-widest uppercase text-white/90">Scanner de Alimentos</h1>
-          <button className="w-10 h-10 rounded-full bg-white/10 backdrop-blur-md flex items-center justify-center border border-white/20 transition-all hover:bg-white/20">
-            <RefreshCw className="w-5 h-5 text-white" />
-          </button>
-        </header>
-
-        {/* Status Messages */}
-        <div className="absolute bottom-40 left-0 right-0 px-6 z-10 text-center pointer-events-none">
-           {cameraError && (
-             <div className="inline-flex items-center gap-3 bg-amber-950/60 backdrop-blur-md px-4 py-2 rounded-full border border-amber-500/30">
-                <AlertTriangle className="w-4 h-4 text-amber-500" />
-                <span className="text-xs font-bold uppercase tracking-widest text-amber-400">{cameraError}</span>
-             </div>
-           )}
-           {loading && (
-             <div className="inline-flex items-center gap-3 bg-black/60 backdrop-blur-md px-4 py-2 rounded-full border border-white/10">
-                <LoadingBall size="sm" />
-                <span className="text-xs font-bold uppercase tracking-widest text-white/80">Processando Nutrientes...</span>
-             </div>
-           )}
-           {error && (
-             <div className="inline-flex items-center gap-3 bg-red-950/60 backdrop-blur-md px-4 py-2 rounded-full border border-red-500/30">
-                <AlertTriangle className="w-4 h-4 text-red-500" />
-                <span className="text-xs font-bold uppercase tracking-widest text-red-400">{error}</span>
-             </div>
-           )}
-           {mediaPipeLoading && !preview && (
-             <div className="inline-flex items-center gap-3 bg-black/40 backdrop-blur-md px-4 py-2 rounded-full border border-white/10">
-                <LoadingBall size="sm" />
-                <span className="text-xs font-medium text-white/60">Calibrando Scanner Local...</span>
-             </div>
-           )}
-        </div>
-      </main>
-
-      {/* Analysis Bottom Sheet */}
-      <section 
-        className={`bottom-sheet rounded-t-[32px] px-6 pt-2 pb-24 z-20 relative -mt-10 transition-transform duration-500 custom-scrollbar overflow-y-auto max-h-[70vh] ${result ? 'translate-y-0' : 'translate-y-4'}`}
-        style={{ backgroundColor: 'var(--fl-surface-strong, #161616)' }}
-      >
-        {/* Drag Handle */}
-        <div className="flex justify-center mb-6">
-          <div className="w-12 h-1 bg-white/20 rounded-full"></div>
-        </div>
-
-        {/* Initial View Controls (Scan or Gallery) */}
-        {!preview && !loading && !result && (
-          <div className="space-y-4 mb-8">
-            {!streamActive ? (
-              <button 
-                onClick={startCamera} 
-                className="w-full py-4 rounded-2xl font-bold text-sm tracking-wide uppercase transition-all active:scale-95 text-black neon-glow"
-                style={{ backgroundColor: 'var(--app-primary-color)' }}
-              >
-                Abrir Scanner
-              </button>
-            ) : (
-              <button 
-                onClick={captureFromCamera} 
-                className="w-full py-4 rounded-2xl font-bold text-sm tracking-wide uppercase transition-all active:scale-95 text-black neon-glow"
-                style={{ backgroundColor: 'var(--app-primary-color)' }}
-              >
-                Capturar Alimento
-              </button>
-            )}
-            <label className="flex w-full items-center justify-center py-4 rounded-2xl bg-white/5 border border-white/10 font-bold text-sm tracking-wide uppercase cursor-pointer transition-all hover:bg-white/10">
-              <ImagePlus className="w-5 h-5 mr-3" />
-              Selecionar Galeria
-              <input type="file" accept="image/*" className="hidden" onChange={onPickGallery} />
-            </label>
-          </div>
-        )}
-
-        {/* Results View */}
-        {result && (
-          <>
-            {/* Macros Header */}
-            <div className="flex justify-between items-end mb-6">
-              <div>
-                <p className="text-xs text-white/50 uppercase tracking-tighter mb-1">Energia Estimada</p>
-                <h2 className="text-4xl font-bold" style={{ color: 'var(--app-primary-color)' }}>
-                  {result.totals.calories} <span className="text-lg font-normal text-white/70 tracking-normal ml-1">kcal</span>
-                </h2>
-              </div>
-              <div className="text-right">
-                <span className="inline-block px-3 py-1 rounded-full text-[10px] font-bold border" style={{ backgroundColor: 'color-mix(in srgb, var(--app-primary-color) 10%, transparent)', borderColor: 'color-mix(in srgb, var(--app-primary-color) 30%, transparent)', color: 'var(--app-primary-color)' }}>
-                  ACURÁCIA {result.has_estimates ? '85%' : '94%'}
-                </span>
-              </div>
-            </div>
-
-            {/* Macros Grid */}
-            <div className="grid grid-cols-3 gap-4 mb-8">
-              <MacroCard label="Proteína" value={`${result.totals.protein}g`} percentage={macroBars.protein} />
-              <MacroCard label="Carbs" value={`${result.totals.carbs}g`} percentage={macroBars.carbs} />
-              <MacroCard label="Gorduras" value={`${result.totals.fats}g`} percentage={macroBars.fats} />
-            </div>
-
-            {/* Detected Ingredients */}
-            <div className="mb-8">
-              <h3 className="text-xs font-bold text-white/50 uppercase tracking-widest mb-4">Ingredientes Detectados</h3>
-              <div className="space-y-3">
-                {result.items.map((item, i) => (
-                  <div key={i} className="flex items-center justify-between bg-white/5 p-4 rounded-xl border border-white/5 transition-all hover:bg-white/10">
-                    <div className="flex items-center gap-4">
-                      <div className="w-10 h-10 rounded-lg flex items-center justify-center text-xl bg-[#1E1E1E]">
-                        {item.food_name.toLowerCase().includes('ovo') ? '🥚' : 
-                         item.food_name.toLowerCase().includes('pão') ? '🍞' : 
-                         item.food_name.toLowerCase().includes('carne') ? '🥩' : 
-                         item.food_name.toLowerCase().includes('frango') ? '🍗' : 
-                         item.food_name.toLowerCase().includes('arroz') ? '🍚' : 
-                         item.food_name.toLowerCase().includes('feijão') ? '🫘' : 
-                         item.food_name.toLowerCase().includes('salad') ? '🥗' : '🍱'}
-                      </div>
-                      <div>
-                        <p className="font-bold text-sm">{item.food_name}</p>
-                        <p className="text-[10px] text-white/40">{item.portion_description} • {item.calories || 0} kcal</p>
-                      </div>
-                    </div>
-                    <CheckCircle2 className="w-5 h-5" style={{ color: 'var(--app-primary-color)' }} />
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Action Buttons */}
-            <div className="grid grid-cols-2 gap-4">
-              <button 
-                onClick={() => { setPreview(null); setResult(null); setError(null); }}
-                className="py-4 rounded-2xl bg-white/5 border border-white/10 font-bold text-sm tracking-wide uppercase transition-all active:scale-95 text-white/70 hover:bg-white/10"
-              >
-                Escanear Novamente
-              </button>
-              <button 
-                onClick={saveMeal}
-                disabled={saving}
-                className="py-4 rounded-2xl font-bold text-sm tracking-wide uppercase neon-glow transition-all active:scale-95 text-black disabled:opacity-50"
-                style={{ backgroundColor: 'var(--app-primary-color)' }}
-              >
-                {saving ? "Salvando..." : "Confirmar e Salvar"}
-              </button>
-            </div>
-          </>
-        )}
-
-        {/* Error / Result Placeholder when empty */}
-        {!result && !loading && preview && error && (
-          <div className="flex flex-col items-center justify-center py-10">
+      {/* Welcome Screen (Initial State) */}
+      {(!streamActive && !preview && !result) ? (
+        <div className="flex-1 flex flex-col relative z-20 overflow-y-auto custom-scrollbar">
+          {/* Header */}
+          <header className="sticky top-0 z-50 bg-[#0A0A0A]/60 backdrop-blur-md border-b border-white/5 p-6 flex justify-between items-center">
             <button 
-              onClick={() => { setPreview(null); setResult(null); setError(null); startCamera(); }}
-              className="px-8 py-3 rounded-xl border border-white/10 bg-white/5 font-bold uppercase text-xs"
+              onClick={() => navigate("/app")}
+              className="w-10 h-10 rounded-full hover:bg-white/5 flex items-center justify-center transition-colors"
             >
-              Tentar Novamente
+              <Camera className="w-5 h-5 opacity-60 rotate-180" />
+            </button>
+            <h1 className="text-xs font-bold tracking-[0.2em] uppercase text-white/90">Scanner de Alimentos</h1>
+            <div className="w-10 h-10" /> {/* Spacer */}
+          </header>
+
+          {/* Hero Section */}
+          <div className="px-6 py-10 text-center">
+            <h2 className="text-4xl font-bold tracking-tight mb-2">Scanner IA</h2>
+            <p className="text-sm font-medium" style={{ color: 'color-mix(in srgb, var(--app-primary-color) 80%, white)' }}>
+              Selecione o portal de entrada para análise
+            </p>
+          </div>
+
+          {/* Cards Section */}
+          <div className="px-6 space-y-8 flex-1">
+            {/* Primary Card - Camera */}
+            <div className="group relative">
+              <div className="absolute -inset-1 bg-primary rounded-3xl blur opacity-10 card-glow-bg group-hover:opacity-30 transition-opacity" style={{ backgroundColor: 'var(--app-primary-color)' }}></div>
+              <div className="relative bg-[#161616] border border-white/5 rounded-3xl p-8 flex flex-col items-center overflow-hidden">
+                <div 
+                  className="w-20 h-20 rounded-full flex items-center justify-center mb-6 relative"
+                  style={{ backgroundColor: 'color-mix(in srgb, var(--app-primary-color) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--app-primary-color) 40%, transparent)' }}
+                >
+                  <Camera className="w-8 h-8" style={{ color: 'var(--app-primary-color)' }} />
+                  <div className="absolute inset-0 rounded-full blur-md opacity-40" style={{ backgroundColor: 'var(--app-primary-color)' }}></div>
+                </div>
+                
+                <h3 className="text-2xl font-bold mb-2 uppercase tracking-wide">Abrir Câmera</h3>
+                <p className="text-sm mb-8 max-w-[200px]" style={{ color: 'color-mix(in srgb, var(--app-primary-color) 70%, white)' }}>
+                  Aponte seu portal visual para o alimento
+                </p>
+
+                <button 
+                  onClick={startCamera}
+                  className="w-full py-4 rounded-2xl flex items-center justify-center gap-3 font-bold text-sm tracking-widest uppercase text-black neon-glow transition-all active:scale-95"
+                  style={{ backgroundColor: 'var(--app-primary-color)' }}
+                >
+                  <Bolt className="w-5 h-5 fill-current" />
+                  Iniciar Scan
+                </button>
+              </div>
+            </div>
+
+            {/* Secondary Card - Gallery */}
+            <button 
+              onClick={() => {
+                const input = document.getElementById('gallery-input');
+                if (input) input.click();
+              }}
+              className="w-full relative overflow-hidden bg-white/5 border border-white/10 p-6 rounded-3xl flex items-center justify-between group hover:bg-white/10 transition-all border-l-4"
+              style={{ borderLeftColor: 'color-mix(in srgb, var(--app-primary-color) 40%, transparent)' }}
+            >
+              <div className="text-left">
+                <h4 className="font-bold text-sm tracking-wide uppercase mb-1">Escolher da Galeria</h4>
+                <p className="text-[10px] uppercase tracking-widest" style={{ color: 'color-mix(in srgb, var(--app-primary-color) 70%, white)' }}>Importar dados visuais</p>
+              </div>
+              <div className="w-12 h-12 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center transition-transform group-hover:scale-110">
+                <ImageIcon className="w-6 h-6" style={{ color: 'var(--app-primary-color)' }} />
+              </div>
+              <input type="file" id="gallery-input" accept="image/*" className="hidden" onChange={onPickGallery} />
             </button>
           </div>
-        )}
-      </section>
+
+          {/* Footer Badge */}
+          <div className="p-10 flex justify-center mt-auto">
+            <div className="inline-flex items-center gap-2 bg-[#161616]/50 border border-white/5 rounded-full px-4 py-2 backdrop-blur-sm">
+              <ShieldCheck className="w-4 h-4" style={{ color: 'var(--app-primary-color)' }} />
+              <span className="text-[10px] font-bold uppercase tracking-[0.15em] text-white/50">Tecnologia Neural Ativa</span>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <>
+          {/* Camera Viewfinder Section (Active Scanner) */}
+          <main className="relative flex-1 overflow-hidden">
+            {/* Simulated Camera Feed / Video Source */}
+            <div className="absolute inset-0 z-0 overflow-hidden flex items-center justify-center bg-black">
+              {!preview && streamActive ? (
+                <video ref={videoRef} className="h-full w-full object-cover" autoPlay playsInline muted />
+              ) : preview ? (
+                <img src={preview} alt="Captured food" className="h-full w-full object-cover" />
+              ) : (
+                <div className="flex flex-col items-center gap-4 text-slate-500">
+                  <Camera className="w-16 h-16 opacity-20" />
+                  <p className="text-sm uppercase tracking-widest font-bold">Iniciando Sensor...</p>
+                </div>
+              )}
+
+              {/* Scanning Overlay Effects */}
+              <div className="absolute inset-0 bg-black/20"></div>
+
+              {/* Scanner Frame Corners */}
+              <div className="absolute inset-10 border-2 border-transparent pointer-events-none" style={{ animation: "pulse-border 2s infinite" }}>
+                <div className="absolute top-0 left-0 w-8 h-8 border-t-4 border-l-4 rounded-tl-xl" style={{ borderColor: 'var(--app-primary-color)' }}></div>
+                <div className="absolute top-0 right-0 w-8 h-8 border-t-4 border-r-4 rounded-tr-xl" style={{ borderColor: 'var(--app-primary-color)' }}></div>
+                <div className="absolute bottom-0 left-0 w-8 h-8 border-b-4 border-l-4 rounded-bl-xl" style={{ borderColor: 'var(--app-primary-color)' }}></div>
+                <div className="absolute bottom-0 right-0 w-8 h-8 border-b-4 border-r-4 rounded-br-xl" style={{ borderColor: 'var(--app-primary-color)' }}></div>
+                <div className="scanner-line"></div>
+              </div>
+
+              {/* Floating Detection Tags */}
+              {(streamActive || preview) && !result && !error && !loading && (
+                <div className="absolute top-1/4 left-1/4 animate-bounce">
+                  <div className="text-black text-[10px] font-bold px-2 py-0.5 rounded shadow-lg flex items-center gap-1" style={{ backgroundColor: 'var(--app-primary-color)' }}>
+                    <span className="w-1.5 h-1.5 bg-black rounded-full"></span> 
+                    ANALISANDO...
+                  </div>
+                </div>
+              )}
+
+              {/* Detection Tags (Real Data) */}
+              {result && result.items && result.items.length > 0 && (
+                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 animate-pulse">
+                  <div className="text-black text-[10px] font-bold px-3 py-1 rounded-full shadow-lg flex items-center gap-1.5" style={{ backgroundColor: 'var(--app-primary-color)' }}>
+                    <CheckCircle2 className="w-3 h-3" />
+                    {(result.items[0]?.food_name || "ALIMENTO").toUpperCase()} DETECTADO
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Header Overlay (In Scanner) */}
+            <header className="absolute top-0 left-0 right-0 p-6 flex justify-between items-center z-10 bg-gradient-to-b from-black/70 to-transparent">
+              <button 
+                onClick={() => preview ? (setPreview(null), setResult(null), setError(null), startCamera()) : (stopCamera(), setStreamActive(false))}
+                className="w-10 h-10 rounded-full bg-white/10 backdrop-blur-md flex items-center justify-center border border-white/20 transition-all hover:bg-white/20"
+              >
+                <Camera className="w-5 h-5 text-white rotate-180" />
+              </button>
+              <h1 className="text-sm font-bold tracking-widest uppercase text-white/90">AI Vision ACTIVE</h1>
+              <button className="w-10 h-10 rounded-full bg-white/10 backdrop-blur-md flex items-center justify-center border border-white/20 transition-all hover:bg-white/20">
+                <RefreshCw className="w-5 h-5 text-white" />
+              </button>
+            </header>
+
+            {/* Status Messages */}
+            <div className="absolute bottom-40 left-0 right-0 px-6 z-10 text-center pointer-events-none">
+              {cameraError && (
+                <div className="inline-flex items-center gap-3 bg-amber-950/60 backdrop-blur-md px-4 py-2 rounded-full border border-amber-500/30">
+                    <AlertTriangle className="w-4 h-4 text-red-500" />
+                    <span className="text-xs font-bold uppercase tracking-widest text-amber-400">{cameraError}</span>
+                </div>
+              )}
+              {loading && (
+                <div className="inline-flex items-center gap-3 bg-black/60 backdrop-blur-md px-4 py-2 rounded-full border border-white/10">
+                    <LoadingBall size="sm" />
+                    <span className="text-xs font-bold uppercase tracking-widest text-white/80">Processando Nutrientes...</span>
+                </div>
+              )}
+              {error && (
+                <div className="inline-flex items-center gap-3 bg-red-950/60 backdrop-blur-md px-4 py-2 rounded-full border border-red-500/30">
+                    <AlertTriangle className="w-4 h-4 text-red-500" />
+                    <span className="text-xs font-bold uppercase tracking-widest text-red-400">{error}</span>
+                </div>
+              )}
+            </div>
+          </main>
+
+          {/* Analysis Bottom Sheet */}
+          <section 
+            className={`bottom-sheet rounded-t-[32px] px-6 pt-2 pb-24 z-20 relative -mt-10 transition-transform duration-500 custom-scrollbar overflow-y-auto max-h-[70vh] ${result ? 'translate-y-0' : 'translate-y-full opacity-0'}`}
+            style={{ backgroundColor: 'var(--fl-surface-strong, #161616)' }}
+          >
+            {/* Drag Handle */}
+            <div className="flex justify-center mb-6">
+              <div className="w-12 h-1 bg-white/20 rounded-full"></div>
+            </div>
+
+            {/* Capture Control (Visible when in scanner but no result) */}
+            {streamActive && !preview && !loading && !result && (
+               <div className="flex justify-center mb-6">
+                 <button 
+                  onClick={captureFromCamera}
+                  className="w-20 h-20 rounded-full border-4 border-white/20 flex items-center justify-center bg-white/10 active:scale-95 transition-all p-1"
+                >
+                  <div className="w-full h-full rounded-full bg-white opacity-80"></div>
+                </button>
+               </div>
+            )}
+
+            {/* Results View */}
+            {result && (
+              <>
+                {/* Macros Header */}
+                <div className="flex justify-between items-end mb-6">
+                  <div>
+                    <p className="text-xs text-white/50 uppercase tracking-tighter mb-1">Energia Estimada</p>
+                    <h2 className="text-4xl font-bold" style={{ color: 'var(--app-primary-color)' }}>
+                      {result.totals.calories} <span className="text-lg font-normal text-white/70 tracking-normal ml-1">kcal</span>
+                    </h2>
+                  </div>
+                  <div className="text-right">
+                    <span className="inline-block px-3 py-1 rounded-full text-[10px] font-bold border" style={{ backgroundColor: 'color-mix(in srgb, var(--app-primary-color) 10%, transparent)', borderColor: 'color-mix(in srgb, var(--app-primary-color) 30%, transparent)', color: 'var(--app-primary-color)' }}>
+                      ACURÁCIA {result.has_estimates ? '85%' : '94%'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Macros Grid */}
+                <div className="grid grid-cols-3 gap-4 mb-8">
+                  <MacroCard label="Proteína" value={`${result.totals.protein}g`} percentage={macroBars.protein} />
+                  <MacroCard label="Carbs" value={`${result.totals.carbs}g`} percentage={macroBars.carbs} />
+                  <MacroCard label="Gorduras" value={`${result.totals.fats}g`} percentage={macroBars.fats} />
+                </div>
+
+                {/* Detected Ingredients */}
+                <div className="mb-8">
+                  <h3 className="text-xs font-bold text-white/50 uppercase tracking-widest mb-4">Ingredientes Detectados</h3>
+                  <div className="space-y-3">
+                    {result.items.map((item, i) => (
+                      <div key={i} className="flex items-center justify-between bg-white/5 p-4 rounded-xl border border-white/5">
+                        <div className="flex items-center gap-4">
+                          <div className="w-10 h-10 rounded-lg flex items-center justify-center text-xl bg-[#1E1E1E]">
+                            {item.food_name.toLowerCase().includes('ovo') ? '🥚' : 
+                            item.food_name.toLowerCase().includes('pão') ? '🍞' : 
+                            item.food_name.toLowerCase().includes('carne') ? '🥩' : 
+                            item.food_name.toLowerCase().includes('frango') ? '🍗' : 
+                            item.food_name.toLowerCase().includes('arroz') ? '🍚' : 
+                            item.food_name.toLowerCase().includes('feijão') ? '🫘' : 
+                            item.food_name.toLowerCase().includes('salad') ? '🥗' : '🍱'}
+                          </div>
+                          <div>
+                            <p className="font-bold text-sm">{item.food_name}</p>
+                            <p className="text-[10px] text-white/40">{item.portion_description} • {item.calories || 0} kcal</p>
+                          </div>
+                        </div>
+                        <CheckCircle2 className="w-5 h-5" style={{ color: 'var(--app-primary-color)' }} />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Action Buttons */}
+                <div className="grid grid-cols-2 gap-4">
+                  <button 
+                    onClick={() => { setPreview(null); setResult(null); setError(null); startCamera(); }}
+                    className="py-4 rounded-2xl bg-white/5 border border-white/10 font-bold text-sm tracking-wide uppercase transition-all active:scale-95 text-white/70"
+                  >
+                    Repetir
+                  </button>
+                  <button 
+                    onClick={saveMeal}
+                    disabled={saving}
+                    className="py-4 rounded-2xl font-bold text-sm tracking-wide uppercase neon-glow transition-all active:scale-95 text-black disabled:opacity-50"
+                    style={{ backgroundColor: 'var(--app-primary-color)' }}
+                  >
+                    {saving ? "Salvando..." : "Confirmar"}
+                  </button>
+                </div>
+              </>
+            )}
+          </section>
+        </>
+      )}
       <canvas ref={canvasRef} className="hidden" />
     </AppPageShell>
   );
