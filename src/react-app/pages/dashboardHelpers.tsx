@@ -36,8 +36,8 @@ export function SectionHeader({
   onAction?: (() => void) | undefined;
 }) {
   return (
-    <div className="mb-4 flex items-center justify-between gap-4">
-      <h2 className="text-base font-bold sm:text-lg" style={{ color: "var(--fl-color-text)" }}>
+    <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+      <h2 className="min-w-0 text-base font-bold sm:text-lg" style={{ color: "var(--fl-color-text)" }}>
         {title}
       </h2>
       {actionLabel && onAction ? (

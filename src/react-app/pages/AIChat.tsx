@@ -331,7 +331,7 @@ export default function AIChat() {
         .custom-scrollbar::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--app-primary-color) 20%, transparent); border-radius: 10px; }
       `}</style>
 
-      <div className="relative flex h-full min-h-0 flex-col overflow-hidden">
+      <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
         <header className="fl-theme-topbar shrink-0 border-b px-3 py-3 backdrop-blur-md sm:px-4 lg:px-8">
           <div className="mx-auto flex w-full max-w-5xl items-center justify-between gap-3">
             <button
@@ -494,7 +494,7 @@ export default function AIChat() {
           <div ref={messagesEndRef} />
         </main>
 
-        <div className="fl-theme-topbar sticky bottom-0 z-10 shrink-0 border-t px-3 pb-[calc(env(safe-area-inset-bottom,0px)+0.75rem)] pt-3 backdrop-blur-xl sm:px-4 lg:px-8 lg:pt-4">
+        <div className="fl-theme-topbar shrink-0 border-t px-3 pb-[calc(env(safe-area-inset-bottom,0px)+0.5rem)] pt-3 backdrop-blur-xl sm:px-4 lg:px-8 lg:pt-4">
           <div className="mx-auto w-full max-w-5xl">
             {messages.length <= 1 && !loading ? (
               <div className="custom-scrollbar mb-3 flex gap-2 overflow-x-auto pb-1 sm:mb-4 sm:gap-3">

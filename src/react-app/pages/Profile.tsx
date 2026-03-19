@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/react-app/contexts/auth";
 import { useTheme } from "@/react-app/contexts/theme";
+import AchievementShowcaseBadge from "@/react-app/components/AchievementShowcaseBadge";
 import AppPageShell from "@/react-app/components/AppPageShell";
 import LoadingBall from "@/react-app/components/LoadingBall";
 import PageLoader from "@/react-app/components/PageLoader";
@@ -35,11 +36,7 @@ import type {
   UserProgression,
 } from "@/shared/types";
 import { ApiRequestError, api, clearJsonCache, fetchAndCacheJson, readCachedJson } from "@/react-app/utils/api";
-import {
-  getAchievementShowcaseStyle,
-  resolveShowcasedAchievement,
-  sanitizeAchievementsForDisplay,
-} from "@/react-app/utils/achievementShowcase";
+import { resolveShowcasedAchievement, sanitizeAchievementsForDisplay } from "@/react-app/utils/achievementShowcase";
 import { applyProfileTheme } from "@/react-app/utils/theme";
 
 const FEEDBACK_TYPES = ["Sugestao", "Bug", "Elogio", "Outro"] as const;
@@ -147,9 +144,6 @@ export default function Profile() {
     () => resolveShowcasedAchievement(profile?.showcased_achievements, achievements),
     [achievements, profile?.showcased_achievements],
   );
-  const showcasedAchievementStyle = showcasedAchievement
-    ? getAchievementShowcaseStyle(showcasedAchievement.rarity)
-    : null;
 
   const combatPower = useMemo(() => {
     if (!attributes) return 0;
@@ -275,51 +269,32 @@ export default function Profile() {
               <p className="text-primary font-bold text-[10px] uppercase tracking-[0.3em]" style={{ color: 'var(--app-primary-color)' }}>
                 {activeTitle?.name || "RECRUTA FITLOOT"}
               </p>
-              {showcasedAchievement && showcasedAchievementStyle ? (
-                <div
-                  className="mx-auto mt-4 flex w-fit max-w-full items-center justify-center gap-2 rounded-full border px-4 py-2"
-                  style={{
-                    borderColor: showcasedAchievementStyle.borderColor,
-                    backgroundColor: showcasedAchievementStyle.backgroundColor,
-                  }}
-                >
-                   <span
-                     className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full"
-                     style={{
-                       backgroundColor: showcasedAchievementStyle.iconBackground,
-                       color: showcasedAchievementStyle.textColor,
-                     }}
-                   >
-                     <Trophy className="size-3.5" />
-                   </span>
-                   <span className="truncate text-[9px] font-bold uppercase tracking-widest sm:text-[10px]" style={{ color: showcasedAchievementStyle.textColor }}>
-                     {showcasedAchievement.name}
-                   </span>
-                </div>
+              {showcasedAchievement ? (
+                <AchievementShowcaseBadge achievement={showcasedAchievement} className="mt-4" />
               ) : null}
             </div>
 
-            <div className="grid w-full grid-cols-3 gap-3 border-t pt-8" style={{ borderColor: "var(--fl-border-soft)" }}>
+            <div className="flex w-full flex-wrap gap-2 border-t pt-6 sm:gap-3 sm:pt-8" style={{ borderColor: "var(--fl-border-soft)" }}>
               <button 
                 onClick={() => navigate(ROUTE_PATHS.achievements)}
-                className="fl-theme-input flex items-center justify-center gap-2 rounded-2xl px-3 py-4 fl-theme-text-muted transition-opacity group hover:opacity-85"
+                className="fl-theme-input flex min-w-[8.5rem] flex-1 items-center justify-center gap-1.5 rounded-2xl px-3 py-3 fl-theme-text-muted transition-opacity group hover:opacity-85 sm:min-w-0 sm:gap-2 sm:py-4"
               >
-                <Trophy className="size-4 transition-colors" style={{ color: 'var(--app-primary-color)' }} />
-                <span className="text-[10px] font-bold uppercase tracking-widest">Conquistas</span>
+                <Trophy className="size-3.5 shrink-0 transition-colors sm:size-4" style={{ color: 'var(--app-primary-color)' }} />
+                <span className="text-[9px] font-bold uppercase tracking-[0.16em] sm:text-[10px] sm:tracking-widest">Conquistas</span>
               </button>
               <button 
                 onClick={() => navigate(ROUTE_PATHS.shop)}
-                className="fl-theme-input flex items-center justify-center gap-2 rounded-2xl px-3 py-4 fl-theme-text-muted transition-opacity group hover:opacity-85"
+                className="fl-theme-input flex min-w-[8.5rem] flex-1 items-center justify-center gap-1.5 rounded-2xl px-3 py-3 fl-theme-text-muted transition-opacity group hover:opacity-85 sm:min-w-0 sm:gap-2 sm:py-4"
               >
-                <Box className="size-4 transition-colors" style={{ color: 'var(--app-primary-color)' }} />
-                <span className="text-[10px] font-bold uppercase tracking-widest">Loot</span>
+                <Box className="size-3.5 shrink-0 transition-colors sm:size-4" style={{ color: 'var(--app-primary-color)' }} />
+                <span className="text-[9px] font-bold uppercase tracking-[0.16em] sm:text-[10px] sm:tracking-widest">Loot</span>
               </button>
               <button 
                 onClick={() => navigate(ROUTE_PATHS.friends)}
-                className="fl-theme-input flex items-center justify-center gap-2 rounded-2xl px-3 py-4 fl-theme-text-muted transition-opacity group hover:opacity-85"
+                className="fl-theme-input flex min-w-[8.5rem] flex-1 items-center justify-center gap-1.5 rounded-2xl px-3 py-3 fl-theme-text-muted transition-opacity group hover:opacity-85 sm:min-w-0 sm:gap-2 sm:py-4"
               >
-                <Users className="size-4 transition-colors" style={{ color: 'var(--app-primary-color)' }} />
-                <span className="text-[10px] font-bold uppercase tracking-widest">Amigos</span>
+                <Users className="size-3.5 shrink-0 transition-colors sm:size-4" style={{ color: 'var(--app-primary-color)' }} />
+                <span className="text-[9px] font-bold uppercase tracking-[0.16em] sm:text-[10px] sm:tracking-widest">Amigos</span>
               </button>
             </div>
           </section>

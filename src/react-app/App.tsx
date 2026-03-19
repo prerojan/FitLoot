@@ -3,7 +3,6 @@ import { useState, useEffect, lazy, Suspense, useCallback, type ReactNode } from
 import { Analytics } from "@vercel/analytics/react";
 import { SpeedInsights } from "@vercel/speed-insights/react";
 import PageLoader from "@/react-app/components/PageLoader";
-import LoadingBall from "@/react-app/components/LoadingBall";
 import { ROUTE_PATHS, AUTHENTICATED_HINT_KEY } from "@/react-app/constants/auth";
 import { AuthContext, useAuth } from "@/react-app/contexts/auth";
 import { AppChromeContext } from "@/react-app/contexts/appChrome";
@@ -44,13 +43,7 @@ const BILLING_ROUTE_PATHS = new Set<string>([
 ]);
 
 function RouteLoader() {
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 px-6 pt-20">
-      <div className="fl-card flex items-center justify-center p-6">
-        <LoadingBall size="md" />
-      </div>
-    </div>
-  );
+  return <PageLoader />;
 }
 
 function ProtectedRoute({ children }: { children: ReactNode }) {
