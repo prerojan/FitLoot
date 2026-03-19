@@ -3,6 +3,7 @@ export interface User {
   email: string;
   name: string;
   avatar_url?: string | undefined;
+  showcased_achievements?: string | null | undefined;
   onboarding_completed: number;
   plan_id: "basic" | "pro" | "annual" | "vip";
   plan_status: "pending" | "active" | "cancelled" | "failed" | "expired";

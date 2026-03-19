@@ -360,7 +360,7 @@ export default function MiniGames() {
               </p>
             </div>
 
-            <div className="fl-theme-surface-soft flex self-start rounded-full p-1.5">
+            <div className="fl-theme-surface-soft mx-auto flex self-start rounded-full p-1.5">
               <button
                 type="button"
                 onClick={() => setViewMode("live")}

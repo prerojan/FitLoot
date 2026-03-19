@@ -2933,6 +2933,9 @@ app.get("/api/users/me", authMiddleware, async (c) => {
     }
 
     const userRecord = await getUserAuthRecordById(c.env.fitloot_db, user.id);
+    const profileRecord = await c.env.fitloot_db.prepare(
+      "SELECT showcased_achievements FROM user_profiles WHERE user_id = ?"
+    ).bind(user.id).first<{ showcased_achievements?: string | null }>();
 
     if (!userRecord) {
       return c.json({ error: "UsuÃƒÂ¡rio nÃƒÂ£o encontrado", code: "USER_NOT_FOUND" }, 404);
@@ -2943,6 +2946,7 @@ app.get("/api/users/me", authMiddleware, async (c) => {
       email: userRecord.email,
       name: userRecord.name,
       avatar_url: userRecord.avatar_url ?? undefined,
+      showcased_achievements: profileRecord?.showcased_achievements ?? null,
       onboarding_completed: userRecord.onboarding_completed,
       plan_id: userRecord.plan_id,
       plan_status: userRecord.plan_status,

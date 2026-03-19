@@ -384,8 +384,8 @@ export default function Dashboard() {
   const xpTextSizeClass = xpStrLength >= 5 ? "text-xl md:text-2xl" : xpStrLength === 4 ? "text-2xl md:text-3xl" : "text-3xl md:text-4xl";
   const xpLabelSizeClass = xpStrLength >= 5 ? "text-[0.6rem] md:text-[0.65rem]" : xpStrLength === 4 ? "text-[0.65rem] md:text-[0.7rem]" : "text-[0.7rem] md:text-[0.8rem]";
   const showcasedAchievement = useMemo(
-    () => resolveShowcasedAchievement(profile?.showcased_achievements, achievements),
-    [achievements, profile?.showcased_achievements],
+    () => resolveShowcasedAchievement(profile?.showcased_achievements ?? user?.showcased_achievements ?? null, achievements),
+    [achievements, profile?.showcased_achievements, user?.showcased_achievements],
   );
   const showcasedAchievementDisplay = useMemo(() => {
     if (!showcasedAchievement) return null;
@@ -397,22 +397,22 @@ export default function Dashboard() {
       .toUpperCase();
 
     if (normalizedRarity === "RARO") {
-      return { rarityClass: "border-blue-500 text-blue-600", rarityIcon: "\u25C6" };
+      return { rarityClass: "border-blue-500 text-blue-400" };
     }
 
     if (normalizedRarity === "EPICO" || normalizedRarity === "MITICO") {
-      return { rarityClass: "border-purple-500 text-purple-600", rarityIcon: "\u2726" };
+      return { rarityClass: "border-purple-500 text-purple-400" };
     }
 
     if (normalizedRarity === "LENDARIO") {
-      return { rarityClass: "border-amber-500 text-amber-600", rarityIcon: "\u2736" };
+      return { rarityClass: "border-amber-500 text-amber-400" };
     }
 
     if (normalizedRarity === "SECRETO") {
-      return { rarityClass: "border-black/40 text-black/70", rarityIcon: "\u2739" };
+      return { rarityClass: "border-primary text-primary" };
     }
 
-    return { rarityClass: "border-slate-500 text-slate-600", rarityIcon: "\u2022" };
+    return { rarityClass: "border-slate-500 text-slate-400" };
   }, [showcasedAchievement]);
 
   return (
@@ -420,14 +420,14 @@ export default function Dashboard() {
       <main className="mx-auto max-w-[48rem] px-4 pb-[98px] pt-4 sm:px-5 md:px-8 md:pt-8 min-w-0">
         <div className="space-y-2 sm:space-y-4 md:space-y-6 min-w-0">
           <div className="flex w-full items-start justify-between gap-4 px-1">
-            <div className="flex flex-col">
+            <div className="flex min-w-0 flex-1 flex-col">
               <p className="text-xs sm:text-sm md:text-base font-bold truncate" style={{ color: "var(--fl-color-text)" }}>{displayName}</p>
               <p className="text-[10px] sm:text-xs text-slate-400 font-medium truncate" style={{ color: "var(--fl-color-text-muted)" }}>{usernameLabel}</p>
             </div>
-            <div className="flex flex-col items-end gap-1 md:flex-row md:items-center md:gap-2">
+            <div className="flex min-w-0 flex-col items-end gap-1 md:flex-row md:items-center md:gap-2">
               {loadingState.titles ? <LoadingBall size="sm" /> : activeTitle ? (
                 <div
-                  className="rounded-full px-2 py-0.5 sm:px-3 sm:py-1 text-[9px] sm:text-[0.68rem] font-bold uppercase tracking-[0.16em] truncate"
+                  className="max-w-[10rem] sm:max-w-[14rem] rounded-full px-2 py-0.5 sm:px-3 sm:py-1 text-[9px] sm:text-[0.68rem] font-bold uppercase tracking-[0.16em] truncate"
                   style={{
                     background: "color-mix(in srgb, var(--app-primary-color) 14%, transparent)",
                     color: "var(--app-primary-color)",
@@ -468,19 +468,18 @@ export default function Dashboard() {
                     <Cloud className="h-4 w-4" />
                     <span>Experience Points</span>
                   </div>
-                  <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
-                    <div className="inline-flex w-fit items-center gap-1.5 sm:gap-2 rounded-full px-2 py-1 md:px-4 md:py-3 text-[10px] sm:text-xs md:text-sm font-black bg-black/10 text-black">
+                  <div className="inline-flex w-fit items-center gap-1.5 sm:gap-2 rounded-full px-2 py-1 md:px-4 md:py-3 text-[10px] sm:text-xs md:text-sm font-black bg-black/10 text-black">
                       <Flame className="h-4 w-4" />
                       <span>{loadingState.progression ? <LoadingBall size="sm" /> : `${progression?.current_streak ?? 0}-Day Streak`}</span>
-                    </div>
-
-                    {showcasedAchievement && showcasedAchievementDisplay && (
-                      <div className={`inline-flex w-fit items-center gap-1 rounded-full px-2 py-0.5 sm:px-3 sm:py-1 text-[10px] sm:text-xs font-bold border transition-colors bg-white/10 ${showcasedAchievementDisplay.rarityClass}`}>
-                        <span className="shrink-0">{showcasedAchievementDisplay.rarityIcon}</span>
+                  </div>
+                  {showcasedAchievement && showcasedAchievementDisplay ? (
+                    <div className="min-w-0">
+                      <div className={`inline-flex max-w-full items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] sm:text-xs font-bold ${showcasedAchievementDisplay.rarityClass}`}>
+                        <span className="shrink-0">{"\u{1F3C6}"}</span>
                         <span className="truncate">{showcasedAchievement.name}</span>
                       </div>
-                    )}
-                  </div>
+                    </div>
+                  ) : null}
                   <div className="mt-1 sm:mt-2 text-[8px] sm:text-[0.6rem] md:text-xs font-black uppercase tracking-[0.15em] sm:tracking-[0.2em] text-black/60 truncate">
                     {loadingState.progression ? <LoadingBall size="sm" /> : `${formatNumber(Math.max(0, progression?.xp ?? 0))} / ${formatNumber(xpForNextLevel)} PARA O PROXIMO NIVEL`}
                   </div>

@@ -140,8 +140,8 @@ export default function Profile() {
 
   const activeTitle = useMemo(() => titles.find((item) => item.is_active === 1), [titles]);
   const showcasedAchievement = useMemo(
-    () => resolveShowcasedAchievement(profile?.showcased_achievements, achievements),
-    [achievements, profile?.showcased_achievements],
+    () => resolveShowcasedAchievement(profile?.showcased_achievements ?? user?.showcased_achievements ?? null, achievements),
+    [achievements, profile?.showcased_achievements, user?.showcased_achievements],
   );
   const showcasedAchievementTone = useMemo(() => {
     if (!showcasedAchievement) return null;
@@ -153,22 +153,22 @@ export default function Profile() {
       .toUpperCase();
 
     if (normalizedRarity === "RARO") {
-      return { rarityClass: "border-blue-500 text-blue-600" };
+      return { rarityClass: "border-blue-500 text-blue-400" };
     }
 
     if (normalizedRarity === "EPICO" || normalizedRarity === "MITICO") {
-      return { rarityClass: "border-purple-500 text-purple-600" };
+      return { rarityClass: "border-purple-500 text-purple-400" };
     }
 
     if (normalizedRarity === "LENDARIO") {
-      return { rarityClass: "border-amber-500 text-amber-600" };
+      return { rarityClass: "border-amber-500 text-amber-400" };
     }
 
     if (normalizedRarity === "SECRETO") {
-      return { rarityClass: "border-black/40 text-black/70" };
+      return { rarityClass: "border-primary text-primary" };
     }
 
-    return { rarityClass: "border-slate-500 text-slate-600" };
+    return { rarityClass: "border-slate-500 text-slate-400" };
   }, [showcasedAchievement]);
 
   const combatPower = useMemo(() => {
@@ -297,8 +297,8 @@ export default function Profile() {
               </p>
               {showcasedAchievement && showcasedAchievementTone && (
                 <div className="mt-2 min-w-0">
-                  <span className={`inline-flex items-center text-[10px] sm:text-xs font-bold px-2 py-0.5 rounded-full border truncate ${showcasedAchievementTone.rarityClass}`}>
-                    🏆 {showcasedAchievement.name}
+                  <span className={`inline-flex items-center text-[10px] sm:text-xs font-bold px-2 py-0.5 rounded-full border ${showcasedAchievementTone.rarityClass}`}>
+                    {"\u{1F3C6}"} {showcasedAchievement.name}
                   </span>
                 </div>
               )}
