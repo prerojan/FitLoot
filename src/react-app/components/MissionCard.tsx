@@ -495,21 +495,12 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
   const missionDetails = detailedMission ?? mission;
   const detailMetricType = normalizeMetricType(missionDetails);
   const detailMissionMediaUrl = resolveMissionMediaUrl(missionDetails);
-  const detailsInstructions = Array.isArray(missionDetails.instructions) && missionDetails.instructions.length > 0
-    ? missionDetails.instructions
-    : [
-      "Aqueca por 3 a 5 minutos antes de iniciar.",
-      "Mantenha postura e amplitude seguras durante o movimento.",
-      "Respeite intervalos e hidratacao durante a execucao.",
-    ];
   const safetyTips = Array.isArray(missionDetails.safety_tips) && missionDetails.safety_tips.length > 0
     ? missionDetails.safety_tips
     : ["Mantenha alinhamento postural e interrompa em caso de dor aguda."];
   const pixelOrLineArt = isPixelOrLineArtUrl(detailMissionMediaUrl);
   const gifLikeMedia = isGifUrl(detailMissionMediaUrl);
-  const detailCircuitTasks = resolveCircuitTasks(missionDetails);
-  const detailCompletedCircuitTasks = detailCircuitTasks.filter((task) => task.completed).length;
-  const detailCircuitProgress = detailCircuitTasks.length > 0 ? (detailCompletedCircuitTasks / detailCircuitTasks.length) * 100 : 0;
+
   const compactDurationLabel = mission.duration_estimate_minutes && mission.duration_estimate_minutes > 0
     ? `${mission.duration_estimate_minutes} min`
     : null;
@@ -701,155 +692,166 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
 
   return (
     <>
-      {triggerContent}
-
-      {showDetails && (
-        <div className="fl-z-modal fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center px-4">
-          <div className="w-full max-w-xl bg-white rounded-3xl shadow-2xl p-6 space-y-5 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between">
-              <h3 className="text-xl font-bold text-gray-900">{missionDetails.title}</h3>
-              <button onClick={() => setShowDetails(false)} className="p-2 rounded-xl hover:bg-gray-100" aria-label="Fechar">
-                <X className="w-4 h-4" />
+      {triggerContent}      {showDetails && (
+        <div className="fl-z-modal fixed inset-0 bg-black/60 backdrop-blur-md flex items-center justify-center p-4 md:p-8 overflow-y-auto">
+          {/* Modal Container */}
+          <div className="layout-content-container flex flex-col max-w-[600px] w-full rounded-xl shadow-2xl overflow-hidden relative" style={{ background: "var(--fl-surface-strong)", border: "1px solid color-mix(in srgb, var(--app-primary-color) 20%, transparent)" }}>
+            
+            {/* Header */}
+            <header className="flex items-center justify-between px-6 py-4" style={{ borderBottom: "1px solid var(--fl-border-soft)" }}>
+              <div className="flex items-center gap-3">
+                <Dumbbell className="w-6 h-6" style={{ color: "var(--app-primary-color)" }} />
+                <h2 className="text-xl font-bold tracking-tight" style={{ color: "var(--fl-color-text)" }}>Detalhes da Missão</h2>
+              </div>
+              <button 
+                onClick={() => setShowDetails(false)}
+                className="flex items-center justify-center rounded-full h-10 w-10 transition-colors opacity-70 hover:opacity-100"
+                style={{ background: "var(--fl-surface-muted)", color: "var(--fl-color-text)" }}
+                aria-label="Fechar"
+              >
+                <X className="w-5 h-5" />
               </button>
-            </div>
+            </header>
 
-            <div className="space-y-3">
-              {detailMissionMediaUrl ? (
-                <div className="w-full h-64 rounded-2xl border border-gray-200 overflow-hidden bg-gradient-to-br from-gray-50 to-gray-100 flex items-center justify-center">
-                  <img
-                    src={detailMissionMediaUrl}
-                    alt={missionDetails.title}
-                    loading="lazy"
-                    decoding="async"
-                    className="w-[125%] h-[125%] object-contain"
-                    style={{
-                      objectFit: "contain",
-                      imageRendering: pixelOrLineArt ? "crisp-edges" : "auto",
-                      filter: pixelOrLineArt || gifLikeMedia ? "blur(0px)" : "contrast(1.05) saturate(1.1) blur(0px)",
-                      transform: "scale(1)",
-                    }}
-                  />
+            <div className="overflow-y-auto pb-32 min-h-[50vh] max-h-[75vh]">
+              {/* Hero Image Section */}
+              <div className="px-6 py-4">
+                <div 
+                  className="relative w-full aspect-video rounded-xl overflow-hidden group"
+                  style={{ background: "color-mix(in srgb, var(--app-primary-color) 5%, transparent)" }}
+                >
+                  {detailMissionMediaUrl ? (
+                    <>
+                      <div 
+                        className="absolute inset-0 bg-cover bg-center transition-transform duration-500 group-hover:scale-105" 
+                        style={{ 
+                          backgroundImage: `url("${detailMissionMediaUrl}")`,
+                          imageRendering: pixelOrLineArt ? "crisp-edges" : "auto",
+                          filter: pixelOrLineArt || gifLikeMedia ? "blur(0px)" : "contrast(1.05) saturate(1.1) blur(0px)",
+                        }}
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent" />
+                      <div className="absolute bottom-4 left-4">
+                        <span className="text-black text-xs font-bold px-2 py-1 rounded-full uppercase tracking-wider" style={{ background: "var(--app-primary-color)" }}>
+                          {stateLabel}
+                        </span>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <Dumbbell className="w-16 h-16 opacity-50" style={{ color: "var(--app-primary-color)" }} />
+                    </div>
+                  )}
                 </div>
-              ) : (
-                <div className="w-full h-64 rounded-2xl border border-emerald-100 bg-gradient-to-br from-emerald-100 to-teal-100 flex items-center justify-center overflow-hidden">
-                  <Dumbbell className="w-12 h-12 text-emerald-600" />
-                </div>
-              )}
-              {detailsLoading ? (
-                <div className="flex items-center gap-2 text-sm text-gray-500">
-                  <LoadingBall size="sm" />
-                  Carregando detalhes completos...
-                </div>
-              ) : null}
-              {detailsError ? (
-                <p className="text-sm text-red-600">{detailsError}</p>
-              ) : null}
-              <p className="text-sm text-gray-700">{missionDetails.description}</p>
-            </div>
+              </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div className="rounded-xl border border-gray-200 p-3">
-                <p className="text-xs text-gray-500">Area do corpo</p>
-                <p className="font-semibold text-gray-900">{bodyAreaLabel(missionDetails.body_area)}</p>
+              {/* Title & Description */}
+              <div className="px-6 py-2">
+                <h1 className="text-3xl font-black leading-tight" style={{ color: "var(--fl-color-text)" }}>{missionDetails.title}</h1>
+                <p className="text-base font-medium mt-1" style={{ color: "var(--app-primary-color)" }}>
+                  Dificuldade: {missionDetails.difficulty_level ? missionDetails.difficulty_level.charAt(0).toUpperCase() + missionDetails.difficulty_level.slice(1) : "Iniciante"} • Est. {missionDetails.duration_estimate_minutes ?? 10} min
+                </p>
+                {detailsLoading ? (
+                  <div className="flex items-center gap-2 text-sm mt-3" style={{ color: "var(--fl-color-text-muted)" }}>
+                    <LoadingBall size="sm" />
+                    Carregando detalhes...
+                  </div>
+                ) : null}
+                {detailsError ? (
+                  <p className="text-sm text-red-600 mt-2">{detailsError}</p>
+                ) : null}
               </div>
-              <div className="rounded-xl border border-gray-200 p-3">
-                <p className="text-xs text-gray-500">Meta</p>
-                <p className="font-semibold text-gray-900">{formatGoal(missionDetails, detailMetricType)}</p>
-              </div>
-              <div className="rounded-xl border border-gray-200 p-3">
-                <p className="text-xs text-gray-500">Dificuldade</p>
-                <p className="font-semibold text-gray-900">{missionDetails.difficulty_level ?? "iniciante"}</p>
-              </div>
-              <div className="rounded-xl border border-gray-200 p-3">
-                <p className="text-xs text-gray-500">Tempo estimado</p>
-                <p className="font-semibold text-gray-900">{missionDetails.duration_estimate_minutes ?? 10} min</p>
-              </div>
-              <div className="rounded-xl border border-gray-200 p-3">
-                <p className="text-xs text-gray-500">XP</p>
-                <p className="font-semibold text-emerald-700">{missionDetails.xp_reward}</p>
-              </div>
-              <div className="rounded-xl border border-gray-200 p-3">
-                <p className="text-xs text-gray-500">Pontos</p>
-                <p className="font-semibold text-teal-700">{missionDetails.points_reward}</p>
-              </div>
-            </div>
 
-            <div className="space-y-2">
-              <p className="text-sm font-semibold text-gray-900">Atributos beneficiados</p>
-              <div className="flex flex-wrap gap-2">
-                {(missionDetails.attributes_benefited ?? []).map((attribute) => (
-                  <span key={attribute} className="px-2 py-1 text-xs rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
-                    <Star className="w-3 h-3 inline mr-1" />
-                    {attribute}
-                  </span>
-                ))}
-              </div>
-            </div>
-
-            {isCircuitMission && detailCircuitTasks.length > 0 && (
-              <div className="space-y-3">
-                <p className="text-sm font-semibold text-gray-900">Progresso do circuito semanal</p>
-                <div className="h-2 rounded-full bg-gray-100 overflow-hidden">
-                  <div className="h-full bg-emerald-500" style={{ width: `${detailCircuitProgress}%` }} />
-                </div>
-                <div className="space-y-2">
-                  {detailCircuitTasks.map((task) => (
-                    <div key={task.id} className="rounded-xl border border-gray-200 p-3 text-sm flex items-center justify-between">
-                      <span>{task.label}</span>
-                      <span className="font-semibold text-emerald-700">
-                        {task.current_count}/{task.required_count} {task.completed ? "OK" : ""}
-                      </span>
+              {/* Target Muscles */}
+              <div className="px-6 pt-6">
+                <h3 className="text-lg font-bold mb-3 flex items-center gap-2" style={{ color: "var(--fl-color-text)" }}>
+                  <Dumbbell className="w-5 h-5" style={{ color: "var(--app-primary-color)" }} />
+                  Músculos Alvo
+                </h3>
+                <div className="flex gap-2 flex-wrap">
+                  {(missionDetails.muscle_groups?.length ? missionDetails.muscle_groups : [bodyAreaLabel(missionDetails.body_area)]).map((muscle, idx) => (
+                    <div key={`${muscle}-${idx}`} className="flex items-center gap-2 rounded-full px-4 py-1.5 border" style={{ background: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)", borderColor: "color-mix(in srgb, var(--app-primary-color) 20%, transparent)" }}>
+                      <span className="font-semibold text-sm" style={{ color: "var(--app-primary-color)" }}>{muscle}</span>
                     </div>
                   ))}
                 </div>
               </div>
-            )}
 
-            <div className="space-y-2">
-              <p className="text-sm font-semibold text-gray-900">Como executar</p>
-              <ol className="space-y-2">
-                {(Array.isArray(missionDetails.instructions) && missionDetails.instructions.length > 0
-                  ? missionDetails.instructions
-                  : detailsInstructions
-                ).map((instruction, index) => (
-                  <li key={`${instruction}-${index}`} className="text-sm text-gray-700 flex gap-2">
-                    <span className="font-semibold text-emerald-700">{index + 1}.</span>
-                    <span>{instruction}</span>
-                  </li>
-                ))}
-              </ol>
-              {missionDetails.rest_seconds ? (
-                <p className="text-xs text-gray-500">Descanso entre series: {missionDetails.rest_seconds} segundos</p>
-              ) : null}
+              {/* Safety Instructions */}
+              {safetyTips && safetyTips.length > 0 && (
+                <div className="px-6 pt-8">
+                  <h3 className="text-lg font-bold mb-3 flex items-center gap-2" style={{ color: "var(--fl-color-text)" }}>
+                    <Sparkles className="w-5 h-5" style={{ color: "var(--app-primary-color)" }} />
+                    Instruções de Segurança
+                  </h3>
+                  <div className="space-y-3">
+                    {safetyTips.map((tip, index) => (
+                      <div key={`${tip}-${index}`} className="flex gap-3 p-3 rounded-lg border" style={{ background: "color-mix(in srgb, var(--fl-surface-muted) 50%, transparent)", borderColor: "var(--fl-border-soft)" }}>
+                        <CheckCircle2 className="w-5 h-5 shrink-0" style={{ color: "var(--app-primary-color)" }} />
+                        <p className="text-sm" style={{ color: "var(--fl-color-text-muted)" }}>{tip}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Loot / Rewards */}
+              <div className="px-6 pt-8 pb-4">
+                <h3 className="text-lg font-bold mb-3 flex items-center gap-2" style={{ color: "var(--fl-color-text)" }}>
+                  <Trophy className="w-5 h-5" style={{ color: "var(--app-primary-color)" }} />
+                  Recompensas
+                </h3>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="p-4 rounded-xl flex items-center gap-4 border" style={{ background: "color-mix(in srgb, var(--fl-surface-muted) 50%, transparent)", borderColor: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)" }}>
+                    <div className="w-10 h-10 rounded-full flex items-center justify-center shrink-0" style={{ background: "color-mix(in srgb, var(--app-primary-color) 20%, transparent)" }}>
+                      <Star className="w-5 h-5" style={{ color: "var(--app-primary-color)" }} />
+                    </div>
+                    <div>
+                      <p className="text-xs font-bold uppercase" style={{ color: "color-mix(in srgb, var(--app-primary-color) 60%, var(--fl-color-text))" }}>Experiência</p>
+                      <p className="text-lg font-bold" style={{ color: "var(--fl-color-text)" }}>+{missionDetails.xp_reward} XP</p>
+                    </div>
+                  </div>
+                  <div className="p-4 rounded-xl flex items-center gap-4 border" style={{ background: "color-mix(in srgb, var(--fl-surface-muted) 50%, transparent)", borderColor: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)" }}>
+                    <div className="w-10 h-10 rounded-full flex items-center justify-center shrink-0" style={{ background: "color-mix(in srgb, var(--app-primary-color) 20%, transparent)" }}>
+                      <Trophy className="w-5 h-5" style={{ color: "var(--app-primary-color)" }} />
+                    </div>
+                    <div>
+                      <p className="text-xs font-bold uppercase" style={{ color: "color-mix(in srgb, var(--app-primary-color) 60%, var(--fl-color-text))" }}>FitCoins</p>
+                      <p className="text-lg font-bold" style={{ color: "var(--fl-color-text)" }}>{missionDetails.points_reward}</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
 
-            <div className="space-y-2">
-              <p className="text-sm font-semibold text-gray-900">Seguranca e forma</p>
-              <ul className="space-y-2">
-                {safetyTips.map((tip, index) => (
-                  <li key={`${tip}-${index}`} className="text-sm text-gray-700 flex gap-2">
-                    <CheckCircle2 className="w-4 h-4 mt-0.5 text-emerald-600" />
-                    <span>{tip}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-
-            <div className="flex gap-3">
-              <Button variant="secondary" className="flex-1" onClick={() => setShowDetails(false)}>
-                Fechar
-              </Button>
+            {/* Sticky Bottom Action */}
+            <div className="absolute bottom-0 left-0 right-0 p-6 backdrop-blur-md flex flex-col items-center" style={{ borderTop: "1px solid var(--fl-border-soft)", background: "color-mix(in srgb, var(--fl-surface-strong) 92%, transparent)" }}>
+              <button 
+                onClick={() => {
+                  if (isCircuitMission || isCompleted || visualState === "failed") {
+                    setShowDetails(false);
+                  } else {
+                    setShowExecution(true);
+                  }
+                }}
+                className="w-full text-black font-black text-lg py-4 rounded-xl transition-all active:scale-95 flex items-center justify-center gap-3 relative z-10"
+                style={{ 
+                  background: "var(--app-primary-color)", 
+                  boxShadow: "0 0 20px color-mix(in srgb, var(--app-primary-color) 25%, transparent)" 
+                }}
+              >
+                {!isCircuitMission && !isCompleted && visualState !== "failed" && <Play className="w-6 h-6 fill-black text-black" strokeWidth={1.5} />}
+                {isCompleted ? "CONCLUÍDA" : visualState === "failed" ? "FECHAR" : isCircuitMission ? "FECHAR" : isInProgress ? "CONTINUAR" : "INICIAR MISSÃO"}
+              </button>
               {!isCircuitMission && (
-                <Button className="flex-1" onClick={() => setShowExecution(true)}>
-                  <Play className="w-4 h-4" />
-                  Iniciar
-                </Button>
+                 <p className="text-center text-xs mt-3 font-medium uppercase tracking-widest relative z-10" style={{ color: "var(--fl-color-text-muted)" }}>
+                   {missionDetails.sets && missionDetails.sets > 0 ? `${missionDetails.sets} séries • ` : ""}{formatGoal(missionDetails, detailMetricType)}{missionDetails.rest_seconds && missionDetails.rest_seconds > 0 ? ` • ${missionDetails.rest_seconds}s descanso` : ""}
+                 </p>
               )}
             </div>
           </div>
         </div>
       )}
-
       {!isCircuitMission && (
         <MissionExecutionModal
           mission={missionDetails}
