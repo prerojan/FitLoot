@@ -7,7 +7,7 @@ import {
 type AchievementRarity = "COMUM" | "INCOMUM" | "RARO" | "MITICO" | "SECRETO";
 
 const ACHIEVEMENT_RARITY_ACCENT: Record<AchievementRarity, string> = {
-  COMUM: "#00ff7b",
+  COMUM: "#94a3b8",
   INCOMUM: "#22c55e",
   RARO: "#0070dd",
   MITICO: "#a335ee",

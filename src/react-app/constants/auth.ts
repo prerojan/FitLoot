@@ -15,6 +15,7 @@ export const ROUTE_PATHS = {
   profile: "/profile",
   friends: "/friends",
   shop: "/shop",
+  titles: "/titles",
   ranking: "/ranking",
   achievements: "/achievements",
   minigames: "/minigames",

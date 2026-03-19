@@ -24,7 +24,7 @@ type RarityFilter = "ALL" | "COMUM" | "INCOMUM" | "RARO" | "MITICO" | "SECRETO";
 type NormalizedRarity = Exclude<RarityFilter, "ALL">;
 
 const RARITY_CONFIG: Record<NormalizedRarity, { color: string; label: string }> = {
-  COMUM: { color: "#00ff7b", label: "Comum" },
+  COMUM: { color: "#94a3b8", label: "Comum" },
   INCOMUM: { color: "#22c55e", label: "Incomum" },
   RARO: { color: "#0070dd", label: "Raro" },
   MITICO: { color: "#a335ee", label: "Mítico" },

@@ -5,10 +5,10 @@ import {
   LogOut, 
   Target, 
   Award, 
+  Badge,
   Trophy, 
   Dumbbell, 
   Users, 
-  Box, 
   Shield,
   Zap,
   Flame,
@@ -307,11 +307,11 @@ export default function Profile() {
                 <span className="text-[8px] font-bold uppercase tracking-[0.1em] sm:text-[10px] sm:tracking-widest truncate">Conquistas</span>
               </button>
               <button 
-                onClick={() => navigate(ROUTE_PATHS.shop)}
+                onClick={() => navigate(ROUTE_PATHS.titles)}
                 className="fl-theme-input flex min-w-[7.5rem] flex-1 items-center justify-center gap-1.5 rounded-2xl px-2 py-3 fl-theme-text-muted transition-opacity group hover:opacity-85 sm:min-w-0 sm:gap-2 sm:py-4"
               >
-                <Box className="size-3.5 shrink-0 transition-colors sm:size-4" style={{ color: 'var(--app-primary-color)' }} />
-                <span className="text-[8px] font-bold uppercase tracking-[0.1em] sm:text-[10px] sm:tracking-widest truncate">Loot</span>
+                <Badge className="size-3.5 shrink-0 transition-colors sm:size-4" style={{ color: 'var(--app-primary-color)' }} />
+                <span className="text-[8px] font-bold uppercase tracking-[0.1em] sm:text-[10px] sm:tracking-widest truncate">Títulos</span>
               </button>
               <button 
                 onClick={() => navigate(ROUTE_PATHS.friends)}

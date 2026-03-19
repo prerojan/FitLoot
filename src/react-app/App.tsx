@@ -25,6 +25,7 @@ const Checkout = lazy(() => import("@/react-app/pages/Checkout"));
 const PaymentPending = lazy(() => import("@/react-app/pages/PaymentPending"));
 const Dashboard = lazy(() => import("@/react-app/pages/Dashboard"));
 const Profile = lazy(() => import("@/react-app/pages/Profile"));
+const Titles = lazy(() => import("@/react-app/pages/Titles"));
 const Friends = lazy(() => import("@/react-app/pages/Friends"));
 const Shop = lazy(() => import("@/react-app/pages/Shop"));
 const Ranking = lazy(() => import("@/react-app/pages/Ranking"));
@@ -199,6 +200,14 @@ export default function App({ initialThemeMode = DEFAULT_APP_THEME_MODE }: AppPr
                   element={
                     <ProtectedRoute>
                       <Profile />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path={ROUTE_PATHS.titles}
+                  element={
+                    <ProtectedRoute>
+                      <Titles />
                     </ProtectedRoute>
                   }
                 />
