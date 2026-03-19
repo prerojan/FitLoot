@@ -706,8 +706,8 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
     : [compactDurationLabel, formatGoal(mission, metricType)].filter(Boolean).join(" | ");
   const compactActionLabel = isCircuitMission ? "Ver detalhes" : "Iniciar Treino";
   const triggerContent = layout === "compact" ? (
-    <div className="flex items-center justify-between gap-4">
-      <div className="flex min-w-0 items-center gap-4">
+    <div className="flex min-w-0 w-full items-center justify-between gap-4">
+      <div className="flex min-w-0 flex-1 items-center gap-4">
         <div
           className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl"
           style={{ background: "var(--app-primary-color)", color: "var(--fl-nav-item-active-text)" }}

@@ -19,6 +19,12 @@ type ShowcaseToken = {
   name: string | null;
 };
 
+function toTokenValue(value: unknown): string | null {
+  if (typeof value === "string" && value.trim()) return value;
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return null;
+}
+
 function normalizeToken(value: string): string {
   return repairKnownMojibakeString(value)
     .normalize("NFD")
@@ -86,10 +92,15 @@ function toShowcaseTokens(rawValue: string | null | undefined): ShowcaseToken[] 
           if (item && typeof item === "object") {
             const record = item as Record<string, unknown>;
             const idValue =
-              typeof record.id === "string" || typeof record.id === "number"
-                ? String(record.id)
-                : null;
-            const nameValue = typeof record.name === "string" ? record.name : null;
+              toTokenValue(record.id)
+              ?? toTokenValue(record.achievement_id)
+              ?? toTokenValue(record.achievementId)
+              ?? toTokenValue(record.value);
+            const nameValue =
+              toTokenValue(record.name)
+              ?? toTokenValue(record.achievement_name)
+              ?? toTokenValue(record.achievementName)
+              ?? toTokenValue(record.label);
 
             if (idValue || nameValue) {
               return { id: idValue, name: nameValue };
@@ -104,10 +115,15 @@ function toShowcaseTokens(rawValue: string | null | undefined): ShowcaseToken[] 
     if (parsed && typeof parsed === "object") {
       const record = parsed as Record<string, unknown>;
       const idValue =
-        typeof record.id === "string" || typeof record.id === "number"
-          ? String(record.id)
-          : null;
-      const nameValue = typeof record.name === "string" ? record.name : null;
+        toTokenValue(record.id)
+        ?? toTokenValue(record.achievement_id)
+        ?? toTokenValue(record.achievementId)
+        ?? toTokenValue(record.value);
+      const nameValue =
+        toTokenValue(record.name)
+        ?? toTokenValue(record.achievement_name)
+        ?? toTokenValue(record.achievementName)
+        ?? toTokenValue(record.label);
 
       if (idValue || nameValue) {
         return [{ id: idValue, name: nameValue }];
@@ -118,6 +134,15 @@ function toShowcaseTokens(rawValue: string | null | undefined): ShowcaseToken[] 
       return [{ id: String(parsed), name: String(parsed) }];
     }
   } catch {
+    const delimitedTokens = trimmedValue
+      .split(/[|,;]/)
+      .map((token) => token.trim())
+      .filter(Boolean);
+
+    if (delimitedTokens.length > 1) {
+      return delimitedTokens.map((token) => ({ id: token, name: token }));
+    }
+
     return [{ id: trimmedValue, name: trimmedValue }];
   }
 

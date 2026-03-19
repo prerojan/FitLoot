@@ -297,8 +297,9 @@ export default function Profile() {
               </p>
               {showcasedAchievement && showcasedAchievementTone && (
                 <div className="mt-2 min-w-0">
-                  <span className={`inline-flex items-center text-[10px] sm:text-xs font-bold px-2 py-0.5 rounded-full border ${showcasedAchievementTone.rarityClass}`}>
-                    {"\u{1F3C6}"} {showcasedAchievement.name}
+                  <span className={`inline-flex max-w-full items-center gap-1 text-[10px] sm:text-xs font-bold px-2 py-0.5 rounded-full border ${showcasedAchievementTone.rarityClass}`}>
+                    <span className="shrink-0">{"\u{1F3C6}"}</span>
+                    <span className="truncate">{showcasedAchievement.name}</span>
                   </span>
                 </div>
               )}

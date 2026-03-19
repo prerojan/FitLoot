@@ -42,7 +42,7 @@ export default function AppPageShell({
       data-route={location.pathname}
     >
       {!hideNavigation ? <DesktopAppNavbar profile={profile} progression={progression} /> : null}
-      <div className={cn("relative flex min-h-0 flex-1 flex-col", contentClassName)}>
+      <div className={cn("relative flex min-h-0 min-w-0 flex-1 flex-col", contentClassName)}>
         {children}
       </div>
       {!hideNavigation ? (

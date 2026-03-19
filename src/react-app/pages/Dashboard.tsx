@@ -417,7 +417,7 @@ export default function Dashboard() {
 
   return (
     <AppPageShell bottomNavActive="missions" profile={profile} progression={progression}>
-      <main className="mx-auto max-w-[48rem] px-4 pb-[98px] pt-4 sm:px-5 md:px-8 md:pt-8 min-w-0">
+      <main className="mx-auto w-full max-w-[48rem] px-4 pb-[98px] pt-4 sm:px-5 md:px-8 md:pt-8 min-w-0">
         <div className="space-y-2 sm:space-y-4 md:space-y-6 min-w-0">
           <div className="flex w-full items-start justify-between gap-4 px-1">
             <div className="flex min-w-0 flex-1 flex-col">
@@ -476,7 +476,7 @@ export default function Dashboard() {
                     <div className="min-w-0">
                       <div className={`inline-flex max-w-full items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] sm:text-xs font-bold ${showcasedAchievementDisplay.rarityClass}`}>
                         <span className="shrink-0">{"\u{1F3C6}"}</span>
-                        <span className="truncate">{showcasedAchievement.name}</span>
+                        <span className="max-w-full truncate">{showcasedAchievement.name}</span>
                       </div>
                     </div>
                   ) : null}
