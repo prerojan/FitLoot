@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { useLocation } from "react-router";
 import BottomNav from "@/react-app/components/BottomNav";
 import DesktopAppNavbar from "@/react-app/components/DesktopAppNavbar";
+import { ROUTE_PATHS } from "@/react-app/constants/auth";
 import { useAppChrome } from "@/react-app/contexts/appChrome";
 import type { UserProfile, UserProgression } from "@/shared/types";
 import { cn } from "@/react-app/utils";
@@ -15,6 +16,10 @@ type AppPageShellProps = {
   progression?: UserProgression | null | undefined;
 };
 
+const CHROMELESS_ROUTES = new Set<string>([
+  ROUTE_PATHS.aiChat,
+]);
+
 export default function AppPageShell({
   bottomNavActive,
   children,
@@ -25,7 +30,10 @@ export default function AppPageShell({
 }: AppPageShellProps) {
   const location = useLocation();
   const { missionDetailsOpen, missionExecutionOpen } = useAppChrome();
-  const hideNavigation = missionExecutionOpen || missionDetailsOpen;
+  const hideNavigation =
+    missionExecutionOpen ||
+    missionDetailsOpen ||
+    CHROMELESS_ROUTES.has(location.pathname);
 
   return (
     <div

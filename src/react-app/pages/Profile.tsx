@@ -34,6 +34,10 @@ import type {
   UserProgression,
 } from "@/shared/types";
 import { ApiRequestError, api, clearJsonCache, fetchAndCacheJson, readCachedJson } from "@/react-app/utils/api";
+import {
+  getAchievementShowcaseStyle,
+  resolveShowcasedAchievement,
+} from "@/react-app/utils/achievementShowcase";
 import { applyProfileTheme } from "@/react-app/utils/theme";
 
 const FEEDBACK_TYPES = ["Sugestao", "Bug", "Elogio", "Outro"] as const;
@@ -131,11 +135,13 @@ export default function Profile() {
   }, [user, navigate, loadData]);
 
   const activeTitle = useMemo(() => titles.find((item) => item.is_active === 1), [titles]);
-  
-  const showcasedAchievement = useMemo(() => {
-    if (!profile?.showcased_achievements) return null;
-    return achievements.find(a => String(a.id) === profile.showcased_achievements || a.name === profile.showcased_achievements);
-  }, [profile?.showcased_achievements, achievements]);
+  const showcasedAchievement = useMemo(
+    () => resolveShowcasedAchievement(profile?.showcased_achievements, achievements),
+    [achievements, profile?.showcased_achievements],
+  );
+  const showcasedAchievementStyle = showcasedAchievement
+    ? getAchievementShowcaseStyle(showcasedAchievement.rarity)
+    : null;
 
   const combatPower = useMemo(() => {
     if (!attributes) return 0;
@@ -230,7 +236,7 @@ export default function Profile() {
 
   return (
     <AppPageShell bottomNavActive="profile" className="fl-theme-page">
-      <main className="flex-1 flex flex-col lg:flex-row p-6 sm:p-8 lg:p-12 gap-8 lg:gap-12 overflow-y-auto custom-scrollbar">
+      <main className="custom-scrollbar flex flex-1 flex-col gap-6 overflow-y-auto p-4 sm:gap-8 sm:p-6 lg:flex-row lg:gap-12 lg:p-10">
         {error ? (
           <div className="lg:hidden rounded-3xl border px-5 py-4 text-[11px] font-bold uppercase tracking-widest" style={{ borderColor: "color-mix(in srgb, var(--app-primary-color) 24%, transparent)", backgroundColor: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)", color: "var(--app-primary-color)" }}>
             {error}
@@ -253,49 +259,72 @@ export default function Profile() {
               <div className="size-40 rounded-full border-4 border-primary p-1 shadow-[0_0_30px_rgba(var(--app-primary-color-rgb),0.2)] animate-pulse-slow" style={{ borderColor: 'var(--app-primary-color)' }}>
                 <Avatar name={profile?.username || "Guerreiro"} className="w-full h-full text-4xl" />
               </div>
-              <div className="absolute bottom-1 right-1 size-12 rounded-full bg-primary text-black flex items-center justify-center font-bold text-lg border-4 border-[#161616] shadow-xl" style={{ backgroundColor: 'var(--app-primary-color)' }}>
+              <div className="absolute bottom-1 right-1 flex size-12 items-center justify-center rounded-full border-4 text-lg font-bold shadow-xl" style={{ backgroundColor: 'var(--app-primary-color)', color: 'var(--fl-nav-item-active-text)', borderColor: 'var(--fl-surface-strong)' }}>
                 {progression?.level || 1}
               </div>
             </div>
 
             <div className="mb-8">
-              <h1 className="text-2xl font-bold text-white tracking-tight leading-tight mb-2 uppercase">{profile?.full_name}</h1>
+              <h1 className="mb-2 text-2xl font-bold uppercase tracking-tight leading-tight" style={{ color: "var(--fl-color-text)" }}>{profile?.full_name}</h1>
               <p className="text-primary font-bold text-[10px] uppercase tracking-[0.3em]" style={{ color: 'var(--app-primary-color)' }}>
                 {activeTitle?.name || "RECRUTA FITLOOT"}
               </p>
-              {showcasedAchievement && (
-                <div className="mt-4 flex items-center justify-center gap-2 px-4 py-2 bg-white/5 rounded-full border border-white/5 mx-auto w-fit">
-                   <Trophy className="size-3 text-slate-400" />
-                   <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{showcasedAchievement.name}</span>
+              {showcasedAchievement && showcasedAchievementStyle ? (
+                <div
+                  className="mx-auto mt-4 flex w-fit max-w-full items-center justify-center gap-2 rounded-full border px-4 py-2"
+                  style={{
+                    borderColor: showcasedAchievementStyle.borderColor,
+                    backgroundColor: showcasedAchievementStyle.backgroundColor,
+                  }}
+                >
+                   <span
+                     className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full"
+                     style={{
+                       backgroundColor: showcasedAchievementStyle.iconBackground,
+                       color: showcasedAchievementStyle.textColor,
+                     }}
+                   >
+                     <Trophy className="size-3.5" />
+                   </span>
+                   <span className="truncate text-[9px] font-bold uppercase tracking-widest sm:text-[10px]" style={{ color: showcasedAchievementStyle.textColor }}>
+                     {showcasedAchievement.name}
+                   </span>
                 </div>
-              )}
+              ) : null}
             </div>
 
-            <div className="w-full border-t border-white/5 pt-8 grid grid-cols-2 gap-4">
+            <div className="grid w-full grid-cols-3 gap-3 border-t pt-8" style={{ borderColor: "var(--fl-border-soft)" }}>
               <button 
-                onClick={() => navigate(ROUTE_PATHS.friends)}
-                className="fl-theme-input flex items-center gap-3 rounded-2xl px-4 py-4 fl-theme-text-muted hover:text-white transition-all group"
+                onClick={() => navigate(ROUTE_PATHS.achievements)}
+                className="fl-theme-input flex items-center justify-center gap-2 rounded-2xl px-3 py-4 fl-theme-text-muted transition-opacity group hover:opacity-85"
               >
-                <Users className="size-4 group-hover:text-primary transition-colors" style={{ color: 'var(--app-primary-color)' }} />
-                <span className="text-[10px] font-bold uppercase tracking-widest">Amigos</span>
+                <Trophy className="size-4 transition-colors" style={{ color: 'var(--app-primary-color)' }} />
+                <span className="text-[10px] font-bold uppercase tracking-widest">Conquistas</span>
               </button>
               <button 
                 onClick={() => navigate(ROUTE_PATHS.shop)}
-                className="fl-theme-input flex items-center gap-3 rounded-2xl px-4 py-4 fl-theme-text-muted hover:text-white transition-all group"
+                className="fl-theme-input flex items-center justify-center gap-2 rounded-2xl px-3 py-4 fl-theme-text-muted transition-opacity group hover:opacity-85"
               >
-                <Box className="size-4 group-hover:text-primary transition-colors" style={{ color: 'var(--app-primary-color)' }} />
+                <Box className="size-4 transition-colors" style={{ color: 'var(--app-primary-color)' }} />
                 <span className="text-[10px] font-bold uppercase tracking-widest">Loot</span>
+              </button>
+              <button 
+                onClick={() => navigate(ROUTE_PATHS.friends)}
+                className="fl-theme-input flex items-center justify-center gap-2 rounded-2xl px-3 py-4 fl-theme-text-muted transition-opacity group hover:opacity-85"
+              >
+                <Users className="size-4 transition-colors" style={{ color: 'var(--app-primary-color)' }} />
+                <span className="text-[10px] font-bold uppercase tracking-widest">Amigos</span>
               </button>
             </div>
           </section>
 
           {/* XP Progress Card */}
-          <section className="fl-theme-surface rounded-3xl p-8">
+          <section className="fl-theme-surface rounded-3xl p-6 sm:p-8">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-[0.2em]">Experiência (XP)</h3>
+              <h3 className="text-[10px] font-bold uppercase tracking-[0.2em]" style={{ color: "var(--fl-color-text-muted)" }}>Experiência (XP)</h3>
               <span className="text-[10px] font-bold text-primary" style={{ color: 'var(--app-primary-color)' }}>{progression?.xp || 0} / {Math.max(100, (progression?.level || 1) * 100)}</span>
             </div>
-            <div className="h-2.5 w-full rounded-full overflow-hidden border border-white/5" style={{ backgroundColor: "color-mix(in srgb, var(--fl-surface-muted) 70%, transparent)" }}>
+            <div className="h-2.5 w-full overflow-hidden rounded-full border" style={{ borderColor: "var(--fl-border-soft)", backgroundColor: "color-mix(in srgb, var(--fl-surface-muted) 70%, transparent)" }}>
               <div 
                 className="h-full bg-primary relative shadow-[0_0_15px_rgba(var(--app-primary-color-rgb),0.4)] transition-all duration-1000" 
                 style={{ width: `${levelProgress}%`, backgroundColor: 'var(--app-primary-color)' }}
@@ -309,7 +338,7 @@ export default function Profile() {
           <div className="flex flex-col gap-3">
              <button 
                 onClick={() => setSettingsOpen(true)}
-                className="fl-theme-surface flex items-center justify-center gap-3 rounded-2xl py-4 text-[10px] font-bold fl-theme-text-muted uppercase tracking-widest hover:text-white transition-all"
+                className="fl-theme-surface flex items-center justify-center gap-3 rounded-2xl py-4 text-[10px] font-bold fl-theme-text-muted uppercase tracking-widest transition-opacity hover:opacity-85"
               >
                 <Settings className="size-4" /> Configurações
              </button>
@@ -327,19 +356,19 @@ export default function Profile() {
         <section className="flex-1 flex flex-col gap-8">
           
           {/* Tab Navigation */}
-          <nav className="flex items-center gap-8 border-b border-white/5">
+          <nav className="flex items-center gap-6 border-b sm:gap-8" style={{ borderColor: "var(--fl-border-soft)" }}>
             <button 
               onClick={() => setTab("attributes")}
-              className={`pb-4 text-xs font-bold uppercase tracking-[0.2em] transition-all relative ${tab === 'attributes' ? 'text-primary' : 'text-slate-500 hover:text-slate-300'}`}
-              style={{ color: tab === 'attributes' ? 'var(--app-primary-color)' : '' }}
+              className="relative pb-4 text-xs font-bold uppercase tracking-[0.2em] transition-opacity hover:opacity-85"
+              style={{ color: tab === 'attributes' ? 'var(--app-primary-color)' : 'var(--fl-color-text-muted)' }}
             >
               Atributos
               {tab === 'attributes' && <div className="absolute bottom-[-1px] left-0 w-full h-0.5 bg-primary shadow-[0_0_10px_rgba(var(--app-primary-color-rgb),0.5)]" style={{ backgroundColor: 'var(--app-primary-color)' }}></div>}
             </button>
             <button 
               onClick={() => setTab("skills")}
-              className={`pb-4 text-xs font-bold uppercase tracking-[0.2em] transition-all relative ${tab === 'skills' ? 'text-primary' : 'text-slate-500 hover:text-slate-300'}`}
-              style={{ color: tab === 'skills' ? 'var(--app-primary-color)' : '' }}
+              className="relative pb-4 text-xs font-bold uppercase tracking-[0.2em] transition-opacity hover:opacity-85"
+              style={{ color: tab === 'skills' ? 'var(--app-primary-color)' : 'var(--fl-color-text-muted)' }}
             >
               Habilidades
               {tab === 'skills' && <div className="absolute bottom-[-1px] left-0 w-full h-0.5 bg-primary shadow-[0_0_10px_rgba(var(--app-primary-color-rgb),0.5)]" style={{ backgroundColor: 'var(--app-primary-color)' }}></div>}
@@ -358,7 +387,7 @@ export default function Profile() {
                       <Activity className="size-4" />
                     </div>
 
-                    <h3 className="text-sm font-bold text-white uppercase tracking-widest">Atributos Principais</h3>
+                    <h3 className="text-sm font-bold uppercase tracking-widest" style={{ color: "var(--fl-color-text)" }}>Atributos Principais</h3>
                   </header>
 
                   <div className="space-y-8">
@@ -366,14 +395,14 @@ export default function Profile() {
                       const value = attributes ? Number(attributes[attr.key as keyof UserAttributes]) || 0 : 0;
                       return (
                         <div key={attr.key} className="group">
-                          <div className="flex items-center justify-between mb-3 text-white">
+                          <div className="mb-3 flex items-center justify-between" style={{ color: "var(--fl-color-text)" }}>
                             <div className="flex items-center gap-3">
                               <attr.icon className="size-4 text-primary group-hover:scale-110 transition-transform" style={{ color: 'var(--app-primary-color)' }} />
-                              <span className="text-[10px] font-bold uppercase tracking-widest text-slate-300 group-hover:text-white transition-colors">{attr.label} ({attr.sigla})</span>
+                              <span className="fl-theme-text-muted text-[10px] font-bold uppercase tracking-widest transition-opacity group-hover:opacity-80">{attr.label} ({attr.sigla})</span>
                             </div>
                             <span className="text-sm font-black tracking-tighter">{value}</span>
                           </div>
-                          <div className="h-3.5 w-full bg-[#161616] rounded-full p-0.5 border border-white/5">
+                          <div className="h-3.5 w-full rounded-full border p-0.5" style={{ borderColor: "var(--fl-border-soft)", backgroundColor: "color-mix(in srgb, var(--fl-surface-muted) 74%, transparent)" }}>
                             <div 
                               className={`h-full bg-gradient-to-r ${attr.color} rounded-full transition-all duration-1000 shadow-[0_0_10px_rgba(var(--app-primary-color-rgb),0.2)]`} 
                               style={{ width: `${Math.min(value, 100)}%` }}
@@ -400,7 +429,7 @@ export default function Profile() {
                               return `${50 + (r/2) * Math.cos(angle)},${50 + (r/2) * Math.sin(angle)}`;
                             }).join(" ")}
                             fill="none"
-                            stroke="rgba(255,255,255,0.05)"
+                            stroke="var(--fl-border-soft)"
                             strokeWidth="0.5"
                           />
                         ))}
@@ -408,7 +437,7 @@ export default function Profile() {
                         {/* Axis */}
                         {ATTRIBUTE_META.map((_, i) => {
                            const angle = (i * 2 * Math.PI) / 5 - Math.PI / 2;
-                           return <line key={i} x1="50" y1="50" x2={50 + 50 * Math.cos(angle)} y2={50 + 50 * Math.sin(angle)} stroke="rgba(255,255,255,0.05)" strokeWidth="0.5" />
+                           return <line key={i} x1="50" y1="50" x2={50 + 50 * Math.cos(angle)} y2={50 + 50 * Math.sin(angle)} stroke="var(--fl-border-soft)" strokeWidth="0.5" />
                         })}
 
                         {/* Data Polygon */}
@@ -443,8 +472,8 @@ export default function Profile() {
                    </div>
 
                    <div className="mt-12 text-center relative z-10">
-                      <p className="text-[10px] font-bold text-slate-500 uppercase tracking-[0.4em] mb-1">Poder de Combate</p>
-                      <h4 className="text-4xl font-black text-white tracking-tighter shadow-primary-glow">{combatPower.toLocaleString()}</h4>
+                      <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.4em]" style={{ color: "var(--fl-color-text-muted)" }}>Poder de Combate</p>
+                      <h4 className="text-4xl font-black tracking-tighter shadow-primary-glow" style={{ color: "var(--fl-color-text)" }}>{combatPower.toLocaleString()}</h4>
                    </div>
                 </div>
               </div>
@@ -454,12 +483,12 @@ export default function Profile() {
                   <div className="size-8 rounded-lg bg-primary/10 flex items-center justify-center text-primary" style={{ color: 'var(--app-primary-color)' }}>
                     <Dumbbell className="size-4" />
                   </div>
-                  <h3 className="text-sm font-bold text-white uppercase tracking-widest">Árvore de Habilidades</h3>
+                  <h3 className="text-sm font-bold uppercase tracking-widest" style={{ color: "var(--fl-color-text)" }}>Árvore de Habilidades</h3>
                 </header>
 
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-6 gap-4">
                   {skills.length === 0 ? (
-                    <div className="fl-theme-surface col-span-full py-12 text-center rounded-3xl border border-dashed border-white/5">
+                    <div className="fl-theme-surface col-span-full rounded-3xl border border-dashed py-12 text-center" style={{ borderColor: "var(--fl-border-soft)" }}>
                       <p className="text-xs font-bold text-slate-600 uppercase tracking-widest">Nenhuma skill dominada ainda.</p>
                     </div>
                   ) : skills.map((skill) => {
@@ -467,18 +496,33 @@ export default function Profile() {
                     return (
                       <div 
                         key={skill.id}
-                        className={`group relative flex flex-col items-center gap-4 p-5 rounded-3xl border transition-all duration-500 ${isUnlocked ? 'bg-primary/5 border-primary/20 hover:scale-105 shadow-lg shadow-primary/5' : 'bg-slate-900/50 border-white/5 grayscale opacity-50'}`}
-                        style={{ borderColor: isUnlocked ? 'var(--app-primary-color-20)' : '' }}
+                        className={`group relative flex flex-col items-center gap-4 rounded-3xl border p-5 transition-all duration-500 ${isUnlocked ? 'hover:scale-105 shadow-lg shadow-primary/5' : 'grayscale opacity-50'}`}
+                        style={{
+                          borderColor: isUnlocked
+                            ? "color-mix(in srgb, var(--app-primary-color) 22%, var(--fl-border-soft))"
+                            : "var(--fl-border-soft)",
+                          backgroundColor: isUnlocked
+                            ? "color-mix(in srgb, var(--app-primary-color) 8%, var(--fl-surface-strong))"
+                            : "color-mix(in srgb, var(--fl-surface-muted) 78%, transparent)",
+                        }}
                       >
 
-                         <div className={`size-14 rounded-2xl flex items-center justify-center transition-all duration-500 ${isUnlocked ? 'bg-primary/20 text-primary group-hover:bg-primary group-hover:text-black' : 'bg-white/5 text-slate-600'}`} style={{ backgroundColor: isUnlocked ? 'var(--app-primary-color-20)' : '', color: isUnlocked ? 'var(--app-primary-color)' : '' }}>
+                         <div
+                           className="size-14 rounded-2xl flex items-center justify-center transition-all duration-500"
+                           style={{
+                             backgroundColor: isUnlocked
+                               ? "color-mix(in srgb, var(--app-primary-color) 18%, transparent)"
+                               : "color-mix(in srgb, var(--fl-surface-strong) 92%, transparent)",
+                             color: isUnlocked ? "var(--app-primary-color)" : "var(--fl-color-text-soft)",
+                           }}
+                         >
                             {isUnlocked ? <Zap className="size-7" /> : <Lock className="size-6" />}
                          </div>
                          <div className="text-center min-w-0 w-full">
-                           <span className={`text-[9px] font-black uppercase tracking-widest block truncate ${isUnlocked ? 'text-primary' : 'text-slate-500'}`} style={{ color: isUnlocked ? 'var(--app-primary-color)' : '' }}>{skill.name}</span>
+                           <span className="block truncate text-[9px] font-black uppercase tracking-widest" style={{ color: isUnlocked ? 'var(--app-primary-color)' : 'var(--fl-color-text-muted)' }}>{skill.name}</span>
                          </div>
                          {isUnlocked && (
-                           <div className="absolute top-2 right-2 size-6 rounded-full bg-primary text-black font-black text-[10px] flex items-center justify-center shadow-lg" style={{ backgroundColor: 'var(--app-primary-color)' }}>
+                           <div className="absolute top-2 right-2 flex size-6 items-center justify-center rounded-full bg-primary text-[10px] font-black shadow-lg" style={{ backgroundColor: 'var(--app-primary-color)', color: 'var(--fl-nav-item-active-text)' }}>
                               L{Math.floor(skill.total_reps / 50) + 1}
                            </div>
                          )}
@@ -499,11 +543,11 @@ export default function Profile() {
       {settingsOpen && (
         <div className="fl-z-modal fixed inset-0 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 sm:p-6 animate-fadeIn">
           <div className="fl-theme-surface w-full max-w-2xl rounded-[2.5rem] overflow-hidden shadow-2xl animate-scaleIn max-h-[90vh] flex flex-col">
-            <header className="p-8 border-b border-white/5 flex items-center justify-between shrink-0">
-              <h2 className="text-xl font-bold text-white tracking-tight uppercase tracking-widest">Configurações</h2>
+            <header className="flex items-center justify-between border-b p-8 shrink-0" style={{ borderColor: "var(--fl-border-soft)" }}>
+              <h2 className="text-xl font-bold tracking-tight uppercase tracking-widest" style={{ color: "var(--fl-color-text)" }}>Configurações</h2>
               <button 
                 onClick={() => setSettingsOpen(false)}
-                className="size-10 flex items-center justify-center rounded-xl bg-white/5 text-slate-400 hover:text-white transition-colors"
+                className="fl-theme-surface-soft size-10 flex items-center justify-center rounded-xl fl-theme-text-muted transition-opacity hover:opacity-80"
               >
                 <X className="size-5" />
               </button>
@@ -515,12 +559,12 @@ export default function Profile() {
                 <h3 className="text-[10px] font-bold text-primary uppercase tracking-[0.3em]" style={{ color: 'var(--app-primary-color)' }}>Sua Conta</h3>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="fl-theme-input rounded-2xl p-4">
-                    <p className="text-[9px] font-bold text-slate-500 uppercase mb-1">Nome Real</p>
-                    <p className="text-sm font-bold text-white uppercase">{profile?.full_name}</p>
+                    <p className="mb-1 text-[9px] font-bold uppercase" style={{ color: "var(--fl-color-text-muted)" }}>Nome Real</p>
+                    <p className="text-sm font-bold uppercase" style={{ color: "var(--fl-color-text)" }}>{profile?.full_name}</p>
                   </div>
                   <div className="fl-theme-input rounded-2xl p-4">
-                    <p className="text-[9px] font-bold text-slate-500 uppercase mb-1">Username</p>
-                    <p className="text-sm font-bold text-white uppercase">@{profile?.username}</p>
+                    <p className="mb-1 text-[9px] font-bold uppercase" style={{ color: "var(--fl-color-text-muted)" }}>Username</p>
+                    <p className="text-sm font-bold uppercase" style={{ color: "var(--fl-color-text)" }}>@{profile?.username}</p>
                   </div>
                 </div>
               </section>
@@ -533,8 +577,8 @@ export default function Profile() {
                     <button 
                       key={focus}
                       onClick={() => updateFocus(focus)}
-                      className={`py-4 rounded-2xl text-[10px] font-bold uppercase tracking-widest transition-all ${profile?.active_skill_focus === focus ? 'bg-primary text-black' : 'fl-theme-input fl-theme-text-muted hover:text-white'}`}
-                      style={{ backgroundColor: profile?.active_skill_focus === focus ? 'var(--app-primary-color)' : '' }}
+                      className={`py-4 rounded-2xl text-[10px] font-bold uppercase tracking-widest transition-all ${profile?.active_skill_focus === focus ? 'bg-primary' : 'fl-theme-input fl-theme-text-muted hover:opacity-80'}`}
+                      style={{ backgroundColor: profile?.active_skill_focus === focus ? 'var(--app-primary-color)' : '', color: profile?.active_skill_focus === focus ? 'var(--fl-nav-item-active-text)' : undefined }}
                     >
                       {focus === 'calistenia' ? 'Foco Calistenia' : 'Foco Yoga'}
                     </button>
@@ -543,14 +587,14 @@ export default function Profile() {
               </section>
 
               <section className="space-y-4">
-                <h3 className="text-[10px] font-bold text-primary uppercase tracking-[0.3em]" style={{ color: 'var(--app-primary-color)' }}>Aparencia</h3>
+                <h3 className="text-[10px] font-bold text-primary uppercase tracking-[0.3em]" style={{ color: 'var(--app-primary-color)' }}>Aparência</h3>
                 <div className="fl-theme-input rounded-[1.75rem] p-5 flex items-center justify-between gap-4">
                   <div className="min-w-0">
-                    <p className="text-xs font-bold text-white uppercase tracking-widest">
+                    <p className="text-xs font-bold uppercase tracking-widest" style={{ color: "var(--fl-color-text)" }}>
                       {themeMode === "dark" ? "Tema Escuro" : "Tema Claro"}
                     </p>
-                    <p className="text-[10px] font-bold text-slate-500 uppercase tracking-[0.18em] mt-2">
-                      Aplicacao imediata em todo o app
+                    <p className="mt-2 text-[10px] font-bold uppercase tracking-[0.18em]" style={{ color: "var(--fl-color-text-muted)" }}>
+                      Aplicação imediata em todo o app
                     </p>
                   </div>
                   <button
@@ -561,15 +605,20 @@ export default function Profile() {
                     aria-label={themeMode === "dark" ? "Tema Escuro" : "Tema Claro"}
                     className="relative flex h-12 w-24 shrink-0 items-center rounded-full border px-1 transition-all"
                     style={{
-                      backgroundColor: themeMode === "dark" ? "color-mix(in srgb, var(--app-primary-color) 18%, transparent)" : "rgba(255,255,255,0.06)",
-                      borderColor: themeMode === "dark" ? "color-mix(in srgb, var(--app-primary-color) 30%, transparent)" : "rgba(255,255,255,0.08)",
+                      backgroundColor: themeMode === "dark"
+                        ? "color-mix(in srgb, var(--app-primary-color) 18%, transparent)"
+                        : "color-mix(in srgb, var(--fl-surface-muted) 96%, transparent)",
+                      borderColor: themeMode === "dark"
+                        ? "color-mix(in srgb, var(--app-primary-color) 30%, transparent)"
+                        : "var(--fl-border-soft)",
                     }}
                   >
                     <span
-                      className="absolute top-1 flex size-10 items-center justify-center rounded-full text-black shadow-lg transition-all"
+                      className="absolute top-1 flex size-10 items-center justify-center rounded-full shadow-lg transition-all"
                       style={{
                         left: themeMode === "dark" ? "calc(100% - 2.75rem)" : "0.25rem",
                         backgroundColor: "var(--app-primary-color)",
+                        color: "var(--fl-nav-item-active-text)",
                       }}
                     >
                       {themeMode === "dark" ? <Moon className="size-4" /> : <Sun className="size-4" />}
@@ -589,7 +638,8 @@ export default function Profile() {
                         setFeedbackType(e.target.value);
                       }
                     }}
-                    className="fl-theme-input w-full rounded-2xl px-6 py-4 text-xs font-bold text-white uppercase tracking-widest focus:ring-1 focus:ring-primary outline-none transition-all"
+                    className="fl-theme-input w-full rounded-2xl px-6 py-4 text-xs font-bold uppercase tracking-widest outline-none transition-all"
+                    style={{ color: "var(--fl-color-text)" }}
                   >
                     <option value="Sugestao">Sugestão</option>
                     <option value="Bug">Reportar Bug</option>
@@ -600,7 +650,8 @@ export default function Profile() {
                     value={feedbackMessage}
                     onChange={(e) => setFeedbackMessage(e.target.value)}
                     placeholder="Sugestões de novas skills ou melhorias..."
-                    className="fl-theme-input w-full rounded-2xl px-6 py-4 text-xs font-bold text-white uppercase tracking-widest focus:ring-1 focus:ring-primary outline-none transition-all min-h-[120px]"
+                    className="fl-theme-input min-h-[120px] w-full rounded-2xl px-6 py-4 text-xs font-bold uppercase tracking-widest outline-none transition-all"
+                    style={{ color: "var(--fl-color-text)" }}
                   />
                   {feedbackStatus && (
                     <p className={`text-[10px] font-bold uppercase tracking-widest ${feedbackStatus.type === 'success' ? 'text-primary' : 'text-red-400'}`} style={{ color: feedbackStatus.type === 'success' ? 'var(--app-primary-color)' : '' }}>
@@ -610,7 +661,7 @@ export default function Profile() {
                   <button 
                     onClick={sendFeedback}
                     disabled={feedbackSending}
-                    className="w-full py-4 rounded-2xl bg-white/5 border border-white/5 text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em] hover:text-white hover:bg-white/10 transition-all disabled:opacity-50"
+                    className="fl-theme-input w-full rounded-2xl py-4 text-[10px] font-bold fl-theme-text-muted uppercase tracking-[0.2em] transition-opacity hover:opacity-85 disabled:opacity-50"
                   >
                     {feedbackSending ? <LoadingBall size="sm" /> : 'Enviar Relatório de Combate'}
                   </button>
@@ -618,11 +669,11 @@ export default function Profile() {
               </section>
             </div>
 
-            <footer className="p-8 border-t border-white/5 shrink-0" style={{ backgroundColor: "color-mix(in srgb, var(--fl-surface-muted) 58%, transparent)" }}>
+            <footer className="p-8 border-t shrink-0" style={{ borderColor: "var(--fl-border-soft)", backgroundColor: "color-mix(in srgb, var(--fl-surface-muted) 58%, transparent)" }}>
                <button 
                 onClick={() => setSettingsOpen(false)}
-                className="w-full py-5 rounded-2xl bg-primary text-black font-black text-xs uppercase tracking-[0.3em] shadow-lg shadow-primary/20 hover:scale-[1.02] transition-all"
-                style={{ backgroundColor: 'var(--app-primary-color)' }}
+                className="w-full rounded-2xl bg-primary py-5 text-xs font-black uppercase tracking-[0.3em] shadow-lg shadow-primary/20 transition-all hover:scale-[1.02]"
+                style={{ backgroundColor: 'var(--app-primary-color)', color: 'var(--fl-nav-item-active-text)' }}
                >
                  Confirmar Alterações
                </button>

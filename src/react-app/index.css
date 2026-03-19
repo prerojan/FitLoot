@@ -378,7 +378,7 @@ body {
   .fl-app-page {
     min-height: 100vh;
     overflow-x: hidden;
-    padding-bottom: 7.5rem;
+    padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 6rem);
   }
 
   .fl-app-container {
@@ -452,27 +452,31 @@ body {
   }
 
   .fl-z-nav {
-    z-index: 40;
+    z-index: 20;
   }
 
   .fl-z-fab {
-    z-index: 40;
+    z-index: 20;
   }
 
   .fl-z-drawer {
-    z-index: 50;
+    z-index: 30;
+  }
+
+  .fl-z-detail {
+    z-index: 40;
   }
 
   .fl-z-modal {
-    z-index: 60;
+    z-index: 50;
   }
 
   .fl-z-mission-screen {
-    z-index: 60;
+    z-index: 50;
   }
 
   .fl-z-toast {
-    z-index: 70;
+    z-index: 60;
   }
 }
 
@@ -1505,7 +1509,7 @@ body {
 
 @media (min-width: 768px) {
   .fl-app-page {
-    padding-bottom: 2.5rem;
+    padding-bottom: 2rem;
   }
 
   .fl-app-container {

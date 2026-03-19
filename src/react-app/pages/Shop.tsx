@@ -169,18 +169,18 @@ export default function Shop() {
       progression={progression}
       className="fl-theme-page"
     >
-      <div className="flex-1 flex flex-col overflow-hidden min-h-screen">
+      <div className="flex flex-1 min-h-0 flex-col overflow-hidden">
         {/* Inner Header (Search + Points) */}
-        <header className="sticky top-0 z-10 h-20 border-b border-white/5 px-6 flex items-center justify-between backdrop-blur-xl" style={{ backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 82%, transparent)" }}>
+        <header className="sticky top-0 z-10 flex h-20 items-center justify-between border-b px-4 backdrop-blur-xl sm:px-6" style={{ borderColor: "var(--fl-border-soft)", backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 82%, transparent)" }}>
           <div className="flex-1 max-w-xl">
             <div className="relative group">
-              <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500 group-focus-within:text-primary transition-colors" style={{ color: searchQuery ? 'var(--app-primary-color)' : '' }} />
+              <Search className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 transition-colors" style={{ color: searchQuery ? 'var(--app-primary-color)' : 'var(--fl-color-text-muted)' }} />
               <input 
                 type="text"
                 placeholder="Buscar recompensas, marcas ou equipamentos..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="fl-theme-input w-full focus:ring-1 focus:ring-primary rounded-xl pl-12 pr-4 py-2.5 placeholder:text-slate-500 text-sm focus:outline-none transition-all"
+                className="fl-theme-input w-full rounded-xl py-2.5 pl-12 pr-4 text-sm transition-all focus:outline-none focus:ring-1 focus:ring-primary"
                 style={{ borderColor: searchQuery ? 'rgba(var(--app-primary-color-rgb), 0.3)' : '' }}
               />
             </div>
@@ -188,7 +188,7 @@ export default function Shop() {
           <div className="flex items-center gap-4 ml-6">
             <div className="fl-theme-surface hidden sm:flex items-center gap-2 rounded-xl px-4 py-2 shadow-inner">
               <Coins className="w-5 h-5" style={{ color: 'var(--app-primary-color)' }} />
-              <span className="font-bold text-white tracking-tight">{progression?.points?.toLocaleString() || 0} <span className="text-[10px] text-slate-500 uppercase ml-1">Pts</span></span>
+              <span className="font-bold tracking-tight" style={{ color: "var(--fl-color-text)" }}>{progression?.points?.toLocaleString() || 0} <span className="ml-1 text-[10px] uppercase" style={{ color: "var(--fl-color-text-muted)" }}>Pts</span></span>
             </div>
             <button className="fl-theme-surface-soft w-10 h-10 flex items-center justify-center rounded-full fl-theme-text-muted hover:text-primary transition-colors">
               <ShoppingCart className="w-5 h-5" />
@@ -200,9 +200,9 @@ export default function Shop() {
         </header>
 
         {/* Shop Body */}
-        <div className="flex-1 overflow-y-auto custom-scrollbar p-6 sm:p-8">
+        <div className="custom-scrollbar flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
           {/* Hero Promo */}
-          <div className="relative w-full h-52 sm:h-64 rounded-3xl overflow-hidden mb-8 group border border-white/5">
+          <div className="group relative mb-8 h-52 w-full overflow-hidden rounded-3xl border sm:h-64" style={{ borderColor: "var(--fl-border-soft)" }}>
             <div className="absolute inset-0 bg-gradient-to-r from-black via-black/50 to-transparent z-10"></div>
             <img 
               src="https://images.unsplash.com/photo-1517836357463-d25dfeac3438?auto=format&fit=crop&q=80" 
@@ -210,9 +210,9 @@ export default function Shop() {
               className="absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition-transform duration-700"
             />
             <div className="relative z-20 h-full flex flex-col justify-center px-10">
-              <span className="bg-primary text-black px-3 py-1 rounded-full text-[10px] font-bold w-fit mb-3 uppercase tracking-wider" style={{ backgroundColor: 'var(--app-primary-color)' }}>Tempo Limitado</span>
-              <h2 className="text-3xl sm:text-4xl font-bold text-white mb-2 tracking-tight">Summer Fitness Drop</h2>
-              <p className="text-slate-300 max-w-sm text-sm font-medium">Ganhe 20% de desconto em equipamentos selecionados até 31 de Outubro.</p>
+              <span className="mb-3 w-fit rounded-full bg-primary px-3 py-1 text-[10px] font-bold uppercase tracking-wider" style={{ backgroundColor: 'var(--app-primary-color)', color: 'var(--fl-nav-item-active-text)' }}>Tempo Limitado</span>
+              <h2 className="mb-2 text-3xl font-bold tracking-tight text-white sm:text-4xl">Summer Fitness Drop</h2>
+              <p className="max-w-sm text-sm font-medium text-white/80">Ganhe 20% de desconto em equipamentos selecionados até 31 de outubro.</p>
             </div>
           </div>
 
@@ -253,7 +253,7 @@ export default function Shop() {
           {activeTab === 'shop' ? (
             <div className="mb-14">
               <div className="flex items-center justify-between mb-8">
-                <h3 className="text-2xl font-bold tracking-tight text-white">Recompensas em Destaque</h3>
+                <h3 className="text-2xl font-bold tracking-tight" style={{ color: "var(--fl-color-text)" }}>Recompensas em Destaque</h3>
                 <button className="text-primary text-sm font-bold flex items-center gap-1 hover:underline" style={{ color: 'var(--app-primary-color)' }}>
                   Ver Todos <ArrowRight className="w-4 h-4" />
                 </button>
@@ -278,26 +278,26 @@ export default function Shop() {
               </div>
 
               {displayProducts.length === 0 && (
-                <div className="fl-theme-surface text-center py-20 rounded-3xl border border-dashed border-white/10">
-                  <Package className="w-16 h-16 text-white/5 mx-auto mb-4" />
-                  <p className="text-slate-500 font-bold text-xs uppercase tracking-[0.2em] px-4">Novas Recompensas em Breve</p>
-                  <p className="text-[10px] text-slate-700 uppercase tracking-widest mt-2">Estamos preparando o melhor portal de loot para você.</p>
+                <div className="fl-theme-surface rounded-3xl border border-dashed py-20 text-center" style={{ borderColor: "var(--fl-border-soft)" }}>
+                  <Package className="mx-auto mb-4 h-16 w-16 fl-theme-text-soft" />
+                  <p className="px-4 text-xs font-bold uppercase tracking-[0.2em]" style={{ color: "var(--fl-color-text-muted)" }}>Novas Recompensas em Breve</p>
+                  <p className="mt-2 text-[10px] uppercase tracking-widest" style={{ color: "var(--fl-color-text-muted)" }}>Estamos preparando o melhor portal de loot para você.</p>
                 </div>
               )}
 
               {/* Brand Partners */}
               <div className="mt-20 mb-8">
-                <h3 className="text-xl font-bold mb-8 tracking-tight flex items-center gap-3 text-white">
+                <h3 className="mb-8 flex items-center gap-3 text-xl font-bold tracking-tight" style={{ color: "var(--fl-color-text)" }}>
                   <Star className="w-5 h-5 text-yellow-500 fill-yellow-500" />
                   Marcas Parceiras
                 </h3>
                 <div className="fl-theme-surface p-10 rounded-3xl flex flex-col items-center justify-center text-center">
                   <div className="flex gap-4 mb-4 opacity-20 grayscale">
-                    <div className="w-12 h-12 rounded-xl bg-white/10" />
-                    <div className="w-12 h-12 rounded-xl bg-white/10" />
-                    <div className="w-12 h-12 rounded-xl bg-white/10" />
+                    <div className="h-12 w-12 rounded-xl" style={{ backgroundColor: "color-mix(in srgb, var(--fl-surface-muted) 84%, transparent)" }} />
+                    <div className="h-12 w-12 rounded-xl" style={{ backgroundColor: "color-mix(in srgb, var(--fl-surface-muted) 84%, transparent)" }} />
+                    <div className="h-12 w-12 rounded-xl" style={{ backgroundColor: "color-mix(in srgb, var(--fl-surface-muted) 84%, transparent)" }} />
                   </div>
-                  <span className="text-xs font-bold text-white/30 tracking-[0.3em] uppercase">Parcerias em Breve</span>
+                  <span className="text-xs font-bold uppercase tracking-[0.3em]" style={{ color: "var(--fl-color-text-soft)" }}>Parcerias em breve</span>
                 </div>
               </div>
             </div>
@@ -305,16 +305,17 @@ export default function Shop() {
             <div className="mb-14">
               <div className="flex items-center gap-3 mb-8">
                 <Ticket className="w-6 h-6" style={{ color: 'var(--app-primary-color)' }} />
-                <h3 className="text-2xl font-bold tracking-tight text-white">Meus Cupons Ativos</h3>
+                <h3 className="text-2xl font-bold tracking-tight" style={{ color: "var(--fl-color-text)" }}>Meus Cupons Ativos</h3>
               </div>
               
               {orders.length === 0 ? (
-                <div className="fl-theme-surface text-center py-20 rounded-3xl border border-dashed border-white/10">
-                  <Package className="w-16 h-16 text-white/5 mx-auto mb-4" />
-                  <p className="text-slate-500 font-bold text-xs uppercase tracking-widest px-4">Nenhum cupom adquirido ainda. Vá até a loja e use seus pontos!</p>
+                <div className="fl-theme-surface rounded-3xl border border-dashed py-20 text-center" style={{ borderColor: "var(--fl-border-soft)" }}>
+                  <Package className="mx-auto mb-4 h-16 w-16 fl-theme-text-soft" />
+                  <p className="px-4 text-xs font-bold uppercase tracking-widest" style={{ color: "var(--fl-color-text-muted)" }}>Nenhum cupom adquirido ainda. Vá até a loja e use seus pontos!</p>
                   <button
                     onClick={() => setActiveTab('shop')}
-                    className="mt-6 px-8 py-3 bg-[#0A0A0A] text-white border border-white/10 rounded-full text-xs font-bold uppercase tracking-widest hover:bg-white/5 transition-colors"
+                    className="fl-theme-surface-soft mt-6 rounded-full border px-8 py-3 text-xs font-bold uppercase tracking-widest transition-opacity hover:opacity-85"
+                    style={{ borderColor: "var(--fl-border-soft)", color: "var(--fl-color-text)" }}
                   >
                     Explorar Recompensas
                   </button>
@@ -340,12 +341,13 @@ function CategoryItem({ active, onClick, icon, label }: { active: boolean, onCli
       onClick={onClick}
       className={`flex items-center gap-2 px-6 py-2.5 rounded-full font-bold whitespace-nowrap transition-all border ${
         active 
-          ? "bg-primary text-black border-primary shadow-[0_4px_12px_rgba(57,224,121,0.2)]" 
-          : "fl-theme-surface fl-theme-text-muted hover:border-white/10 hover:text-white"
+          ? "bg-primary border-primary shadow-[0_4px_12px_rgba(57,224,121,0.2)]" 
+          : "fl-theme-surface fl-theme-text-muted hover:opacity-85"
       }`}
       style={{ 
         backgroundColor: active ? 'var(--app-primary-color)' : '',
-        borderColor: active ? 'var(--app-primary-color)' : ''
+        borderColor: active ? 'var(--app-primary-color)' : '',
+        color: active ? 'var(--fl-nav-item-active-text)' : undefined,
       }}
     >
       {icon}
@@ -375,30 +377,36 @@ function ProductCard({
             className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700"
           />
         ) : (
-          <div className="w-full h-full flex items-center justify-center opacity-20 text-white">
+          <div className="flex h-full w-full items-center justify-center opacity-20" style={{ color: "var(--fl-color-text)" }}>
             <ShoppingBag className="w-16 h-16" />
           </div>
         )}
-        <div className="absolute top-4 right-4 bg-black/80 backdrop-blur-md px-3 py-1.5 rounded-xl flex items-center gap-1.5 border border-white/10">
+        <div className="absolute right-4 top-4 flex items-center gap-1.5 rounded-xl border px-3 py-1.5 backdrop-blur-md" style={{ backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 84%, transparent)", borderColor: "var(--fl-border-soft)" }}>
           <Coins className="w-3.5 h-3.5" style={{ color: 'var(--app-primary-color)' }} />
-          <span className="text-[10px] font-bold text-white">{product.points_cost.toLocaleString()}</span>
+          <span className="text-[10px] font-bold" style={{ color: "var(--fl-color-text)" }}>{product.points_cost.toLocaleString()}</span>
         </div>
       </div>
-      <div className="p-5 flex flex-col flex-1 text-white">
+      <div className="flex flex-1 flex-col p-5" style={{ color: "var(--fl-color-text)" }}>
         <p className="text-[10px] font-bold mb-1 uppercase tracking-[0.2em]" style={{ color: 'var(--app-primary-color)' }}>
           {product.partner_name || "FitLoot Partner"}
         </p>
-        <h4 className="font-bold text-lg text-white mb-2 leading-tight group-hover:text-primary transition-colors">{product.name}</h4>
-        <p className="text-xs text-slate-500 mb-6 line-clamp-2 leading-relaxed">
+        <h4 className="mb-2 text-lg font-bold leading-tight transition-colors group-hover:opacity-85">{product.name}</h4>
+        <p className="mb-6 line-clamp-2 text-xs leading-relaxed" style={{ color: "var(--fl-color-text-muted)" }}>
           {product.description || "Resgate esta oferta exclusiva e aproveite os benefícios da sua rotina fitness."}
         </p>
         <button
           onClick={() => onPurchase(product.id)}
           disabled={!canAfford}
           className={`mt-auto w-full py-4 rounded-2xl font-bold text-xs uppercase tracking-[0.2em] transition-all active:scale-95 disabled:opacity-50 disabled:grayscale ${
-            canAfford ? "neon-glow text-black" : "bg-white/5 text-slate-600 border border-white/5 cursor-not-allowed"
+            canAfford ? "neon-glow" : "cursor-not-allowed border"
           }`}
-          style={{ backgroundColor: canAfford ? 'var(--app-primary-color)' : '' }}
+          style={{
+            backgroundColor: canAfford
+              ? 'var(--app-primary-color)'
+              : 'color-mix(in srgb, var(--fl-surface-muted) 84%, transparent)',
+            color: canAfford ? 'var(--fl-nav-item-active-text)' : 'var(--fl-color-text-muted)',
+            borderColor: canAfford ? 'transparent' : 'var(--fl-border-soft)',
+          }}
         >
           {canAfford ? "Resgatar Loot" : "Saldo Insuficiente"}
         </button>
@@ -413,39 +421,39 @@ function OrderCard({ order }: { order: ShopOrderView }) {
   return (
     <div className={`fl-theme-surface relative rounded-3xl flex items-stretch p-2 transition-all ${isRedeemed ? 'opacity-40 grayscale pointer-events-none' : 'hover:border-primary/20 shadow-xl'}`}>
       {/* Ticket QR Section */}
-      <div className="w-28 sm:w-32 bg-white rounded-2xl flex flex-col items-center justify-center p-3">
+      <div className="flex w-28 flex-col items-center justify-center rounded-2xl p-3 sm:w-32" style={{ backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 98%, transparent)", border: "1px solid var(--fl-border-soft)" }}>
         {order.qr_code ? (
-          <div className="w-full aspect-square bg-slate-100 rounded-lg overflow-hidden flex items-center justify-center">
-             <QrCode className="w-16 h-16 text-slate-900" />
+          <div className="flex aspect-square w-full items-center justify-center overflow-hidden rounded-lg" style={{ backgroundColor: "color-mix(in srgb, var(--fl-surface-muted) 92%, transparent)" }}>
+             <QrCode className="w-16 h-16" style={{ color: "var(--fl-color-text)" }} />
           </div>
         ) : (
-          <div className="w-full aspect-square bg-slate-100 rounded-lg flex items-center justify-center">
-            <Package className="w-10 h-10 text-slate-300" />
+          <div className="flex aspect-square w-full items-center justify-center rounded-lg" style={{ backgroundColor: "color-mix(in srgb, var(--fl-surface-muted) 92%, transparent)" }}>
+            <Package className="w-10 h-10" style={{ color: "var(--fl-color-text-soft)" }} />
           </div>
         )}
-        <p className="text-[8px] font-mono mt-2 text-slate-900 font-bold tracking-widest">{order.qr_code || 'PENDING'}</p>
+        <p className="mt-2 text-[8px] font-mono font-bold tracking-widest" style={{ color: "var(--fl-color-text)" }}>{order.qr_code || 'PENDING'}</p>
       </div>
 
       {/* Ticket Details */}
-      <div className="flex-1 p-4 sm:p-6 flex flex-col justify-center border-l border-dashed border-white/10 ml-2">
-        <div className="flex justify-between items-start text-white">
+      <div className="ml-2 flex flex-1 flex-col justify-center border-l border-dashed p-4 sm:p-6" style={{ borderColor: "var(--fl-border-soft)" }}>
+        <div className="flex items-start justify-between" style={{ color: "var(--fl-color-text)" }}>
           <div className="flex-1">
-            <h4 className="font-bold text-base sm:text-lg leading-tight text-white">{order.product_name}</h4>
+            <h4 className="text-base font-bold leading-tight sm:text-lg">{order.product_name}</h4>
             <p className="text-[10px] font-bold mt-1 uppercase tracking-widest" style={{ color: 'var(--app-primary-color)' }}>
               {isRedeemed ? 'Resgatado em ' + (order.created_at ? new Date(order.created_at).toLocaleDateString('pt-BR') : '-') : 'Disponível para Resgate'}
             </p>
           </div>
-          <span className={`text-[9px] px-2.5 py-1 rounded-full font-bold uppercase tracking-wider ${isRedeemed ? 'bg-white/5 text-slate-500' : 'bg-primary/20 text-primary'}`} style={{ backgroundColor: isRedeemed ? '' : 'color-mix(in srgb, var(--app-primary-color) 20%, transparent)', color: isRedeemed ? '' : 'var(--app-primary-color)' }}>
+          <span className="rounded-full px-2.5 py-1 text-[9px] font-bold uppercase tracking-wider" style={{ backgroundColor: isRedeemed ? 'color-mix(in srgb, var(--fl-surface-muted) 82%, transparent)' : 'color-mix(in srgb, var(--app-primary-color) 20%, transparent)', color: isRedeemed ? 'var(--fl-color-text-muted)' : 'var(--app-primary-color)' }}>
             {isRedeemed ? 'USADO' : 'ATIVO'}
           </span>
         </div>
         
         <div className="mt-4 flex flex-col gap-2">
-          <div className="flex items-center gap-2 text-[10px] text-slate-500 font-bold uppercase tracking-widest leading-none">
+          <div className="flex items-center gap-2 text-[10px] font-bold uppercase leading-none tracking-widest" style={{ color: "var(--fl-color-text-muted)" }}>
             <Coins className="w-3 h-3" />
             {order.points_spent || 0} PTS UTILIZADOS
           </div>
-          <div className="flex items-center gap-2 text-[10px] text-slate-500 font-bold uppercase tracking-widest leading-none">
+          <div className="flex items-center gap-2 text-[10px] font-bold uppercase leading-none tracking-widest" style={{ color: "var(--fl-color-text-muted)" }}>
             <Ticket className="w-3 h-3" />
             VÁLIDO EM TODOS OS PARCEIROS
           </div>

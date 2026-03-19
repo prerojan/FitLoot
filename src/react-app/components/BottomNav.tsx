@@ -7,7 +7,7 @@ interface BottomNavProps {
 }
 
 const NAV_ITEMS = [
-  { id: "missions", label: "Missoes", icon: Target, path: ROUTE_PATHS.dashboard },
+  { id: "missions", label: "Missões", icon: Target, path: ROUTE_PATHS.dashboard },
   { id: "shop", label: "Loja", icon: ShoppingBag, path: ROUTE_PATHS.shop },
   { id: "arena", label: "Arena", icon: Swords, path: ROUTE_PATHS.minigames },
   { id: "ranking", label: "Ranking", icon: TrendingUp, path: ROUTE_PATHS.ranking },

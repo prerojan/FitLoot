@@ -7,9 +7,16 @@ import LevelUpModal from "@/react-app/components/LevelUpModal";
 import AIRecommendations from "@/react-app/components/AIRecommendations";
 import AIMissionGenerator from "@/react-app/components/AIMissionGenerator";
 import LoadingBall from "@/react-app/components/LoadingBall";
-import { Bot, CalendarDays, Camera, Cloud, Flame, Zap } from "lucide-react";
+import { Bot, CalendarDays, Camera, Cloud, Flame, Trophy, Zap } from "lucide-react";
 import { ROUTE_PATHS } from "@/react-app/constants/auth";
-import type { DailyMetrics, Mission, Title, UserProfile, UserProgression } from "@/shared/types";
+import type {
+  AchievementWithUnlock,
+  DailyMetrics,
+  Mission,
+  Title,
+  UserProfile,
+  UserProgression,
+} from "@/shared/types";
 import {
   ApiRequestError,
   api,
@@ -36,8 +43,13 @@ import {
   isMissionCompleted,
   sortMissions,
 } from "@/react-app/pages/dashboardUtils";
+import {
+  getAchievementShowcaseStyle,
+  resolveShowcasedAchievement,
+} from "@/react-app/utils/achievementShowcase";
 
 type DashboardLoadingState = {
+  achievements: boolean;
   profile: boolean;
   progression: boolean;
   missions: boolean;
@@ -46,6 +58,7 @@ type DashboardLoadingState = {
 };
 
 const DEFAULT_LOADING_STATE: DashboardLoadingState = {
+  achievements: true,
   profile: true,
   progression: true,
   missions: true,
@@ -59,6 +72,7 @@ export default function Dashboard() {
 
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [progression, setProgression] = useState<UserProgression | null>(null);
+  const [achievements, setAchievements] = useState<AchievementWithUnlock[]>([]);
   const [missions, setMissions] = useState<Mission[]>([]);
   const [metrics, setMetrics] = useState<DailyMetrics | null>(null);
   const [activeTitle, setActiveTitle] = useState<Title | null>(null);
@@ -77,12 +91,14 @@ export default function Dashboard() {
     const forceRefresh = options?.forceRefresh === true;
     setError(null);
 
+    const cacheAchievements = readCachedJson<AchievementWithUnlock[]>("/api/achievements");
     const cacheProfile = readCachedJson<UserProfile>("/api/profile");
     const cacheProgression = readCachedJson<UserProgression>("/api/progression");
     const cacheMissions = readCachedJson<Mission[]>("/api/missions");
     const cacheMetrics = readCachedJson<DailyMetrics>("/api/metrics/today");
     const cacheTitles = readCachedJson<Array<Title & { is_active?: number | undefined }>>("/api/titles");
 
+    if (cacheAchievements) setAchievements(Array.isArray(cacheAchievements.data) ? cacheAchievements.data : []);
     if (cacheProfile) setProfile(cacheProfile.data);
     if (cacheProgression) setProgression(cacheProgression.data);
     if (cacheMissions) setMissions(Array.isArray(cacheMissions.data) ? cacheMissions.data : []);
@@ -92,6 +108,7 @@ export default function Dashboard() {
     }
 
     setLoadingState({
+      achievements: forceRefresh || !cacheAchievements,
       profile: forceRefresh || !cacheProfile,
       progression: forceRefresh || !cacheProgression,
       missions: forceRefresh || !cacheMissions,
@@ -132,7 +149,7 @@ export default function Dashboard() {
 
         if (!hasCachedEntry) {
           hasRequestError = true;
-          setError("Nao foi possivel carregar todos os dados do dashboard agora.");
+          setError("Não foi possível carregar todos os dados do dashboard agora.");
         }
       } finally {
         setSectionLoading(section, false);
@@ -140,6 +157,9 @@ export default function Dashboard() {
     };
 
     await Promise.all([
+      runRequest<AchievementWithUnlock[]>("achievements", "/api/achievements", Boolean(cacheAchievements), Boolean(cacheAchievements?.stale), (payload) => {
+        setAchievements(Array.isArray(payload) ? payload : []);
+      }),
       runRequest<UserProfile>("profile", "/api/profile", Boolean(cacheProfile), Boolean(cacheProfile?.stale), setProfile, () => {
         shouldRedirectToOnboarding = true;
       }),
@@ -198,6 +218,7 @@ export default function Dashboard() {
     void import("@/react-app/pages/Ranking");
     void import("@/react-app/pages/AIChat");
     void import("@/react-app/pages/FoodAnalysis");
+    void prefetchJson("/api/achievements");
     void prefetchJson("/api/profile");
     void prefetchJson("/api/progression");
     void prefetchJson("/api/missions");
@@ -206,6 +227,7 @@ export default function Dashboard() {
   }, []);
 
   const refreshData = useCallback(async () => {
+    clearJsonCache("/api/achievements");
     clearJsonCache("/api/profile");
     clearJsonCache("/api/progression");
     clearJsonCache("/api/missions");
@@ -234,7 +256,7 @@ export default function Dashboard() {
 
       if (!response.ok) {
         const payload = (await response.json().catch(() => null)) as { error?: string | undefined } | null;
-        setError(payload?.error ?? "Nao foi possivel concluir a missao.");
+        setError(payload?.error ?? "Não foi possível concluir a missão.");
         return;
       }
 
@@ -254,7 +276,7 @@ export default function Dashboard() {
 
       await refreshData();
     } catch {
-      setError("Nao foi possivel concluir a missao agora.");
+      setError("Não foi possível concluir a missão agora.");
     }
   };
 
@@ -282,11 +304,11 @@ export default function Dashboard() {
   const missionFeedSections = useMemo(
     () =>
       [
-        { title: "Todas as missoes de hoje", missions: allDailyMissions },
-        { title: "Missoes especiais da IA", missions: aiSpecialMissions },
-        { title: "Missoes semanais", missions: weeklyMissions },
-        { title: "Missoes mensais", missions: monthlyMissions },
-        { title: "Missoes expiradas", missions: failedMissions },
+        { title: "Todas as missões de hoje", missions: allDailyMissions },
+        { title: "Missões especiais da IA", missions: aiSpecialMissions },
+        { title: "Missões semanais", missions: weeklyMissions },
+        { title: "Missões mensais", missions: monthlyMissions },
+        { title: "Missões expiradas", missions: failedMissions },
       ].filter((section) => section.missions.length > 0),
     [aiSpecialMissions, allDailyMissions, failedMissions, monthlyMissions, weeklyMissions],
   );
@@ -348,6 +370,13 @@ export default function Dashboard() {
 
   const displayName = profile?.full_name ?? user?.name ?? "Seu dashboard";
   const usernameLabel = profile?.username ? `@${profile.username}` : user?.email ?? "fitloot";
+  const showcasedAchievement = useMemo(
+    () => resolveShowcasedAchievement(profile?.showcased_achievements, achievements),
+    [achievements, profile?.showcased_achievements],
+  );
+  const showcasedAchievementStyle = showcasedAchievement
+    ? getAchievementShowcaseStyle(showcasedAchievement.rarity)
+    : null;
 
   const scrollToSection = useCallback((sectionId: string) => {
     const section = document.getElementById(sectionId);
@@ -365,12 +394,12 @@ export default function Dashboard() {
 
   return (
     <AppPageShell bottomNavActive="missions" profile={profile} progression={progression}>
-      <main className="mx-auto max-w-[48rem] px-4 pb-16 pt-4 sm:px-5 md:px-8 md:pt-8">
-        <div className="space-y-3 md:space-y-6">
-          <div className="flex w-full items-start justify-between gap-4 px-1">
+      <main className="mx-auto max-w-[48rem] px-3 pb-6 pt-3 sm:px-4 md:px-6 md:pt-6 lg:px-8 lg:pb-8">
+        <div className="space-y-3 md:space-y-5 lg:space-y-6">
+          <div className="flex w-full items-start justify-between gap-3 px-1 md:gap-4">
             <div className="flex flex-col">
               <p className="text-sm font-semibold md:text-base" style={{ color: "var(--fl-color-text)" }}>{displayName}</p>
-              <p className="text-[0.7rem] sm:text-xs text-slate-400 font-medium" style={{ color: "var(--fl-color-text-muted)" }}>{usernameLabel}</p>
+              <p className="text-[0.7rem] font-medium sm:text-xs" style={{ color: "var(--fl-color-text-muted)" }}>{usernameLabel}</p>
             </div>
             <div className="flex flex-col items-end gap-1 md:flex-row md:items-center md:gap-2">
               {loadingState.titles ? <LoadingBall size="sm" /> : activeTitle ? (
@@ -398,6 +427,37 @@ export default function Dashboard() {
             </div>
           </div>
 
+          {showcasedAchievement && showcasedAchievementStyle ? (
+            <div className="px-1">
+              <div
+                className="inline-flex max-w-full items-center gap-2 rounded-full border px-3 py-2 sm:px-4"
+                style={{
+                  borderColor: showcasedAchievementStyle.borderColor,
+                  backgroundColor: showcasedAchievementStyle.backgroundColor,
+                }}
+              >
+                <span
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full"
+                  style={{
+                    backgroundColor: showcasedAchievementStyle.iconBackground,
+                    color: showcasedAchievementStyle.textColor,
+                  }}
+                >
+                  <Trophy className="h-4 w-4" />
+                </span>
+                <div className="min-w-0">
+                  <p
+                    className="text-[0.58rem] font-black uppercase tracking-[0.18em] sm:text-[0.62rem]"
+                    style={{ color: showcasedAchievementStyle.textColor }}
+                  >
+                    Conquista honrada
+                  </p>
+                  <p className="truncate text-sm font-bold sm:text-base">{showcasedAchievement.name}</p>
+                </div>
+              </div>
+            </div>
+          ) : null}
+
           {error ? (
             <div className="flex flex-col gap-3 rounded-[1.75rem] p-4 sm:flex-row sm:items-center sm:justify-between" style={SUBTLE_PANEL_STYLE}>
               <span className="text-sm" style={{ color: "var(--fl-color-text)" }}>{error}</span>
@@ -411,16 +471,16 @@ export default function Dashboard() {
             <div className="rounded-[2rem] px-4 py-5 md:px-8 md:py-6" style={PRIMARY_GLOW_STYLE}>
               <div className="flex min-h-[9.5rem] flex-row items-center justify-between gap-2 sm:min-h-[10rem]">
                 <div className="flex flex-col justify-center gap-3 md:gap-4 pl-1">
-                  <div className="inline-flex items-center gap-2 text-[0.64rem] font-black uppercase tracking-[0.24em] sm:text-[0.68rem] sm:tracking-[0.28em] text-black/80">
+                  <div className="inline-flex items-center gap-2 text-[0.64rem] font-black uppercase tracking-[0.24em] sm:text-[0.68rem] sm:tracking-[0.28em]" style={{ color: "color-mix(in srgb, var(--fl-nav-item-active-text) 80%, transparent)" }}>
                     <Cloud className="h-4 w-4" />
                     <span>Experience Points</span>
                   </div>
-                  <div className="inline-flex w-fit items-center gap-2 rounded-full px-3 py-1.5 md:px-4 md:py-3 text-xs md:text-sm font-black bg-black/10 text-black">
+                  <div className="inline-flex w-fit items-center gap-2 rounded-full bg-black/10 px-3 py-1.5 text-xs font-black md:px-4 md:py-3 md:text-sm" style={{ color: "var(--fl-nav-item-active-text)" }}>
                     <Flame className="h-4 w-4" />
                     <span>{loadingState.progression ? <LoadingBall size="sm" /> : `${progression?.current_streak ?? 0}-Day Streak`}</span>
                   </div>
-                  <div className="mt-2 text-[0.6rem] md:text-xs font-black uppercase tracking-[0.2em] text-black/60">
-                    {loadingState.progression ? <LoadingBall size="sm" /> : `${formatNumber(Math.max(0, progression?.xp ?? 0))} / ${formatNumber(xpForNextLevel)} PARA O PROXIMO NIVEL`}
+                  <div className="mt-2 text-[0.6rem] font-black uppercase tracking-[0.2em] md:text-xs" style={{ color: "color-mix(in srgb, var(--fl-nav-item-active-text) 60%, transparent)" }}>
+                    {loadingState.progression ? <LoadingBall size="sm" /> : `${formatNumber(Math.max(0, progression?.xp ?? 0))} / ${formatNumber(xpForNextLevel)} PARA O PRÓXIMO NÍVEL`}
                   </div>
                 </div>
 
@@ -445,10 +505,10 @@ export default function Dashboard() {
                       />
                     </svg>
                     <div className="absolute inset-x-0 bottom-4 flex items-baseline justify-center gap-1 sm:bottom-5">
-                      <span className={`${xpTextSizeClass} font-black leading-none text-black drop-shadow-sm transition-all`}>
+                      <span className={`${xpTextSizeClass} font-black leading-none drop-shadow-sm transition-all`} style={{ color: "var(--fl-nav-item-active-text)" }}>
                         {loadingState.progression ? <LoadingBall size="sm" /> : formatNumber(xpDisplayValue)}
                       </span>
-                      <span className={`pb-0.5 ${xpLabelSizeClass} font-black uppercase text-black`}>XP</span>
+                      <span className={`pb-0.5 ${xpLabelSizeClass} font-black uppercase`} style={{ color: "var(--fl-nav-item-active-text)" }}>XP</span>
                     </div>
                   </div>
                 </div>
@@ -493,13 +553,17 @@ export default function Dashboard() {
                     onClick={() => scrollToSection("mission-feed")}
                     className={`flex h-12 w-12 shrink-0 flex-col items-center justify-center rounded-xl ${
                       isCurrentDay
-                        ? "bg-[var(--app-primary-color)] text-[var(--fl-background-color,#0f172a)] shadow-lg"
-                        : "bg-transparent text-slate-400"
+                        ? "shadow-lg"
+                        : "bg-transparent"
                     }`}
-                    aria-label={`Abrir missoes de ${weekdayLabel} ${String(date.getDate()).padStart(2, "0")}`}
+                    aria-label={`Abrir missões de ${weekdayLabel} ${String(date.getDate()).padStart(2, "0")}`}
                     style={isCurrentDay ? {
+                      backgroundColor: "var(--app-primary-color)",
+                      color: "var(--fl-nav-item-active-text)",
                       boxShadow: "0 8px 20px color-mix(in srgb, var(--app-primary-color) 20%, transparent)"
-                    } : {}}
+                    } : {
+                      color: "var(--fl-color-text-muted)",
+                    }}
                   >
                     <span className="text-[0.6rem] font-black uppercase tracking-[0.1em]">{weekdayLabel}</span>
                     <span className="mt-0.5 text-base font-black leading-none">{String(date.getDate()).padStart(2, "0")}</span>
@@ -510,7 +574,7 @@ export default function Dashboard() {
           </section>
 
           <section>
-            <SectionHeader title="Missoes de Hoje" actionLabel="Ver todas" onAction={() => scrollToSection("mission-feed")} />
+            <SectionHeader title="Missões de Hoje" actionLabel="Ver todas" onAction={() => scrollToSection("mission-feed")} />
             <div className="rounded-[2rem] p-3 md:p-5" style={SUBTLE_PANEL_STYLE}>
               <div className="mb-5 inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-[0.68rem] font-bold" style={{ background: "color-mix(in srgb, var(--fl-surface-strong) 86%, transparent)", color: "var(--fl-color-text-muted)", border: "1px solid var(--fl-border-soft)" }}>
                 <CalendarDays className="h-3.5 w-3.5" />
@@ -529,7 +593,7 @@ export default function Dashboard() {
                   ))}
                 </div>
               ) : (
-                <div className="rounded-[1.5rem] p-5 text-sm" style={PANEL_STYLE}>Nenhuma missao disponivel para hoje no momento.</div>
+                <div className="rounded-[1.5rem] p-5 text-sm" style={PANEL_STYLE}>Nenhuma missão disponível para hoje no momento.</div>
               )}
             </div>
           </section>
@@ -551,7 +615,7 @@ export default function Dashboard() {
 
           {missionFeedSections.length > 0 ? (
             <section id="mission-feed" className="space-y-6">
-              <SectionHeader title="Explorar Missoes" />
+              <SectionHeader title="Explorar Missões" />
               {missionFeedSections.map((section) => (
                 <div key={section.title}>
                   <h3 className="mb-3 text-sm font-black uppercase tracking-[0.18em]" style={{ color: "var(--fl-color-text-muted)" }}>{section.title}</h3>
@@ -621,7 +685,7 @@ export default function Dashboard() {
           onClick={() => setQuickActionsOpen((current) => !current)}
           className="flex h-14 w-14 items-center justify-center rounded-full transition-transform duration-200"
           style={PRIMARY_GLOW_STYLE}
-          aria-label="Abrir acoes rapidas"
+          aria-label="Abrir ações rápidas"
           aria-expanded={quickActionsOpen}
         >
           <Zap className={`h-6 w-6 transition-transform duration-200 ${quickActionsOpen ? "rotate-12" : ""}`} />

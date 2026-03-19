@@ -891,7 +891,7 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
   return (
     <>
       {triggerContent}      {showDetails && (
-        <div className="fl-z-drawer fixed inset-0 bg-black/60 backdrop-blur-md flex items-center justify-center p-4 md:p-8 overflow-y-auto">
+        <div className="fl-z-detail fixed inset-0 bg-black/60 backdrop-blur-md flex items-center justify-center p-4 md:p-8 overflow-y-auto">
           {/* Modal Container */}
           <div className="layout-content-container flex flex-col max-w-[600px] w-full rounded-xl shadow-2xl overflow-hidden relative" style={{ background: "var(--fl-surface-strong)", border: "1px solid color-mix(in srgb, var(--app-primary-color) 20%, transparent)" }}>
             
@@ -1098,7 +1098,7 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
       )}
 
       {showDetails && (
-        <div className="fl-z-drawer fixed bottom-6 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full border px-3 py-1.5 text-xs" style={{ color: "var(--fl-color-text-muted)", borderColor: "var(--fl-border-soft)", backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 86%, transparent)" }}>
+        <div className="fl-z-detail fixed bottom-6 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full border px-3 py-1.5 text-xs" style={{ color: "var(--fl-color-text-muted)", borderColor: "var(--fl-border-soft)", backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 86%, transparent)" }}>
           <MapPinned className="w-3 h-3" />
           <span>{bodyAreaLabel(mission.body_area)}</span>
           <Trophy className="w-3 h-3" />

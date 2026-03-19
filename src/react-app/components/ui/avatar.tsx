@@ -19,7 +19,13 @@ export function Avatar({ src, name, className }: AvatarProps) {
   }
 
   return (
-    <div className={cn('h-12 w-12 rounded-full bg-white/20 text-white font-semibold flex items-center justify-center', className)}>
+    <div
+      className={cn('flex h-12 w-12 items-center justify-center rounded-full font-semibold', className)}
+      style={{
+        background: 'color-mix(in srgb, var(--app-primary-color) 18%, var(--fl-surface-strong))',
+        color: 'var(--fl-color-text)',
+      }}
+    >
       {initials}
     </div>
   );

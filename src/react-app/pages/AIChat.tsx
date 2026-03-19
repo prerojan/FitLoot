@@ -1,19 +1,20 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router";
-import { useAuth } from "@/react-app/contexts/auth";
-import AppPageShell from "@/react-app/components/AppPageShell";
 import {
+  ArrowLeft,
+  ArrowUp,
   Bot,
-  History,
-  Settings,
   Dumbbell,
-  LineChart,
   Gift,
-  Utensils,
+  History,
+  LineChart,
   Mic,
   Paperclip,
-  ArrowUp,
+  Utensils,
+  X,
 } from "lucide-react";
+import AppPageShell from "@/react-app/components/AppPageShell";
+import { useAuth } from "@/react-app/contexts/auth";
 import { api } from "@/react-app/utils/api";
 
 type Message = {
@@ -32,7 +33,11 @@ function renderMessageContent(text: string) {
   return parts.map((part, index) => {
     if (part.startsWith("**") && part.endsWith("**")) {
       return (
-        <span key={index} className="font-bold italic" style={{ color: "var(--app-primary-color)" }}>
+        <span
+          key={index}
+          className="font-bold italic"
+          style={{ color: "var(--app-primary-color)" }}
+        >
           {part.slice(2, -2)}
         </span>
       );
@@ -73,26 +78,120 @@ function getStorageKey(userId: string | undefined) {
   return `fitloot_ai_chat_${userId ?? "guest"}`;
 }
 
+function createGreetingMessage(): Message {
+  return {
+    role: "assistant",
+    content: "Olá! Sou o FitBot. Como posso te ajudar hoje?",
+    timestamp: new Date().toISOString(),
+  };
+}
+
 const QUICK_QUESTIONS: QuickQuestion[] = [
-  { text: "Sugerir proximo treino", icon: Dumbbell },
-  { text: "Como estao meus stats?", icon: LineChart },
+  { text: "Sugerir próximo treino", icon: Dumbbell },
+  { text: "Como estão meus stats?", icon: LineChart },
   { text: "Resgatar FitLoot", icon: Gift },
-  { text: "Recomendacoes de refeicao", icon: Utensils },
+  { text: "Recomendações de refeição", icon: Utensils },
 ];
 
-const DEFAULT_GREETING: Message = {
-  role: "assistant",
-  content: "Ola! Sou o FitBot. Como posso te ajudar hoje?",
-  timestamp: new Date().toISOString(),
-};
+function HistoryModal({
+  messages,
+  onClose,
+  onClear,
+}: {
+  messages: Message[];
+  onClose: () => void;
+  onClear: () => void;
+}) {
+  return (
+    <div
+      className="fl-z-modal fixed inset-0 flex items-center justify-center bg-black/55 p-4 backdrop-blur-md"
+      onClick={onClose}
+    >
+      <div
+        className="fl-theme-surface w-full max-w-xl rounded-[2rem] p-5 sm:p-6"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="mb-5 flex items-center justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-black tracking-tight sm:text-xl">
+              Histórico da conversa
+            </h2>
+            <p className="fl-theme-text-muted text-[0.65rem] font-bold uppercase tracking-[0.18em] sm:text-[0.7rem]">
+              {messages.length} mensagens nesta sessão
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="fl-theme-surface-soft flex h-10 w-10 items-center justify-center rounded-full fl-theme-text-muted transition-opacity hover:opacity-80"
+            aria-label="Fechar histórico"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div className="custom-scrollbar max-h-[60vh] space-y-3 overflow-y-auto pr-1">
+          {messages.map((message, index) => (
+            <div
+              key={`${message.timestamp}-${index}`}
+              className="fl-theme-surface-soft rounded-2xl p-3 sm:p-4"
+            >
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <span
+                  className="text-[0.68rem] font-black uppercase tracking-[0.16em]"
+                  style={{
+                    color:
+                      message.role === "assistant"
+                        ? "var(--app-primary-color)"
+                        : "var(--fl-color-text)",
+                  }}
+                >
+                  {message.role === "assistant" ? "FitBot" : "Você"}
+                </span>
+                <span className="fl-theme-text-muted text-[0.68rem] font-bold">
+                  {new Date(message.timestamp).toLocaleString("pt-BR", {
+                    day: "2-digit",
+                    month: "2-digit",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
+                </span>
+              </div>
+              <p className="text-sm leading-relaxed sm:text-base">{message.content}</p>
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-5 flex flex-col gap-3 sm:flex-row">
+          <button
+            type="button"
+            onClick={onClose}
+            className="fl-theme-input flex-1 rounded-2xl px-4 py-3 text-sm font-bold uppercase tracking-[0.16em] transition-opacity hover:opacity-80"
+          >
+            Fechar
+          </button>
+          <button
+            type="button"
+            onClick={onClear}
+            className="flex-1 rounded-2xl px-4 py-3 text-sm font-black uppercase tracking-[0.16em] transition-transform hover:scale-[1.01] active:scale-95"
+            style={{ backgroundColor: "var(--app-primary-color)", color: "var(--fl-nav-item-active-text)" }}
+          >
+            Limpar histórico
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function AIChat() {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const [messages, setMessages] = useState<Message[]>([DEFAULT_GREETING]);
+  const [messages, setMessages] = useState<Message[]>(() => [createGreetingMessage()]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [sessionMessageCount, setSessionMessageCount] = useState(0);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -103,26 +202,48 @@ export default function AIChat() {
 
     try {
       const stored = localStorage.getItem(getStorageKey(user.id));
-      if (!stored) return;
+      if (!stored) {
+        setMessages([createGreetingMessage()]);
+        setSessionMessageCount(0);
+        return;
+      }
+
       const parsed = JSON.parse(stored) as Message[];
       if (Array.isArray(parsed) && parsed.length > 0) {
         setMessages(parsed);
-        setSessionMessageCount(parsed.filter((message) => message.role === "user").length);
+        setSessionMessageCount(
+          parsed.filter((message) => message.role === "user").length,
+        );
+        return;
       }
     } catch (storageError) {
       console.error("Error restoring AI chat history:", storageError);
     }
+
+    setMessages([createGreetingMessage()]);
+    setSessionMessageCount(0);
   }, [navigate, user]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     if (!user) return;
+
     try {
       localStorage.setItem(getStorageKey(user.id), JSON.stringify(messages));
     } catch (storageError) {
       console.error("Error saving AI chat history:", storageError);
     }
   }, [messages, user]);
+
+  const clearHistory = () => {
+    const greetingMessage = createGreetingMessage();
+    if (user) {
+      localStorage.removeItem(getStorageKey(user.id));
+    }
+    setMessages([greetingMessage]);
+    setSessionMessageCount(0);
+    setHistoryOpen(false);
+  };
 
   const submitMessage = async (content: string) => {
     const messageContent = content.trim();
@@ -147,7 +268,7 @@ export default function AIChat() {
         method: "POST",
         body: JSON.stringify({
           message: messageContent,
-          history: messages.map((message) => ({
+          history: nextMessages.map((message) => ({
             role: message.role,
             content: message.content,
           })),
@@ -161,7 +282,9 @@ export default function AIChat() {
       }
 
       if (!response.ok) {
-        const payload = (await response.json().catch(() => null)) as { error?: string | undefined } | null;
+        const payload = (await response.json().catch(() => null)) as {
+          error?: string | undefined;
+        } | null;
         throw new Error(payload?.error || "Failed to get response");
       }
 
@@ -180,7 +303,8 @@ export default function AIChat() {
         ...current,
         {
           role: "assistant",
-          content: "Desculpe, tive um problema ao processar sua mensagem. Tente novamente!",
+          content:
+            "Desculpe, tive um problema ao processar sua mensagem. Tente novamente.",
           timestamp: new Date().toISOString(),
         },
       ]);
@@ -206,74 +330,119 @@ export default function AIChat() {
         .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--app-primary-color) 20%, transparent); border-radius: 10px; }
       `}</style>
-      <div className="relative flex h-screen w-full flex-col overflow-hidden" style={{ backgroundColor: "var(--app-bg-color)" }}>
-        <header className="fl-theme-topbar sticky top-0 z-10 flex items-center justify-between border-b px-6 py-4 lg:px-20 backdrop-blur-md">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl" style={{ backgroundColor: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)", color: "var(--app-primary-color)" }}>
-              <Bot className="h-7 w-7" strokeWidth={2} />
-            </div>
-            <div>
-              <h1 className="text-xl font-bold tracking-tight">
+
+      <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+        <header className="fl-theme-topbar shrink-0 border-b px-3 py-3 backdrop-blur-md sm:px-4 lg:px-8">
+          <div className="mx-auto flex w-full max-w-5xl items-center justify-between gap-3">
+            <button
+              type="button"
+              onClick={() => navigate(-1)}
+              className="fl-theme-surface-soft flex h-11 w-11 items-center justify-center rounded-full fl-theme-text-muted transition-opacity hover:opacity-80"
+              aria-label="Voltar"
+            >
+              <ArrowLeft className="h-5 w-5" />
+            </button>
+
+            <div className="min-w-0 flex-1 text-center">
+              <h1 className="truncate text-base font-black tracking-tight sm:text-lg">
                 FitBot <span style={{ color: "var(--app-primary-color)" }}>AI</span>
               </h1>
-              <div className="flex items-center gap-1.5">
+              <div className="mt-1 flex items-center justify-center gap-1.5">
                 <span className="relative flex h-2 w-2">
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full opacity-75" style={{ backgroundColor: "var(--app-primary-color)" }} />
-                  <span className="relative inline-flex h-2 w-2 rounded-full" style={{ backgroundColor: "var(--app-primary-color)" }} />
+                  <span
+                    className="absolute inline-flex h-full w-full animate-ping rounded-full opacity-75"
+                    style={{ backgroundColor: "var(--app-primary-color)" }}
+                  />
+                  <span
+                    className="relative inline-flex h-2 w-2 rounded-full"
+                    style={{ backgroundColor: "var(--app-primary-color)" }}
+                  />
                 </span>
-                <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: "var(--app-primary-color)" }}>
-                  System Online
+                <span
+                  className="text-[0.68rem] font-bold uppercase tracking-[0.16em]"
+                  style={{ color: "var(--app-primary-color)" }}
+                >
+                  Sistema online
                 </span>
               </div>
             </div>
-          </div>
-          <div className="flex items-center gap-3">
-            <button className="fl-theme-surface-soft flex h-10 w-10 items-center justify-center rounded-full fl-theme-text-muted transition-all hover:opacity-80">
+
+            <button
+              type="button"
+              onClick={() => setHistoryOpen(true)}
+              className="fl-theme-surface-soft flex h-11 w-11 items-center justify-center rounded-full fl-theme-text-muted transition-opacity hover:opacity-80"
+              aria-label="Abrir histórico"
+            >
               <History className="h-5 w-5" />
             </button>
-            <button className="fl-theme-surface-soft flex h-10 w-10 items-center justify-center rounded-full fl-theme-text-muted transition-all hover:opacity-80">
-              <Settings className="h-5 w-5" />
-            </button>
-            <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full border-2 p-0.5 font-bold" style={{ borderColor: "var(--app-primary-color)", backgroundColor: "color-mix(in srgb, var(--app-primary-color) 20%, transparent)", color: "var(--app-primary-color)" }}>
-              {user?.avatar_url ? (
-                <img src={user.avatar_url} alt="User Avatar" className="h-full w-full rounded-full object-cover" />
-              ) : (
-                user?.name ? getInitials(user.name) : "U"
-              )}
-            </div>
           </div>
         </header>
 
-        <main className="custom-scrollbar mx-auto flex w-full max-w-5xl flex-1 flex-col gap-8 overflow-y-auto p-4 pb-32 lg:p-10">
+        <main className="custom-scrollbar mx-auto flex min-h-0 w-full max-w-5xl flex-1 flex-col gap-4 overflow-y-auto px-3 py-4 pb-6 sm:px-4 lg:px-8 lg:py-6">
           {messages.map((message, index) =>
             message.role === "assistant" ? (
-              <div key={`${message.timestamp}-${index}`} className="flex max-w-[85%] items-end gap-4">
+              <div
+                key={`${message.timestamp}-${index}`}
+                className="flex max-w-[88%] items-end gap-3 sm:max-w-[82%] sm:gap-4"
+              >
                 <div className="fl-theme-surface flex h-10 w-10 shrink-0 items-center justify-center rounded-full">
-                  <Bot className="h-6 w-6" style={{ color: "var(--app-primary-color)" }} />
+                  <Bot
+                    className="h-5 w-5 sm:h-6 sm:w-6"
+                    style={{ color: "var(--app-primary-color)" }}
+                  />
                 </div>
-                <div className="flex flex-col gap-1.5">
-                  <span className="fl-theme-text-muted ml-1 text-xs font-medium uppercase tracking-tighter">
-                    FitBot AI • {new Date(message.timestamp).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
+                <div className="flex min-w-0 flex-col gap-1.5">
+                  <span className="fl-theme-text-muted ml-1 text-[0.68rem] font-bold uppercase tracking-[0.12em]">
+                    FitBot •{" "}
+                    {new Date(message.timestamp).toLocaleTimeString("pt-BR", {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
                   </span>
-                  <div className="fl-theme-surface rounded-2xl rounded-bl-none p-5 text-sm leading-relaxed whitespace-pre-wrap">
+                  <div className="fl-theme-surface rounded-2xl rounded-bl-none p-3 text-sm leading-relaxed whitespace-pre-wrap sm:p-4 sm:text-base">
                     {renderMessageContent(message.content)}
                   </div>
                 </div>
               </div>
             ) : (
-              <div key={`${message.timestamp}-${index}`} className="ml-auto flex max-w-[80%] flex-col items-end gap-1.5">
-                <div className="flex items-end gap-4">
-                  <div className="flex flex-col items-end gap-1.5">
-                    <span className="fl-theme-text-muted mr-1 text-xs font-medium uppercase tracking-tighter">
-                      Voce • {new Date(message.timestamp).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
+              <div
+                key={`${message.timestamp}-${index}`}
+                className="ml-auto flex max-w-[88%] flex-col items-end gap-1.5 sm:max-w-[80%]"
+              >
+                <div className="flex items-end gap-3 sm:gap-4">
+                  <div className="flex min-w-0 flex-col items-end gap-1.5">
+                    <span className="fl-theme-text-muted mr-1 text-[0.68rem] font-bold uppercase tracking-[0.12em]">
+                      Você •{" "}
+                      {new Date(message.timestamp).toLocaleTimeString("pt-BR", {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
                     </span>
-                    <div className="rounded-2xl rounded-br-none p-5 text-sm font-semibold text-black shadow-lg" style={{ backgroundColor: "var(--app-primary-color)" }}>
+                    <div
+                      className="rounded-2xl rounded-br-none p-3 text-sm font-semibold shadow-lg whitespace-pre-wrap sm:p-4 sm:text-base"
+                      style={{
+                        backgroundColor: "var(--app-primary-color)",
+                        color: "var(--fl-nav-item-active-text)",
+                      }}
+                    >
                       {message.content}
                     </div>
                   </div>
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full border-2 p-0.5 font-bold" style={{ borderColor: "var(--app-primary-color)", backgroundColor: "color-mix(in srgb, var(--app-primary-color) 20%, transparent)", color: "var(--app-primary-color)" }}>
+                  <div
+                    className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full border-2 p-0.5 font-bold"
+                    style={{
+                      borderColor: "var(--app-primary-color)",
+                      backgroundColor:
+                        "color-mix(in srgb, var(--app-primary-color) 20%, transparent)",
+                      color: "var(--app-primary-color)",
+                    }}
+                  >
                     {user?.avatar_url ? (
-                      <img src={user.avatar_url} alt="User Avatar" className="h-full w-full rounded-full object-cover" />
+                      <img
+                        src={user.avatar_url}
+                        alt="Avatar do usuário"
+                        className="h-full w-full rounded-full object-cover"
+                      />
                     ) : (
                       user?.name ? getInitials(user.name) : "U"
                     )}
@@ -284,18 +453,39 @@ export default function AIChat() {
           )}
 
           {loading ? (
-            <div className="flex max-w-[85%] items-end gap-4">
+            <div className="flex max-w-[88%] items-end gap-3 sm:max-w-[82%] sm:gap-4">
               <div className="fl-theme-surface flex h-10 w-10 shrink-0 items-center justify-center rounded-full">
-                <Bot className="h-6 w-6" style={{ color: "var(--app-primary-color)" }} />
+                <Bot
+                  className="h-5 w-5 sm:h-6 sm:w-6"
+                  style={{ color: "var(--app-primary-color)" }}
+                />
               </div>
               <div className="flex flex-col gap-1.5">
-                <span className="fl-theme-text-muted ml-1 text-xs font-medium uppercase tracking-tighter">
-                  FitBot AI • {new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
+                <span className="fl-theme-text-muted ml-1 text-[0.68rem] font-bold uppercase tracking-[0.12em]">
+                  FitBot • digitando...
                 </span>
                 <div className="fl-theme-surface flex h-12 w-16 items-center justify-center gap-1 rounded-2xl rounded-bl-none p-4 shadow-xl">
-                  <span className="h-2 w-2 animate-bounce rounded-full" style={{ backgroundColor: "var(--app-primary-color)", animationDelay: "0ms" }} />
-                  <span className="h-2 w-2 animate-bounce rounded-full" style={{ backgroundColor: "var(--app-primary-color)", animationDelay: "150ms" }} />
-                  <span className="h-2 w-2 animate-bounce rounded-full" style={{ backgroundColor: "var(--app-primary-color)", animationDelay: "300ms" }} />
+                  <span
+                    className="h-2 w-2 animate-bounce rounded-full"
+                    style={{
+                      backgroundColor: "var(--app-primary-color)",
+                      animationDelay: "0ms",
+                    }}
+                  />
+                  <span
+                    className="h-2 w-2 animate-bounce rounded-full"
+                    style={{
+                      backgroundColor: "var(--app-primary-color)",
+                      animationDelay: "150ms",
+                    }}
+                  />
+                  <span
+                    className="h-2 w-2 animate-bounce rounded-full"
+                    style={{
+                      backgroundColor: "var(--app-primary-color)",
+                      animationDelay: "300ms",
+                    }}
+                  />
                 </div>
               </div>
             </div>
@@ -304,54 +494,80 @@ export default function AIChat() {
           <div ref={messagesEndRef} />
         </main>
 
-        <div className="fl-theme-topbar absolute bottom-0 w-full border-t p-4 backdrop-blur-xl lg:px-20 lg:pb-8">
-          {messages.length <= 1 && !loading ? (
-            <div className="custom-scrollbar mb-4 flex gap-3 overflow-x-auto pb-2">
-              {QUICK_QUESTIONS.map((question) => (
-                <button
-                  key={question.text}
-                  type="button"
-                  onClick={() => {
-                    void submitMessage(question.text);
-                  }}
-                  className="fl-theme-surface-soft flex h-10 shrink-0 items-center justify-center gap-2 rounded-full px-5 text-sm font-semibold transition-all hover:opacity-90 whitespace-nowrap"
-                >
-                  <question.icon className="h-5 w-5" />
-                  {question.text}
-                </button>
-              ))}
-            </div>
-          ) : null}
-
-          <form onSubmit={(event) => { void handleSubmit(event); }} className="relative mx-auto flex w-full max-w-5xl items-center">
-            <div className="relative flex-1">
-              <input
-                type="text"
-                value={input}
-                onChange={(event) => setInput(event.target.value)}
-                disabled={loading}
-                className="fl-theme-input w-full rounded-2xl py-4 pl-6 pr-24 outline-none"
-                placeholder="Mensagem para o FitBot..."
-              />
-              <div className="absolute right-4 top-1/2 flex -translate-y-1/2 items-center gap-2">
-                <button type="button" className="fl-theme-text-muted transition-colors hover:text-primary">
-                  <Mic className="h-5 w-5" />
-                </button>
-                <button type="button" className="fl-theme-text-muted transition-colors hover:text-primary">
-                  <Paperclip className="h-5 w-5" />
-                </button>
+        <div className="fl-theme-topbar shrink-0 border-t px-3 pb-[calc(env(safe-area-inset-bottom,0px)+1rem)] pt-3 backdrop-blur-xl sm:px-4 lg:px-8 lg:pt-4">
+          <div className="mx-auto w-full max-w-5xl">
+            {messages.length <= 1 && !loading ? (
+              <div className="custom-scrollbar mb-3 flex gap-2 overflow-x-auto pb-1 sm:mb-4 sm:gap-3">
+                {QUICK_QUESTIONS.map((question) => (
+                  <button
+                    key={question.text}
+                    type="button"
+                    onClick={() => {
+                      void submitMessage(question.text);
+                    }}
+                    className="fl-theme-surface-soft flex h-10 shrink-0 items-center justify-center gap-2 rounded-full px-4 text-sm font-semibold transition-opacity hover:opacity-90 whitespace-nowrap"
+                  >
+                    <question.icon className="h-4 w-4 sm:h-5 sm:w-5" />
+                    {question.text}
+                  </button>
+                ))}
               </div>
-            </div>
-            <button
-              type="submit"
-              disabled={loading || !input.trim()}
-              className="ml-3 flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl text-black shadow-lg transition-transform hover:scale-105 active:scale-95 disabled:opacity-50 disabled:grayscale"
-              style={{ backgroundColor: "var(--app-primary-color)" }}
+            ) : null}
+
+            <form
+              onSubmit={(event) => {
+                void handleSubmit(event);
+              }}
+              className="flex items-end gap-3"
             >
-              <ArrowUp className="h-6 w-6" strokeWidth={3} />
-            </button>
-          </form>
+              <div className="relative flex-1">
+                <input
+                  type="text"
+                  value={input}
+                  onChange={(event) => setInput(event.target.value)}
+                  disabled={loading}
+                  className="fl-theme-input min-h-[3.5rem] w-full rounded-2xl px-4 py-3.5 pr-24 text-sm outline-none sm:text-base"
+                  placeholder="Mensagem para o FitBot..."
+                />
+                <div className="absolute right-4 top-1/2 flex -translate-y-1/2 items-center gap-2">
+                  <button
+                    type="button"
+                    className="fl-theme-text-muted transition-colors hover:opacity-80"
+                    aria-label="Usar microfone"
+                  >
+                    <Mic className="h-5 w-5" />
+                  </button>
+                  <button
+                    type="button"
+                    className="fl-theme-text-muted transition-colors hover:opacity-80"
+                    aria-label="Anexar arquivo"
+                  >
+                    <Paperclip className="h-5 w-5" />
+                  </button>
+                </div>
+              </div>
+              <button
+                type="submit"
+                disabled={loading || !input.trim()}
+                className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl shadow-lg transition-transform hover:scale-105 active:scale-95 disabled:opacity-50 disabled:grayscale"
+                style={{
+                  backgroundColor: "var(--app-primary-color)",
+                  color: "var(--fl-nav-item-active-text)",
+                }}
+              >
+                <ArrowUp className="h-6 w-6" strokeWidth={3} />
+              </button>
+            </form>
+          </div>
         </div>
+
+        {historyOpen ? (
+          <HistoryModal
+            messages={messages}
+            onClose={() => setHistoryOpen(false)}
+            onClear={clearHistory}
+          />
+        ) : null}
       </div>
     </AppPageShell>
   );

@@ -340,7 +340,7 @@ export default function FoodAnalysis() {
   const macroBars = useMemo(() => result?.totals.macro_percentages ?? { protein: 0, carbs: 0, fats: 0 }, [result]);
 
   return (
-    <AppPageShell bottomNavActive="missions" className="fl-theme-page overflow-hidden min-h-screen w-full flex flex-col font-display text-white antialiased">
+    <AppPageShell bottomNavActive="missions" className="fl-theme-page overflow-hidden w-full flex flex-col font-display antialiased">
       <style>{`
         @keyframes pulse-border {
           0% { border-color: color-mix(in srgb, var(--app-primary-color) 40%, transparent); }
@@ -385,21 +385,21 @@ export default function FoodAnalysis() {
       {(!streamActive && !preview && !result) ? (
         <div className="flex-1 flex flex-col relative z-20 overflow-y-auto custom-scrollbar">
           {/* Header */}
-          <header className="sticky top-0 z-10 border-b border-white/5 p-6 flex justify-between items-center backdrop-blur-md" style={{ backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 84%, transparent)" }}>
+          <header className="sticky top-0 z-10 flex items-center justify-between border-b p-4 sm:p-6 backdrop-blur-md" style={{ borderColor: "var(--fl-border-soft)", backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 84%, transparent)" }}>
             <button 
               onClick={() => navigate("/app")}
-              className="w-10 h-10 rounded-full hover:bg-white/5 flex items-center justify-center transition-colors"
+              className="fl-theme-surface-soft flex h-10 w-10 items-center justify-center rounded-full fl-theme-text-muted transition-opacity hover:opacity-85"
             >
-              <Camera className="w-5 h-5 opacity-60 rotate-180" />
+              <Camera className="h-5 w-5 rotate-180" />
             </button>
-            <h1 className="text-xs font-bold tracking-[0.2em] uppercase text-white/90">Scanner de Alimentos</h1>
+            <h1 className="text-xs font-bold uppercase tracking-[0.2em]" style={{ color: "var(--fl-color-text)" }}>Scanner de Alimentos</h1>
             <div className="w-10 h-10" /> {/* Spacer */}
           </header>
 
           {/* Hero Section */}
           <div className="px-6 py-10 text-center">
             <h2 className="text-4xl font-bold tracking-tight mb-2">Scanner IA</h2>
-            <p className="text-sm font-medium" style={{ color: 'color-mix(in srgb, var(--app-primary-color) 80%, white)' }}>
+            <p className="text-sm font-medium" style={{ color: 'var(--app-primary-color)' }}>
               Selecione o portal de entrada para análise
             </p>
           </div>
@@ -419,14 +419,14 @@ export default function FoodAnalysis() {
                 </div>
                 
                 <h3 className="text-2xl font-bold mb-2 uppercase tracking-wide">Abrir Câmera</h3>
-                <p className="text-sm mb-8 max-w-[200px]" style={{ color: 'color-mix(in srgb, var(--app-primary-color) 70%, white)' }}>
+                <p className="mb-8 max-w-[200px] text-sm" style={{ color: 'var(--fl-color-text-muted)' }}>
                   Aponte seu portal visual para o alimento
                 </p>
 
                 <button 
                   onClick={startCamera}
-                  className="w-full py-4 rounded-2xl flex items-center justify-center gap-3 font-bold text-sm tracking-widest uppercase text-black neon-glow transition-all active:scale-95"
-                  style={{ backgroundColor: 'var(--app-primary-color)' }}
+                  className="neon-glow flex w-full items-center justify-center gap-3 rounded-2xl py-4 text-sm font-bold uppercase tracking-widest transition-all active:scale-95"
+                  style={{ backgroundColor: 'var(--app-primary-color)', color: 'var(--fl-nav-item-active-text)' }}
                 >
                   <Bolt className="w-5 h-5 fill-current" />
                   Iniciar Scan
@@ -445,9 +445,9 @@ export default function FoodAnalysis() {
             >
               <div className="text-left">
                 <h4 className="font-bold text-sm tracking-wide uppercase mb-1">Escolher da Galeria</h4>
-                <p className="text-[10px] uppercase tracking-widest" style={{ color: 'color-mix(in srgb, var(--app-primary-color) 70%, white)' }}>Importar dados visuais</p>
+                <p className="text-[10px] uppercase tracking-widest" style={{ color: 'var(--fl-color-text-muted)' }}>Importar dados visuais</p>
               </div>
-              <div className="w-12 h-12 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center transition-transform group-hover:scale-110">
+              <div className="fl-theme-surface-soft flex h-12 w-12 items-center justify-center rounded-2xl transition-transform group-hover:scale-110">
                 <ImageIcon className="w-6 h-6" style={{ color: 'var(--app-primary-color)' }} />
               </div>
               <input type="file" id="gallery-input" accept="image/*" className="hidden" onChange={onPickGallery} />
@@ -458,31 +458,31 @@ export default function FoodAnalysis() {
           <div className="p-10 flex justify-center mt-auto">
             <div className="fl-theme-surface-soft inline-flex items-center gap-2 rounded-full px-4 py-2 backdrop-blur-sm">
               <ShieldCheck className="w-4 h-4" style={{ color: 'var(--app-primary-color)' }} />
-              <span className="text-[10px] font-bold uppercase tracking-[0.15em] text-white/50">Tecnologia Neural Ativa</span>
+              <span className="text-[10px] font-bold uppercase tracking-[0.15em]" style={{ color: "var(--fl-color-text-muted)" }}>Tecnologia Neural Ativa</span>
             </div>
           </div>
         </div>
       ) : result ? (
         /* Results Screen (Full screen, no black void) */
-        <div className="flex-1 flex flex-col overflow-y-auto custom-scrollbar p-6 pb-32 animate-in fade-in slide-in-from-bottom-5 duration-500" style={{ backgroundColor: "var(--app-bg-color)" }}>
+        <div className="custom-scrollbar flex flex-1 flex-col overflow-y-auto p-4 pb-6 sm:p-6 sm:pb-8 animate-in fade-in slide-in-from-bottom-5 duration-500" style={{ backgroundColor: "var(--app-bg-color)" }}>
           {/* Header */}
           <div className="flex items-center justify-between mb-8">
             <button 
               onClick={() => { setPreview(null); setResult(null); setError(null); startCamera(); }}
-              className="w-10 h-10 rounded-full bg-white/5 border border-white/10 flex items-center justify-center transition-all hover:bg-white/10"
+              className="fl-theme-surface-soft flex h-10 w-10 items-center justify-center rounded-full transition-opacity hover:opacity-85"
             >
-              <Camera className="w-5 h-5 text-white/60 rotate-180" />
+              <Camera className="h-5 w-5 rotate-180" style={{ color: "var(--fl-color-text-muted)" }} />
             </button>
-            <h2 className="text-xs font-bold tracking-[0.2em] uppercase text-white/50">Análise Completa</h2>
+            <h2 className="text-xs font-bold uppercase tracking-[0.2em]" style={{ color: "var(--fl-color-text-muted)" }}>Análise Completa</h2>
             <div className="w-10 h-10" />
           </div>
 
           {/* Energy Display */}
           <div className="flex justify-between items-start mb-8">
             <div>
-              <p className="text-[10px] text-white/50 uppercase tracking-[0.2em] font-bold mb-1">Energia Estimada</p>
+              <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.2em]" style={{ color: "var(--fl-color-text-muted)" }}>Energia Estimada</p>
               <h3 className="text-5xl font-bold tracking-tight" style={{ color: 'var(--app-primary-color)' }}>
-                {result.totals.calories} <span className="text-xl font-medium text-white/40 tracking-normal ml-1">kcal</span>
+                {result.totals.calories} <span className="ml-1 text-xl font-medium tracking-normal" style={{ color: "var(--fl-color-text-soft)" }}>kcal</span>
               </h3>
             </div>
             <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-primary/10 border border-primary/30 text-[10px] font-bold uppercase tracking-wider" style={{ backgroundColor: 'color-mix(in srgb, var(--app-primary-color) 10%, transparent)', borderColor: 'color-mix(in srgb, var(--app-primary-color) 30%, transparent)', color: 'var(--app-primary-color)' }}>
@@ -511,10 +511,10 @@ export default function FoodAnalysis() {
 
           {/* Ingredients Section */}
           <div className="mb-12">
-            <h4 className="text-[10px] font-bold text-white/30 uppercase tracking-[0.2em] mb-4">Ingredientes Detectados</h4>
+            <h4 className="mb-4 text-[10px] font-bold uppercase tracking-[0.2em]" style={{ color: "var(--fl-color-text-muted)" }}>Ingredientes Detectados</h4>
             <div className="space-y-3">
               {result.items.map((item, i) => (
-                <div key={i} className="flex items-center justify-between bg-white/5 p-4 rounded-2xl border border-white/5 transition-all hover:border-white/10">
+                <div key={i} className="fl-theme-surface-soft flex items-center justify-between rounded-2xl border p-4 transition-opacity hover:opacity-90" style={{ borderColor: "var(--fl-border-soft)" }}>
                   <div className="flex items-center gap-4">
                     <div className="fl-theme-surface-soft w-12 h-12 rounded-xl flex items-center justify-center text-2xl">
                       {item.food_name.toLowerCase().includes('ovo') ? '🥚' : 
@@ -526,8 +526,8 @@ export default function FoodAnalysis() {
                        item.food_name.toLowerCase().includes('salad') ? '🥗' : '🍱'}
                     </div>
                     <div>
-                      <p className="font-bold text-sm text-white/90">{item.food_name}</p>
-                      <p className="text-[10px] text-white/40 uppercase tracking-widest">{item.portion_description} • {item.calories || 0} kcal</p>
+                      <p className="text-sm font-bold" style={{ color: "var(--fl-color-text)" }}>{item.food_name}</p>
+                      <p className="text-[10px] uppercase tracking-widest" style={{ color: "var(--fl-color-text-muted)" }}>{item.portion_description} • {item.calories || 0} kcal</p>
                     </div>
                   </div>
                   <CheckCircle2 className="w-5 h-5" style={{ color: 'var(--app-primary-color)' }} />
@@ -540,15 +540,16 @@ export default function FoodAnalysis() {
           <div className="grid grid-cols-2 gap-4 mt-auto pt-4">
             <button 
               onClick={() => { setPreview(null); setResult(null); setError(null); startCamera(); }}
-              className="h-14 rounded-2xl bg-white/5 border border-white/10 font-bold text-xs tracking-widest uppercase transition-all active:scale-95 text-white/60 hover:bg-white/10"
+              className="fl-theme-input h-14 rounded-2xl border font-bold text-xs tracking-widest uppercase transition-opacity active:scale-95 hover:opacity-85"
+              style={{ borderColor: "var(--fl-border-soft)", color: "var(--fl-color-text-muted)" }}
             >
               Repetir Scan
             </button>
             <button 
               onClick={saveMeal}
               disabled={saving}
-              className="h-14 rounded-2xl font-bold text-xs tracking-widest uppercase neon-glow transition-all active:scale-95 text-black disabled:opacity-50"
-              style={{ backgroundColor: 'var(--app-primary-color)' }}
+              className="neon-glow h-14 rounded-2xl text-xs font-bold uppercase tracking-widest transition-all active:scale-95 disabled:opacity-50"
+              style={{ backgroundColor: 'var(--app-primary-color)', color: 'var(--fl-nav-item-active-text)' }}
             >
               {saving ? "Registrando..." : "Confirmar e Salvar"}
             </button>
@@ -642,7 +643,7 @@ function MacroCard({ label, value, percentage }: { label: string; value: string;
     <div className="fl-theme-surface p-3 rounded-2xl flex flex-col items-center">
       <span className="text-[10px] fl-theme-text-muted uppercase font-medium">{label}</span>
       <span className="text-xl font-bold tracking-tight">{value}</span>
-      <div className="w-full h-1 bg-white/10 rounded-full mt-2 overflow-hidden">
+      <div className="mt-2 h-1 w-full overflow-hidden rounded-full" style={{ backgroundColor: "color-mix(in srgb, var(--fl-color-text) 8%, transparent)" }}>
         <div 
           className="h-full transition-all duration-1000" 
           style={{ backgroundColor: 'var(--app-primary-color)', width: `${Math.min(100, Math.max(0, percentage))}%` }}

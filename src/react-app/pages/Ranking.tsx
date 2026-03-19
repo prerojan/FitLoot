@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router";
-import { useAuth } from "@/react-app/contexts/auth";
+import { Crown, Filter as FilterIcon, Trophy } from "lucide-react";
 import AppPageShell from "@/react-app/components/AppPageShell";
 import LoadingBall from "@/react-app/components/LoadingBall";
 import { Avatar } from "@/react-app/components/ui/avatar";
-import { Trophy, Crown, Filter as FilterIcon } from "lucide-react";
+import { useAuth } from "@/react-app/contexts/auth";
 import { ApiRequestError, fetchAndCacheJson, readCachedJson } from "@/react-app/utils/api";
 import type { RankingPlayer, UserProfile } from "@/shared/types";
 
@@ -57,12 +57,15 @@ export default function Ranking() {
 
   const loadRanking = useCallback(async (currentMode: RankingMode) => {
     setError(null);
+
     const rankingPath = currentMode === "global" ? "/api/ranking/global" : "/api/friends";
     const cachedRanking = readCachedJson<Array<RankingPlayer | FriendRankingRow>>(rankingPath);
     const cachedProfile = readCachedJson<UserProfile>("/api/profile");
 
     if (cachedRanking) {
-      const cachedList = Array.isArray(cachedRanking.data) ? cachedRanking.data.map(normalizeRankingEntry) : [];
+      const cachedList = Array.isArray(cachedRanking.data)
+        ? cachedRanking.data.map(normalizeRankingEntry)
+        : [];
       setRanking(cachedList);
       setLoading(false);
     }
@@ -84,9 +87,10 @@ export default function Ranking() {
         navigate("/app");
         return;
       }
+
       console.error("Error loading ranking:", loadError);
       if (!cachedRanking) {
-        setError("Nao foi possivel carregar o ranking agora.");
+        setError("Não foi possível carregar o ranking agora.");
         setRanking([]);
       }
     } finally {
@@ -106,8 +110,12 @@ export default function Ranking() {
   const currentUsername = profile?.username ?? null;
   const top3 = ranking.slice(0, 3);
   const others = ranking.slice(3);
-  const currentUserEntry = currentUsername ? ranking.find((entry) => entry.username === currentUsername) ?? null : null;
-  const currentUserPosition = currentUsername ? ranking.findIndex((entry) => entry.username === currentUsername) + 1 : 0;
+  const currentUserEntry = currentUsername
+    ? ranking.find((entry) => entry.username === currentUsername) ?? null
+    : null;
+  const currentUserPosition = currentUsername
+    ? ranking.findIndex((entry) => entry.username === currentUsername) + 1
+    : 0;
 
   if (loading && ranking.length === 0) {
     return (
@@ -121,8 +129,8 @@ export default function Ranking() {
 
   return (
     <AppPageShell bottomNavActive="ranking" className="fl-theme-page">
-      <div className="flex flex-1 flex-col overflow-y-auto p-6 sm:p-8">
-        <header className="mb-8 flex items-center justify-between">
+      <div className="flex flex-1 flex-col overflow-y-auto p-4 sm:p-6 lg:p-8">
+        <header className="mb-8 flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="mb-1 text-2xl font-bold uppercase tracking-[0.2em]">
               {mode === "global" ? "Ranking Global" : "Ranking de Amigos"}
@@ -137,26 +145,33 @@ export default function Ranking() {
         </header>
 
         {error ? (
-          <div className="mb-8 rounded-3xl border px-5 py-4 text-[11px] font-bold uppercase tracking-widest" style={{ borderColor: "color-mix(in srgb, var(--app-primary-color) 24%, transparent)", backgroundColor: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)", color: "var(--app-primary-color)" }}>
+          <div
+            className="mb-8 rounded-3xl border px-5 py-4 text-[11px] font-bold uppercase tracking-widest"
+            style={{
+              borderColor: "color-mix(in srgb, var(--app-primary-color) 24%, transparent)",
+              backgroundColor: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)",
+              color: "var(--app-primary-color)",
+            }}
+          >
             {error}
           </div>
         ) : null}
 
-        <div className="mb-12">
+        <div className="mb-10">
           <div className="fl-theme-surface-soft flex max-w-[320px] rounded-2xl p-1.5">
             <button
               type="button"
               onClick={() => setMode("global")}
-              className={`flex-1 rounded-xl py-3 text-[10px] font-bold uppercase tracking-widest transition-all ${mode === "global" ? "text-black" : "fl-theme-text-muted"}`}
-              style={{ backgroundColor: mode === "global" ? "var(--app-primary-color)" : undefined }}
+              className="flex-1 rounded-xl py-3 text-[10px] font-bold uppercase tracking-widest transition-all"
+              style={{ backgroundColor: mode === "global" ? "var(--app-primary-color)" : undefined, color: mode === "global" ? "var(--fl-nav-item-active-text)" : "var(--fl-color-text-muted)" }}
             >
               Global
             </button>
             <button
               type="button"
               onClick={() => setMode("friends")}
-              className={`flex-1 rounded-xl py-3 text-[10px] font-bold uppercase tracking-widest transition-all ${mode === "friends" ? "text-black" : "fl-theme-text-muted"}`}
-              style={{ backgroundColor: mode === "friends" ? "var(--app-primary-color)" : undefined }}
+              className="flex-1 rounded-xl py-3 text-[10px] font-bold uppercase tracking-widest transition-all"
+              style={{ backgroundColor: mode === "friends" ? "var(--app-primary-color)" : undefined, color: mode === "friends" ? "var(--fl-nav-item-active-text)" : "var(--fl-color-text-muted)" }}
             >
               Amigos
             </button>
@@ -164,42 +179,51 @@ export default function Ranking() {
         </div>
 
         {currentUserEntry ? (
-          <section className="fl-theme-surface mb-12 rounded-[2rem] p-6">
+          <section className="fl-theme-surface mb-10 rounded-[2rem] p-5 sm:p-6">
             <div className="mb-5 flex items-center gap-3">
               <Trophy className="h-5 w-5" style={{ color: "var(--app-primary-color)" }} />
-              <h2 className="text-[10px] font-bold uppercase tracking-[0.3em]">Sua Posicao Atual</h2>
+              <h2 className="text-[10px] font-bold uppercase tracking-[0.3em]">Sua posição atual</h2>
             </div>
-            <div className="flex items-center justify-between gap-4">
-              <div className="flex items-center gap-4">
-                <Avatar name={currentUserEntry.username} className="size-14 rounded-full border border-white/10" />
-                <div>
-                  <p className="text-lg font-bold tracking-tight">Voce ({currentUserEntry.username})</p>
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div className="flex min-w-0 items-center gap-4">
+                <div className="size-14 overflow-hidden rounded-full border" style={{ borderColor: "var(--fl-border-soft)" }}>
+                  <Avatar
+                    name={currentUserEntry.username}
+                    className="h-full w-full"
+                  />
+                </div>
+                <div className="min-w-0">
+                  <p className="truncate text-lg font-bold tracking-tight">
+                    Você ({currentUserEntry.username})
+                  </p>
                   <p className="fl-theme-text-muted text-[10px] font-bold uppercase tracking-[0.2em]">
                     {currentUserEntry.current_streak} dias de streak
                   </p>
                 </div>
               </div>
               <div className="text-right">
-                <p className="text-3xl font-bold tracking-tight" style={{ color: "var(--app-primary-color)" }}>#{currentUserPosition}</p>
+                <p className="text-3xl font-bold tracking-tight" style={{ color: "var(--app-primary-color)" }}>
+                  #{currentUserPosition}
+                </p>
                 <p className="fl-theme-text-muted text-[10px] font-bold uppercase tracking-[0.2em]">
-                  LVL {currentUserEntry.level} • {(currentUserEntry.xp / 1000).toFixed(1)}K XP
+                  {`LVL ${currentUserEntry.level} • ${(currentUserEntry.xp / 1000).toFixed(1)}K XP`}
                 </p>
               </div>
             </div>
           </section>
         ) : null}
 
-        <div className="mb-16 flex items-end justify-center gap-2 px-4 pt-10 sm:gap-6">
+        <div className="mx-auto mb-12 flex w-full max-w-[720px] items-end justify-center gap-2 px-2 pt-10 sm:gap-6 sm:px-4">
           <PodiumCard entry={top3[1]} position={2} highlightColor="#64748b" />
           <PodiumCard entry={top3[0]} position={1} highlightColor="var(--app-primary-color)" featured />
           <PodiumCard entry={top3[2]} position={3} highlightColor="#92400e" />
         </div>
 
-        <div className="mx-auto mb-24 flex w-full max-w-[800px] flex-col gap-4">
-          <div className="flex items-center px-6 py-2 text-[10px] font-bold uppercase tracking-[0.3em] fl-theme-text-muted">
+        <div className="mx-auto mb-8 flex w-full max-w-[800px] flex-col gap-4">
+          <div className="flex items-center px-4 py-2 text-[10px] font-bold uppercase tracking-[0.3em] fl-theme-text-muted sm:px-6">
             <span className="w-8 sm:w-10">POS</span>
-            <span className="flex-1 px-4">USUARIO</span>
-            <span className="text-right">EXPERIENCIA</span>
+            <span className="flex-1 px-4">USUÁRIO</span>
+            <span className="text-right">EXPERIÊNCIA</span>
           </div>
 
           {others.map((player, index) => {
@@ -211,17 +235,33 @@ export default function Ranking() {
                 key={`${player.username}-${position}`}
                 className={`relative flex items-center rounded-2xl border p-4 transition-all duration-300 ${isCurrentUser ? "overflow-hidden" : ""}`}
                 style={{
-                  borderColor: isCurrentUser ? "color-mix(in srgb, var(--app-primary-color) 30%, transparent)" : "var(--fl-border-soft)",
-                  backgroundColor: isCurrentUser ? "color-mix(in srgb, var(--app-primary-color) 8%, transparent)" : "color-mix(in srgb, var(--fl-surface-muted) 70%, transparent)",
+                  borderColor: isCurrentUser
+                    ? "color-mix(in srgb, var(--app-primary-color) 30%, transparent)"
+                    : "var(--fl-border-soft)",
+                  backgroundColor: isCurrentUser
+                    ? "color-mix(in srgb, var(--app-primary-color) 8%, transparent)"
+                    : "color-mix(in srgb, var(--fl-surface-muted) 70%, transparent)",
                 }}
               >
-                {isCurrentUser ? <div className="absolute inset-y-0 left-0 w-1.5" style={{ backgroundColor: "var(--app-primary-color)" }} /> : null}
-                <span className="w-8 text-sm font-bold sm:w-10" style={{ color: isCurrentUser ? "var(--app-primary-color)" : "var(--fl-color-text-muted)" }}>{position}</span>
-                <div className="mx-4 size-12 shrink-0 overflow-hidden rounded-full border" style={{ borderColor: isCurrentUser ? "var(--app-primary-color)" : "var(--fl-border-soft)" }}>
+                {isCurrentUser ? (
+                  <div className="absolute inset-y-0 left-0 w-1.5" style={{ backgroundColor: "var(--app-primary-color)" }} />
+                ) : null}
+                <span
+                  className="w-8 text-sm font-bold sm:w-10"
+                  style={{ color: isCurrentUser ? "var(--app-primary-color)" : "var(--fl-color-text-muted)" }}
+                >
+                  {position}
+                </span>
+                <div
+                  className="mx-4 size-12 shrink-0 overflow-hidden rounded-full border"
+                  style={{ borderColor: isCurrentUser ? "var(--app-primary-color)" : "var(--fl-border-soft)" }}
+                >
                   <Avatar name={player.username} className="h-full w-full" />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-base font-bold tracking-tight">{isCurrentUser ? `Voce (${player.username})` : player.username}</p>
+                  <p className="truncate text-base font-bold tracking-tight">
+                    {isCurrentUser ? `Você (${player.username})` : player.username}
+                  </p>
                   <p className="fl-theme-text-muted mt-0.5 text-[10px] font-bold uppercase tracking-[0.15em]">
                     {player.current_streak} dias de streak
                   </p>
@@ -238,7 +278,7 @@ export default function Ranking() {
 
           {ranking.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-24 text-center">
-              <Trophy className="mb-6 h-16 w-16 text-white/5" />
+              <Trophy className="mb-6 h-16 w-16 fl-theme-text-soft" />
               <p className="fl-theme-text-muted text-[11px] font-bold uppercase tracking-[0.2em]">
                 Nenhum competidor encontrado.
               </p>
@@ -266,15 +306,28 @@ function PodiumCard({
   return (
     <div className={`flex flex-1 flex-col items-center ${featured ? "-mt-8 max-w-[180px]" : "max-w-[140px]"}`}>
       <div className="relative mb-5">
-        {featured ? <Crown className="absolute -top-10 left-1/2 h-12 w-12 -translate-x-1/2" style={{ color: highlightColor }} /> : null}
+        {featured ? (
+          <Crown className="absolute -top-10 left-1/2 h-12 w-12 -translate-x-1/2" style={{ color: highlightColor }} />
+        ) : null}
         <div className={`overflow-hidden rounded-full border-4 ${featured ? "size-28" : "size-20"}`} style={{ borderColor: highlightColor }}>
           <Avatar name={entry.username} className="h-full w-full" />
         </div>
-        <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 rounded-full px-4 py-1 text-[9px] font-bold uppercase tracking-[0.2em] text-black" style={{ backgroundColor: highlightColor }}>
-          {position === 1 ? "Campeao" : `${position}o`}
+        <div
+          className="absolute -bottom-2 left-1/2 -translate-x-1/2 rounded-full px-4 py-1 text-[9px] font-bold uppercase tracking-[0.2em]"
+          style={{ backgroundColor: highlightColor, color: "var(--fl-nav-item-active-text)" }}
+        >
+          {position === 1 ? "Campeão" : `${position}º`}
         </div>
       </div>
-      <div className={`w-full rounded-t-[2rem] border-x border-t p-4 text-center ${featured ? "h-36" : "h-24"}`} style={{ borderColor: "var(--fl-border-soft)", backgroundColor: featured ? "color-mix(in srgb, var(--app-primary-color) 10%, transparent)" : "color-mix(in srgb, var(--fl-surface-muted) 70%, transparent)" }}>
+      <div
+        className={`w-full rounded-t-[2rem] border-x border-t p-4 text-center ${featured ? "h-36" : "h-24"}`}
+        style={{
+          borderColor: "var(--fl-border-soft)",
+          backgroundColor: featured
+            ? "color-mix(in srgb, var(--app-primary-color) 10%, transparent)"
+            : "color-mix(in srgb, var(--fl-surface-muted) 70%, transparent)",
+        }}
+      >
         <p className="truncate text-sm font-bold sm:text-base">{entry.username}</p>
         <p className="mt-1 text-[10px] font-bold uppercase tracking-widest" style={{ color: "var(--app-primary-color)" }}>
           LVL {entry.level}

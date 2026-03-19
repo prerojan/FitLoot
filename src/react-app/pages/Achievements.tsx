@@ -25,7 +25,7 @@ const RARITY_CONFIG: Record<NormalizedRarity, { color: string; label: string }> 
   COMUM: { color: "#00ff7b", label: "Comum" },
   INCOMUM: { color: "#22c55e", label: "Incomum" },
   RARO: { color: "#0070dd", label: "Raro" },
-  MITICO: { color: "#a335ee", label: "Mitico" },
+  MITICO: { color: "#a335ee", label: "Mítico" },
   SECRETO: { color: "#ff8000", label: "Secreto" },
 };
 
@@ -115,12 +115,12 @@ export default function Achievements() {
               <header className="mb-8">
                 <h1 className="mb-2 text-4xl font-black uppercase tracking-[0.2em] md:text-5xl">Hall of Fame</h1>
                 <p className="text-[10px] font-bold uppercase tracking-[0.3em]" style={{ color: "var(--app-primary-color)" }}>
-                  Seu legado imortalizado em conquistas epicas.
+                  Seu legado imortalizado em conquistas épicas.
                 </p>
               </header>
 
               <div className="flex flex-wrap gap-4">
-                <StatsCard icon={Trophy} label="Concluidas" value={`${unlockedCount} / ${achievements.length}`} />
+                <StatsCard icon={Trophy} label="Concluídas" value={`${unlockedCount} / ${achievements.length}`} />
                 <StatsCard icon={Flame} label="Rank Atual" value="ELITE IV" />
               </div>
             </div>
@@ -128,14 +128,14 @@ export default function Achievements() {
             <div className="relative overflow-hidden rounded-[2.5rem] border p-8" style={{ backgroundColor: "color-mix(in srgb, var(--app-primary-color) 5%, transparent)", borderColor: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)" }}>
               <div className="relative z-10 flex h-full flex-col justify-between">
                 <div className="mb-4 flex items-center justify-between">
-                  <h3 className="text-xs font-black uppercase tracking-[0.3em]">Dominacao Total</h3>
+                  <h3 className="text-xs font-black uppercase tracking-[0.3em]">Dominação Total</h3>
                   <span className="text-xl font-black" style={{ color: "var(--app-primary-color)" }}>{Math.round(progressPercent)}%</span>
                 </div>
-                <div className="mb-6 h-4 overflow-hidden rounded-full border border-white/5 bg-white/5">
+                <div className="mb-6 h-4 overflow-hidden rounded-full border" style={{ borderColor: "var(--fl-border-soft)", backgroundColor: "color-mix(in srgb, var(--fl-surface-muted) 72%, transparent)" }}>
                   <div className="h-full transition-all duration-1000" style={{ width: `${progressPercent}%`, backgroundColor: "var(--app-primary-color)" }} />
                 </div>
                 <p className="fl-theme-text-muted text-[10px] font-bold uppercase tracking-widest leading-loose">
-                  Desbloqueie mais conquistas para chegar ao rank maximo.
+                  Desbloqueie mais conquistas para chegar ao rank máximo.
                 </p>
               </div>
               <Crown className="absolute -bottom-6 -right-6 size-32 rotate-12" style={{ color: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)" }} />
@@ -147,8 +147,8 @@ export default function Achievements() {
               <button
                 type="button"
                 onClick={() => setActiveRarity("ALL")}
-                className={`rounded-xl px-6 py-2.5 text-[10px] font-bold uppercase tracking-widest transition-all ${activeRarity === "ALL" ? "text-black" : "fl-theme-text-muted"}`}
-                style={{ backgroundColor: activeRarity === "ALL" ? "var(--app-primary-color)" : undefined }}
+                className="rounded-xl px-6 py-2.5 text-[10px] font-bold uppercase tracking-widest transition-all"
+                style={{ backgroundColor: activeRarity === "ALL" ? "var(--app-primary-color)" : undefined, color: activeRarity === "ALL" ? "var(--fl-nav-item-active-text)" : "var(--fl-color-text-muted)" }}
               >
                 Todos
               </button>
@@ -177,7 +177,7 @@ export default function Achievements() {
             </div>
           </div>
 
-          <div className="mb-24 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {filteredAchievements.map((achievement) => {
               const rarity = normalizeRarity(achievement.rarity);
               const rarityStyle = RARITY_CONFIG[rarity];
@@ -199,7 +199,7 @@ export default function Achievements() {
                   ) : null}
 
                   <div className="mb-6 flex items-start justify-between">
-                    <div className="flex size-14 items-center justify-center rounded-2xl border p-3" style={{ borderColor: "var(--fl-border-soft)", backgroundColor: "rgba(0,0,0,0.22)" }}>
+                    <div className="flex size-14 items-center justify-center rounded-2xl border p-3" style={{ borderColor: "var(--fl-border-soft)", backgroundColor: "color-mix(in srgb, var(--fl-surface-muted) 80%, transparent)" }}>
                       {isLocked ? <Lock className="h-6 w-6 fl-theme-text-muted" /> : <Award className="h-8 w-8" style={{ color: rarityStyle.color }} />}
                     </div>
                     {!isLocked ? (
@@ -216,8 +216,8 @@ export default function Achievements() {
                     </p>
                   </div>
 
-                  <div className="flex items-center justify-between border-t border-white/5 pt-4">
-                    <span className="rounded-md bg-white/5 px-2 py-1 text-[9px] font-bold uppercase tracking-widest" style={{ color: rarityStyle.color }}>
+                  <div className="flex items-center justify-between border-t pt-4" style={{ borderColor: "var(--fl-border-soft)" }}>
+                    <span className="rounded-md px-2 py-1 text-[9px] font-bold uppercase tracking-widest" style={{ color: rarityStyle.color, backgroundColor: "color-mix(in srgb, var(--fl-surface-muted) 74%, transparent)" }}>
                       {rarityStyle.label}
                     </span>
                     <div className="flex items-center gap-1">
@@ -232,7 +232,7 @@ export default function Achievements() {
 
           {filteredAchievements.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-24 text-center">
-              <Star className="mb-6 h-16 w-16 text-white/5" />
+              <Star className="mb-6 h-16 w-16 fl-theme-text-soft" />
               <p className="fl-theme-text-muted text-[11px] font-bold uppercase tracking-[0.2em]">
                 Nenhuma conquista encontrada neste filtro.
               </p>
@@ -247,17 +247,17 @@ export default function Achievements() {
             <button
               type="button"
               onClick={() => setSelectedAchievement(null)}
-              className="absolute right-6 top-6 rounded-full bg-white/5 p-2 fl-theme-text-muted transition-colors hover:text-white"
+              className="fl-theme-surface-soft absolute right-6 top-6 rounded-full p-2 fl-theme-text-muted transition-opacity hover:opacity-80"
             >
               <X className="h-6 w-6" />
             </button>
 
             <div className="flex flex-col items-center text-center">
-              <div className={`mb-8 flex size-32 items-center justify-center rounded-[2.5rem] border-2 p-8 ${selectedAchievement.unlocked !== 1 ? "grayscale" : ""}`} style={{ borderColor: selectedAchievement.unlocked === 1 ? RARITY_CONFIG[normalizeRarity(selectedAchievement.rarity)].color : "var(--fl-border-soft)", backgroundColor: "rgba(0,0,0,0.26)" }}>
-                <Award className="size-full" style={{ color: selectedAchievement.unlocked === 1 ? RARITY_CONFIG[normalizeRarity(selectedAchievement.rarity)].color : "#666" }} />
+              <div className={`mb-8 flex size-32 items-center justify-center rounded-[2.5rem] border-2 p-8 ${selectedAchievement.unlocked !== 1 ? "grayscale" : ""}`} style={{ borderColor: selectedAchievement.unlocked === 1 ? RARITY_CONFIG[normalizeRarity(selectedAchievement.rarity)].color : "var(--fl-border-soft)", backgroundColor: "color-mix(in srgb, var(--fl-surface-muted) 84%, transparent)" }}>
+                <Award className="size-full" style={{ color: selectedAchievement.unlocked === 1 ? RARITY_CONFIG[normalizeRarity(selectedAchievement.rarity)].color : "var(--fl-color-text-soft)" }} />
               </div>
 
-              <span className="mb-3 text-[10px] font-black uppercase tracking-[0.4em]" style={{ color: selectedAchievement.unlocked === 1 ? RARITY_CONFIG[normalizeRarity(selectedAchievement.rarity)].color : "#666" }}>
+              <span className="mb-3 text-[10px] font-black uppercase tracking-[0.4em]" style={{ color: selectedAchievement.unlocked === 1 ? RARITY_CONFIG[normalizeRarity(selectedAchievement.rarity)].color : "var(--fl-color-text-soft)" }}>
                 Conquista {RARITY_CONFIG[normalizeRarity(selectedAchievement.rarity)].label}
               </span>
 
@@ -286,8 +286,8 @@ export default function Achievements() {
                 <button
                   type="button"
                   onClick={() => setSelectedAchievement(null)}
-                  className="w-full rounded-2xl py-5 text-[12px] font-black uppercase tracking-[0.3em] text-black transition-all hover:scale-[1.02] active:scale-95"
-                  style={{ backgroundColor: "var(--app-primary-color)" }}
+                  className="w-full rounded-2xl py-5 text-[12px] font-black uppercase tracking-[0.3em] transition-all hover:scale-[1.02] active:scale-95"
+                  style={{ backgroundColor: "var(--app-primary-color)", color: "var(--fl-nav-item-active-text)" }}
                 >
                   Honrar Conquista
                 </button>
