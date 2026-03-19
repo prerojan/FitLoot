@@ -35,7 +35,7 @@ import type {
   UserProgression,
 } from "@/shared/types";
 import { ApiRequestError, api, clearJsonCache, fetchAndCacheJson, readCachedJson } from "@/react-app/utils/api";
-import { resolveShowcasedAchievement, sanitizeAchievementsForDisplay } from "@/react-app/utils/achievementShowcase";
+import { getAchievementShowcaseStyle, resolveShowcasedAchievement, sanitizeAchievementsForDisplay } from "@/react-app/utils/achievementShowcase";
 import { applyProfileTheme } from "@/react-app/utils/theme";
 
 const FEEDBACK_TYPES = ["Sugestao", "Bug", "Elogio", "Outro"] as const;
@@ -145,60 +145,7 @@ export default function Profile() {
   );
   const showcasedAchievementTone = useMemo(() => {
     if (!showcasedAchievement) return null;
-
-    const normalizedRarity = showcasedAchievement.rarity
-      .normalize("NFD")
-      .replace(/\p{Diacritic}/gu, "")
-      .trim()
-      .toUpperCase();
-
-    if (normalizedRarity === "RARO") {
-      return {
-        style: {
-          borderColor: "color-mix(in srgb, #3b82f6 42%, transparent)",
-          color: "#60a5fa",
-          backgroundColor: "color-mix(in srgb, #3b82f6 18%, transparent)",
-        },
-      };
-    }
-
-    if (normalizedRarity === "EPICO" || normalizedRarity === "MITICO") {
-      return {
-        style: {
-          borderColor: "color-mix(in srgb, #8b5cf6 42%, transparent)",
-          color: "#c084fc",
-          backgroundColor: "color-mix(in srgb, #8b5cf6 18%, transparent)",
-        },
-      };
-    }
-
-    if (normalizedRarity === "LENDARIO") {
-      return {
-        style: {
-          borderColor: "color-mix(in srgb, #f59e0b 42%, transparent)",
-          color: "#fbbf24",
-          backgroundColor: "color-mix(in srgb, #f59e0b 18%, transparent)",
-        },
-      };
-    }
-
-    if (normalizedRarity === "SECRETO") {
-      return {
-        style: {
-          borderColor: "color-mix(in srgb, var(--app-primary-color) 42%, transparent)",
-          color: "var(--app-primary-color)",
-          backgroundColor: "color-mix(in srgb, var(--app-primary-color) 18%, transparent)",
-        },
-      };
-    }
-
-    return {
-      style: {
-        borderColor: "color-mix(in srgb, #64748b 42%, transparent)",
-        color: "#94a3b8",
-        backgroundColor: "color-mix(in srgb, #64748b 18%, transparent)",
-      },
-    };
+    return getAchievementShowcaseStyle(showcasedAchievement.rarity);
   }, [showcasedAchievement]);
 
   const combatPower = useMemo(() => {
@@ -327,8 +274,24 @@ export default function Profile() {
               </p>
               {showcasedAchievement && showcasedAchievementTone && (
                 <div className="mt-2 min-w-0">
-                  <span className="inline-flex max-w-full items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] sm:text-xs font-bold" style={showcasedAchievementTone.style}>
-                    <Award className="h-3.5 w-3.5 shrink-0" />
+                  <span
+                    className="inline-flex max-w-full items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] sm:text-xs font-bold"
+                    style={{
+                      borderColor: showcasedAchievementTone.borderColor,
+                      color: showcasedAchievementTone.textColor,
+                      backgroundColor: showcasedAchievementTone.backgroundColor,
+                      boxShadow: showcasedAchievementTone.badgeShadow,
+                    }}
+                  >
+                    <span
+                      className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full"
+                      style={{
+                        backgroundColor: showcasedAchievementTone.iconBackground,
+                        color: showcasedAchievementTone.accent,
+                      }}
+                    >
+                      <Award className="h-3 w-3" />
+                    </span>
                     <span className="truncate">{showcasedAchievement.name}</span>
                   </span>
                 </div>

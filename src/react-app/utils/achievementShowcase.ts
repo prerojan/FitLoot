@@ -7,11 +7,11 @@ import {
 type AchievementRarity = "COMUM" | "INCOMUM" | "RARO" | "MITICO" | "SECRETO";
 
 const ACHIEVEMENT_RARITY_ACCENT: Record<AchievementRarity, string> = {
-  COMUM: "#22c55e",
-  INCOMUM: "#14b8a6",
-  RARO: "#2563eb",
-  MITICO: "#a855f7",
-  SECRETO: "#f97316",
+  COMUM: "#00ff7b",
+  INCOMUM: "#22c55e",
+  RARO: "#0070dd",
+  MITICO: "#a335ee",
+  SECRETO: "#ff8000",
 };
 
 type ShowcaseToken = {
@@ -178,9 +178,10 @@ export function getAchievementShowcaseStyle(rarity: string | null | undefined) {
   return {
     accent,
     rarity: normalizedRarity,
-    borderColor: `color-mix(in srgb, ${accent} 42%, var(--fl-border-soft))`,
-    backgroundColor: `color-mix(in srgb, ${accent} 12%, var(--fl-surface-strong))`,
-    iconBackground: `color-mix(in srgb, ${accent} 18%, transparent)`,
-    textColor: accent,
+    borderColor: `color-mix(in srgb, ${accent} 58%, var(--fl-border-soft))`,
+    backgroundColor: `color-mix(in srgb, ${accent} 10%, var(--fl-surface-strong))`,
+    iconBackground: `color-mix(in srgb, ${accent} 22%, var(--fl-surface-strong))`,
+    textColor: `color-mix(in srgb, ${accent} 72%, var(--fl-color-text))`,
+    badgeShadow: `0 0 0 1px color-mix(in srgb, ${accent} 16%, transparent), 0 12px 28px color-mix(in srgb, ${accent} 12%, transparent)`,
   };
 }

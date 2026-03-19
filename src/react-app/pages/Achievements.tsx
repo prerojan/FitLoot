@@ -18,7 +18,7 @@ import AppPageShell from "@/react-app/components/AppPageShell";
 import PageLoader from "@/react-app/components/PageLoader";
 import { api, clearJsonCache, fetchAndCacheJson } from "@/react-app/utils/api";
 import type { AchievementWithUnlock, UserProfile, UserProgression } from "@/shared/types";
-import { resolveShowcasedAchievement, sanitizeAchievementsForDisplay } from "@/react-app/utils/achievementShowcase";
+import { getAchievementShowcaseStyle, resolveShowcasedAchievement, sanitizeAchievementsForDisplay } from "@/react-app/utils/achievementShowcase";
 
 type RarityFilter = "ALL" | "COMUM" | "INCOMUM" | "RARO" | "MITICO" | "SECRETO";
 type NormalizedRarity = Exclude<RarityFilter, "ALL">;
@@ -110,16 +110,7 @@ export default function Achievements() {
   );
   const showcasedAchievementTone = useMemo(() => {
     if (!showcasedAchievement) return null;
-
-    const rarityStyle = RARITY_CONFIG[normalizeRarity(showcasedAchievement.rarity)];
-
-    return {
-      style: {
-        borderColor: `color-mix(in srgb, ${rarityStyle.color} 42%, transparent)`,
-        color: rarityStyle.color,
-        backgroundColor: `color-mix(in srgb, ${rarityStyle.color} 18%, transparent)`,
-      },
-    };
+    return getAchievementShowcaseStyle(showcasedAchievement.rarity);
   }, [showcasedAchievement]);
 
   const unlockedCount = achievements.filter((achievement) => achievement.unlocked === 1).length;
@@ -184,8 +175,24 @@ export default function Achievements() {
             </button>
 
             {showcasedAchievement && showcasedAchievementTone ? (
-              <div className="inline-flex max-w-full items-center gap-2 self-start rounded-full border px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.16em] sm:self-auto" style={showcasedAchievementTone.style}>
-                <Award className="h-3.5 w-3.5 shrink-0" />
+              <div
+                className="inline-flex max-w-full items-center gap-2 self-start rounded-full border px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.16em] sm:self-auto"
+                style={{
+                  borderColor: showcasedAchievementTone.borderColor,
+                  color: showcasedAchievementTone.textColor,
+                  backgroundColor: showcasedAchievementTone.backgroundColor,
+                  boxShadow: showcasedAchievementTone.badgeShadow,
+                }}
+              >
+                <span
+                  className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full"
+                  style={{
+                    backgroundColor: showcasedAchievementTone.iconBackground,
+                    color: showcasedAchievementTone.accent,
+                  }}
+                >
+                  <Award className="h-3.5 w-3.5" />
+                </span>
                 <span className="truncate">Honrada: {showcasedAchievement.name}</span>
               </div>
             ) : null}
