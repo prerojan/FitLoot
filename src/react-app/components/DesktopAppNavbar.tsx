@@ -101,9 +101,11 @@ export default function DesktopAppNavbar({
     <header
       className={cn("fl-z-nav sticky top-0 hidden md:block", className)}
       style={{
-        background: "color-mix(in srgb, var(--fl-surface-strong) 90%, transparent)",
+        background:
+          "radial-gradient(circle at top right, var(--fl-nav-ambient), transparent 42%), linear-gradient(180deg, color-mix(in srgb, var(--fl-surface-gradient-top) 94%, transparent), color-mix(in srgb, var(--fl-surface-gradient-bottom) 96%, transparent))",
         borderBottom: "1px solid color-mix(in srgb, var(--app-primary-color) 18%, transparent)",
         backdropFilter: "blur(18px)",
+        boxShadow: "0 18px 44px color-mix(in srgb, var(--app-primary-color) 8%, transparent)",
       }}
     >
       <div className="fl-app-container grid grid-cols-[auto_1fr_auto] items-center gap-4 py-4 lg:gap-6">
@@ -123,7 +125,8 @@ export default function DesktopAppNavbar({
             className="inline-flex shrink-0 items-center rounded-full border px-3 py-1.5 text-[0.7rem] font-black uppercase tracking-[0.2em] lg:text-xs"
             style={{
               borderColor: "color-mix(in srgb, var(--app-primary-color) 20%, transparent)",
-              background: "color-mix(in srgb, var(--fl-surface-strong) 74%, transparent)",
+              background:
+                "linear-gradient(180deg, color-mix(in srgb, var(--fl-surface-gradient-top) 88%, transparent), color-mix(in srgb, var(--fl-surface-gradient-bottom) 92%, transparent))",
               color: "var(--fl-color-text)",
             }}
           >
@@ -158,7 +161,12 @@ export default function DesktopAppNavbar({
             type="button"
             onClick={() => navigate(ROUTE_PATHS.profile)}
             className="flex h-11 w-11 items-center justify-center rounded-full"
-            style={{ background: "color-mix(in srgb, var(--app-primary-color) 16%, transparent)", color: "var(--app-primary-color)" }}
+            style={{
+              background:
+                "radial-gradient(circle at top right, color-mix(in srgb, var(--app-primary-color) 12%, transparent), transparent 48%), linear-gradient(180deg, color-mix(in srgb, var(--fl-surface-gradient-top) 88%, transparent), color-mix(in srgb, var(--fl-surface-gradient-bottom) 92%, transparent))",
+              color: "var(--app-primary-color)",
+              border: "1px solid color-mix(in srgb, var(--app-primary-color) 16%, transparent)",
+            }}
             aria-label="Abrir configuracoes"
           >
             <MaterialIcon name="settings" filled className="text-2xl" />

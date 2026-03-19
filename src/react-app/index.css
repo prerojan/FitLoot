@@ -54,6 +54,15 @@
   --fl-nav-item-muted: rgba(15, 23, 42, 0.62);
   --fl-nav-item-active-text: #04100b;
   --fl-nav-shadow: 0 18px 46px rgba(15, 23, 42, 0.16);
+  --fl-page-orb-primary: rgba(var(--fl-color-accent-rgb), 0.12);
+  --fl-page-orb-secondary: rgba(var(--fl-color-accent-secondary-rgb), 0.1);
+  --fl-page-orb-tertiary: rgba(var(--fl-color-accent-rgb), 0.07);
+  --fl-surface-gradient-top: rgba(255, 255, 255, 0.92);
+  --fl-surface-gradient-bottom: rgba(236, 245, 241, 0.88);
+  --fl-surface-soft-gradient-top: rgba(255, 255, 255, 0.82);
+  --fl-surface-soft-gradient-bottom: rgba(239, 246, 242, 0.74);
+  --fl-surface-accent-wash: rgba(var(--fl-color-accent-rgb), 0.06);
+  --fl-nav-ambient: rgba(var(--fl-color-accent-rgb), 0.08);
 }
 
 [data-theme="dark"] {
@@ -85,6 +94,15 @@
   --fl-nav-item-muted: rgba(148, 163, 184, 0.72);
   --fl-nav-item-active-text: #04100b;
   --fl-nav-shadow: 0 22px 56px rgba(0, 0, 0, 0.42);
+  --fl-page-orb-primary: rgba(var(--fl-color-accent-rgb), 0.16);
+  --fl-page-orb-secondary: rgba(var(--fl-color-accent-secondary-rgb), 0.11);
+  --fl-page-orb-tertiary: rgba(var(--fl-color-accent-rgb), 0.08);
+  --fl-surface-gradient-top: rgba(18, 28, 23, 0.92);
+  --fl-surface-gradient-bottom: rgba(7, 12, 10, 0.96);
+  --fl-surface-soft-gradient-top: rgba(18, 28, 23, 0.78);
+  --fl-surface-soft-gradient-bottom: rgba(10, 16, 13, 0.72);
+  --fl-surface-accent-wash: rgba(var(--fl-color-accent-rgb), 0.08);
+  --fl-nav-ambient: rgba(var(--fl-color-accent-rgb), 0.12);
 }
 
 :root.fitloot-auth-light {
@@ -324,11 +342,13 @@ body {
   .fl-card {
     @apply relative rounded-2xl bg-white shadow-lg;
     z-index: 10;
-    background-image: linear-gradient(
-      180deg,
-      rgba(255, 255, 255, 0.08),
-      rgba(255, 255, 255, 0.02)
-    );
+    background-image:
+      radial-gradient(circle at top right, color-mix(in srgb, var(--app-primary-color) 10%, transparent), transparent 42%),
+      linear-gradient(
+        180deg,
+        color-mix(in srgb, var(--fl-surface-gradient-top) 100%, transparent),
+        color-mix(in srgb, var(--fl-surface-gradient-bottom) 100%, transparent)
+      );
     box-shadow:
       0 10px 25px rgba(0, 0, 0, 0.15),
       inset 0 1px 0 rgba(255, 255, 255, 0.15);
@@ -338,11 +358,13 @@ body {
     @apply relative rounded-2xl bg-white/60 backdrop-blur-sm border;
     z-index: 10;
     border-color: rgba(var(--app-primary-color-rgb), 0.12);
-    background-image: linear-gradient(
-      135deg,
-      rgba(255, 255, 255, 0.05) 0%,
-      rgba(255, 255, 255, 0.01) 100%
-    );
+    background-image:
+      radial-gradient(circle at top right, color-mix(in srgb, var(--app-primary-color) 8%, transparent), transparent 42%),
+      linear-gradient(
+        135deg,
+        color-mix(in srgb, var(--fl-surface-soft-gradient-top) 100%, transparent) 0%,
+        color-mix(in srgb, var(--fl-surface-soft-gradient-bottom) 100%, transparent) 100%
+      );
     box-shadow:
       0 10px 25px rgba(0, 0, 0, 0.12),
       inset 0 1px 0 rgba(255, 255, 255, 0.15);
@@ -392,44 +414,79 @@ body {
   }
 
   .fl-theme-page {
+    position: relative;
+    isolation: isolate;
     min-height: 100vh;
     min-height: 100dvh;
     color: var(--fl-color-text);
     background:
-      radial-gradient(circle at 12% 14%, color-mix(in srgb, var(--app-primary-color) 8%, transparent), transparent 28%),
-      radial-gradient(circle at 84% 10%, color-mix(in srgb, var(--app-secondary-color) 8%, transparent), transparent 24%),
+      radial-gradient(circle at 12% 14%, var(--fl-page-orb-primary), transparent 30%),
+      radial-gradient(circle at 84% 10%, var(--fl-page-orb-secondary), transparent 25%),
+      radial-gradient(circle at 52% 100%, var(--fl-page-orb-tertiary), transparent 34%),
       linear-gradient(180deg, color-mix(in srgb, var(--app-bg-color) 94%, transparent), color-mix(in srgb, var(--fl-body-bg) 100%, transparent));
   }
 
   .fl-theme-surface {
-    background: color-mix(in srgb, var(--fl-surface-strong) 94%, transparent);
+    background:
+      radial-gradient(circle at top right, color-mix(in srgb, var(--app-primary-color) 10%, transparent), transparent 42%),
+      linear-gradient(
+        180deg,
+        color-mix(in srgb, var(--fl-surface-gradient-top) 100%, transparent),
+        color-mix(in srgb, var(--fl-surface-gradient-bottom) 100%, transparent)
+      );
     border: 1px solid var(--fl-border-soft);
     color: var(--fl-color-text);
     box-shadow: var(--fl-shadow-glass);
   }
 
   .fl-theme-surface-muted {
-    background: color-mix(in srgb, var(--fl-surface-muted) 92%, transparent);
+    background:
+      radial-gradient(circle at top right, color-mix(in srgb, var(--app-secondary-color) 8%, transparent), transparent 40%),
+      linear-gradient(
+        180deg,
+        color-mix(in srgb, var(--fl-surface-soft-gradient-top) 96%, transparent),
+        color-mix(in srgb, var(--fl-surface-soft-gradient-bottom) 100%, transparent)
+      );
     border: 1px solid var(--fl-border-soft);
     color: var(--fl-color-text);
   }
 
   .fl-theme-surface-soft {
-    background: color-mix(in srgb, var(--fl-surface-strong) 78%, transparent);
+    background:
+      radial-gradient(circle at top right, var(--fl-surface-accent-wash), transparent 42%),
+      linear-gradient(
+        180deg,
+        color-mix(in srgb, var(--fl-surface-soft-gradient-top) 100%, transparent),
+        color-mix(in srgb, var(--fl-surface-soft-gradient-bottom) 100%, transparent)
+      );
     border: 1px solid color-mix(in srgb, var(--app-primary-color) 16%, var(--fl-border-soft));
     color: var(--fl-color-text);
   }
 
   .fl-theme-topbar {
-    background: color-mix(in srgb, var(--fl-surface-strong) 88%, transparent);
+    background:
+      radial-gradient(circle at top right, var(--fl-nav-ambient), transparent 42%),
+      linear-gradient(
+        180deg,
+        color-mix(in srgb, var(--fl-surface-gradient-top) 94%, transparent),
+        color-mix(in srgb, var(--fl-surface-gradient-bottom) 94%, transparent)
+      );
     border-color: var(--fl-border-soft);
     color: var(--fl-color-text);
   }
 
   .fl-theme-input {
-    background: color-mix(in srgb, var(--fl-surface-strong) 84%, transparent);
+    background:
+      linear-gradient(
+        180deg,
+        color-mix(in srgb, var(--fl-surface-soft-gradient-top) 98%, transparent),
+        color-mix(in srgb, var(--fl-surface-soft-gradient-bottom) 100%, transparent)
+      );
     border: 1px solid var(--fl-border-soft);
     color: var(--fl-color-text);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.08),
+      0 10px 24px color-mix(in srgb, var(--app-primary-color) 6%, transparent);
   }
 
   .fl-theme-input::placeholder {
@@ -482,6 +539,33 @@ body {
 
   .fl-z-toast {
     z-index: 60;
+  }
+
+  .fl-theme-backdrop {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .fl-theme-backdrop-orb {
+    position: absolute;
+    border-radius: 9999px;
+    filter: blur(18px);
+    opacity: 0.88;
+  }
+
+  .fl-theme-backdrop-orb-primary {
+    background: radial-gradient(circle, var(--fl-page-orb-primary) 0%, transparent 72%);
+  }
+
+  .fl-theme-backdrop-orb-secondary {
+    background: radial-gradient(circle, var(--fl-page-orb-secondary) 0%, transparent 72%);
+  }
+
+  .fl-theme-backdrop-orb-tertiary {
+    background: radial-gradient(circle, var(--fl-page-orb-tertiary) 0%, transparent 72%);
   }
 }
 
@@ -1461,7 +1545,13 @@ body {
   width: min(22rem, calc(100vw - 1.5rem));
   border-radius: 1.75rem;
   border: 1px solid var(--fl-nav-shell-border);
-  background: var(--fl-nav-shell-bg);
+  background:
+    radial-gradient(circle at top right, var(--fl-nav-ambient), transparent 42%),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--fl-surface-gradient-top) 92%, transparent),
+      color-mix(in srgb, var(--fl-surface-gradient-bottom) 94%, transparent)
+    );
   backdrop-filter: blur(24px);
   box-shadow: var(--fl-nav-shadow);
 }

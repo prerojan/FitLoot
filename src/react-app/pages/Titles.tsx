@@ -23,20 +23,15 @@ import { getAchievementShowcaseStyle } from "@/react-app/utils/achievementShowca
 import type { TitleWithUnlock, UserProfile, UserProgression } from "@/shared/types";
 import { repairKnownMojibakeString } from "@/shared/textEncoding";
 
-type TitleFilter = "all" | "unlocked" | "locked";
+type TitleFilter = "ALL" | "COMUM" | "INCOMUM" | "RARO" | "MITICO" | "SECRETO";
+type NormalizedRarity = Exclude<TitleFilter, "ALL">;
 
-const TITLE_FILTERS: Array<{ id: TitleFilter; label: string }> = [
-  { id: "all", label: "Todos" },
-  { id: "unlocked", label: "Desbloqueados" },
-  { id: "locked", label: "Bloqueados" },
-];
-
-const RARITY_LABELS: Record<string, string> = {
-  COMUM: "Comum",
-  INCOMUM: "Incomum",
-  RARO: "Raro",
-  MITICO: "Mítico",
-  SECRETO: "Secreto",
+const RARITY_CONFIG: Record<NormalizedRarity, { color: string; label: string }> = {
+  COMUM: { color: "#94a3b8", label: "Comum" },
+  INCOMUM: { color: "#22c55e", label: "Incomum" },
+  RARO: { color: "#0070dd", label: "Raro" },
+  MITICO: { color: "#a335ee", label: "Mítico" },
+  SECRETO: { color: "#ff8000", label: "Secreto" },
 };
 
 function sanitizeTitlesForDisplay(titles: TitleWithUnlock[]): TitleWithUnlock[] {
@@ -51,15 +46,21 @@ function sanitizeTitlesForDisplay(titles: TitleWithUnlock[]): TitleWithUnlock[] 
 }
 
 function normalizeRarity(value: string | null | undefined) {
-  return repairKnownMojibakeString(String(value ?? ""))
+  const normalized = repairKnownMojibakeString(String(value ?? ""))
     .normalize("NFD")
     .replace(/\p{Diacritic}/gu, "")
     .trim()
     .toUpperCase();
+
+  if (normalized === "COMUM" || normalized === "INCOMUM" || normalized === "RARO" || normalized === "MITICO" || normalized === "SECRETO") {
+    return normalized;
+  }
+
+  return "COMUM";
 }
 
 function formatRarityLabel(value: string | null | undefined) {
-  return RARITY_LABELS[normalizeRarity(value)] ?? "Comum";
+  return RARITY_CONFIG[normalizeRarity(value)].label;
 }
 
 function formatUnlockCondition(title: TitleWithUnlock) {
@@ -111,7 +112,7 @@ export default function Titles() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [progression, setProgression] = useState<UserProgression | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeFilter, setActiveFilter] = useState<TitleFilter>("all");
+  const [activeFilter, setActiveFilter] = useState<TitleFilter>("ALL");
   const [equipPendingId, setEquipPendingId] = useState<number | null>(null);
   const [status, setStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
@@ -171,15 +172,21 @@ export default function Titles() {
   const unlockedCount = useMemo(() => titles.filter((title) => title.unlocked === 1).length, [titles]);
   const filteredTitles = useMemo(() => {
     const visibleTitles = titles.filter((title) => {
-      if (activeFilter === "unlocked") return title.unlocked === 1;
-      if (activeFilter === "locked") return title.unlocked !== 1;
-      return true;
+      if (activeFilter === "ALL") return true;
+      return normalizeRarity(title.rarity) === activeFilter;
     });
 
     return [...visibleTitles].sort((left, right) => {
       const leftUnlocked = left.unlocked === 1 ? 1 : 0;
       const rightUnlocked = right.unlocked === 1 ? 1 : 0;
       if (rightUnlocked !== leftUnlocked) return rightUnlocked - leftUnlocked;
+
+      const leftRarity = normalizeRarity(left.rarity);
+      const rightRarity = normalizeRarity(right.rarity);
+      if (leftRarity !== rightRarity && activeFilter === "ALL") {
+        const rarityOrder: NormalizedRarity[] = ["SECRETO", "MITICO", "RARO", "INCOMUM", "COMUM"];
+        return rarityOrder.indexOf(leftRarity) - rarityOrder.indexOf(rightRarity);
+      }
 
       const leftActive = left.is_active === 1 || left.is_equipped === 1 ? 1 : 0;
       const rightActive = right.is_active === 1 || right.is_equipped === 1 ? 1 : 0;
@@ -188,6 +195,14 @@ export default function Titles() {
       return left.name.localeCompare(right.name, "pt-BR");
     });
   }, [activeFilter, titles]);
+  const visibleLockedCount = useMemo(
+    () => filteredTitles.filter((title) => title.unlocked !== 1).length,
+    [filteredTitles],
+  );
+  const visibleUnlockedCount = useMemo(
+    () => filteredTitles.filter((title) => title.unlocked === 1).length,
+    [filteredTitles],
+  );
 
   const equipTitle = useCallback(async (title: TitleWithUnlock) => {
     setEquipPendingId(title.id);
@@ -336,57 +351,70 @@ export default function Titles() {
                   Galeria de Títulos
                 </h2>
                 <p className="mt-2 text-[11px] font-bold uppercase tracking-[0.16em]" style={{ color: "var(--fl-color-text-muted)" }}>
-                  Ative o que melhor representa sua build atual.
+                  Filtre por raridade e equipe o que melhor representa sua build atual.
                 </p>
               </div>
 
               <div className="flex w-full flex-wrap gap-2 lg:w-auto">
-                {TITLE_FILTERS.map((filter) => {
-                  const isActive = activeFilter === filter.id;
-                  const accentColor =
-                    filter.id === "unlocked"
-                      ? "var(--app-primary-color)"
-                      : filter.id === "locked"
-                        ? "var(--fl-color-text-soft)"
-                        : "var(--app-primary-color)";
+                <button
+                  type="button"
+                  onClick={() => setActiveFilter("ALL")}
+                  className="inline-flex h-10 items-center justify-center gap-2 rounded-full px-5 text-[11px] font-bold transition-all hover:scale-[1.02]"
+                  style={{
+                    backgroundColor: activeFilter === "ALL" ? "var(--app-primary-color)" : "var(--fl-surface-muted)",
+                    color: activeFilter === "ALL" ? "var(--fl-nav-item-active-text)" : "var(--fl-color-text-muted)",
+                    boxShadow: activeFilter === "ALL"
+                      ? "0 10px 24px color-mix(in srgb, var(--app-primary-color) 22%, transparent)"
+                      : undefined,
+                  }}
+                >
+                  <ListFilter className="h-4 w-4 shrink-0" />
+                  Todos
+                </button>
+                {(Object.keys(RARITY_CONFIG) as NormalizedRarity[]).map((rarity) => {
+                  const isActive = activeFilter === rarity;
 
                   return (
                     <button
-                      key={filter.id}
+                      key={rarity}
                       type="button"
-                      onClick={() => setActiveFilter(filter.id)}
-                      className="inline-flex h-10 items-center justify-center gap-2 rounded-full px-5 text-[11px] font-bold transition-all hover:scale-[1.02]"
+                      onClick={() => setActiveFilter(rarity)}
+                      className="inline-flex h-10 items-center justify-center gap-2 rounded-full px-4 text-[11px] font-medium transition-colors whitespace-nowrap"
                       style={{
                         backgroundColor: isActive
-                          ? filter.id === "all"
-                            ? "var(--app-primary-color)"
-                            : `color-mix(in srgb, ${accentColor} 18%, var(--fl-surface-muted))`
+                          ? `color-mix(in srgb, ${RARITY_CONFIG[rarity].color} 18%, var(--fl-surface-muted))`
                           : "var(--fl-surface-muted)",
-                        color: isActive
-                          ? filter.id === "all"
-                            ? "var(--fl-nav-item-active-text)"
-                            : "var(--fl-color-text)"
-                          : "var(--fl-color-text-muted)",
-                        border: isActive && filter.id !== "all"
-                          ? `1px solid color-mix(in srgb, ${accentColor} 42%, transparent)`
+                        color: isActive ? "var(--fl-color-text)" : "var(--fl-color-text-muted)",
+                        border: isActive
+                          ? `1px solid color-mix(in srgb, ${RARITY_CONFIG[rarity].color} 42%, transparent)`
                           : "1px solid transparent",
                         boxShadow: isActive
-                          ? filter.id === "all"
-                            ? "0 10px 24px color-mix(in srgb, var(--app-primary-color) 22%, transparent)"
-                            : `0 10px 24px color-mix(in srgb, ${accentColor} 16%, transparent)`
+                          ? `0 10px 24px color-mix(in srgb, ${RARITY_CONFIG[rarity].color} 16%, transparent)`
                           : undefined,
                       }}
                     >
-                      {filter.id === "all" ? (
-                        <ListFilter className="h-4 w-4 shrink-0" />
-                      ) : (
-                        <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: accentColor }} />
-                      )}
-                      {filter.label}
+                      <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: RARITY_CONFIG[rarity].color }} />
+                      {RARITY_CONFIG[rarity].label}
                     </button>
                   );
                 })}
               </div>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <span
+                className="inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.16em]"
+                style={{
+                  borderColor: "color-mix(in srgb, var(--app-primary-color) 18%, transparent)",
+                  color: "var(--app-primary-color)",
+                  backgroundColor: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)",
+                }}
+              >
+                {visibleUnlockedCount} desbloqueados
+              </span>
+              <span className="fl-theme-surface-soft rounded-full px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.16em] fl-theme-text-muted">
+                {visibleLockedCount} bloqueados
+              </span>
             </div>
 
             {status ? (
