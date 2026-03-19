@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/react-app/contexts/auth";
 import { useNavigate } from "react-router";
 import {
+  ArrowLeft,
   Trophy,
   Lock,
   Search,
@@ -15,9 +16,9 @@ import {
 } from "lucide-react";
 import AppPageShell from "@/react-app/components/AppPageShell";
 import PageLoader from "@/react-app/components/PageLoader";
-import { fetchAndCacheJson } from "@/react-app/utils/api";
+import { api, clearJsonCache, fetchAndCacheJson } from "@/react-app/utils/api";
 import type { AchievementWithUnlock, UserProfile, UserProgression } from "@/shared/types";
-import { sanitizeAchievementsForDisplay } from "@/react-app/utils/achievementShowcase";
+import { resolveShowcasedAchievement, sanitizeAchievementsForDisplay } from "@/react-app/utils/achievementShowcase";
 
 type RarityFilter = "ALL" | "COMUM" | "INCOMUM" | "RARO" | "MITICO" | "SECRETO";
 type NormalizedRarity = Exclude<RarityFilter, "ALL">;
@@ -54,6 +55,8 @@ export default function Achievements() {
   const [activeRarity, setActiveRarity] = useState<RarityFilter>("ALL");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedAchievement, setSelectedAchievement] = useState<AchievementWithUnlock | null>(null);
+  const [honorSaving, setHonorSaving] = useState(false);
+  const [honorStatus, setHonorStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
   const loadData = useCallback(async () => {
     try {
@@ -93,9 +96,57 @@ export default function Achievements() {
       return matchesRarity && matchesSearch;
     });
   }, [achievements, activeRarity, searchQuery]);
+  const filteredUnlockedAchievements = useMemo(
+    () => filteredAchievements.filter((achievement) => achievement.unlocked === 1),
+    [filteredAchievements],
+  );
+  const filteredLockedAchievements = useMemo(
+    () => filteredAchievements.filter((achievement) => achievement.unlocked !== 1),
+    [filteredAchievements],
+  );
+  const showcasedAchievement = useMemo(
+    () => resolveShowcasedAchievement(profile?.showcased_achievements ?? user?.showcased_achievements ?? null, achievements),
+    [achievements, profile?.showcased_achievements, user?.showcased_achievements],
+  );
 
   const unlockedCount = achievements.filter((achievement) => achievement.unlocked === 1).length;
   const progressPercent = achievements.length > 0 ? (unlockedCount / achievements.length) * 100 : 0;
+  const hasFilteredResults = filteredUnlockedAchievements.length > 0 || filteredLockedAchievements.length > 0;
+
+  const honorAchievement = useCallback(async (achievement: AchievementWithUnlock) => {
+    setHonorSaving(true);
+    setHonorStatus(null);
+
+    try {
+      const response = await api("/api/profile/customization", {
+        method: "POST",
+        body: JSON.stringify({
+          showcased_achievements: [{ id: achievement.id, name: achievement.name }],
+        }),
+      });
+
+      const payload = (await response.json().catch(() => null)) as { error?: string | undefined; profile?: UserProfile | undefined } | null;
+
+      if (!response.ok) {
+        throw new Error(payload?.error ?? "Não foi possível honrar a conquista agora.");
+      }
+
+      clearJsonCache("/api/profile");
+
+      if (payload?.profile) {
+        setProfile(payload.profile);
+      }
+
+      setHonorStatus({ type: "success", message: "Conquista honrada equipada." });
+    } catch (error) {
+      setHonorStatus({
+        type: "error",
+        message: error instanceof Error ? error.message : "Não foi possível honrar a conquista agora.",
+      });
+    } finally {
+      setHonorSaving(false);
+    }
+  }, []);
 
   if (loading) {
     return (
@@ -109,6 +160,24 @@ export default function Achievements() {
     <AppPageShell bottomNavActive="missions" className="fl-theme-page" profile={profile ?? undefined} progression={progression ?? undefined}>
       <div className="flex flex-1 flex-col overflow-hidden">
         <div className="flex-1 overflow-y-auto p-4 pb-4 sm:p-6 md:p-8 min-w-0">
+          <div className="mb-6 flex flex-col gap-3 sm:mb-8 sm:flex-row sm:items-center sm:justify-between">
+            <button
+              type="button"
+              onClick={() => navigate(-1)}
+              className="fl-theme-surface-soft inline-flex w-fit items-center gap-2 rounded-2xl px-4 py-3 text-[10px] font-bold uppercase tracking-[0.18em] fl-theme-text-muted transition-opacity hover:opacity-85"
+            >
+              <ArrowLeft className="h-4 w-4 shrink-0" />
+              <span>Voltar</span>
+            </button>
+
+            {showcasedAchievement ? (
+              <div className="inline-flex max-w-full items-center gap-2 self-start rounded-full border px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.16em] sm:self-auto" style={{ borderColor: "color-mix(in srgb, var(--app-primary-color) 20%, transparent)", color: "var(--app-primary-color)", backgroundColor: "color-mix(in srgb, var(--app-primary-color) 8%, transparent)" }}>
+                <Trophy className="h-3.5 w-3.5 shrink-0" />
+                <span className="truncate">Honrada: {showcasedAchievement.name}</span>
+              </div>
+            ) : null}
+          </div>
+
           <div className="mb-12 grid grid-cols-1 gap-8 lg:grid-cols-[1fr_400px]">
             <div>
               <header className="mb-6 sm:mb-8 min-w-0">
@@ -176,67 +245,38 @@ export default function Achievements() {
             </div>
           </div>
 
-          <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {filteredAchievements.map((achievement) => {
-              const rarity = normalizeRarity(achievement.rarity);
-              const rarityStyle = RARITY_CONFIG[rarity];
-              const isLocked = achievement.unlocked !== 1;
+          {hasFilteredResults ? (
+            <div className="space-y-10">
+              <AchievementSection
+                title="Desbloqueadas"
+                description="Escolha aqui a conquista que vai aparecer como honrada no seu perfil e dashboard."
+                items={filteredUnlockedAchievements}
+                showcasedAchievementId={showcasedAchievement?.id ?? null}
+                onSelect={(achievement) => {
+                  setHonorStatus(null);
+                  setSelectedAchievement(achievement);
+                }}
+              />
 
-              return (
-                <button
-                  key={achievement.id}
-                  type="button"
-                  onClick={() => setSelectedAchievement(achievement)}
-                  className={`relative flex h-full flex-col overflow-hidden rounded-[2rem] border p-6 text-left transition-all duration-300 ${isLocked ? "opacity-50 grayscale" : "hover:scale-[1.02]"}`}
-                  style={{
-                    borderColor: isLocked ? "var(--fl-border-soft)" : "color-mix(in srgb, var(--app-primary-color) 16%, var(--fl-border-soft))",
-                    backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 96%, transparent)",
-                  }}
-                >
-                  {!isLocked ? (
-                    <div className="absolute inset-0 opacity-0 transition-opacity group-hover:opacity-10" style={{ background: `radial-gradient(circle at center, ${rarityStyle.color}, transparent)` }} />
-                  ) : null}
-
-                  <div className="mb-6 flex items-start justify-between">
-                    <div className="flex size-14 items-center justify-center rounded-2xl border p-3" style={{ borderColor: "var(--fl-border-soft)", backgroundColor: "color-mix(in srgb, var(--fl-surface-muted) 80%, transparent)" }}>
-                      {isLocked ? <Lock className="h-6 w-6 fl-theme-text-muted" /> : <Award className="h-8 w-8" style={{ color: rarityStyle.color }} />}
-                    </div>
-                    {!isLocked ? (
-                      <div className="flex size-6 items-center justify-center rounded-full" style={{ backgroundColor: "color-mix(in srgb, var(--app-primary-color) 20%, transparent)" }}>
-                        <CheckCircle2 className="h-3.5 w-3.5" style={{ color: "var(--app-primary-color)" }} />
-                      </div>
-                    ) : null}
-                  </div>
-
-                  <div className="mb-4 flex-1">
-                    <h4 className="mb-2 text-sm font-black uppercase tracking-tight">{achievement.name}</h4>
-                    <p className="fl-theme-text-muted line-clamp-2 text-[10px] font-bold uppercase tracking-wider">
-                      {achievement.description || ""}
-                    </p>
-                  </div>
-
-                  <div className="flex items-center justify-between border-t pt-4" style={{ borderColor: "var(--fl-border-soft)" }}>
-                    <span className="rounded-md px-2 py-1 text-[9px] font-bold uppercase tracking-widest" style={{ color: rarityStyle.color, backgroundColor: "color-mix(in srgb, var(--fl-surface-muted) 74%, transparent)" }}>
-                      {rarityStyle.label}
-                    </span>
-                    <div className="flex items-center gap-1">
-                      <Zap className="h-3 w-3 animate-pulse" style={{ color: "var(--app-primary-color)" }} />
-                      <span className="text-xs font-black">+50 XP</span>
-                    </div>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-
-          {filteredAchievements.length === 0 ? (
+              <AchievementSection
+                title="Bloqueadas"
+                description="Conquistas ainda não liberadas."
+                items={filteredLockedAchievements}
+                showcasedAchievementId={showcasedAchievement?.id ?? null}
+                onSelect={(achievement) => {
+                  setHonorStatus(null);
+                  setSelectedAchievement(achievement);
+                }}
+              />
+            </div>
+          ) : (
             <div className="flex flex-col items-center justify-center py-24 text-center">
               <Star className="mb-6 h-16 w-16 fl-theme-text-soft" />
               <p className="fl-theme-text-muted text-[11px] font-bold uppercase tracking-[0.2em]">
                 Nenhuma conquista encontrada neste filtro.
               </p>
             </div>
-          ) : null}
+          )}
         </div>
       </div>
 
@@ -282,14 +322,26 @@ export default function Achievements() {
               </div>
 
               {selectedAchievement.unlocked === 1 ? (
-                <button
-                  type="button"
-                  onClick={() => setSelectedAchievement(null)}
-                  className="w-full rounded-2xl py-5 text-[12px] font-black uppercase tracking-[0.3em] transition-all hover:scale-[1.02] active:scale-95"
-                  style={{ backgroundColor: "var(--app-primary-color)", color: "var(--fl-nav-item-active-text)" }}
-                >
-                  Honrar Conquista
-                </button>
+                <>
+                  {honorStatus ? (
+                    <p className={`mb-4 text-center text-[10px] font-bold uppercase tracking-[0.2em] ${honorStatus.type === "success" ? "" : "text-red-400"}`} style={honorStatus.type === "success" ? { color: "var(--app-primary-color)" } : undefined}>
+                      {honorStatus.message}
+                    </p>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={() => { void honorAchievement(selectedAchievement); }}
+                    disabled={honorSaving || showcasedAchievement?.id === selectedAchievement.id}
+                    className="w-full rounded-2xl py-5 text-[12px] font-black uppercase tracking-[0.3em] transition-all hover:scale-[1.02] active:scale-95 disabled:opacity-60 disabled:hover:scale-100"
+                    style={{ backgroundColor: "var(--app-primary-color)", color: "var(--fl-nav-item-active-text)" }}
+                  >
+                    {showcasedAchievement?.id === selectedAchievement.id
+                      ? "Conquista Honrada"
+                      : honorSaving
+                        ? "Honrando..."
+                        : "Honrar Conquista"}
+                  </button>
+                </>
               ) : (
                 <div className="w-full rounded-2xl border py-5 text-[10px] font-black uppercase tracking-[0.2em]" style={{ borderColor: "var(--fl-border-soft)", color: "var(--fl-color-text-muted)" }}>
                   Continue treinando para desbloquear
@@ -324,5 +376,102 @@ function StatsCard({
         </div>
       </div>
     </div>
+  );
+}
+
+function AchievementSection({
+  title,
+  description,
+  items,
+  showcasedAchievementId,
+  onSelect,
+}: {
+  title: string;
+  description: string;
+  items: AchievementWithUnlock[];
+  showcasedAchievementId: number | null;
+  onSelect: (achievement: AchievementWithUnlock) => void;
+}) {
+  if (items.length === 0) return null;
+
+  return (
+    <section className="space-y-4">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h2 className="text-sm font-black uppercase tracking-[0.2em]">{title}</h2>
+          <p className="fl-theme-text-muted mt-2 text-[10px] font-bold uppercase tracking-[0.16em]">
+            {description}
+          </p>
+        </div>
+        <span className="self-start rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-[0.16em] sm:self-auto" style={{ color: "var(--app-primary-color)", backgroundColor: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)" }}>
+          {items.length} {items.length === 1 ? "conquista" : "conquistas"}
+        </span>
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        {items.map((achievement) => {
+          const rarity = normalizeRarity(achievement.rarity);
+          const rarityStyle = RARITY_CONFIG[rarity];
+          const isLocked = achievement.unlocked !== 1;
+          const isShowcased = showcasedAchievementId === achievement.id;
+
+          return (
+            <button
+              key={achievement.id}
+              type="button"
+              onClick={() => onSelect(achievement)}
+              className={`relative flex h-full flex-col overflow-hidden rounded-[2rem] border p-6 text-left transition-all duration-300 ${isLocked ? "opacity-50 grayscale" : "hover:scale-[1.02]"}`}
+              style={{
+                borderColor: isShowcased
+                  ? "var(--app-primary-color)"
+                  : isLocked
+                    ? "var(--fl-border-soft)"
+                    : "color-mix(in srgb, var(--app-primary-color) 16%, var(--fl-border-soft))",
+                backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 96%, transparent)",
+                boxShadow: isShowcased
+                  ? "0 0 0 1px color-mix(in srgb, var(--app-primary-color) 24%, transparent), 0 18px 40px color-mix(in srgb, var(--app-primary-color) 12%, transparent)"
+                  : undefined,
+              }}
+            >
+              {!isLocked ? (
+                <div className="absolute inset-0 opacity-0 transition-opacity group-hover:opacity-10" style={{ background: `radial-gradient(circle at center, ${rarityStyle.color}, transparent)` }} />
+              ) : null}
+
+              <div className="mb-6 flex items-start justify-between gap-3">
+                <div className="flex size-14 items-center justify-center rounded-2xl border p-3" style={{ borderColor: "var(--fl-border-soft)", backgroundColor: "color-mix(in srgb, var(--fl-surface-muted) 80%, transparent)" }}>
+                  {isLocked ? <Lock className="h-6 w-6 fl-theme-text-muted" /> : <Award className="h-8 w-8" style={{ color: rarityStyle.color }} />}
+                </div>
+                {isShowcased ? (
+                  <span className="rounded-full px-2 py-1 text-[9px] font-bold uppercase tracking-[0.16em]" style={{ color: "var(--app-primary-color)", backgroundColor: "color-mix(in srgb, var(--app-primary-color) 14%, transparent)" }}>
+                    Honrada
+                  </span>
+                ) : !isLocked ? (
+                  <div className="flex size-6 items-center justify-center rounded-full" style={{ backgroundColor: "color-mix(in srgb, var(--app-primary-color) 20%, transparent)" }}>
+                    <CheckCircle2 className="h-3.5 w-3.5" style={{ color: "var(--app-primary-color)" }} />
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="mb-4 flex-1">
+                <h4 className="mb-2 text-sm font-black uppercase tracking-tight">{achievement.name}</h4>
+                <p className="fl-theme-text-muted line-clamp-2 text-[10px] font-bold uppercase tracking-wider">
+                  {achievement.description || ""}
+                </p>
+              </div>
+
+              <div className="flex items-center justify-between border-t pt-4" style={{ borderColor: "var(--fl-border-soft)" }}>
+                <span className="rounded-md px-2 py-1 text-[9px] font-bold uppercase tracking-widest" style={{ color: rarityStyle.color, backgroundColor: "color-mix(in srgb, var(--fl-surface-muted) 74%, transparent)" }}>
+                  {rarityStyle.label}
+                </span>
+                <div className="flex items-center gap-1">
+                  <Zap className="h-3 w-3 animate-pulse" style={{ color: "var(--app-primary-color)" }} />
+                  <span className="text-xs font-black">+50 XP</span>
+                </div>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </section>
   );
 }
