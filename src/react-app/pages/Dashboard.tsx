@@ -6,7 +6,6 @@ import MissionCard from "@/react-app/components/MissionCard";
 import LevelUpModal from "@/react-app/components/LevelUpModal";
 import AIRecommendations from "@/react-app/components/AIRecommendations";
 import AIMissionGenerator from "@/react-app/components/AIMissionGenerator";
-import AchievementShowcaseBadge from "@/react-app/components/AchievementShowcaseBadge";
 import LoadingBall from "@/react-app/components/LoadingBall";
 import { Bot, CalendarDays, Camera, Cloud, Flame, Zap } from "lucide-react";
 import { ROUTE_PATHS } from "@/react-app/constants/auth";
@@ -26,6 +25,7 @@ import {
   prefetchJson,
   readCachedJson,
 } from "@/react-app/utils/api";
+import { resolveShowcasedAchievement } from "@/react-app/utils/achievementShowcase";
 import {
   MetricCard,
   SectionHeader,
@@ -44,10 +44,8 @@ import {
   isMissionCompleted,
   sortMissions,
 } from "@/react-app/pages/dashboardUtils";
-import { resolveShowcasedAchievement, sanitizeAchievementsForDisplay } from "@/react-app/utils/achievementShowcase";
 
 type DashboardLoadingState = {
-  achievements: boolean;
   profile: boolean;
   progression: boolean;
   missions: boolean;
@@ -56,7 +54,6 @@ type DashboardLoadingState = {
 };
 
 const DEFAULT_LOADING_STATE: DashboardLoadingState = {
-  achievements: true,
   profile: true,
   progression: true,
   missions: true,
@@ -70,9 +67,9 @@ export default function Dashboard() {
 
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [progression, setProgression] = useState<UserProgression | null>(null);
-  const [achievements, setAchievements] = useState<AchievementWithUnlock[]>([]);
   const [missions, setMissions] = useState<Mission[]>([]);
   const [metrics, setMetrics] = useState<DailyMetrics | null>(null);
+  const [achievements, setAchievements] = useState<AchievementWithUnlock[]>([]);
   const [activeTitle, setActiveTitle] = useState<Title | null>(null);
   const [loadingState, setLoadingState] = useState<DashboardLoadingState>(DEFAULT_LOADING_STATE);
   const [error, setError] = useState<string | null>(null);
@@ -89,30 +86,23 @@ export default function Dashboard() {
     const forceRefresh = options?.forceRefresh === true;
     setError(null);
 
-    const cacheAchievements = readCachedJson<AchievementWithUnlock[]>("/api/achievements");
     const cacheProfile = readCachedJson<UserProfile>("/api/profile");
     const cacheProgression = readCachedJson<UserProgression>("/api/progression");
     const cacheMissions = readCachedJson<Mission[]>("/api/missions");
     const cacheMetrics = readCachedJson<DailyMetrics>("/api/metrics/today");
+    const cacheAchievements = readCachedJson<AchievementWithUnlock[]>("/api/achievements");
     const cacheTitles = readCachedJson<Array<Title & { is_active?: number | undefined }>>("/api/titles");
 
-    if (cacheAchievements) {
-      setAchievements(
-        Array.isArray(cacheAchievements.data)
-          ? sanitizeAchievementsForDisplay(cacheAchievements.data)
-          : [],
-      );
-    }
     if (cacheProfile) setProfile(cacheProfile.data);
     if (cacheProgression) setProgression(cacheProgression.data);
     if (cacheMissions) setMissions(Array.isArray(cacheMissions.data) ? cacheMissions.data : []);
     if (cacheMetrics) setMetrics(cacheMetrics.data);
+    if (cacheAchievements) setAchievements(Array.isArray(cacheAchievements.data) ? cacheAchievements.data : []);
     if (cacheTitles) {
       setActiveTitle(cacheTitles.data.find((title) => title.is_active === 1) ?? null);
     }
 
     setLoadingState({
-      achievements: forceRefresh || !cacheAchievements,
       profile: forceRefresh || !cacheProfile,
       progression: forceRefresh || !cacheProgression,
       missions: forceRefresh || !cacheMissions,
@@ -153,7 +143,7 @@ export default function Dashboard() {
 
         if (!hasCachedEntry) {
           hasRequestError = true;
-          setError("Não foi possível carregar todos os dados do dashboard agora.");
+          setError("Nao foi possivel carregar todos os dados do dashboard agora.");
         }
       } finally {
         setSectionLoading(section, false);
@@ -161,9 +151,6 @@ export default function Dashboard() {
     };
 
     await Promise.all([
-      runRequest<AchievementWithUnlock[]>("achievements", "/api/achievements", Boolean(cacheAchievements), Boolean(cacheAchievements?.stale), (payload) => {
-        setAchievements(Array.isArray(payload) ? sanitizeAchievementsForDisplay(payload) : []);
-      }),
       runRequest<UserProfile>("profile", "/api/profile", Boolean(cacheProfile), Boolean(cacheProfile?.stale), setProfile, () => {
         shouldRedirectToOnboarding = true;
       }),
@@ -172,6 +159,16 @@ export default function Dashboard() {
         setMissions(Array.isArray(payload) ? payload : []);
       }),
       runRequest<DailyMetrics>("metrics", "/api/metrics/today", Boolean(cacheMetrics), Boolean(cacheMetrics?.stale), setMetrics),
+      (async () => {
+        try {
+          const payload = await fetchAndCacheJson<AchievementWithUnlock[]>("/api/achievements");
+          setAchievements(Array.isArray(payload) ? payload : []);
+        } catch (requestError) {
+          if (requestError instanceof ApiRequestError && (requestError.status === 401 || requestError.status === 403)) {
+            shouldRedirectToApp = true;
+          }
+        }
+      })(),
       runRequest<Array<Title & { is_active?: number | undefined }>>("titles", "/api/titles", Boolean(cacheTitles), Boolean(cacheTitles?.stale), (payload) => {
         setActiveTitle((Array.isArray(payload) ? payload : []).find((title) => title.is_active === 1) ?? null);
       }),
@@ -222,7 +219,6 @@ export default function Dashboard() {
     void import("@/react-app/pages/Ranking");
     void import("@/react-app/pages/AIChat");
     void import("@/react-app/pages/FoodAnalysis");
-    void prefetchJson("/api/achievements");
     void prefetchJson("/api/profile");
     void prefetchJson("/api/progression");
     void prefetchJson("/api/missions");
@@ -231,7 +227,6 @@ export default function Dashboard() {
   }, []);
 
   const refreshData = useCallback(async () => {
-    clearJsonCache("/api/achievements");
     clearJsonCache("/api/profile");
     clearJsonCache("/api/progression");
     clearJsonCache("/api/missions");
@@ -260,7 +255,7 @@ export default function Dashboard() {
 
       if (!response.ok) {
         const payload = (await response.json().catch(() => null)) as { error?: string | undefined } | null;
-        setError(payload?.error ?? "Não foi possível concluir a missão.");
+        setError(payload?.error ?? "Nao foi possivel concluir a missao.");
         return;
       }
 
@@ -280,7 +275,7 @@ export default function Dashboard() {
 
       await refreshData();
     } catch {
-      setError("Não foi possível concluir a missão agora.");
+      setError("Nao foi possivel concluir a missao agora.");
     }
   };
 
@@ -308,11 +303,11 @@ export default function Dashboard() {
   const missionFeedSections = useMemo(
     () =>
       [
-        { title: "Todas as missões de hoje", missions: allDailyMissions },
-        { title: "Missões especiais da IA", missions: aiSpecialMissions },
-        { title: "Missões semanais", missions: weeklyMissions },
-        { title: "Missões mensais", missions: monthlyMissions },
-        { title: "Missões expiradas", missions: failedMissions },
+        { title: "Todas as missoes de hoje", missions: allDailyMissions },
+        { title: "Missoes especiais da IA", missions: aiSpecialMissions },
+        { title: "Missoes semanais", missions: weeklyMissions },
+        { title: "Missoes mensais", missions: monthlyMissions },
+        { title: "Missoes expiradas", missions: failedMissions },
       ].filter((section) => section.missions.length > 0),
     [aiSpecialMissions, allDailyMissions, failedMissions, monthlyMissions, weeklyMissions],
   );
@@ -374,10 +369,6 @@ export default function Dashboard() {
 
   const displayName = profile?.full_name ?? user?.name ?? "Seu dashboard";
   const usernameLabel = profile?.username ? `@${profile.username}` : user?.email ?? "fitloot";
-  const showcasedAchievement = useMemo(
-    () => resolveShowcasedAchievement(profile?.showcased_achievements, achievements),
-    [achievements, profile?.showcased_achievements],
-  );
 
   const scrollToSection = useCallback((sectionId: string) => {
     const section = document.getElementById(sectionId);
@@ -392,20 +383,51 @@ export default function Dashboard() {
   const xpStrLength = xpDisplayValue.toString().length;
   const xpTextSizeClass = xpStrLength >= 5 ? "text-xl md:text-2xl" : xpStrLength === 4 ? "text-2xl md:text-3xl" : "text-3xl md:text-4xl";
   const xpLabelSizeClass = xpStrLength >= 5 ? "text-[0.6rem] md:text-[0.65rem]" : xpStrLength === 4 ? "text-[0.65rem] md:text-[0.7rem]" : "text-[0.7rem] md:text-[0.8rem]";
+  const showcasedAchievement = useMemo(
+    () => resolveShowcasedAchievement(profile?.showcased_achievements, achievements),
+    [achievements, profile?.showcased_achievements],
+  );
+  const showcasedAchievementDisplay = useMemo(() => {
+    if (!showcasedAchievement) return null;
+
+    const normalizedRarity = showcasedAchievement.rarity
+      .normalize("NFD")
+      .replace(/\p{Diacritic}/gu, "")
+      .trim()
+      .toUpperCase();
+
+    if (normalizedRarity === "RARO") {
+      return { rarityClass: "border-blue-500 text-blue-400", rarityIcon: "\u25C6" };
+    }
+
+    if (normalizedRarity === "EPICO" || normalizedRarity === "MITICO") {
+      return { rarityClass: "border-purple-500 text-purple-400", rarityIcon: "\u2726" };
+    }
+
+    if (normalizedRarity === "LENDARIO") {
+      return { rarityClass: "border-amber-500 text-amber-400", rarityIcon: "\u2736" };
+    }
+
+    if (normalizedRarity === "SECRETO") {
+      return { rarityClass: "border-primary text-primary", rarityIcon: "\u2739" };
+    }
+
+    return { rarityClass: "border-slate-500 text-slate-400", rarityIcon: "\u2022" };
+  }, [showcasedAchievement]);
 
   return (
     <AppPageShell bottomNavActive="missions" profile={profile} progression={progression}>
-      <main className="mx-auto max-w-[48rem] px-3 pb-4 pt-3 sm:px-4 md:px-6 md:pt-6 lg:px-8 lg:pb-6">
-        <div className="space-y-3 md:space-y-5 lg:space-y-6">
-          <div className="flex w-full flex-col gap-3 px-1 sm:flex-row sm:items-start sm:justify-between md:gap-4">
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-semibold md:text-base" style={{ color: "var(--fl-color-text)" }}>{displayName}</p>
-              <p className="truncate text-[0.7rem] font-medium sm:text-xs" style={{ color: "var(--fl-color-text-muted)" }}>{usernameLabel}</p>
+      <main className="mx-auto max-w-[48rem] px-4 pb-16 pt-4 sm:px-5 md:px-8 md:pt-8">
+        <div className="space-y-3 md:space-y-6">
+          <div className="flex w-full items-start justify-between gap-4 px-1">
+            <div className="flex flex-col">
+              <p className="text-sm font-semibold md:text-base" style={{ color: "var(--fl-color-text)" }}>{displayName}</p>
+              <p className="text-[0.7rem] sm:text-xs text-slate-400 font-medium" style={{ color: "var(--fl-color-text-muted)" }}>{usernameLabel}</p>
             </div>
-            <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+            <div className="flex flex-col items-end gap-1 md:flex-row md:items-center md:gap-2">
               {loadingState.titles ? <LoadingBall size="sm" /> : activeTitle ? (
                 <div
-                  className="max-w-full truncate rounded-full px-3 py-1 text-[0.62rem] font-bold uppercase tracking-[0.14em] sm:text-[0.68rem] sm:tracking-[0.16em]"
+                  className="rounded-full px-3 py-1 text-[0.68rem] font-bold uppercase tracking-[0.16em]"
                   style={{
                     background: "color-mix(in srgb, var(--app-primary-color) 14%, transparent)",
                     color: "var(--app-primary-color)",
@@ -428,12 +450,6 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {showcasedAchievement ? (
-            <div className="px-1">
-              <AchievementShowcaseBadge achievement={showcasedAchievement} variant="dashboard" />
-            </div>
-          ) : null}
-
           {error ? (
             <div className="flex flex-col gap-3 rounded-[1.75rem] p-4 sm:flex-row sm:items-center sm:justify-between" style={SUBTLE_PANEL_STYLE}>
               <span className="text-sm" style={{ color: "var(--fl-color-text)" }}>{error}</span>
@@ -443,25 +459,33 @@ export default function Dashboard() {
             </div>
           ) : null}
 
+          {showcasedAchievement && showcasedAchievementDisplay ? (
+            <div className="flex items-center gap-2 px-1">
+              <span className={`text-xs font-bold px-3 py-1 rounded-full border ${showcasedAchievementDisplay.rarityClass}`}>
+                {showcasedAchievementDisplay.rarityIcon} {showcasedAchievement.name}
+              </span>
+            </div>
+          ) : null}
+
           <section className="space-y-4">
             <div className="rounded-[2rem] px-4 py-5 md:px-8 md:py-6" style={PRIMARY_GLOW_STYLE}>
-              <div className="flex flex-col gap-6 sm:min-h-[10rem] sm:flex-row sm:items-center sm:justify-between">
-                <div className="min-w-0 flex-1 pl-1">
-                  <div className="inline-flex max-w-full items-center gap-2 text-[0.58rem] font-black uppercase tracking-[0.18em] sm:text-[0.68rem] sm:tracking-[0.28em]" style={{ color: "color-mix(in srgb, var(--fl-nav-item-active-text) 80%, transparent)" }}>
+              <div className="flex min-h-[9.5rem] flex-row items-center justify-between gap-2 sm:min-h-[10rem]">
+                <div className="flex flex-col justify-center gap-3 md:gap-4 pl-1">
+                  <div className="inline-flex items-center gap-2 text-[0.64rem] font-black uppercase tracking-[0.24em] sm:text-[0.68rem] sm:tracking-[0.28em] text-black/80">
                     <Cloud className="h-4 w-4" />
-                    <span className="truncate">Experience Points</span>
+                    <span>Experience Points</span>
                   </div>
-                  <div className="mt-3 inline-flex max-w-full items-center gap-2 rounded-full bg-black/10 px-3 py-1.5 text-[0.7rem] font-black sm:w-fit sm:text-xs md:px-4 md:py-3 md:text-sm" style={{ color: "var(--fl-nav-item-active-text)" }}>
+                  <div className="inline-flex w-fit items-center gap-2 rounded-full px-3 py-1.5 md:px-4 md:py-3 text-xs md:text-sm font-black bg-black/10 text-black">
                     <Flame className="h-4 w-4" />
-                    <span className="truncate">{loadingState.progression ? <LoadingBall size="sm" /> : `${progression?.current_streak ?? 0}-Day Streak`}</span>
+                    <span>{loadingState.progression ? <LoadingBall size="sm" /> : `${progression?.current_streak ?? 0}-Day Streak`}</span>
                   </div>
-                  <div className="mt-3 break-words text-[0.58rem] font-black uppercase tracking-[0.16em] leading-relaxed sm:text-xs sm:tracking-[0.2em]" style={{ color: "color-mix(in srgb, var(--fl-nav-item-active-text) 60%, transparent)" }}>
-                    {loadingState.progression ? <LoadingBall size="sm" /> : `${formatNumber(Math.max(0, progression?.xp ?? 0))} / ${formatNumber(xpForNextLevel)} PARA O PRÓXIMO NÍVEL`}
+                  <div className="mt-2 text-[0.6rem] md:text-xs font-black uppercase tracking-[0.2em] text-black/60">
+                    {loadingState.progression ? <LoadingBall size="sm" /> : `${formatNumber(Math.max(0, progression?.xp ?? 0))} / ${formatNumber(xpForNextLevel)} PARA O PROXIMO NIVEL`}
                   </div>
                 </div>
 
-                <div className="relative mx-auto flex w-full max-w-[11rem] shrink-0 items-center justify-center sm:mx-0">
-                  <div className="relative h-[7.5rem] w-[8.5rem] sm:h-[9.5rem] sm:w-[11rem]">
+                <div className="relative flex shrink-0 items-center justify-center">
+                  <div className="h-[8rem] w-[9rem] sm:h-[9.5rem] sm:w-[11rem] relative">
                     <svg viewBox="0 0 176 104" className="absolute inset-0 h-full w-full" aria-hidden="true">
                       <path
                         d="M18 86 A70 70 0 0 1 158 86"
@@ -481,17 +505,17 @@ export default function Dashboard() {
                       />
                     </svg>
                     <div className="absolute inset-x-0 bottom-4 flex items-baseline justify-center gap-1 sm:bottom-5">
-                      <span className={`${xpTextSizeClass} font-black leading-none drop-shadow-sm transition-all`} style={{ color: "var(--fl-nav-item-active-text)" }}>
+                      <span className={`${xpTextSizeClass} font-black leading-none text-black drop-shadow-sm transition-all`}>
                         {loadingState.progression ? <LoadingBall size="sm" /> : formatNumber(xpDisplayValue)}
                       </span>
-                      <span className={`pb-0.5 ${xpLabelSizeClass} font-black uppercase`} style={{ color: "var(--fl-nav-item-active-text)" }}>XP</span>
+                      <span className={`pb-0.5 ${xpLabelSizeClass} font-black uppercase text-black`}>XP</span>
                     </div>
                   </div>
                 </div>
               </div>
             </div>
 
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 md:gap-3">
+            <div className="grid grid-cols-2 gap-2 md:gap-3">
               <MetricCard
                 label="Passos"
                 value={formatNumber(stepsValue)}
@@ -517,7 +541,7 @@ export default function Dashboard() {
           </section>
 
           <section className="px-1 pt-1 sm:px-2">
-            <div className="flex w-full justify-between gap-2 sm:justify-center">
+            <div className="flex w-full gap-2 justify-center">
               {calendarDates.map((date) => {
                 const dateKey = formatDateKey(date);
                 const isCurrentDay = dateKey === todayKey;
@@ -529,17 +553,13 @@ export default function Dashboard() {
                     onClick={() => scrollToSection("mission-feed")}
                     className={`flex h-12 w-12 shrink-0 flex-col items-center justify-center rounded-xl ${
                       isCurrentDay
-                        ? "shadow-lg"
-                        : "bg-transparent"
+                        ? "bg-[var(--app-primary-color)] text-[var(--fl-background-color,#0f172a)] shadow-lg"
+                        : "bg-transparent text-slate-400"
                     }`}
-                    aria-label={`Abrir missões de ${weekdayLabel} ${String(date.getDate()).padStart(2, "0")}`}
+                    aria-label={`Abrir missoes de ${weekdayLabel} ${String(date.getDate()).padStart(2, "0")}`}
                     style={isCurrentDay ? {
-                      backgroundColor: "var(--app-primary-color)",
-                      color: "var(--fl-nav-item-active-text)",
                       boxShadow: "0 8px 20px color-mix(in srgb, var(--app-primary-color) 20%, transparent)"
-                    } : {
-                      color: "var(--fl-color-text-muted)",
-                    }}
+                    } : {}}
                   >
                     <span className="text-[0.6rem] font-black uppercase tracking-[0.1em]">{weekdayLabel}</span>
                     <span className="mt-0.5 text-base font-black leading-none">{String(date.getDate()).padStart(2, "0")}</span>
@@ -550,7 +570,7 @@ export default function Dashboard() {
           </section>
 
           <section>
-            <SectionHeader title="Missões de Hoje" actionLabel="Ver todas" onAction={() => scrollToSection("mission-feed")} />
+            <SectionHeader title="Missoes de Hoje" actionLabel="Ver todas" onAction={() => scrollToSection("mission-feed")} />
             <div className="rounded-[2rem] p-3 md:p-5" style={SUBTLE_PANEL_STYLE}>
               <div className="mb-5 inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-[0.68rem] font-bold" style={{ background: "color-mix(in srgb, var(--fl-surface-strong) 86%, transparent)", color: "var(--fl-color-text-muted)", border: "1px solid var(--fl-border-soft)" }}>
                 <CalendarDays className="h-3.5 w-3.5" />
@@ -569,7 +589,7 @@ export default function Dashboard() {
                   ))}
                 </div>
               ) : (
-                <div className="rounded-[1.5rem] p-5 text-sm" style={PANEL_STYLE}>Nenhuma missão disponível para hoje no momento.</div>
+                <div className="rounded-[1.5rem] p-5 text-sm" style={PANEL_STYLE}>Nenhuma missao disponivel para hoje no momento.</div>
               )}
             </div>
           </section>
@@ -577,7 +597,7 @@ export default function Dashboard() {
           <section>
             <SectionHeader title="Passos" actionLabel="Ver todos" onAction={() => scrollToSection("assistant-tools")} />
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
-              <div className="shrink-0">
+              <div className="shrink-0 whitespace-nowrap">
                 <span className="text-xl font-black md:text-[1.8rem]" style={{ color: "var(--fl-color-text)" }}>{loadingState.metrics ? <LoadingBall size="sm" /> : formatNumber(stepsValue)}</span>
                 <span className="ml-2 text-sm font-bold" style={{ color: "var(--fl-color-text-muted)" }}>/ {formatNumber(STEPS_TARGET)}</span>
               </div>
@@ -591,7 +611,7 @@ export default function Dashboard() {
 
           {missionFeedSections.length > 0 ? (
             <section id="mission-feed" className="space-y-6">
-              <SectionHeader title="Explorar Missões" />
+              <SectionHeader title="Explorar Missoes" />
               {missionFeedSections.map((section) => (
                 <div key={section.title}>
                   <h3 className="mb-3 text-sm font-black uppercase tracking-[0.18em]" style={{ color: "var(--fl-color-text-muted)" }}>{section.title}</h3>
@@ -661,7 +681,7 @@ export default function Dashboard() {
           onClick={() => setQuickActionsOpen((current) => !current)}
           className="flex h-14 w-14 items-center justify-center rounded-full transition-transform duration-200"
           style={PRIMARY_GLOW_STYLE}
-          aria-label="Abrir ações rápidas"
+          aria-label="Abrir acoes rapidas"
           aria-expanded={quickActionsOpen}
         >
           <Zap className={`h-6 w-6 transition-transform duration-200 ${quickActionsOpen ? "rotate-12" : ""}`} />

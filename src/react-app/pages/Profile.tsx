@@ -20,7 +20,6 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/react-app/contexts/auth";
 import { useTheme } from "@/react-app/contexts/theme";
-import AchievementShowcaseBadge from "@/react-app/components/AchievementShowcaseBadge";
 import AppPageShell from "@/react-app/components/AppPageShell";
 import LoadingBall from "@/react-app/components/LoadingBall";
 import PageLoader from "@/react-app/components/PageLoader";
@@ -144,6 +143,33 @@ export default function Profile() {
     () => resolveShowcasedAchievement(profile?.showcased_achievements, achievements),
     [achievements, profile?.showcased_achievements],
   );
+  const showcasedAchievementTone = useMemo(() => {
+    if (!showcasedAchievement) return null;
+
+    const normalizedRarity = showcasedAchievement.rarity
+      .normalize("NFD")
+      .replace(/\p{Diacritic}/gu, "")
+      .trim()
+      .toUpperCase();
+
+    if (normalizedRarity === "RARO") {
+      return { rarityTextClass: "text-blue-400" };
+    }
+
+    if (normalizedRarity === "EPICO" || normalizedRarity === "MITICO") {
+      return { rarityTextClass: "text-purple-400" };
+    }
+
+    if (normalizedRarity === "LENDARIO") {
+      return { rarityTextClass: "text-amber-400" };
+    }
+
+    if (normalizedRarity === "SECRETO") {
+      return { rarityTextClass: "text-primary" };
+    }
+
+    return { rarityTextClass: "text-slate-400" };
+  }, [showcasedAchievement]);
 
   const combatPower = useMemo(() => {
     if (!attributes) return 0;
@@ -269,8 +295,10 @@ export default function Profile() {
               <p className="text-primary font-bold text-[10px] uppercase tracking-[0.3em]" style={{ color: 'var(--app-primary-color)' }}>
                 {activeTitle?.name || "RECRUTA FITLOOT"}
               </p>
-              {showcasedAchievement ? (
-                <AchievementShowcaseBadge achievement={showcasedAchievement} className="mt-4" />
+              {showcasedAchievement && showcasedAchievementTone ? (
+                <span className={`text-xs font-medium ${showcasedAchievementTone.rarityTextClass}`}>
+                  {"\u{1F3C6}"} {showcasedAchievement.name}
+                </span>
               ) : null}
             </div>
 
