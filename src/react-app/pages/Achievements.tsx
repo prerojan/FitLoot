@@ -5,6 +5,7 @@ import {
   ArrowLeft,
   Trophy,
   Lock,
+  ListFilter,
   Search,
   Star,
   Flame,
@@ -214,6 +215,14 @@ export default function Achievements() {
             </div>
 
             <div className="relative overflow-hidden rounded-[2.5rem] border p-8" style={{ backgroundColor: "color-mix(in srgb, var(--app-primary-color) 5%, transparent)", borderColor: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)" }}>
+              <div
+                className="pointer-events-none absolute -right-16 top-0 h-40 w-40 rounded-full"
+                style={{ background: "radial-gradient(circle, color-mix(in srgb, var(--app-primary-color) 16%, transparent) 0%, transparent 72%)" }}
+              />
+              <div
+                className="pointer-events-none absolute -left-8 bottom-0 h-32 w-32 rounded-full"
+                style={{ background: "radial-gradient(circle, color-mix(in srgb, var(--app-secondary-color) 10%, transparent) 0%, transparent 72%)" }}
+              />
               <div className="relative z-10 flex h-full flex-col justify-between">
                 <div className="mb-4 flex items-center justify-between">
                   <h3 className="text-xs font-black uppercase tracking-[0.3em]">Dominação Total</h3>
@@ -231,13 +240,20 @@ export default function Achievements() {
           </div>
 
           <div className="mb-10 flex flex-col items-center justify-between gap-6 md:flex-row">
-            <div className="fl-theme-surface-soft flex w-full overflow-x-auto rounded-2xl p-1 md:w-auto">
+            <div className="flex w-full flex-wrap gap-2 md:w-auto">
               <button
                 type="button"
                 onClick={() => setActiveRarity("ALL")}
-                className="rounded-xl px-6 py-2.5 text-[10px] font-bold uppercase tracking-widest transition-all"
-                style={{ backgroundColor: activeRarity === "ALL" ? "var(--app-primary-color)" : undefined, color: activeRarity === "ALL" ? "var(--fl-nav-item-active-text)" : "var(--fl-color-text-muted)" }}
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-full px-5 text-[11px] font-bold transition-all hover:scale-[1.02]"
+                style={{
+                  backgroundColor: activeRarity === "ALL" ? "var(--app-primary-color)" : "var(--fl-surface-muted)",
+                  color: activeRarity === "ALL" ? "var(--fl-nav-item-active-text)" : "var(--fl-color-text-muted)",
+                  boxShadow: activeRarity === "ALL"
+                    ? "0 10px 24px color-mix(in srgb, var(--app-primary-color) 22%, transparent)"
+                    : undefined,
+                }}
               >
+                <ListFilter className="h-4 w-4 shrink-0" />
                 Todos
               </button>
               {(Object.keys(RARITY_CONFIG) as NormalizedRarity[]).map((rarity) => (
@@ -245,9 +261,21 @@ export default function Achievements() {
                   key={rarity}
                   type="button"
                   onClick={() => setActiveRarity(rarity)}
-                  className={`rounded-xl px-5 py-2.5 text-[10px] font-bold uppercase tracking-widest transition-all whitespace-nowrap ${activeRarity === rarity ? "text-white" : "fl-theme-text-muted"}`}
-                  style={{ backgroundColor: activeRarity === rarity ? RARITY_CONFIG[rarity].color : undefined }}
+                  className="inline-flex h-10 items-center justify-center gap-2 rounded-full px-4 text-[11px] font-medium transition-colors whitespace-nowrap"
+                  style={{
+                    backgroundColor: activeRarity === rarity
+                      ? `color-mix(in srgb, ${RARITY_CONFIG[rarity].color} 18%, var(--fl-surface-muted))`
+                      : "var(--fl-surface-muted)",
+                    color: activeRarity === rarity ? "var(--fl-color-text)" : "var(--fl-color-text-muted)",
+                    border: activeRarity === rarity
+                      ? `1px solid color-mix(in srgb, ${RARITY_CONFIG[rarity].color} 42%, transparent)`
+                      : "1px solid transparent",
+                    boxShadow: activeRarity === rarity
+                      ? `0 10px 24px color-mix(in srgb, ${RARITY_CONFIG[rarity].color} 16%, transparent)`
+                      : undefined,
+                  }}
                 >
+                  <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: RARITY_CONFIG[rarity].color }} />
                   {RARITY_CONFIG[rarity].label}
                 </button>
               ))}
@@ -440,22 +468,29 @@ function AchievementSection({
               key={achievement.id}
               type="button"
               onClick={() => onSelect(achievement)}
-              className={`relative flex h-full flex-col overflow-hidden rounded-[2rem] border p-6 text-left transition-all duration-300 ${isLocked ? "opacity-50 grayscale" : "hover:scale-[1.02]"}`}
+              className={`group relative flex h-full flex-col overflow-hidden rounded-[2rem] border p-6 text-left transition-all duration-300 ${isLocked ? "opacity-50 grayscale" : "hover:-translate-y-1"}`}
               style={{
                 borderColor: isShowcased
                   ? "var(--app-primary-color)"
                   : isLocked
                     ? "var(--fl-border-soft)"
                     : "color-mix(in srgb, var(--app-primary-color) 16%, var(--fl-border-soft))",
-                backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 96%, transparent)",
+                backgroundColor: isLocked
+                  ? "color-mix(in srgb, var(--fl-surface-muted) 76%, transparent)"
+                  : "color-mix(in srgb, var(--fl-surface-strong) 96%, transparent)",
                 boxShadow: isShowcased
                   ? "0 0 0 1px color-mix(in srgb, var(--app-primary-color) 24%, transparent), 0 18px 40px color-mix(in srgb, var(--app-primary-color) 12%, transparent)"
                   : undefined,
               }}
             >
-              {!isLocked ? (
-                <div className="absolute inset-0 opacity-0 transition-opacity group-hover:opacity-10" style={{ background: `radial-gradient(circle at center, ${rarityStyle.color}, transparent)` }} />
-              ) : null}
+              <div
+                className="pointer-events-none absolute inset-0 opacity-90"
+                style={{
+                  background: isLocked
+                    ? "none"
+                    : `radial-gradient(circle at top right, color-mix(in srgb, ${rarityStyle.color} 14%, transparent) 0%, transparent 56%)`,
+                }}
+              />
 
               <div className="mb-6 flex items-start justify-between gap-3">
                 <div className="flex size-14 items-center justify-center rounded-2xl border p-3" style={{ borderColor: "var(--fl-border-soft)", backgroundColor: "color-mix(in srgb, var(--fl-surface-muted) 80%, transparent)" }}>
@@ -467,7 +502,7 @@ function AchievementSection({
                     style={{
                       borderColor: `color-mix(in srgb, ${rarityStyle.color} 42%, transparent)`,
                       color: rarityStyle.color,
-                      backgroundColor: `color-mix(in srgb, ${rarityStyle.color} 18%, transparent)`,
+                      backgroundColor: `color-mix(in srgb, ${rarityStyle.color} 16%, var(--fl-surface-muted))`,
                     }}
                   >
                     <Award className="h-3 w-3 shrink-0" />

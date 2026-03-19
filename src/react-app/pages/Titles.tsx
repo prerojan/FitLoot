@@ -5,6 +5,7 @@ import {
   Badge,
   CheckCircle2,
   Crown,
+  ListFilter,
   Lock,
   Sparkles,
 } from "lucide-react";
@@ -169,9 +170,23 @@ export default function Titles() {
   );
   const unlockedCount = useMemo(() => titles.filter((title) => title.unlocked === 1).length, [titles]);
   const filteredTitles = useMemo(() => {
-    if (activeFilter === "unlocked") return titles.filter((title) => title.unlocked === 1);
-    if (activeFilter === "locked") return titles.filter((title) => title.unlocked !== 1);
-    return titles;
+    const visibleTitles = titles.filter((title) => {
+      if (activeFilter === "unlocked") return title.unlocked === 1;
+      if (activeFilter === "locked") return title.unlocked !== 1;
+      return true;
+    });
+
+    return [...visibleTitles].sort((left, right) => {
+      const leftUnlocked = left.unlocked === 1 ? 1 : 0;
+      const rightUnlocked = right.unlocked === 1 ? 1 : 0;
+      if (rightUnlocked !== leftUnlocked) return rightUnlocked - leftUnlocked;
+
+      const leftActive = left.is_active === 1 || left.is_equipped === 1 ? 1 : 0;
+      const rightActive = right.is_active === 1 || right.is_equipped === 1 ? 1 : 0;
+      if (rightActive !== leftActive) return rightActive - leftActive;
+
+      return left.name.localeCompare(right.name, "pt-BR");
+    });
   }, [activeFilter, titles]);
 
   const equipTitle = useCallback(async (title: TitleWithUnlock) => {
@@ -325,20 +340,48 @@ export default function Titles() {
                 </p>
               </div>
 
-              <div className="fl-theme-surface-soft inline-flex w-full flex-wrap gap-2 rounded-2xl p-1.5 lg:w-auto">
+              <div className="flex w-full flex-wrap gap-2 lg:w-auto">
                 {TITLE_FILTERS.map((filter) => {
                   const isActive = activeFilter === filter.id;
+                  const accentColor =
+                    filter.id === "unlocked"
+                      ? "var(--app-primary-color)"
+                      : filter.id === "locked"
+                        ? "var(--fl-color-text-soft)"
+                        : "var(--app-primary-color)";
+
                   return (
                     <button
                       key={filter.id}
                       type="button"
                       onClick={() => setActiveFilter(filter.id)}
-                      className="rounded-full px-4 py-2 text-[10px] font-black uppercase tracking-[0.18em] transition-all"
+                      className="inline-flex h-10 items-center justify-center gap-2 rounded-full px-5 text-[11px] font-bold transition-all hover:scale-[1.02]"
                       style={{
-                        backgroundColor: isActive ? "var(--app-primary-color)" : "transparent",
-                        color: isActive ? "var(--fl-nav-item-active-text)" : "var(--fl-color-text-muted)",
+                        backgroundColor: isActive
+                          ? filter.id === "all"
+                            ? "var(--app-primary-color)"
+                            : `color-mix(in srgb, ${accentColor} 18%, var(--fl-surface-muted))`
+                          : "var(--fl-surface-muted)",
+                        color: isActive
+                          ? filter.id === "all"
+                            ? "var(--fl-nav-item-active-text)"
+                            : "var(--fl-color-text)"
+                          : "var(--fl-color-text-muted)",
+                        border: isActive && filter.id !== "all"
+                          ? `1px solid color-mix(in srgb, ${accentColor} 42%, transparent)`
+                          : "1px solid transparent",
+                        boxShadow: isActive
+                          ? filter.id === "all"
+                            ? "0 10px 24px color-mix(in srgb, var(--app-primary-color) 22%, transparent)"
+                            : `0 10px 24px color-mix(in srgb, ${accentColor} 16%, transparent)`
+                          : undefined,
                       }}
                     >
+                      {filter.id === "all" ? (
+                        <ListFilter className="h-4 w-4 shrink-0" />
+                      ) : (
+                        <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: accentColor }} />
+                      )}
                       {filter.label}
                     </button>
                   );
@@ -492,16 +535,37 @@ function TitleCard({
             {unlocked ? <Badge className="h-7 w-7" /> : <Lock className="h-6 w-6" />}
           </div>
 
-          <span
-            className="rounded-full border px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.16em]"
-            style={{
-              borderColor: unlocked ? tone.borderColor : "var(--fl-border-soft)",
-              color: unlocked ? tone.textColor : "var(--fl-color-text-soft)",
-              backgroundColor: unlocked ? tone.iconBackground : "color-mix(in srgb, var(--fl-surface-muted) 82%, transparent)",
-            }}
-          >
-            {formatRarityLabel(title.rarity)}
-          </span>
+          {isActive ? (
+            <span
+              className="inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[9px] font-bold uppercase tracking-[0.16em]"
+              style={{
+                borderColor: tone.borderColor,
+                color: tone.textColor,
+                backgroundColor: tone.iconBackground,
+              }}
+            >
+              <CheckCircle2 className="h-3 w-3 shrink-0" />
+              Equipado
+            </span>
+          ) : unlocked ? (
+            <div
+              className="flex size-7 items-center justify-center rounded-full"
+              style={{ backgroundColor: "color-mix(in srgb, var(--app-primary-color) 18%, transparent)" }}
+            >
+              <CheckCircle2 className="h-4 w-4" style={{ color: "var(--app-primary-color)" }} />
+            </div>
+          ) : (
+            <span
+              className="rounded-full border px-2.5 py-1 text-[9px] font-bold uppercase tracking-[0.16em]"
+              style={{
+                borderColor: "var(--fl-border-soft)",
+                color: "var(--fl-color-text-soft)",
+                backgroundColor: "color-mix(in srgb, var(--fl-surface-muted) 82%, transparent)",
+              }}
+            >
+              Bloqueado
+            </span>
+          )}
         </div>
 
         <div className="flex-1 space-y-3">
@@ -524,8 +588,14 @@ function TitleCard({
         </div>
 
         <div className="mt-6 flex items-center justify-between gap-3 border-t pt-4" style={{ borderColor: "var(--fl-border-soft)" }}>
-          <span className="text-[10px] font-black uppercase tracking-[0.18em]" style={{ color: unlocked ? tone.textColor : "var(--fl-color-text-soft)" }}>
-            {isActive ? "Equipado" : unlocked ? "Disponível" : "Bloqueado"}
+          <span
+            className="rounded-md px-2 py-1 text-[9px] font-bold uppercase tracking-widest"
+            style={{
+              color: unlocked ? tone.textColor : "var(--fl-color-text-soft)",
+              backgroundColor: unlocked ? tone.iconBackground : "color-mix(in srgb, var(--fl-surface-muted) 74%, transparent)",
+            }}
+          >
+            {formatRarityLabel(title.rarity)}
           </span>
 
           {unlocked ? (
