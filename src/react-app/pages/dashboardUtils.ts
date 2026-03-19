@@ -9,7 +9,9 @@ export const STEPS_TARGET = 15000;
 export const DESKTOP_NAV_ITEMS = [
   { id: "dashboard", label: "Dashboard", icon: "dashboard", path: "/dashboard", matches: ["/dashboard", "/home", "/ai-chat", "/food-analysis"] },
   { id: "arena", label: "Arena", icon: "swords", path: "/minigames", matches: ["/minigames", "/friends"] },
+  { id: "achievements", label: "Conquistas", icon: "military_tech", path: "/achievements", matches: ["/achievements"] },
   { id: "ranking", label: "Ranking", icon: "leaderboard", path: "/ranking", matches: ["/ranking"] },
+
   { id: "shop", label: "Loja", icon: "storefront", path: "/shop", matches: ["/shop"] },
   { id: "profile", label: "Perfil", icon: "person", path: "/profile", matches: ["/profile"] },
 ] as const;

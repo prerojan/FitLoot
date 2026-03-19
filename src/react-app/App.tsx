@@ -29,7 +29,9 @@ const Shop = lazy(() => import("@/react-app/pages/Shop"));
 const Ranking = lazy(() => import("@/react-app/pages/Ranking"));
 const MiniGames = lazy(() => import("@/react-app/pages/MiniGames"));
 const AIChat = lazy(() => import("@/react-app/pages/AIChat"));
+const Achievements = lazy(() => import("@/react-app/pages/Achievements"));
 const FoodAnalysis = lazy(() => import("@/react-app/pages/FoodAnalysis"));
+
 const LandingPage = lazy(() => import("@/react-app/pages/Landing"));
 const NotFoundPage = lazy(() => import("@/react-app/pages/NotFound"));
 
@@ -208,6 +210,14 @@ export default function App({ initialThemeMode = DEFAULT_APP_THEME_MODE }: AppPr
                 element={
                   <ProtectedRoute>
                     <Ranking />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path={ROUTE_PATHS.achievements}
+                element={
+                  <ProtectedRoute>
+                    <Achievements />
                   </ProtectedRoute>
                 }
               />
