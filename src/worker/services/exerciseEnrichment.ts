@@ -36,6 +36,10 @@ type PublicExerciseDbListResponse = {
   data?: PublicExerciseDbExercise[] | undefined;
 };
 
+type PublicExerciseDbSingleResponse = {
+  data?: PublicExerciseDbExercise | undefined;
+};
+
 type AscendExercise = {
   id?: string | undefined;
   gifUrl?: string | undefined;
@@ -81,11 +85,16 @@ const CACHE_MAX_ENTRIES = 250;
 const EXERCISE_DB_PUBLIC_API_BASE = "https://www.exercisedb.dev/api/v1";
 const EXERCISE_SEARCH_ALIASES = new Map<string, readonly string[]>([
   ["flexao", ["push-up"]],
-  ["agachamento", ["air squat", "squat"]],
-  ["agachamento livre", ["air squat", "squat"]],
-  ["prancha", ["plank"]],
+  ["push up", ["push-up"]],
+  ["push-up", ["push-up"]],
+  ["agachamento", ["air squat", "bodyweight squat", "squat"]],
+  ["agachamento livre", ["air squat", "bodyweight squat", "squat"]],
+  ["air squat", ["air squat", "bodyweight squat", "squat"]],
+  ["prancha", ["front plank", "plank"]],
+  ["plank", ["front plank", "plank"]],
   ["abdominal", ["crunch", "sit-up"]],
-  ["avanco", ["lunge"]],
+  ["avanco", ["walking lunge", "lunge"]],
+  ["lunge", ["walking lunge", "lunge"]],
   ["ponte de gluteos", ["glute bridge"]],
   ["barra fixa", ["pull-up"]],
   ["suspensao na barra", ["dead hang"]],
@@ -97,6 +106,87 @@ const EXERCISE_SEARCH_ALIASES = new Map<string, readonly string[]>([
   ["yoga", ["yoga flow", "yoga"]],
   ["burpee", ["burpee"]],
   ["hollow body", ["hollow body hold", "hollow body"]],
+]);
+
+type ExerciseSearchHint = {
+  exactNames: readonly string[];
+  preferredTargets: readonly string[];
+  preferredBodyParts: readonly string[];
+  preferredEquipments: readonly string[];
+  penalizedNameTokens: readonly string[];
+};
+
+const EXERCISE_SEARCH_HINTS = new Map<string, ExerciseSearchHint>([
+  ["push-up", {
+    exactNames: ["push-up"],
+    preferredTargets: ["pectorals", "chest", "triceps"],
+    preferredBodyParts: ["chest", "upper arms"],
+    preferredEquipments: ["body weight"],
+    penalizedNameTokens: ["sit up", "crunch", "twist", "weighted", "suspended"],
+  }],
+  ["air squat", {
+    exactNames: ["air squat", "bodyweight squat", "squat"],
+    preferredTargets: ["quads", "glutes", "hamstrings"],
+    preferredBodyParts: ["upper legs"],
+    preferredEquipments: ["body weight"],
+    penalizedNameTokens: ["jerk", "weighted", "smith", "barbell"],
+  }],
+  ["squat", {
+    exactNames: ["air squat", "bodyweight squat", "squat"],
+    preferredTargets: ["quads", "glutes", "hamstrings"],
+    preferredBodyParts: ["upper legs"],
+    preferredEquipments: ["body weight"],
+    penalizedNameTokens: ["jerk", "weighted", "smith", "barbell"],
+  }],
+  ["front plank", {
+    exactNames: ["front plank", "plank"],
+    preferredTargets: ["abs", "core"],
+    preferredBodyParts: ["waist"],
+    preferredEquipments: ["body weight"],
+    penalizedNameTokens: ["weighted", "power point", "twist"],
+  }],
+  ["plank", {
+    exactNames: ["front plank", "plank"],
+    preferredTargets: ["abs", "core"],
+    preferredBodyParts: ["waist"],
+    preferredEquipments: ["body weight"],
+    penalizedNameTokens: ["weighted", "power point", "twist"],
+  }],
+  ["walking lunge", {
+    exactNames: ["walking lunge", "lunge"],
+    preferredTargets: ["glutes", "quads", "hamstrings"],
+    preferredBodyParts: ["upper legs"],
+    preferredEquipments: ["body weight"],
+    penalizedNameTokens: ["twist", "barbell", "dumbbell", "weighted"],
+  }],
+  ["lunge", {
+    exactNames: ["walking lunge", "lunge"],
+    preferredTargets: ["glutes", "quads", "hamstrings"],
+    preferredBodyParts: ["upper legs"],
+    preferredEquipments: ["body weight"],
+    penalizedNameTokens: ["twist", "barbell", "dumbbell", "weighted"],
+  }],
+  ["crunch", {
+    exactNames: ["crunch", "sit-up"],
+    preferredTargets: ["abs"],
+    preferredBodyParts: ["waist"],
+    preferredEquipments: ["body weight"],
+    penalizedNameTokens: ["leg", "twist", "machine", "weighted"],
+  }],
+  ["sit-up", {
+    exactNames: ["sit-up", "crunch"],
+    preferredTargets: ["abs"],
+    preferredBodyParts: ["waist"],
+    preferredEquipments: ["body weight"],
+    penalizedNameTokens: ["leg", "twist", "machine", "weighted"],
+  }],
+  ["glute bridge", {
+    exactNames: ["glute bridge", "hip bridge"],
+    preferredTargets: ["glutes"],
+    preferredBodyParts: ["upper legs", "waist"],
+    preferredEquipments: ["body weight"],
+    penalizedNameTokens: ["barbell", "weighted", "single leg"],
+  }],
 ]);
 
 let exerciseCatalogCache: CacheEntry<ExerciseDbExercise[]> | null = null;
@@ -232,6 +322,55 @@ function normalizeExerciseDbCollection(payload: unknown): ExerciseDbExercise[] {
     .filter((item): item is ExerciseDbExercise => item !== null);
 }
 
+function mergeExerciseDbExercise(
+  primary: ExerciseDbExercise,
+  secondary: ExerciseDbExercise | null | undefined,
+): ExerciseDbExercise {
+  if (!secondary) return primary;
+
+  return {
+    ...primary,
+    bodyPart: primary.bodyPart ?? secondary.bodyPart,
+    target: primary.target ?? secondary.target,
+    equipment: primary.equipment ?? secondary.equipment,
+    gifUrl: primary.gifUrl ?? secondary.gifUrl,
+    imageUrl: primary.imageUrl ?? secondary.imageUrl,
+    videoUrl: primary.videoUrl ?? secondary.videoUrl,
+    thumbnailUrl: primary.thumbnailUrl ?? secondary.thumbnailUrl,
+    secondaryMuscles: primary.secondaryMuscles ?? secondary.secondaryMuscles,
+    instructions: primary.instructions ?? secondary.instructions,
+  };
+}
+
+function mergeExerciseResults(
+  query: string,
+  ...collections: ReadonlyArray<ExerciseDbExercise[]>
+): ExerciseDbExercise[] {
+  const byId = new Map<string, ExerciseDbExercise>();
+
+  for (const collection of collections) {
+    for (const exercise of collection) {
+      const existing = byId.get(exercise.id);
+      byId.set(exercise.id, existing ? mergeExerciseDbExercise(existing, exercise) : exercise);
+    }
+  }
+
+  return rankExercisesByName(Array.from(byId.values()), query);
+}
+
+async function fetchPublicExerciseDetail(exerciseId: string): Promise<ExerciseDbExercise | null> {
+  if (!exerciseId.trim()) return null;
+
+  try {
+    const payload = await publicExerciseDbGet<PublicExerciseDbSingleResponse>(
+      `/exercises/${encodeURIComponent(exerciseId)}`,
+    );
+    return normalizeExerciseDbExercise(payload.data);
+  } catch {
+    return null;
+  }
+}
+
 async function getExerciseCatalog(env: RapidApiEnv): Promise<ExerciseDbExercise[]> {
   const cached = exerciseCatalogCache;
   if (cached && cached.expiresAt > Date.now()) {
@@ -259,6 +398,19 @@ function normalizeExerciseNameToken(value: string): string {
     .toLowerCase()
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function normalizeExerciseTextList(values: readonly string[] | null | undefined): string[] {
+  if (!Array.isArray(values)) return [];
+  return values
+    .map((value) => normalizeExerciseNameToken(value))
+    .filter((value) => value.length > 0);
+}
+
+function resolveExerciseSearchHint(query: string): ExerciseSearchHint | null {
+  const normalizedQuery = normalizeExerciseNameToken(query);
+  if (!normalizedQuery) return null;
+  return EXERCISE_SEARCH_HINTS.get(normalizedQuery) ?? null;
 }
 
 function stripMissionPrefix(value: string): string {
@@ -302,7 +454,21 @@ function buildExerciseSearchQueries(exerciseName: string): string[] {
   const normalizedBase = normalizeExerciseNameToken(stripMissionPrefix(exerciseName));
   if (!normalizedBase) return [];
 
-  const queries = new Set<string>([normalizedBase]);
+  const queries: string[] = [];
+  const seen = new Set<string>();
+  const pushQuery = (value: string) => {
+    if (!value || seen.has(value)) return;
+    seen.add(value);
+    queries.push(value);
+  };
+  const aliases = EXERCISE_SEARCH_ALIASES.get(normalizedBase) ?? [];
+  for (const alias of aliases) {
+    const normalizedAlias = normalizeExerciseNameToken(alias);
+    if (normalizedAlias) {
+      pushQuery(normalizedAlias);
+    }
+  }
+  pushQuery(normalizedBase);
   const descriptorWords = new Set([
     "iniciante",
     "intermediario",
@@ -322,18 +488,10 @@ function buildExerciseSearchQueries(exerciseName: string): string[] {
     .join(" ")
     .trim();
   if (withoutDescriptors && withoutDescriptors !== normalizedBase) {
-    queries.add(withoutDescriptors);
+    pushQuery(withoutDescriptors);
   }
 
-  const aliases = EXERCISE_SEARCH_ALIASES.get(normalizedBase) ?? [];
-  for (const alias of aliases) {
-    const normalizedAlias = normalizeExerciseNameToken(alias);
-    if (normalizedAlias) {
-      queries.add(normalizedAlias);
-    }
-  }
-
-  return Array.from(queries);
+  return queries;
 }
 
 function rankExercisesByName(exercises: ExerciseDbExercise[], query: string): ExerciseDbExercise[] {
@@ -341,6 +499,7 @@ function rankExercisesByName(exercises: ExerciseDbExercise[], query: string): Ex
   if (!normalizedQuery) return exercises.slice(0, 8);
 
   const queryTokens = normalizedQuery.split(" ").filter((token) => token.length > 0);
+  const hint = resolveExerciseSearchHint(query);
   const scoreByName = (exerciseName: string): number => {
     const normalizedName = normalizeExerciseNameToken(exerciseName);
     if (!normalizedName) return 0;
@@ -363,9 +522,54 @@ function rankExercisesByName(exercises: ExerciseDbExercise[], query: string): Ex
     return score;
   };
 
+  const scoreExercise = (exercise: ExerciseDbExercise): number => {
+    const normalizedName = normalizeExerciseNameToken(exercise.name);
+    const target = normalizeExerciseNameToken(exercise.target ?? "");
+    const bodyPart = normalizeExerciseNameToken(exercise.bodyPart ?? "");
+    const equipment = normalizeExerciseNameToken(exercise.equipment ?? "");
+    let score = scoreByName(exercise.name);
+
+    if (hint) {
+      const exactNames = normalizeExerciseTextList(hint.exactNames);
+      const preferredTargets = normalizeExerciseTextList(hint.preferredTargets);
+      const preferredBodyParts = normalizeExerciseTextList(hint.preferredBodyParts);
+      const preferredEquipments = normalizeExerciseTextList(hint.preferredEquipments);
+      const penalizedTokens = normalizeExerciseTextList(hint.penalizedNameTokens);
+
+      if (exactNames.some((candidate) => normalizedName === candidate)) {
+        score += 180;
+      } else if (exactNames.some((candidate) => normalizedName.startsWith(candidate))) {
+        score += 80;
+      }
+
+      if (preferredTargets.includes(target)) {
+        score += 45;
+      }
+      if (preferredBodyParts.includes(bodyPart)) {
+        score += 35;
+      }
+      if (preferredEquipments.includes(equipment)) {
+        score += 40;
+      }
+      if (penalizedTokens.some((token) => normalizedName.includes(token))) {
+        score -= 120;
+      }
+    }
+
+    if (exercise.videoUrl) score += 55;
+    if (exercise.thumbnailUrl) score += 18;
+    if (exercise.imageUrl) score += 15;
+    if (exercise.gifUrl) score += 25;
+    if (Array.isArray(exercise.instructions) && exercise.instructions.length > 0) {
+      score += 10;
+    }
+
+    return score;
+  };
+
   return exercises
     .slice()
-    .sort((a, b) => scoreByName(b.name) - scoreByName(a.name))
+    .sort((a, b) => scoreExercise(b) - scoreExercise(a))
     .slice(0, 8);
 }
 
@@ -416,13 +620,11 @@ export async function searchExerciseDB(exerciseName: string, env: RapidApiEnv): 
       return queryCache;
     }
 
-    let results = hasRapidApiKey
+    const publicResults = await runPublicSearch(query);
+    const rapidResults = hasRapidApiKey
       ? await runRapidSearch(query)
-      : await runPublicSearch(query);
-
-    if (results.length === 0 && hasRapidApiKey) {
-      results = await runPublicSearch(query);
-    }
+      : [];
+    let results = mergeExerciseResults(query, publicResults, rapidResults);
 
     if (results.length === 0 && hasRapidApiKey) {
       try {
@@ -496,11 +698,13 @@ export async function enrichExercise(exerciseName: string, env: RapidApiEnv): Pr
     return null;
   }
 
-  const exercise = exercises[0];
-  const [media, video] = await Promise.all([
-    fetchExerciseMedia(exercise.id, env),
-    fetchExerciseVideo(exercise.id, env),
+  const baseExercise = exercises[0];
+  const [publicDetail, media, video] = await Promise.all([
+    fetchPublicExerciseDetail(baseExercise.id),
+    fetchExerciseMedia(baseExercise.id, env),
+    fetchExerciseVideo(baseExercise.id, env),
   ]);
+  const exercise = mergeExerciseDbExercise(baseExercise, publicDetail);
   const ascendGifUrl = normalizeMissionMediaUrl(media?.gifUrl) ?? null;
   const ascendImageUrl = normalizeMissionMediaUrl(media?.imageUrl) ?? null;
   const exerciseDbGifUrl = normalizeMissionMediaUrl(exercise.gifUrl) ?? null;
@@ -519,8 +723,8 @@ export async function enrichExercise(exerciseName: string, env: RapidApiEnv): Pr
         ? media.instructions
         : [];
   const resolvedVideoUrl =
-    normalizeMissionMediaUrl(video?.videoUrl)
-    ?? exerciseDbVideoUrl;
+    exerciseDbVideoUrl
+    ?? normalizeMissionMediaUrl(video?.videoUrl);
   const resolvedImageUrl =
     ascendGifUrl
     ?? exerciseDbGifUrl
@@ -542,7 +746,7 @@ export async function enrichExercise(exerciseName: string, env: RapidApiEnv): Pr
     equipment: exercise.equipment ?? "",
     secondaryMuscles: Array.isArray(exercise.secondaryMuscles) ? exercise.secondaryMuscles : [],
     instructions: exerciseInstructions,
-    gifUrl: ascendGifUrl,
+    gifUrl: ascendGifUrl ?? exerciseDbGifUrl,
     ascendImageUrl,
     exerciseDbGifUrl,
     exerciseDbImageUrl,

@@ -1,5 +1,7 @@
 import { repairKnownMojibakeString } from "./textEncoding";
 
+const STATIC_EXERCISE_DB_BASE = "https://static.exercisedb.dev";
+
 const PHRASE_REPLACEMENTS: ReadonlyArray<readonly [RegExp, string]> = [
   [/Full Body Calisthenics Circuit/gi, "Circuito de Calistenia de Corpo Inteiro"],
   [/Mobility\s*&\s*Recovery Circuit/gi, "Circuito de Mobilidade e Recupera\u00e7\u00e3o"],
@@ -296,13 +298,23 @@ export function normalizeMissionMediaUrl(value: string | null | undefined): stri
       : trimmed;
   const sanitizedLower = sanitized.toLowerCase();
   const filename = sanitizedLower.split("?")[0] ?? sanitizedLower;
-  const hasKnownExtension = [".gif", ".png", ".jpg", ".jpeg", ".webp", ".mp4"]
+  const hasKnownExtension = [".gif", ".png", ".jpg", ".jpeg", ".webp", ".mp4", ".webm", ".mov", ".m4v"]
     .some((extension) => filename.endsWith(extension));
-  if (sanitizedLower.startsWith("media/")) {
-    return `https://static.exercisedb.dev/${encodeURI(sanitized)}`;
+  const isExerciseDbRelativeAsset =
+    sanitizedLower.startsWith("media/")
+    || sanitizedLower.startsWith("video/")
+    || sanitizedLower.startsWith("videos/")
+    || sanitizedLower.startsWith("image/")
+    || sanitizedLower.startsWith("images/")
+    || sanitizedLower.startsWith("thumbnail/")
+    || sanitizedLower.startsWith("thumbnails/")
+    || /^\d+px\//i.test(sanitizedLower);
+
+  if (isExerciseDbRelativeAsset && hasKnownExtension) {
+    return `${STATIC_EXERCISE_DB_BASE}/${encodeURI(sanitized)}`;
   }
   if (!sanitized.includes("/") && hasKnownExtension) {
-    return `https://static.exercisedb.dev/media/${encodeURI(sanitized)}`;
+    return `${STATIC_EXERCISE_DB_BASE}/media/${encodeURI(sanitized)}`;
   }
 
   return trimmed;
