@@ -6,6 +6,32 @@ const PHRASE_REPLACEMENTS: ReadonlyArray<readonly [RegExp, string]> = [
   [/Upper Body Strength\s*&\s*Core/gi, "For\u00e7a de Membros Superiores e Core"],
   [/Lower Body Power/gi, "Pot\u00eancia de Membros Inferiores"],
   [/Core Control Circuit/gi, "Circuito de Controle do Core"],
+  [/\bUpper Legs\b/gi, "Parte superior das pernas"],
+  [/\bLower Legs\b/gi, "Parte inferior das pernas"],
+  [/\bUpper Arms\b/gi, "Bra\u00e7os"],
+  [/\bLower Arms\b/gi, "Antebra\u00e7os"],
+  [/\bHip Flexors\b/gi, "Flexores do quadril"],
+  [/\bLower Back\b/gi, "Lombar"],
+  [/\bPectorals?\b/gi, "Peitoral"],
+  [/\bShoulders\b/gi, "Ombros"],
+  [/\bTriceps\b/gi, "Tr\u00edceps"],
+  [/\bBiceps\b/gi, "B\u00edceps"],
+  [/\bForearms\b/gi, "Antebra\u00e7os"],
+  [/\bQuadriceps\b/gi, "Quadr\u00edceps"],
+  [/\bHamstrings\b/gi, "Posteriores da coxa"],
+  [/\bCalves\b/gi, "Panturrilhas"],
+  [/\bGlutes?\b/gi, "Gl\u00fateos"],
+  [/\bObliques\b/gi, "Obl\u00edquos"],
+  [/\bAdductors\b/gi, "Adutores"],
+  [/\bAbductors\b/gi, "Abdutores"],
+  [/\bLats\b/gi, "Dorsais"],
+  [/\bTraps\b/gi, "Trap\u00e9zio"],
+  [/\bAbs\b/gi, "Abd\u00f4men"],
+  [/\bChest\b/gi, "Peito"],
+  [/\bBack\b/gi, "Costas"],
+  [/\bWaist\b/gi, "Cintura"],
+  [/\bBody Weight\b/gi, "Peso corporal"],
+  [/\bBand\b/gi, "Faixa el\u00e1stica"],
   [/Air Squat/gi, "Agachamento Livre"],
   [/\bPush-?up\b/gi, "Flex\u00e3o"],
   [/\bPull-?up\b/gi, "Barra Fixa"],
@@ -224,12 +250,36 @@ function iconColorByTarget(target: string): { fill: string; accent: string } {
   return { fill: "#e9d5ff", accent: "#7c3aed" };
 }
 
+export function isGeneratedMissionFallbackMediaUrl(value: string | null | undefined): boolean {
+  if (typeof value !== "string") return false;
+
+  const trimmed = value.trim();
+  if (!trimmed.toLowerCase().startsWith("data:image/svg+xml")) {
+    return false;
+  }
+
+  const encodedPayload = trimmed.split(",", 2)[1] ?? "";
+  if (encodedPayload.length === 0) {
+    return false;
+  }
+
+  try {
+    const decoded = decodeURIComponent(encodedPayload);
+    return /aria-label="Miss(?:\u00e3o|ao) FitLoot"/i.test(decoded);
+  } catch {
+    return encodedPayload.includes("Miss%C3%A3o%20FitLoot") || encodedPayload.includes("Missao%20FitLoot");
+  }
+}
+
 export function normalizeMissionMediaUrl(value: string | null | undefined): string | null {
   if (typeof value !== "string") return null;
 
   const trimmed = value.trim();
   const lowered = trimmed.toLowerCase();
   if (trimmed.length === 0) return null;
+  if (isGeneratedMissionFallbackMediaUrl(trimmed)) {
+    return null;
+  }
   if (
     lowered.startsWith("http://")
     || lowered.startsWith("https://")

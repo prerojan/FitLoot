@@ -1,8 +1,4 @@
-import {
-  buildMissionFallbackMediaDataUrl,
-  inferMissionVisualTarget,
-  normalizeMissionMediaUrl,
-} from "../../shared/missionLocalization";
+import { normalizeMissionMediaUrl } from "../../shared/missionLocalization";
 
 type RapidApiEnv = {
   RAPID_API_KEY?: string | undefined;
@@ -125,38 +121,6 @@ function resolveRapidApiKey(env: RapidApiEnv): string | null {
     .map((value) => (typeof value === "string" ? value.trim() : ""))
     .filter((value) => value.length > 0);
   return candidates[0] ?? null;
-}
-
-function targetLabelFromExerciseName(exerciseName: string): string {
-  const visualTarget = inferMissionVisualTarget(exerciseName);
-  if (visualTarget === "upper body") return "upper body";
-  if (visualTarget === "legs") return "legs";
-  if (visualTarget === "mobility") return "mobility";
-  if (visualTarget === "core") return "core";
-  return "full body";
-}
-
-function buildFallbackExercise(exerciseName: string): EnrichedExercise {
-  const normalizedName = normalizeExerciseNameToken(exerciseName);
-  const target = targetLabelFromExerciseName(exerciseName);
-  const fallbackImageUrl = buildMissionFallbackMediaDataUrl(exerciseName);
-
-  return {
-    id: normalizedName.length > 0 ? `fallback-${normalizedName.replace(/\s+/g, "-")}` : `fallback-${crypto.randomUUID()}`,
-    name: exerciseName,
-    bodyPart: target,
-    target,
-    equipment: "body weight",
-    secondaryMuscles: [],
-    instructions: [],
-    gifUrl: null,
-    ascendImageUrl: null,
-    exerciseDbGifUrl: null,
-    exerciseDbImageUrl: fallbackImageUrl,
-    imageUrl: fallbackImageUrl,
-    videoUrl: null,
-    thumbnailUrl: fallbackImageUrl,
-  };
 }
 
 async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
@@ -414,7 +378,7 @@ export async function enrichExercise(exerciseName: string, env: RapidApiEnv): Pr
     exercises = [];
   }
   if (exercises.length === 0) {
-    return buildFallbackExercise(exerciseName);
+    return null;
   }
 
   const exercise = exercises[0];
@@ -439,8 +403,6 @@ export async function enrichExercise(exerciseName: string, env: RapidApiEnv): Pr
       : Array.isArray(media?.instructions)
         ? media.instructions
         : [];
-  const target = exercise.target ?? "full body";
-  const fallbackIconUrl = buildMissionFallbackMediaDataUrl(exercise.name || exerciseName);
   const resolvedVideoUrl =
     normalizeMissionMediaUrl(video?.videoUrl)
     ?? exerciseDbVideoUrl;
@@ -450,21 +412,19 @@ export async function enrichExercise(exerciseName: string, env: RapidApiEnv): Pr
     ?? ascendImageUrl
     ?? normalizeMissionMediaUrl(video?.thumbnailUrl)
     ?? exerciseDbThumbnailUrl
-    ?? exerciseDbImageUrl
-    ?? fallbackIconUrl;
+    ?? exerciseDbImageUrl;
   const resolvedThumbnailUrl =
     normalizeMissionMediaUrl(video?.thumbnailUrl)
     ?? ascendImageUrl
     ?? exerciseDbThumbnailUrl
-    ?? exerciseDbImageUrl
-    ?? fallbackIconUrl;
+    ?? exerciseDbImageUrl;
 
   return {
     id: exercise.id,
     name: exercise.name,
-    bodyPart: exercise.bodyPart ?? "full body",
-    target,
-    equipment: exercise.equipment ?? "body weight",
+    bodyPart: exercise.bodyPart ?? "",
+    target: exercise.target ?? "",
+    equipment: exercise.equipment ?? "",
     secondaryMuscles: Array.isArray(exercise.secondaryMuscles) ? exercise.secondaryMuscles : [],
     instructions: exerciseInstructions,
     gifUrl: ascendGifUrl,

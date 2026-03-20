@@ -26,7 +26,6 @@ import {
 } from "../shared/textEncoding";
 import {
   buildMissionDisplayGoalFromTasks,
-  buildMissionFallbackMediaDataUrl,
   inferMissionVisualTarget,
   localizeMissionText,
   localizeMissionTextArray,
@@ -4330,7 +4329,7 @@ function normalizeMissionRow(rawMission: Record<string, unknown>): Record<string
   const progressValue = rawMission.progress_value === null || rawMission.progress_value === undefined
     ? (circuitTasks.length > 0 ? circuitTasks.filter((task) => task.completed).length : undefined)
     : Number(rawMission.progress_value);
-  const displayImageUrl = resolveMissionDisplayImage(rawMission, displayTitle);
+  const displayImageUrl = resolveMissionDisplayImage(rawMission);
 
   return {
     ...rawMission,
@@ -4805,7 +4804,7 @@ function resolveMissionDisplayGoal(
   );
 }
 
-function resolveMissionDisplayImage(rawMission: Record<string, unknown>, fallbackLabel: string): string {
+function resolveMissionDisplayImage(rawMission: Record<string, unknown>): string | null {
   const imageCandidates = [
     rawMission.image_url,
     rawMission.exercise_db_gif_url,
@@ -4818,7 +4817,7 @@ function resolveMissionDisplayImage(rawMission: Record<string, unknown>, fallbac
       return normalized;
     }
   }
-  return buildMissionFallbackMediaDataUrl(fallbackLabel);
+  return null;
 }
 
 function missionMatchesTask(completedMission: Record<string, unknown>, task: CircuitTask): boolean {
@@ -6678,10 +6677,12 @@ function applyMissionMetricContext(
     metric_unit: metricUnitByType(normalizedMetricType),
     sets,
     rest_seconds: restSeconds,
-    description: buildMissionDescriptionFromInstructions(
-      wrapMissionInstructionsWithStretching(payload.instructions, exerciseName),
-      buildMissionDescription(exerciseName, normalizedMetricType, normalizedMetricValue, sets),
-    ),
+    description: normalizedMetricType === "circuit_tasks"
+      ? payload.description
+      : buildMissionDescriptionFromInstructions(
+        wrapMissionInstructionsWithStretching(payload.instructions, exerciseName),
+        buildMissionDescription(exerciseName, normalizedMetricType, normalizedMetricValue, sets),
+      ),
     duration_estimate_minutes: shouldShowMissionDuration(period)
       ? estimateMissionDuration(normalizedMetricType, normalizedMetricValue)
       : null,
@@ -6839,7 +6840,7 @@ function buildCircuitTasksV2(exerciseName: string, period: MissionPeriod): Circu
   if (normalizedName.includes("mobility") || normalizedName.includes("recovery") || normalizedName.includes("mobilidade") || normalizedName.includes("recupera")) {
     return [
       toTask("stretching", "alongamento"),
-      toTask("mobility", "mobilidade"),
+      toTask("walk", "caminhada"),
       toTask("yoga", "yoga"),
     ];
   }
@@ -6986,14 +6987,7 @@ function buildMissionPayload(params: {
   return {
     title: `${params.titlePrefix}: ${params.exerciseName}`,
     description: metricType === "circuit_tasks"
-      ? buildPeriodicMissionDescriptionV2(
-        params.exerciseName,
-        params.period === "monthly" ? "monthly" : "weekly",
-        circuitTasks.map((task) => ({
-          title: task.label,
-          requiredCount: task.required_count,
-        })),
-      )
+      ? ""
       : buildMissionDescriptionFromInstructions(
         instructions,
         buildMissionDescription(params.exerciseName, metricType, metricValue, sets),
@@ -7750,9 +7744,12 @@ async function createMissionsForPeriod(env: Env, db: D1Database, userId: string,
     const initialMetricHint = period === "daily" && initialMetricHintRaw === "circuit_tasks"
       ? "sets_reps"
       : initialMetricHintRaw;
+    const shouldEnrichWithExerciseApi = period === "daily";
 
     const [enriched, precomputedAiContext] = await Promise.all([
-      enrichExercise(exerciseName, env).catch(() => null),
+      shouldEnrichWithExerciseApi
+        ? enrichExercise(exerciseName, env).catch(() => null)
+        : Promise.resolve(null),
       getExerciseInstructionsFromAI(
         exerciseName,
         initialMetricHint,
@@ -7763,7 +7760,9 @@ async function createMissionsForPeriod(env: Env, db: D1Database, userId: string,
       ).catch(() => null),
     ]);
 
-    const resolvedName = enriched?.name ?? exerciseName;
+    const resolvedName = shouldEnrichWithExerciseApi
+      ? (enriched?.name || exerciseName)
+      : exerciseName;
     const metricHintRaw = getMissionMetricType(resolvedName);
     const metricHint = period === "daily" && metricHintRaw === "circuit_tasks" ? "sets_reps" : metricHintRaw;
     const canReuseAiContext =
@@ -7788,7 +7787,7 @@ async function createMissionsForPeriod(env: Env, db: D1Database, userId: string,
 
     const apiMuscles = mergeUniqueStrings(
       [
-        enriched?.target ?? muscle,
+        enriched?.target || muscle,
         ...(Array.isArray(enriched?.secondaryMuscles) ? enriched.secondaryMuscles : []),
       ],
       8,
@@ -7803,13 +7802,13 @@ async function createMissionsForPeriod(env: Env, db: D1Database, userId: string,
       period,
       titlePrefix: config.titlePrefix,
       exerciseName: resolvedName,
-      muscle: enriched?.target ?? muscle,
+      muscle: shouldEnrichWithExerciseApi ? (enriched?.target || muscle) : muscle,
       imageUrl: missionMediaUrl ?? undefined,
       exerciseDbGifUrl: enriched?.exerciseDbGifUrl ?? undefined,
       exerciseDbImageUrl: enriched?.exerciseDbImageUrl ?? undefined,
-      exerciseEquipment: enriched?.equipment ?? undefined,
-      exerciseBodyPart: enriched?.bodyPart ?? undefined,
-      exerciseTarget: enriched?.target ?? muscle,
+      exerciseEquipment: enriched?.equipment || undefined,
+      exerciseBodyPart: enriched?.bodyPart || undefined,
+      exerciseTarget: enriched?.target || muscle,
       exerciseSecondaryMuscles: enriched?.secondaryMuscles ?? [],
       exerciseInstructionsEn: apiInstructionsEn,
       exerciseInstructionsPt: apiInstructionsPt,
@@ -7852,14 +7851,7 @@ async function createMissionsForPeriod(env: Env, db: D1Database, userId: string,
       withMetric.rest_seconds,
     );
     withMetric.description = withMetric.metric_type === "circuit_tasks"
-      ? buildPeriodicMissionDescriptionV2(
-        resolvedName,
-        "weekly",
-        withMetric.circuit_tasks.map((task) => ({
-          title: task.label,
-          requiredCount: task.required_count,
-        })),
-      )
+      ? ""
       : buildMissionDescriptionFromInstructions(
         withMetric.instructions,
         buildMissionDescription(resolvedName, withMetric.metric_type, withMetric.metric_value, withMetric.sets),
@@ -7875,16 +7867,16 @@ async function createMissionsForPeriod(env: Env, db: D1Database, userId: string,
       6,
     );
     if (withMetric.muscle_groups.length === 0) {
-      withMetric.muscle_groups = [enriched?.target ?? muscle];
+      withMetric.muscle_groups = [enriched?.target || muscle];
     }
     withMetric.exercise_secondary_muscles = mergeUniqueStrings(
       Array.isArray(enriched?.secondaryMuscles) ? enriched.secondaryMuscles : [],
       8,
     );
     withMetric.exercise_name = resolvedName;
-    withMetric.exercise_equipment = enriched?.equipment ?? withMetric.exercise_equipment;
-    withMetric.exercise_body_part = enriched?.bodyPart ?? withMetric.exercise_body_part;
-    withMetric.exercise_target = enriched?.target ?? withMetric.exercise_target ?? muscle;
+    withMetric.exercise_equipment = enriched?.equipment || withMetric.exercise_equipment;
+    withMetric.exercise_body_part = enriched?.bodyPart || withMetric.exercise_body_part;
+    withMetric.exercise_target = enriched?.target || (withMetric.exercise_target ?? muscle);
     withMetric.exercise_db_gif_url = enriched?.exerciseDbGifUrl ?? withMetric.exercise_db_gif_url;
     withMetric.exercise_db_image_url = enriched?.exerciseDbImageUrl ?? withMetric.exercise_db_image_url;
     withMetric.attributes_benefited = aiContext.attributesBenefited.length > 0
@@ -7894,6 +7886,19 @@ async function createMissionsForPeriod(env: Env, db: D1Database, userId: string,
     withMetric.image_url = missionMediaUrl;
     withMetric.video_url = enriched?.videoUrl ?? withMetric.video_url;
     withMetric.thumbnail_url = enriched?.thumbnailUrl ?? withMetric.thumbnail_url;
+    if (withMetric.metric_type === "circuit_tasks") {
+      withMetric.image_url = null;
+      withMetric.exercise_db_gif_url = null;
+      withMetric.exercise_db_image_url = null;
+      withMetric.video_url = null;
+      withMetric.thumbnail_url = null;
+      withMetric.exercise_name = null;
+      withMetric.exercise_equipment = null;
+      withMetric.exercise_body_part = null;
+      withMetric.exercise_target = null;
+      withMetric.exercise_secondary_muscles = [];
+      withMetric.muscle_groups = mergeUniqueStrings(withMetric.circuit_tasks.map((task) => task.label), 6);
+    }
     return validateMission(withMetric);
   };
 
@@ -8331,7 +8336,7 @@ function buildStructuredPlanPrompt(
     "O ultimo passo da description deve incluir alongamento final para evitar dores musculares intensas.",
     "Para indicar quantidade em weekly_missions.subtasks e monthly_missions.subtasks, repita o nome da mesma daily_mission no array.",
     'Exemplo de circuito: "Forca de Membros Superiores e Core" => subtasks repetidas de "flexao", "abdominal" e "prancha" ate representar 5 missoes de cada.',
-    "Weekly e monthly.description devem mencionar explicitamente quais missoes diarias compoem o circuito.",
+    "Weekly e monthly devem concentrar os detalhes em goal e subtasks. Nao liste as subtasks dentro de description.",
     `Objetivo principal: ${profile.mainGoal}`,
     `Objetivos adicionais: ${profile.goals.join(", ")}`,
     `Condicionamento: ${profile.conditioning}`,
@@ -8425,7 +8430,7 @@ function buildFallbackStructuredPlan(
     .slice(0, options.weeklyTarget)
     .map((missionName, index) => ({
       name: missionName,
-      description: `O progresso desta miss\u00e3o semanal \u00e9 atualizado automaticamente ao concluir as miss\u00f5es di\u00e1rias compat\u00edveis do circuito ${missionName}.`,
+      description: "",
       goal: `Conclua as miss\u00f5es di\u00e1rias compat\u00edveis do circuito ${missionName} nesta semana.`,
       xp_reward: clampXpRewardByPeriod("weekly", 260 + index * 15),
       fitcoins_reward: derivePointsRewardByPeriod("weekly", 55 + index * 3, 260 + index * 15),
@@ -8599,14 +8604,7 @@ function resolvePeriodicMissionBlueprints(params: {
       invalidCount += 1;
     }
 
-    const description = buildPeriodicMissionDescriptionV2(
-      name,
-      params.period,
-      subtaskResolution.subtasks.map((subtask) => ({
-        title: subtask.title,
-        requiredCount: subtask.requiredCount,
-      })),
-    );
+    const description = "";
 
     const goal = buildMissionDisplayGoalFromTasks(
       subtaskResolution.subtasks.map((subtask) => subtask.title),
@@ -8804,8 +8802,11 @@ async function materializeMissionBlueprint(
   blueprint: MissionBlueprint,
 ): Promise<MissionPayload> {
   const config = missionConfigByPeriod(blueprint.period);
+  const shouldEnrichWithExerciseApi = blueprint.period === "daily";
   const [enriched, aiContext] = await Promise.all([
-    enrichExercise(blueprint.exerciseName, env).catch(() => null),
+    shouldEnrichWithExerciseApi
+      ? enrichExercise(blueprint.exerciseName, env).catch(() => null)
+      : Promise.resolve(null),
     getExerciseInstructionsFromAI(
       blueprint.exerciseName,
       blueprint.period === "daily" ? blueprint.metricType : "circuit_tasks",
@@ -8826,23 +8827,25 @@ async function materializeMissionBlueprint(
 
   const apiInstructionsEn = normalizeInstructionList(enriched?.instructions, 8);
   const apiInstructionsPt = await translateExerciseInstructionsToPt(apiInstructionsEn, blueprint.exerciseName, env);
-  const resolvedName = enriched?.name ?? blueprint.exerciseName;
+  const resolvedName = shouldEnrichWithExerciseApi
+    ? (enriched?.name || blueprint.exerciseName)
+    : blueprint.exerciseName;
   const baseMission = buildMissionPayload({
     period: blueprint.period,
     titlePrefix: config.titlePrefix,
     exerciseName: resolvedName,
-    muscle: enriched?.target ?? blueprint.muscle,
-    imageUrl: enriched?.imageUrl ?? undefined,
-    exerciseDbGifUrl: enriched?.exerciseDbGifUrl ?? undefined,
-    exerciseDbImageUrl: enriched?.exerciseDbImageUrl ?? undefined,
-    exerciseEquipment: enriched?.equipment ?? undefined,
-    exerciseBodyPart: enriched?.bodyPart ?? undefined,
-    exerciseTarget: enriched?.target ?? blueprint.muscle,
+    muscle: shouldEnrichWithExerciseApi ? (enriched?.target || blueprint.muscle) : blueprint.muscle,
+    imageUrl: shouldEnrichWithExerciseApi ? (enriched?.imageUrl ?? undefined) : undefined,
+    exerciseDbGifUrl: shouldEnrichWithExerciseApi ? (enriched?.exerciseDbGifUrl ?? undefined) : undefined,
+    exerciseDbImageUrl: shouldEnrichWithExerciseApi ? (enriched?.exerciseDbImageUrl ?? undefined) : undefined,
+    exerciseEquipment: shouldEnrichWithExerciseApi ? (enriched?.equipment || undefined) : undefined,
+    exerciseBodyPart: shouldEnrichWithExerciseApi ? (enriched?.bodyPart || undefined) : undefined,
+    exerciseTarget: shouldEnrichWithExerciseApi ? (enriched?.target || blueprint.muscle) : undefined,
     exerciseSecondaryMuscles: enriched?.secondaryMuscles ?? [],
     exerciseInstructionsEn: apiInstructionsEn,
     exerciseInstructionsPt: apiInstructionsPt,
-    videoUrl: enriched?.videoUrl ?? undefined,
-    thumbnailUrl: enriched?.thumbnailUrl ?? undefined,
+    videoUrl: shouldEnrichWithExerciseApi ? (enriched?.videoUrl ?? undefined) : undefined,
+    thumbnailUrl: shouldEnrichWithExerciseApi ? (enriched?.thumbnailUrl ?? undefined) : undefined,
     instruction: safeGet(apiInstructionsPt.length > 0 ? apiInstructionsPt : apiInstructionsEn, 0),
     safetyTips: aiContext?.safetyTips,
     difficultyLevel: blueprint.difficultyLevel,
@@ -8884,7 +8887,7 @@ async function materializeMissionBlueprint(
     withMetric.difficulty_level = blueprint.difficultyLevel;
     withMetric.muscle_groups = mergeUniqueStrings(
       [
-        enriched?.target ?? blueprint.muscle,
+        enriched?.target || blueprint.muscle,
         ...(Array.isArray(enriched?.secondaryMuscles) ? enriched.secondaryMuscles : []),
         ...normalizeInstructionList(aiContext?.musclesAffected, 8),
       ],
@@ -8904,7 +8907,7 @@ async function materializeMissionBlueprint(
   return {
     ...baseMission,
     title: `${config.titlePrefix}: ${blueprint.name}`,
-    description: blueprint.description,
+    description: "",
     goal: blueprint.goal,
     metric_type: "circuit_tasks",
     metric_value: Math.max(1, blueprint.subtasks.reduce((total, subtask) => total + subtask.requiredCount, 0)),
@@ -8929,13 +8932,17 @@ async function materializeMissionBlueprint(
     exercise_instructions_pt: apiInstructionsPt,
     safety_tips: aiContext?.safetyTips?.length ? aiContext.safetyTips.slice(0, 4) : baseMission.safety_tips,
     difficulty_level: blueprint.difficultyLevel,
-    muscle_groups: mergeUniqueStrings(
-      [
-        enriched?.target ?? blueprint.muscle,
-        ...(Array.isArray(enriched?.secondaryMuscles) ? enriched.secondaryMuscles : []),
-      ],
-      6,
-    ),
+    image_url: null,
+    exercise_db_gif_url: null,
+    exercise_db_image_url: null,
+    video_url: null,
+    thumbnail_url: null,
+    exercise_name: null,
+    exercise_equipment: null,
+    exercise_body_part: null,
+    exercise_target: null,
+    exercise_secondary_muscles: [],
+    muscle_groups: mergeUniqueStrings(blueprint.subtasks.map((subtask) => subtask.title), 6),
   };
 }
 
@@ -9984,8 +9991,11 @@ async function generateAiMissionsForUser(
           : "daily";
 
       const exerciseName = extractExerciseName(mission.title);
+      const shouldEnrichWithExerciseApi = missionPeriod === "daily";
       const [enrichedMedia, aiContext] = await Promise.all([
-        enrichExercise(exerciseName, env).catch(() => null),
+        shouldEnrichWithExerciseApi
+          ? enrichExercise(exerciseName, env).catch(() => null)
+          : Promise.resolve(null),
         getExerciseInstructionsFromAI(
           exerciseName,
           mission.metric_type,
@@ -10011,9 +10021,9 @@ async function generateAiMissionsForUser(
           exercise_db_gif_url: mission.exercise_db_gif_url ?? enrichedMedia?.exerciseDbGifUrl ?? null,
           exercise_db_image_url: mission.exercise_db_image_url ?? enrichedMedia?.exerciseDbImageUrl ?? null,
           exercise_name: mission.exercise_name ?? enrichedMedia?.name ?? exerciseName,
-          exercise_equipment: mission.exercise_equipment ?? enrichedMedia?.equipment ?? null,
-          exercise_body_part: mission.exercise_body_part ?? enrichedMedia?.bodyPart ?? null,
-          exercise_target: mission.exercise_target ?? enrichedMedia?.target ?? null,
+          exercise_equipment: mission.exercise_equipment ?? (enrichedMedia?.equipment || null),
+          exercise_body_part: mission.exercise_body_part ?? (enrichedMedia?.bodyPart || null),
+          exercise_target: mission.exercise_target ?? (enrichedMedia?.target || null),
           exercise_secondary_muscles: mission.exercise_secondary_muscles.length > 0
             ? mission.exercise_secondary_muscles
             : mergeUniqueStrings(
@@ -10042,7 +10052,7 @@ async function generateAiMissionsForUser(
 
       const combinedMuscles = mergeUniqueStrings(
         [
-          enrichedMedia?.target ?? "",
+          enrichedMedia?.target || "",
           ...(Array.isArray(enrichedMedia?.secondaryMuscles) ? enrichedMedia.secondaryMuscles : []),
           ...normalizeInstructionList(aiContext.musclesAffected, 8),
         ],
@@ -10068,10 +10078,10 @@ async function generateAiMissionsForUser(
           Array.isArray(enrichedMedia?.secondaryMuscles) ? enrichedMedia.secondaryMuscles : [],
           8,
         ),
-        exercise_name: enrichedMedia?.name ?? withMetric.exercise_name ?? exerciseName,
-        exercise_equipment: enrichedMedia?.equipment ?? withMetric.exercise_equipment,
-        exercise_body_part: enrichedMedia?.bodyPart ?? withMetric.exercise_body_part,
-        exercise_target: enrichedMedia?.target ?? withMetric.exercise_target,
+        exercise_name: enrichedMedia?.name || (withMetric.exercise_name ?? exerciseName),
+        exercise_equipment: enrichedMedia?.equipment || withMetric.exercise_equipment,
+        exercise_body_part: enrichedMedia?.bodyPart || withMetric.exercise_body_part,
+        exercise_target: enrichedMedia?.target || withMetric.exercise_target,
         exercise_db_gif_url: enrichedMedia?.exerciseDbGifUrl ?? withMetric.exercise_db_gif_url,
         exercise_db_image_url: enrichedMedia?.exerciseDbImageUrl ?? withMetric.exercise_db_image_url,
         attributes_benefited: aiContext.attributesBenefited.length > 0
@@ -10079,18 +10089,24 @@ async function generateAiMissionsForUser(
           : withMetric.attributes_benefited,
       };
       withDetails.description = withDetails.metric_type === "circuit_tasks"
-        ? buildPeriodicMissionDescriptionV2(
-          exerciseName,
-          "weekly",
-          withDetails.circuit_tasks.map((task) => ({
-            title: task.label,
-            requiredCount: task.required_count,
-          })),
-        )
+        ? ""
         : buildMissionDescriptionFromInstructions(
           withDetails.instructions,
           buildMissionDescription(exerciseName, withDetails.metric_type, withDetails.metric_value, withDetails.sets),
         );
+      if (withDetails.metric_type === "circuit_tasks") {
+        withDetails.image_url = null;
+        withDetails.exercise_db_gif_url = null;
+        withDetails.exercise_db_image_url = null;
+        withDetails.video_url = null;
+        withDetails.thumbnail_url = null;
+        withDetails.exercise_name = null;
+        withDetails.exercise_equipment = null;
+        withDetails.exercise_body_part = null;
+        withDetails.exercise_target = null;
+        withDetails.exercise_secondary_muscles = [];
+        withDetails.muscle_groups = mergeUniqueStrings(withDetails.circuit_tasks.map((task) => task.label), 6);
+      }
 
       return {
         period: missionPeriod,

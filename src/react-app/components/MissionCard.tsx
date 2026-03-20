@@ -186,6 +186,62 @@ function resolveMissionMediaUrl(mission: Mission): string | null {
     ?? null;
 }
 
+function summarizeCircuitTaskLabel(label: string): string {
+  const localized = localizeMissionText(label) ?? label;
+  return localized
+    .replace(/^Conclua\s+/i, "")
+    .replace(/^Complete\s+/i, "")
+    .replace(/^\d+\s+miss(?:\u00f5es|oes)\s+di[a\u00e1]rias\s+de\s+/i, "")
+    .replace(/^\d+\s+miss(?:\u00f5es|oes)\s+de\s+/i, "")
+    .trim();
+}
+
+function uniqueMissionLabels(values: ReadonlyArray<string | null | undefined>): string[] {
+  const seen = new Set<string>();
+  const labels: string[] = [];
+
+  for (const value of values) {
+    if (typeof value !== "string") continue;
+    const localized = (localizeMissionText(value) ?? value).trim();
+    if (localized.length === 0) continue;
+    const key = localized.toLocaleLowerCase("pt-BR");
+    if (seen.has(key)) continue;
+    seen.add(key);
+    labels.push(localized);
+  }
+
+  return labels;
+}
+
+function resolveMissionFocusLabels(mission: Mission): string[] {
+  const labels = uniqueMissionLabels([
+    ...(Array.isArray(mission.muscle_groups) ? mission.muscle_groups : []),
+    mission.exercise_target,
+    mission.exercise_body_part,
+    ...(Array.isArray(mission.exercise_secondary_muscles) ? mission.exercise_secondary_muscles.slice(0, 3) : []),
+  ]);
+
+  if (labels.length > 0) {
+    return labels.slice(0, 6);
+  }
+
+  return [bodyAreaLabel(mission.body_area)];
+}
+
+function summarizeAutoProgressLabel(tasks: readonly CircuitTask[]): string {
+  const taskLabels = uniqueMissionLabels(tasks.map((task) => summarizeCircuitTaskLabel(task.label)));
+  if (taskLabels.length === 0) {
+    return "Miss\u00f5es di\u00e1rias compat\u00edveis";
+  }
+  if (taskLabels.length === 1) {
+    return taskLabels[0] ?? "Miss\u00f5es di\u00e1rias compat\u00edveis";
+  }
+  if (taskLabels.length === 2) {
+    return `${taskLabels[0]} e ${taskLabels[1]}`;
+  }
+  return `${taskLabels[0]}, ${taskLabels[1]} e mais ${taskLabels.length - 2}`;
+}
+
 function MissionExecutionModal({
   mission,
   metricType,
@@ -638,8 +694,9 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
   );
   const circuitProgress = autoProgressRequiredTotal > 0 ? (autoProgressCurrentTotal / autoProgressRequiredTotal) * 100 : 0;
   const missionMediaUrl = resolveMissionMediaUrl(mission);
-  const primaryMuscle = localizeMissionText(mission.muscle_groups?.[0] ?? bodyAreaLabel(mission.body_area))
-    ?? bodyAreaLabel(mission.body_area);
+  const primaryLabel = isAutoProgressMission
+    ? summarizeAutoProgressLabel(circuitTasks)
+    : resolveMissionFocusLabels(mission)[0] ?? bodyAreaLabel(mission.body_area);
   const hasCircuitProgress = circuitTasks.some((task) => task.current_count > 0);
   const isInProgress = !isFailed && !isCompleted && (missionStatus === "in_progress" || hasCircuitProgress);
   const visualState = isFailed ? "failed" : isCompleted ? "completed" : isInProgress ? "in_progress" : "available";
@@ -727,6 +784,16 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
 
   const missionDetails = detailedMission ?? mission;
   const detailMetricType = normalizeMetricType(missionDetails);
+  const detailCircuitTasks = resolveCircuitTasks(missionDetails);
+  const detailAutoProgressRequiredTotal = detailCircuitTasks.reduce((total, task) => total + Math.max(1, task.required_count), 0);
+  const detailAutoProgressCurrentTotal = detailCircuitTasks.reduce(
+    (total, task) => total + Math.min(Math.max(0, task.current_count), Math.max(1, task.required_count)),
+    0,
+  );
+  const detailCircuitProgress = detailAutoProgressRequiredTotal > 0
+    ? (detailAutoProgressCurrentTotal / detailAutoProgressRequiredTotal) * 100
+    : 0;
+  const detailFocusLabels = isAutoProgressMission ? [] : resolveMissionFocusLabels(missionDetails);
   const detailMissionMediaUrl = resolveMissionMediaUrl(missionDetails);
   const detailMissionVideoUrl = normalizeMissionMediaUrl(missionDetails.video_url);
   const detailTitle = localizeMissionText(missionDetails.title) ?? missionDetails.title;
@@ -830,7 +897,7 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
             {missionTypeLabel}
           </Badge>
           <Badge className="w-fit bg-gray-100 text-gray-700 border border-gray-200">
-            {primaryMuscle}
+            {primaryLabel}
           </Badge>
           {isAIMission ? (
             <Badge className="w-fit gap-1 bg-purple-100 text-purple-700 border border-purple-200">
@@ -865,12 +932,7 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
       ) : null}
 
       <h3 className="font-semibold text-gray-900 mb-1">{localizeMissionText(mission.title) ?? mission.title}</h3>
-      <p className="text-sm text-gray-500 mb-2">{primaryMuscle}</p>
-      {mission.description ? (
-        <p className="text-sm text-gray-600 mb-3 line-clamp-2">
-          {localizeMissionText(mission.description) ?? mission.description}
-        </p>
-      ) : null}
+      <p className="text-sm text-gray-500 mb-2">{primaryLabel}</p>
 
       {isWeeklyMission || (isMonthlyMission && circuitTasks.length > 0) ? (
         <div className="space-y-3 mb-3">
@@ -983,55 +1045,56 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
             </header>
 
             <div className="overflow-y-auto pb-32 min-h-[50vh] max-h-[75vh]">
-              {/* Hero Image Section */}
-              <div className="px-6 py-4">
-                <div 
-                  className="relative w-full aspect-video rounded-xl overflow-hidden group"
-                  style={{ background: "color-mix(in srgb, var(--app-primary-color) 5%, transparent)" }}
-                >
-                  {detailMissionVideoUrl ? (
-                    <>
-                      <video
-                        src={detailMissionVideoUrl}
-                        poster={detailMissionMediaUrl ?? undefined}
-                        className="absolute inset-0 h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
-                        autoPlay
-                        loop
-                        muted
-                        playsInline
-                      />
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent" />
-                      <div className="absolute bottom-4 left-4">
-                        <span className="text-black text-xs font-bold px-2 py-1 rounded-full uppercase tracking-wider" style={{ background: "var(--app-primary-color)" }}>
-                          {stateLabel}
-                        </span>
+              {!isAutoProgressMission ? (
+                <div className="px-6 py-4">
+                  <div
+                    className="relative w-full aspect-video rounded-xl overflow-hidden group"
+                    style={{ background: "color-mix(in srgb, var(--app-primary-color) 5%, transparent)" }}
+                  >
+                    {detailMissionVideoUrl ? (
+                      <>
+                        <video
+                          src={detailMissionVideoUrl}
+                          poster={detailMissionMediaUrl ?? undefined}
+                          className="absolute inset-0 h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+                          autoPlay
+                          loop
+                          muted
+                          playsInline
+                        />
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent" />
+                        <div className="absolute bottom-4 left-4">
+                          <span className="text-black text-xs font-bold px-2 py-1 rounded-full uppercase tracking-wider" style={{ background: "var(--app-primary-color)" }}>
+                            {stateLabel}
+                          </span>
+                        </div>
+                      </>
+                    ) : detailMissionMediaUrl ? (
+                      <>
+                        <img
+                          src={detailMissionMediaUrl}
+                          alt={detailTitle}
+                          className="absolute inset-0 h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+                          style={{
+                            imageRendering: pixelOrLineArt ? "crisp-edges" : "auto",
+                            filter: pixelOrLineArt || gifLikeMedia ? "none" : "contrast(1.05) saturate(1.1)",
+                          }}
+                        />
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent" />
+                        <div className="absolute bottom-4 left-4">
+                          <span className="text-black text-xs font-bold px-2 py-1 rounded-full uppercase tracking-wider" style={{ background: "var(--app-primary-color)" }}>
+                            {stateLabel}
+                          </span>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="absolute inset-0 flex items-center justify-center">
+                        <Dumbbell className="w-16 h-16 opacity-50" style={{ color: "var(--app-primary-color)" }} />
                       </div>
-                    </>
-                  ) : detailMissionMediaUrl ? (
-                    <>
-                      <img
-                        src={detailMissionMediaUrl}
-                        alt={detailTitle}
-                        className="absolute inset-0 h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
-                        style={{
-                          imageRendering: pixelOrLineArt ? "crisp-edges" : "auto",
-                          filter: pixelOrLineArt || gifLikeMedia ? "none" : "contrast(1.05) saturate(1.1)",
-                        }}
-                      />
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent" />
-                      <div className="absolute bottom-4 left-4">
-                        <span className="text-black text-xs font-bold px-2 py-1 rounded-full uppercase tracking-wider" style={{ background: "var(--app-primary-color)" }}>
-                          {stateLabel}
-                        </span>
-                      </div>
-                    </>
-                  ) : (
-                    <div className="absolute inset-0 flex items-center justify-center">
-                      <Dumbbell className="w-16 h-16 opacity-50" style={{ color: "var(--app-primary-color)" }} />
-                    </div>
-                  )}
+                    )}
+                  </div>
                 </div>
-              </div>
+              ) : null}
 
               {/* Title & Description */}
               <div className="px-6 py-2">
@@ -1039,16 +1102,6 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
                 <p className="text-base font-medium mt-1" style={{ color: "var(--app-primary-color)" }}>
                   Dificuldade: {formatDifficultyLabel(missionDetails.difficulty_level)}{showDetailDuration ? ` • Est. ${missionDetails.duration_estimate_minutes} min` : isAutoProgressMission ? " • Progresso automático" : ""}
                 </p>
-                {detailDescription ? (
-                  <p className="text-sm mt-2" style={{ color: "var(--fl-color-text-muted)" }}>
-                    {detailDescription}
-                  </p>
-                ) : null}
-                {isAutoProgressMission ? (
-                  <p className="text-sm mt-2" style={{ color: "var(--fl-color-text-muted)" }}>
-                    Meta: {detailMissionGoalText}
-                  </p>
-                ) : null}
                 {detailsLoading ? (
                   <div className="flex items-center gap-2 text-sm mt-3" style={{ color: "var(--fl-color-text-muted)" }}>
                     <LoadingBall size="sm" />
@@ -1060,6 +1113,95 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
                 ) : null}
               </div>
 
+              {isAutoProgressMission ? (
+                <div className="px-6 pt-6">
+                  <div
+                    className="rounded-[28px] border p-5 space-y-4"
+                    style={{
+                      background: "linear-gradient(180deg, color-mix(in srgb, var(--app-primary-color) 14%, transparent), color-mix(in srgb, var(--fl-surface-muted) 72%, transparent))",
+                      borderColor: "color-mix(in srgb, var(--app-primary-color) 18%, transparent)",
+                    }}
+                  >
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="space-y-1">
+                        <p className="text-[11px] font-bold uppercase tracking-[0.28em]" style={{ color: "var(--app-primary-color)" }}>
+                          {isWeeklyMission ? "Circuito semanal" : "Meta mensal"}
+                        </p>
+                        <h3 className="text-lg font-black" style={{ color: "var(--fl-color-text)" }}>
+                          Missões diárias que contam para esta meta
+                        </h3>
+                        <p className="text-sm" style={{ color: "var(--fl-color-text-muted)" }}>
+                          Meta: {detailMissionGoalText}
+                        </p>
+                      </div>
+                      <Badge className="shrink-0 border-0" style={{ background: "color-mix(in srgb, var(--app-primary-color) 14%, transparent)", color: "var(--app-primary-color)" }}>
+                        {Math.round(detailCircuitProgress)}%
+                      </Badge>
+                    </div>
+
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between text-xs font-semibold" style={{ color: "var(--fl-color-text-muted)" }}>
+                        <span>{isWeeklyMission ? "Progresso geral" : "Progresso mensal"}</span>
+                        <span>{detailAutoProgressCurrentTotal}/{detailAutoProgressRequiredTotal || 1}</span>
+                      </div>
+                      <div className="h-2.5 rounded-full overflow-hidden" style={{ background: "color-mix(in srgb, var(--fl-color-text) 10%, transparent)" }}>
+                        <div
+                          className="h-full rounded-full transition-all duration-500"
+                          style={{
+                            width: `${detailCircuitProgress}%`,
+                            background: isWeeklyMission ? "linear-gradient(90deg, #10b981, #14b8a6)" : "linear-gradient(90deg, #06b6d4, #22d3ee)",
+                          }}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="space-y-3">
+                      {detailCircuitTasks.map((task) => {
+                        const taskProgress = task.required_count > 0
+                          ? Math.min(100, Math.round((task.current_count / task.required_count) * 100))
+                          : 0;
+                        return (
+                          <div
+                            key={task.id}
+                            className="rounded-2xl border p-3"
+                            style={{
+                              background: "color-mix(in srgb, var(--fl-surface-strong) 84%, transparent)",
+                              borderColor: "var(--fl-border-soft)",
+                            }}
+                          >
+                            <div className="flex items-center justify-between gap-3 mb-2">
+                              <div className="flex items-center gap-2 min-w-0">
+                                <CheckCircle2
+                                  className="w-4 h-4 shrink-0"
+                                  style={{ color: task.completed ? "var(--app-primary-color)" : "var(--fl-color-text-muted)" }}
+                                />
+                                <span className="text-sm font-semibold line-clamp-2" style={{ color: "var(--fl-color-text)" }}>
+                                  {localizeMissionText(task.label) ?? task.label}
+                                </span>
+                              </div>
+                              <span className="text-xs font-bold shrink-0" style={{ color: "var(--fl-color-text-muted)" }}>
+                                {task.current_count}/{task.required_count}
+                              </span>
+                            </div>
+                            <div className="h-2 rounded-full overflow-hidden" style={{ background: "color-mix(in srgb, var(--fl-color-text) 10%, transparent)" }}>
+                              <div
+                                className="h-full rounded-full transition-all duration-500"
+                                style={{
+                                  width: `${taskProgress}%`,
+                                  background: task.completed ? "var(--app-primary-color)" : (isWeeklyMission ? "#14b8a6" : "#22d3ee"),
+                                }}
+                              />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
+              {!isAutoProgressMission ? (
+                <>
               {/* Target Muscles */}
               <div className="px-6 pt-6">
                 <h3 className="text-lg font-bold mb-3 flex items-center gap-2" style={{ color: "var(--fl-color-text)" }}>
@@ -1067,9 +1209,9 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
                   Músculos Alvo
                 </h3>
                 <div className="flex gap-2 flex-wrap">
-                  {(missionDetails.muscle_groups?.length ? missionDetails.muscle_groups : [bodyAreaLabel(missionDetails.body_area)]).map((muscle, idx) => (
-                    <div key={`${muscle}-${idx}`} className="flex items-center gap-2 rounded-full px-4 py-1.5 border" style={{ background: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)", borderColor: "color-mix(in srgb, var(--app-primary-color) 20%, transparent)" }}>
-                      <span className="font-semibold text-sm" style={{ color: "var(--app-primary-color)" }}>{muscle}</span>
+                  {detailFocusLabels.map((label, idx) => (
+                    <div key={`${label}-${idx}`} className="flex items-center gap-2 rounded-full px-4 py-1.5 border" style={{ background: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)", borderColor: "color-mix(in srgb, var(--app-primary-color) 20%, transparent)" }}>
+                      <span className="font-semibold text-sm" style={{ color: "var(--app-primary-color)" }}>{label}</span>
                     </div>
                   ))}
                 </div>
@@ -1092,8 +1234,11 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
                 </div>
               </div>
 
+                </>
+              ) : null}
+
               {/* Safety Instructions */}
-              {safetyTips && safetyTips.length > 0 && (
+              {!isAutoProgressMission && safetyTips && safetyTips.length > 0 && (
                 <div className="px-6 pt-8">
                   <h3 className="text-lg font-bold mb-3 flex items-center gap-2" style={{ color: "var(--fl-color-text)" }}>
                     <Sparkles className="w-5 h-5" style={{ color: "var(--app-primary-color)" }} />
@@ -1165,11 +1310,7 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
                  <p className="text-center text-xs mt-3 font-medium uppercase tracking-widest relative z-10" style={{ color: "var(--fl-color-text-muted)" }}>
                    {missionDetails.sets && missionDetails.sets > 0 ? `${missionDetails.sets} séries • ` : ""}{formatGoal(missionDetails, detailMetricType)}{missionDetails.rest_seconds && missionDetails.rest_seconds > 0 ? ` • ${missionDetails.rest_seconds}s descanso` : ""}
                  </p>
-              ) : (
-                <p className="text-center text-xs mt-3 font-medium uppercase tracking-widest relative z-10" style={{ color: "var(--fl-color-text-muted)" }}>
-                  {detailMissionGoalText}
-                </p>
-              )}
+              ) : null}
             </div>
           </div>
         </div>
@@ -1184,10 +1325,10 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
         />
       )}
 
-      {showDetails && (
+      {showDetails && !isAutoProgressMission && (
         <div className="fl-z-detail fixed bottom-6 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full border px-3 py-1.5 text-xs" style={{ color: "var(--fl-color-text-muted)", borderColor: "var(--fl-border-soft)", backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 86%, transparent)" }}>
           <MapPinned className="w-3 h-3" />
-          <span>{bodyAreaLabel(mission.body_area)}</span>
+          <span>{detailFocusLabels[0] ?? bodyAreaLabel(mission.body_area)}</span>
           <Trophy className="w-3 h-3" />
           <span>{mission.xp_reward} XP</span>
         </div>
