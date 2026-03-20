@@ -821,17 +821,17 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
   const showDetailDuration = shouldShowMissionDuration(missionDetails.type)
     && typeof missionDetails.duration_estimate_minutes === "number"
     && missionDetails.duration_estimate_minutes > 0;
-  const detailMissionGoalText = resolveMissionGoalText(missionDetails, detailMetricType);
-
   const compactDurationLabel = showMissionDuration
     ? `${mission.duration_estimate_minutes} min`
     : null;
   const compactXpLabel = `+${mission.xp_reward} XP`;
   const compactSummary = isWeeklyMission
-    ? [missionGoalText, compactXpLabel].join(" | ")
-    : isMonthlyMission
-      ? [missionGoalText, compactXpLabel].join(" | ")
-      : isCircuitMission
+    ? [`${autoProgressCurrentTotal}/${autoProgressRequiredTotal || 1} tarefas`, compactXpLabel].join(" | ")
+    : isMonthlyMission && circuitTasks.length > 0
+      ? [`${autoProgressCurrentTotal}/${autoProgressRequiredTotal || 1} tarefas`, compactXpLabel].join(" | ")
+      : isMonthlyMission
+        ? [`${monthlyCurrent}/${monthlyTarget}`, compactXpLabel].join(" | ")
+        : isCircuitMission
         ? [compactDurationLabel, `${circuitTasks.length || monthlyTarget} tarefas`].filter(Boolean).join(" | ")
         : [compactDurationLabel, formatGoal(mission, metricType)].filter(Boolean).join(" | ");
   const compactActionLabel = isAutoProgressMission ? "Ver progresso" : isCircuitMission ? "Ver detalhes" : "Iniciar Treino";
@@ -936,7 +936,6 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
 
       {isWeeklyMission || (isMonthlyMission && circuitTasks.length > 0) ? (
         <div className="space-y-3 mb-3">
-          <p className="text-sm text-gray-600">Meta: {missionGoalText}</p>
           <div className="flex items-center justify-between text-xs text-gray-600">
             <span>{isWeeklyMission ? "Progresso geral" : "Progresso mensal"}</span>
             <span>{autoProgressCurrentTotal}/{autoProgressRequiredTotal || 1}</span>
@@ -972,7 +971,7 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
           <div className="h-2 rounded-full bg-gray-100 overflow-hidden">
             <div className="h-full bg-cyan-500" style={{ width: `${monthlyProgress}%` }} />
           </div>
-          <p className="text-sm text-gray-600">Meta: {missionGoalText}</p>
+          <p className="text-sm text-gray-600">{missionGoalText}</p>
         </div>
       ) : (
         <div className="space-y-1 mb-3">
@@ -1122,16 +1121,10 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
                       borderColor: "color-mix(in srgb, var(--app-primary-color) 18%, transparent)",
                     }}
                   >
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="space-y-1">
+                    <div className="flex items-center justify-between gap-4">
+                      <div>
                         <p className="text-[11px] font-bold uppercase tracking-[0.28em]" style={{ color: "var(--app-primary-color)" }}>
                           {isWeeklyMission ? "Circuito semanal" : "Meta mensal"}
-                        </p>
-                        <h3 className="text-lg font-black" style={{ color: "var(--fl-color-text)" }}>
-                          Missões diárias que contam para esta meta
-                        </h3>
-                        <p className="text-sm" style={{ color: "var(--fl-color-text-muted)" }}>
-                          Meta: {detailMissionGoalText}
                         </p>
                       </div>
                       <Badge className="shrink-0 border-0" style={{ background: "color-mix(in srgb, var(--app-primary-color) 14%, transparent)", color: "var(--app-primary-color)" }}>

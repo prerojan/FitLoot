@@ -4319,13 +4319,14 @@ function normalizeMissionRow(rawMission: Record<string, unknown>): Record<string
     ? rawMission.metric_unit
     : metricUnitByType(metricType);
   const circuitTasks = localizeCircuitTasksForDisplay(parseCircuitTaskField(rawMission.circuit_tasks_json));
+  const rawTitle = typeof rawMission.title === "string" ? rawMission.title : "Miss\u00e3o";
   const displayTitle = typeof rawMission.title === "string"
-    ? (localizeMissionText(rawMission.title) ?? rawMission.title)
+    ? stripMissionDisplayTitlePrefix(rawTitle)
     : "Miss\u00e3o";
   const displayDescription = typeof rawMission.description === "string"
     ? (localizeMissionText(rawMission.description) ?? rawMission.description)
     : rawMission.description;
-  const localizedGoal = resolveMissionDisplayGoal(rawMission.goal, rawMission.type, circuitTasks);
+  const localizedGoal = resolveMissionDisplayGoal(rawMission, circuitTasks);
   const progressValue = rawMission.progress_value === null || rawMission.progress_value === undefined
     ? (circuitTasks.length > 0 ? circuitTasks.filter((task) => task.completed).length : undefined)
     : Number(rawMission.progress_value);
@@ -4372,6 +4373,81 @@ function normalizeMissionRow(rawMission: Record<string, unknown>): Record<string
 }
 
 type NormalizedMissionRow = Record<string, unknown> & NormalizedMissionComputedFields;
+
+const MISSION_TITLE_PREFIX_PATTERN = /^(?:miss(?:\u00e3o|ao)\s+(?:di[a\u00e1]ria|semanal|mensal)|daily mission|weekly mission|monthly mission|meta\s+(?:di[a\u00e1]ria|semanal|mensal)|daily goal|weekly goal|monthly goal)\s*:\s*/i;
+
+function stripMissionDisplayTitlePrefix(value: string): string {
+  const localized = localizeMissionText(value) ?? value;
+  const stripped = localized.replace(MISSION_TITLE_PREFIX_PATTERN, "").trim();
+  return stripped.length > 0 ? stripped : localized.trim();
+}
+
+function formatIntegerPtBr(value: number): string {
+  return Math.max(0, Math.round(value)).toLocaleString("pt-BR");
+}
+
+function resolveExplicitMonthlyDisplayGoal(rawMission: Record<string, unknown>): string | null {
+  if (rawMission.type !== "monthly") return null;
+
+  const rawTitle = typeof rawMission.title === "string" ? rawMission.title : "";
+  const title = stripMissionDisplayTitlePrefix(rawTitle);
+  if (title.length === 0) return null;
+
+  const normalizedTitle = normalizeMatchText(title);
+  const metricType = normalizeMissionMetricType(rawMission.metric_type, rawMission.target_time);
+  const targetBase = metricType === "duration_seconds"
+    ? Number(rawMission.target_time ?? rawMission.metric_value ?? 0)
+    : Number(rawMission.metric_value ?? rawMission.target_reps ?? rawMission.target_time ?? 0);
+  const target = Math.max(1, Math.round(targetBase));
+  const rawExerciseName = typeof rawMission.exercise_name === "string" && rawMission.exercise_name.trim().length > 0
+    ? rawMission.exercise_name
+    : extractExerciseName(title);
+  const exerciseName = stripMissionDisplayTitlePrefix(rawExerciseName).trim();
+  const namedSuffix = exerciseName.length > 0 && normalizeMatchText(exerciseName) !== normalizedTitle
+    ? ` de ${exerciseName}`
+    : "";
+
+  if (normalizedTitle.includes("consistencia mensal")) {
+    return `${formatIntegerPtBr(target)} miss\u00f5es conclu\u00eddas`;
+  }
+
+  if (normalizedTitle.includes("distancia mensal")) {
+    const stepTarget = metricType === "steps" ? target : Math.max(1, Math.round(target / 0.75));
+    return `${formatIntegerPtBr(stepTarget)} passos acumulados`;
+  }
+
+  if (normalizedTitle.includes("streak mensal")) {
+    return `${formatIntegerPtBr(target)} dias ativos no m\u00eas`;
+  }
+
+  if (metricType === "steps") {
+    return `${formatIntegerPtBr(target)} passos${namedSuffix}`;
+  }
+
+  if (metricType === "distance_meters") {
+    const kilometers = target / 1000;
+    const formattedDistance = kilometers.toLocaleString("pt-BR", {
+      minimumFractionDigits: kilometers % 1 === 0 ? 0 : 1,
+      maximumFractionDigits: 1,
+    });
+    return `${formattedDistance} km${namedSuffix}`;
+  }
+
+  if (metricType === "duration_minutes") {
+    return `${formatIntegerPtBr(target)} minutos${namedSuffix}`;
+  }
+
+  if (metricType === "duration_seconds") {
+    const minutes = Math.max(1, Math.round(target / 60));
+    return `${formatIntegerPtBr(minutes)} minutos${namedSuffix}`;
+  }
+
+  if (metricType === "sets_reps" || metricType === "repetitions") {
+    return `${formatIntegerPtBr(target)} repeti\u00e7\u00f5es${namedSuffix}`;
+  }
+
+  return null;
+}
 
 function missionSummaryFromNormalized(mission: NormalizedMissionRow): Record<string, unknown> {
   return {
@@ -4788,10 +4864,17 @@ function localizeCircuitTasksForDisplay(tasks: CircuitTask[]): CircuitTask[] {
 }
 
 function resolveMissionDisplayGoal(
-  rawGoal: unknown,
-  missionType: unknown,
+  rawMission: Record<string, unknown>,
   circuitTasks: CircuitTask[],
 ): string | null {
+  const rawGoal = rawMission.goal;
+  const missionType = rawMission.type;
+  if (missionType === "monthly" && circuitTasks.length === 0) {
+    const explicitMonthlyGoal = resolveExplicitMonthlyDisplayGoal(rawMission);
+    if (explicitMonthlyGoal) {
+      return explicitMonthlyGoal;
+    }
+  }
   if (typeof rawGoal === "string" && rawGoal.trim().length > 0) {
     return localizeMissionText(rawGoal) ?? rawGoal;
   }
