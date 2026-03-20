@@ -27,8 +27,10 @@ import {
 import {
   buildMissionDisplayGoalFromTasks,
   buildMissionFallbackMediaDataUrl,
+  inferMissionVisualTarget,
   localizeMissionText,
   localizeMissionTextArray,
+  normalizeMissionMediaUrl,
 } from "../shared/missionLocalization";
 import {
   MISSION_LIMITS,
@@ -50,7 +52,7 @@ import {
   type CaktoOrderSnapshot,
   type CaktoPlanCatalog,
 } from "./services/cakto";
-import { enrichExercise } from "./services/exerciseEnrichment";
+import { enrichExercise, searchExerciseDB } from "./services/exerciseEnrichment";
 
 // Tipo do usuÃƒÂ¡rio autenticado
 interface AuthUser {
@@ -4355,14 +4357,14 @@ function normalizeMissionRow(rawMission: Record<string, unknown>): Record<string
     exercise_equipment: typeof rawMission.exercise_equipment === "string" ? (localizeMissionText(rawMission.exercise_equipment) ?? rawMission.exercise_equipment) : null,
     exercise_body_part: typeof rawMission.exercise_body_part === "string" ? (localizeMissionText(rawMission.exercise_body_part) ?? rawMission.exercise_body_part) : null,
     exercise_target: typeof rawMission.exercise_target === "string" ? (localizeMissionText(rawMission.exercise_target) ?? rawMission.exercise_target) : null,
-    image_url: displayImageUrl,
-    exercise_db_gif_url: typeof rawMission.exercise_db_gif_url === "string" ? rawMission.exercise_db_gif_url : null,
-    exercise_db_image_url: typeof rawMission.exercise_db_image_url === "string" ? rawMission.exercise_db_image_url : null,
+    image_url: normalizeMissionMediaUrl(displayImageUrl) ?? displayImageUrl,
+    exercise_db_gif_url: normalizeMissionMediaUrl(typeof rawMission.exercise_db_gif_url === "string" ? rawMission.exercise_db_gif_url : null),
+    exercise_db_image_url: normalizeMissionMediaUrl(typeof rawMission.exercise_db_image_url === "string" ? rawMission.exercise_db_image_url : null),
     duration_estimate_minutes: durationEstimate > 0 ? durationEstimate : undefined,
     exercise_category: typeof rawMission.exercise_category === "string" ? rawMission.exercise_category : "default",
     difficulty_level: localizeDifficultyLabel(typeof rawMission.difficulty_level === "string" ? rawMission.difficulty_level : undefined),
-    video_url: typeof rawMission.video_url === "string" ? rawMission.video_url : null,
-    thumbnail_url: typeof rawMission.thumbnail_url === "string" ? rawMission.thumbnail_url : null,
+    video_url: normalizeMissionMediaUrl(typeof rawMission.video_url === "string" ? rawMission.video_url : null),
+    thumbnail_url: normalizeMissionMediaUrl(typeof rawMission.thumbnail_url === "string" ? rawMission.thumbnail_url : null),
     mission_origin: rawMission.mission_origin === "ai" ? "ai" : "regular",
     goal: localizedGoal,
     is_ai_special: Number(rawMission.is_ai_special ?? 0) === 1 ? 1 : 0,
@@ -4811,8 +4813,9 @@ function resolveMissionDisplayImage(rawMission: Record<string, unknown>, fallbac
     rawMission.exercise_db_image_url,
   ];
   for (const candidate of imageCandidates) {
-    if (typeof candidate === "string" && candidate.trim().length > 0) {
-      return candidate;
+    const normalized = normalizeMissionMediaUrl(typeof candidate === "string" ? candidate : null);
+    if (normalized) {
+      return normalized;
     }
   }
   return buildMissionFallbackMediaDataUrl(fallbackLabel);
@@ -6675,7 +6678,10 @@ function applyMissionMetricContext(
     metric_unit: metricUnitByType(normalizedMetricType),
     sets,
     rest_seconds: restSeconds,
-    description: buildMissionDescription(exerciseName, normalizedMetricType, normalizedMetricValue, sets),
+    description: buildMissionDescriptionFromInstructions(
+      wrapMissionInstructionsWithStretching(payload.instructions, exerciseName),
+      buildMissionDescription(exerciseName, normalizedMetricType, normalizedMetricValue, sets),
+    ),
     duration_estimate_minutes: shouldShowMissionDuration(period)
       ? estimateMissionDuration(normalizedMetricType, normalizedMetricValue)
       : null,
@@ -6687,128 +6693,245 @@ function applyMissionMetricContext(
 }
 
 function buildCircuitTasks(exerciseName: string, period: MissionPeriod): CircuitTask[] {
-  const lower = exerciseName.toLowerCase();
+  return buildCircuitTasksV2(exerciseName, period);
+}
+
+function buildMissionDescription(exerciseName: string, metricType: MissionMetricType, metricValue: number, sets: number | null): string {
+  return buildMissionDescriptionV2(exerciseName, metricType, metricValue, sets);
+}
+
+function buildMissionInstructions(exerciseName: string, metricType: MissionMetricType, sets: number | null, restSeconds: number | null, apiInstruction?: string | undefined): string[] {
+  return buildMissionInstructionsV2(exerciseName, metricType, sets, restSeconds, apiInstruction);
+}
+
+function normalizeMissionCopy(value: string): string {
+  return repairKnownMojibakeString(localizeMissionText(value) ?? value)
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function ensureSentence(value: string): string {
+  const normalized = normalizeMissionCopy(value);
+  if (normalized.length === 0) return "";
+  return /[.!?]$/.test(normalized) ? normalized : `${normalized}.`;
+}
+
+function stripMissionTaskPrefix(value: string): string {
+  return normalizeMissionCopy(value)
+    .replace(/^Conclua\s+\d+\s+miss(?:\u00f5es|oes)\s+di[a\u00e1]rias\s+de\s+/i, "")
+    .replace(/^Miss(?:\u00e3o|ao)\s+Di[a\u00e1]ria:\s+/i, "")
+    .trim();
+}
+
+function missionStretchFocus(value: string): string {
+  const target = inferMissionVisualTarget(value);
+  if (target === "upper body") return "ombros, peito e costas";
+  if (target === "legs") return "quadris, coxas e panturrilhas";
+  if (target === "core") return "abd\u00f4men, lombar e quadris";
+  if (target === "mobility") return "ombros, coluna, quadris e tornozelos";
+  return "corpo inteiro";
+}
+
+function buildStretchingTip(exerciseName: string, phase: "before" | "after"): string {
+  const focus = missionStretchFocus(exerciseName);
+  if (phase === "before") {
+    return ensureSentence(`Antes de come\u00e7ar, fa\u00e7a alongamento din\u00e2mico leve em ${focus} por 2 minutos para preparar o corpo`);
+  }
+  return ensureSentence(`Ao finalizar, alongue ${focus} novamente e respire fundo para evitar dores musculares intensas`);
+}
+
+function wrapMissionInstructionsWithStretching(instructions: readonly string[], exerciseName: string): string[] {
+  const warmup = buildStretchingTip(exerciseName, "before");
+  const cooldown = buildStretchingTip(exerciseName, "after");
+  const middle = instructions
+    .map((item) => ensureSentence(item))
+    .filter((item) => item.length > 0)
+    .filter((item) => {
+      const normalized = normalizeMatchText(item);
+      return normalized !== normalizeMatchText(warmup) && normalized !== normalizeMatchText(cooldown);
+    });
+
+  if (middle.length === 0) {
+    middle.push(ensureSentence(`Execute ${exerciseName} com movimento controlado e respira\u00e7\u00e3o constante`));
+  }
+
+  return [warmup, ...middle.slice(0, 4), cooldown];
+}
+
+function formatMissionRequirement(requiredCount: number, title: string): string {
+  const missionName = stripMissionTaskPrefix(title);
+  const countLabel = `${requiredCount} miss${requiredCount === 1 ? "\u00e3o" : "\u00f5es"} di\u00e1rias`;
+  return `${countLabel} de ${missionName}`;
+}
+
+function buildPeriodicMissionDescriptionV2(
+  missionName: string,
+  period: "weekly" | "monthly",
+  requirements: ReadonlyArray<{ title: string; requiredCount: number }>,
+): string {
+  const periodLabel = period === "weekly" ? "nesta semana" : "ao longo deste m\u00eas";
+  const requirementList = requirements
+    .map((item) => formatMissionRequirement(item.requiredCount, item.title))
+    .join(", ");
+  const requirementSentence = ensureSentence(
+    `Miss\u00f5es di\u00e1rias que comp\u00f5em ${normalizeMissionCopy(missionName)} ${periodLabel}: ${requirementList}`,
+  );
+  const progressSentence = ensureSentence(
+    "O progresso atualiza automaticamente sempre que uma miss\u00e3o di\u00e1ria compat\u00edvel for conclu\u00edda",
+  );
+  return [
+    buildStretchingTip(missionName, "before"),
+    requirementSentence,
+    progressSentence,
+    buildStretchingTip(missionName, "after"),
+  ].join(" ");
+}
+
+function buildMissionDescriptionFromInstructions(
+  instructions: readonly string[],
+  fallbackDescription: string,
+): string {
+  const normalized = instructions
+    .map((item) => ensureSentence(item))
+    .filter((item) => item.length > 0)
+    .slice(0, 6);
+  return normalized.length > 0 ? normalized.join(" ") : fallbackDescription;
+}
+
+function buildCircuitTasksV2(exerciseName: string, period: MissionPeriod): CircuitTask[] {
+  const normalizedName = normalizeMatchText(exerciseName);
   const baseRequired = period === "weekly" ? 5 : period === "monthly" ? 7 : 3;
   const fullBodyRequired = period === "weekly" ? 3 : baseRequired;
 
-  const toTaskLabel = (exerciseLabel: string, requiredCount: number): string =>
-    `Conclua ${requiredCount} missões diárias de ${exerciseLabel}`;
-
   const toTask = (missionType: string, exerciseLabel: string, requiredCount = baseRequired): CircuitTask => ({
     id: crypto.randomUUID(),
-    label: toTaskLabel(exerciseLabel, requiredCount),
+    label: `Conclua ${requiredCount} miss\u00f5es di\u00e1rias de ${exerciseLabel}`,
     mission_type: missionType,
     required_count: requiredCount,
     current_count: 0,
     completed: false,
   });
 
-  if (lower.includes("upper body")) {
+  if (normalizedName.includes("upper body") || normalizedName.includes("parte superior")) {
     return [
-      toTask("push-up", "flexão"),
-      toTask("pull-up", "barra fixa"),
+      toTask("push-up", "flex\u00e3o"),
       toTask("abdominal", "abdominal"),
       toTask("plank", "prancha"),
     ];
   }
 
-  if (lower.includes("lower body")) {
+  if (normalizedName.includes("lower body") || normalizedName.includes("parte inferior")) {
     return [
       toTask("squat", "agachamento"),
-      toTask("lunge", "avanço"),
-      toTask("glute", "glúteos"),
-      toTask("run", "corrida", 3),
+      toTask("lunge", "avan\u00e7o"),
+      toTask("glute bridge", "ponte de gl\u00fateos"),
     ];
   }
 
-  if (lower.includes("core")) {
+  if (normalizedName.includes("core")) {
     return [
       toTask("abdominal", "abdominal"),
       toTask("plank", "prancha"),
       toTask("hollow body", "hollow body"),
-      toTask("wall sit", "cadeira isométrica"),
     ];
   }
 
-  if (lower.includes("mobility") || lower.includes("recovery")) {
+  if (normalizedName.includes("mobility") || normalizedName.includes("recovery") || normalizedName.includes("mobilidade") || normalizedName.includes("recupera")) {
     return [
       toTask("stretching", "alongamento"),
       toTask("mobility", "mobilidade"),
-      toTask("walk", "caminhada"),
       toTask("yoga", "yoga"),
     ];
   }
 
   return [
-    toTask("push-up", "flexão", fullBodyRequired),
+    toTask("push-up", "flex\u00e3o", fullBodyRequired),
     toTask("squat", "agachamento", fullBodyRequired),
     toTask("abdominal", "abdominal", fullBodyRequired),
     toTask("plank", "prancha", fullBodyRequired),
-    toTask("burpee", "burpee", fullBodyRequired),
   ];
 }
 
-function buildMissionDescription(exerciseName: string, metricType: MissionMetricType, metricValue: number, sets: number | null): string {
+function buildMissionDescriptionV2(
+  exerciseName: string,
+  metricType: MissionMetricType,
+  metricValue: number,
+  sets: number | null,
+  period: MissionPeriod = "daily",
+): string {
   const goalText = formatMissionGoal(metricType, metricValue, sets ?? undefined);
   if (metricType === "circuit_tasks") {
-    return `Conclua o circuito semanal ${exerciseName}. O progresso das tarefas atualiza automaticamente ao completar missões diárias compatíveis.`;
+    return buildPeriodicMissionDescriptionV2(
+      exerciseName,
+      period === "monthly" ? "monthly" : "weekly",
+      buildCircuitTasksV2(exerciseName, period).map((task) => ({
+        title: task.label,
+        requiredCount: task.required_count,
+      })),
+    );
   }
   if (metricType === "duration_seconds" && sets) {
     const secondsPerSet = Math.max(10, Math.floor(metricValue / sets));
-    return `Execute ${sets} séries de ${exerciseName}, mantendo ${secondsPerSet} segundos por série.`;
+    return ensureSentence(`Fa\u00e7a ${sets} s\u00e9ries de ${exerciseName}, sustentando ${secondsPerSet} segundos por s\u00e9rie com alinhamento firme`);
   }
   if (metricType === "sets_reps" && sets) {
     const repsPerSet = Math.max(4, Math.floor(metricValue / sets));
-    return `Complete ${sets} séries de ${repsPerSet} repetições de ${exerciseName} com boa técnica.`;
+    return ensureSentence(`Execute ${sets} s\u00e9ries de ${repsPerSet} repeti\u00e7\u00f5es de ${exerciseName} com amplitude segura e cad\u00eancia controlada`);
   }
   if (metricType === "steps") {
-    return `Acumule ${metricValue.toLocaleString("pt-BR")} passos no dia usando caminhada ativa.`;
+    return ensureSentence(`Some ${metricValue.toLocaleString("pt-BR")} passos no dia com caminhada ativa em ritmo confort\u00e1vel`);
   }
   if (metricType === "distance_meters") {
     const km = (metricValue / 1000).toFixed(metricValue >= 1000 ? 1 : 0);
-    return `Cubra ${km} km de corrida ou trote em ritmo constante.`;
+    return ensureSentence(`Cubra ${km} km de corrida ou trote sem perder a postura e o ritmo`);
   }
   if (metricType === "duration_minutes") {
-    return `Realize ${metricValue} minutos de ${exerciseName} mantendo respiração e postura.`;
+    return ensureSentence(`Treine ${exerciseName} por ${metricValue} minutos com movimentos controlados e respira\u00e7\u00e3o regular`);
   }
-  return `Cumpra a meta de ${goalText} em ${exerciseName} com controle total do movimento.`;
+  return ensureSentence(`Cumpra a meta de ${goalText} em ${exerciseName} com foco total na t\u00e9cnica`);
 }
 
-function buildMissionInstructions(exerciseName: string, metricType: MissionMetricType, sets: number | null, restSeconds: number | null, apiInstruction?: string | undefined): string[] {
-  const instructions: string[] = [
-    `Prepare o corpo e ajuste a postura para ${exerciseName}.`,
-  ];
+function buildMissionInstructionsV2(
+  exerciseName: string,
+  metricType: MissionMetricType,
+  sets: number | null,
+  restSeconds: number | null,
+  apiInstruction?: string | undefined,
+): string[] {
+  const instructions: string[] = [];
 
   if (metricType === "circuit_tasks") {
-    return [
-      "Conclua as tarefas listadas ao longo da semana.",
-      "Cada tarefa avanca automaticamente ao completar missoes diarias relacionadas.",
-      "Mantenha consistencia nos dias de treino para fechar 100% do circuito.",
-      "Ao completar todas as tarefas, a missao semanal libera recompensas automaticamente.",
-    ];
+    return wrapMissionInstructionsWithStretching(
+      [
+        "Confira a lista de miss\u00f5es di\u00e1rias do circuito antes de iniciar a semana.",
+        "Priorize as di\u00e1rias do mesmo grupo muscular para fazer o progresso subir mais r\u00e1pido.",
+        "Acompanhe o contador de cada subtarefa e mantenha consist\u00eancia entre os dias de treino.",
+        "As recompensas s\u00e3o liberadas automaticamente quando todas as subtarefas forem conclu\u00eddas.",
+      ],
+      exerciseName,
+    );
   }
 
   if (apiInstruction) {
     instructions.push(apiInstruction.slice(0, 180));
   }
 
+  instructions.push(`Ajuste a postura e organize o ritmo de execu\u00e7\u00e3o para ${exerciseName}.`);
+
   if (metricType === "duration_seconds" || metricType === "duration_minutes") {
-    instructions.push("Mantenha respiracao constante durante toda a execucao.");
+    instructions.push("Mantenha a respira\u00e7\u00e3o constante durante toda a execu\u00e7\u00e3o.");
   }
 
   if (metricType === "sets_reps" || metricType === "repetitions") {
-    instructions.push("Execute cada repeticao com amplitude segura e controle.");
+    instructions.push("Execute cada repeti\u00e7\u00e3o com amplitude segura, sem perder o controle.");
   }
 
   if (sets && restSeconds) {
-    instructions.push(`Siga ${sets} series com ${restSeconds} segundos de descanso entre elas.`);
+    instructions.push(`Siga ${sets} s\u00e9ries com ${restSeconds} segundos de descanso entre elas.`);
   }
 
-  instructions.push("Interrompa imediatamente se sentir dor aguda ou tontura.");
-  if (instructions.length < 4) {
-    instructions.push("Controle o ritmo para manter a qualidade em todas as series.");
-  }
-  return instructions.slice(0, 6);
+  instructions.push("Interrompa imediatamente se sentir dor aguda, tontura ou perda de estabilidade.");
+  return wrapMissionInstructionsWithStretching(instructions, exerciseName).slice(0, 6);
 }
 
 function buildMissionPayload(params: {
@@ -6862,7 +6985,19 @@ function buildMissionPayload(params: {
 
   return {
     title: `${params.titlePrefix}: ${params.exerciseName}`,
-    description: buildMissionDescription(params.exerciseName, metricType, metricValue, sets),
+    description: metricType === "circuit_tasks"
+      ? buildPeriodicMissionDescriptionV2(
+        params.exerciseName,
+        params.period === "monthly" ? "monthly" : "weekly",
+        circuitTasks.map((task) => ({
+          title: task.label,
+          requiredCount: task.required_count,
+        })),
+      )
+      : buildMissionDescriptionFromInstructions(
+        instructions,
+        buildMissionDescription(params.exerciseName, metricType, metricValue, sets),
+      ),
     goal: null,
     metric_type: metricType,
     metric_value: metricValue,
@@ -7019,39 +7154,16 @@ async function insertMission(
 }
 
 async function fetchExerciseDbExercises(env: Env, muscle: string, equipment: string): Promise<ExerciseRef[]> {
-  if (!env.RAPID_API_KEY) throw new Error("rapidapi-key-missing");
-  const baseHeaders = {
-    "X-RapidAPI-Key": env.RAPID_API_KEY,
-    "X-RapidAPI-Host": "exercisedb.p.rapidapi.com",
-  };
-
-  const mapExercise = (item: Record<string, unknown>): ExerciseRef => ({
-    name: String(item.name ?? "Exercicio funcional"),
-    muscle: String(item.target ?? muscle),
-    equipment: String(item.equipment ?? (equipment || "bodyweight")),
+  const results = await searchExerciseDB(muscle, env);
+  return results.slice(0, 8).map((item) => ({
+    name: item.name,
+    muscle: item.target ?? muscle,
+    equipment: item.equipment ?? (equipment || "bodyweight"),
     difficulty: "intermediate",
     instructions: Array.isArray(item.instructions) ? String(item.instructions[0] ?? "") : "",
-    image_url: typeof item.gifUrl === "string" ? item.gifUrl : undefined,
-    body_part: typeof item.bodyPart === "string" ? item.bodyPart : undefined,
-  });
-
-  const targetMatches = await fetchJsonWithTimeout<Array<Record<string, unknown>>>(
-    `https://exercisedb.p.rapidapi.com/exercises/target/${encodeURIComponent(muscle)}?limit=12`,
-    { headers: baseHeaders },
-    8000
-  );
-
-  if (targetMatches.length > 0) {
-    return targetMatches.slice(0, 8).map(mapExercise);
-  }
-
-  const bodyPartMatches = await fetchJsonWithTimeout<Array<Record<string, unknown>>>(
-    `https://exercisedb.p.rapidapi.com/exercises/bodyPart/${encodeURIComponent(muscle)}?limit=12`,
-    { headers: baseHeaders },
-    8000
-  );
-
-  return bodyPartMatches.slice(0, 8).map(mapExercise);
+    image_url: normalizeMissionMediaUrl(item.gifUrl ?? item.imageUrl ?? item.thumbnailUrl ?? null) ?? undefined,
+    body_part: item.bodyPart,
+  }));
 }
 
 function pickLocalExercises(muscle: string): ExerciseRef[] {
@@ -7169,7 +7281,7 @@ function ensureInstructionSteps(
     if (merged.length >= 6) break;
     if (!merged.includes(step)) merged.push(step);
   }
-  return merged.slice(0, 6);
+  return wrapMissionInstructionsWithStretching(merged.slice(0, 6), exerciseName);
 }
 
 function normalizeInstructionList(value: unknown, limit = 8): string[] {
@@ -7299,6 +7411,9 @@ async function getExerciseInstructionsFromAI(
   const prompt = [
     ...promptLines,
     "",
+    "Retorne 4 a 6 passos curtos em portugues brasileiro para a execucao do treino.",
+    "O primeiro passo deve incluir aquecimento ou alongamento leve antes da execucao.",
+    "O ultimo passo deve incluir alongamento final para evitar dores musculares intensas.",
     "Responda APENAS em JSON valido:",
     "{",
     '  "instructions": ["passo 1", "passo 2", "passo 3", "passo 4"],',
@@ -7595,7 +7710,19 @@ async function createMissionsForPeriod(env: Env, db: D1Database, userId: string,
       { conditioning, volumeMultiplier },
     );
     fixed.instructions = ensureInstructionSteps(fixed.instructions, exerciseName, fixed.metric_type, fixed.sets, fixed.rest_seconds);
-    fixed.description = buildMissionDescription(exerciseName, fixed.metric_type, fixed.metric_value, fixed.sets);
+    fixed.description = fixed.metric_type === "circuit_tasks"
+      ? buildPeriodicMissionDescriptionV2(
+        exerciseName,
+        "weekly",
+        fixed.circuit_tasks.map((task) => ({
+          title: task.label,
+          requiredCount: task.required_count,
+        })),
+      )
+      : buildMissionDescriptionFromInstructions(
+        fixed.instructions,
+        buildMissionDescription(exerciseName, fixed.metric_type, fixed.metric_value, fixed.sets),
+      );
     if (classifyMission(fixed.title, fixed.duration_estimate_minutes ?? undefined) === "weekly") {
       fixed = applyMissionMetricContext(
         fixed,
@@ -7606,7 +7733,10 @@ async function createMissionsForPeriod(env: Env, db: D1Database, userId: string,
         { conditioning, volumeMultiplier },
       );
       fixed.duration_estimate_minutes = Math.min(25, fixed.duration_estimate_minutes ?? 25);
-      fixed.description = buildMissionDescription(exerciseName, fixed.metric_type, fixed.metric_value, fixed.sets);
+      fixed.description = buildMissionDescriptionFromInstructions(
+        fixed.instructions,
+        buildMissionDescription(exerciseName, fixed.metric_type, fixed.metric_value, fixed.sets),
+      );
     }
     return fixed;
   };
@@ -7721,6 +7851,19 @@ async function createMissionsForPeriod(env: Env, db: D1Database, userId: string,
       withMetric.sets,
       withMetric.rest_seconds,
     );
+    withMetric.description = withMetric.metric_type === "circuit_tasks"
+      ? buildPeriodicMissionDescriptionV2(
+        resolvedName,
+        "weekly",
+        withMetric.circuit_tasks.map((task) => ({
+          title: task.label,
+          requiredCount: task.required_count,
+        })),
+      )
+      : buildMissionDescriptionFromInstructions(
+        withMetric.instructions,
+        buildMissionDescription(resolvedName, withMetric.metric_type, withMetric.metric_value, withMetric.sets),
+      );
     withMetric.exercise_instructions_en = apiInstructionsEn;
     withMetric.exercise_instructions_pt = apiInstructionsPt;
     withMetric.safety_tips = aiContext.safetyTips.length > 0 ? aiContext.safetyTips.slice(0, 4) : withMetric.safety_tips;
@@ -8183,6 +8326,12 @@ function buildStructuredPlanPrompt(
     "Circuito completo ou sessao longa nunca pode ser daily_mission.",
     "Weekly e monthly nao podem ter tempo estimado.",
     "Weekly e monthly devem ter goal e subtasks compostas por nomes de daily_missions compativeis.",
+    "Em daily_missions.description, escreva 3 a 5 passos curtos de execucao em portugues brasileiro.",
+    "O primeiro passo da description deve incluir alongamento ou aquecimento leve antes do treino.",
+    "O ultimo passo da description deve incluir alongamento final para evitar dores musculares intensas.",
+    "Para indicar quantidade em weekly_missions.subtasks e monthly_missions.subtasks, repita o nome da mesma daily_mission no array.",
+    'Exemplo de circuito: "Forca de Membros Superiores e Core" => subtasks repetidas de "flexao", "abdominal" e "prancha" ate representar 5 missoes de cada.',
+    "Weekly e monthly.description devem mencionar explicitamente quais missoes diarias compoem o circuito.",
     `Objetivo principal: ${profile.mainGoal}`,
     `Objetivos adicionais: ${profile.goals.join(", ")}`,
     `Condicionamento: ${profile.conditioning}`,
@@ -8250,7 +8399,10 @@ function buildFallbackStructuredPlan(
     const metricValue = conditionedMetricValue(resolvedMetricType, "daily", profile.conditioning, profile.volumeMultiplier);
     return {
       name: entry.name,
-      description: buildMissionDescription(entry.name, resolvedMetricType, metricValue, inferSets(resolvedMetricType, "daily")),
+      description: buildMissionDescriptionFromInstructions(
+        buildMissionInstructions(entry.name, resolvedMetricType, inferSets(resolvedMetricType, "daily"), inferRestSeconds(resolvedMetricType)),
+        buildMissionDescription(entry.name, resolvedMetricType, metricValue, inferSets(resolvedMetricType, "daily")),
+      ),
       exercise_type: inferExerciseType(normalizeExerciseCategory(entry.name, entry.muscle)),
       muscle_group: entry.muscle,
       metric_type:
@@ -8320,9 +8472,7 @@ function buildLegacyCircuitSubtaskNames(missionName: string, period: MissionPeri
   return circuitTasks.flatMap((task) =>
     Array.from({ length: Math.max(1, task.required_count) }, () => {
       const localizedLabel = localizeMissionText(task.label) ?? task.label;
-      const compatibleDailyName = localizedLabel
-        .replace(/^Conclua\s+\d+\s+miss(?:ões|oes)\s+di[aá]rias\s+de\s+/i, "")
-        .trim();
+      const compatibleDailyName = stripMissionTaskPrefix(localizedLabel);
       return compatibleDailyName.length > 0 ? compatibleDailyName : task.mission_type;
     }),
   );
@@ -8430,10 +8580,6 @@ function resolvePeriodicMissionBlueprints(params: {
     if (!draft) invalidCount += 1;
 
     const name = toSafeString(source.name, `${params.period === "weekly" ? "Missão Semanal" : "Missão Mensal"} ${index + 1}`);
-    const description = toSafeString(
-      source.description,
-      `Progresso automático baseado em missões diárias compatíveis para ${name}.`,
-    );
     const subtaskResolution = resolveMissionSubtasks(
       source.subtasks,
       params.dailyBlueprints,
@@ -8452,6 +8598,15 @@ function resolvePeriodicMissionBlueprints(params: {
     if (goalInput.length === 0) {
       invalidCount += 1;
     }
+
+    const description = buildPeriodicMissionDescriptionV2(
+      name,
+      params.period,
+      subtaskResolution.subtasks.map((subtask) => ({
+        title: subtask.title,
+        requiredCount: subtask.requiredCount,
+      })),
+    );
 
     const goal = buildMissionDisplayGoalFromTasks(
       subtaskResolution.subtasks.map((subtask) => subtask.title),
@@ -8707,7 +8862,6 @@ async function materializeMissionBlueprint(
       { conditioning: profile.conditioning, volumeMultiplier: profile.volumeMultiplier },
     );
     withMetric.title = `${config.titlePrefix}: ${blueprint.name}`;
-    withMetric.description = blueprint.description;
     withMetric.mission_origin = blueprint.missionOrigin;
     withMetric.is_ai_special = blueprint.isAiSpecial ? 1 : 0;
     withMetric.instructions = ensureInstructionSteps(
@@ -8716,6 +8870,13 @@ async function materializeMissionBlueprint(
       withMetric.metric_type,
       withMetric.sets,
       withMetric.rest_seconds,
+    );
+    withMetric.description = buildMissionDescriptionFromInstructions(
+      withMetric.instructions,
+      toSafeString(
+        blueprint.description,
+        buildMissionDescription(resolvedName, withMetric.metric_type, withMetric.metric_value, withMetric.sets),
+      ),
     );
     withMetric.exercise_instructions_en = apiInstructionsEn;
     withMetric.exercise_instructions_pt = apiInstructionsPt;
@@ -9673,7 +9834,13 @@ function sanitizeMissionDraft(raw: MissionDraft, conditioning: ConditioningLevel
   return {
     ...payload,
     title: toSafeString(raw.title, payload.title),
-    description: toSafeString(raw.description, buildMissionDescription(exerciseName, payload.metric_type, safeMetricValue, safeSets)),
+    description: toSafeString(
+      raw.description,
+      buildMissionDescriptionFromInstructions(
+        payload.instructions,
+        buildMissionDescription(exerciseName, payload.metric_type, safeMetricValue, safeSets),
+      ),
+    ),
     metric_value: safeMetricValue,
     sets: safeSets,
     rest_seconds: safeRest,
@@ -9911,6 +10078,19 @@ async function generateAiMissionsForUser(
           ? aiContext.attributesBenefited.slice(0, 6)
           : withMetric.attributes_benefited,
       };
+      withDetails.description = withDetails.metric_type === "circuit_tasks"
+        ? buildPeriodicMissionDescriptionV2(
+          exerciseName,
+          "weekly",
+          withDetails.circuit_tasks.map((task) => ({
+            title: task.label,
+            requiredCount: task.required_count,
+          })),
+        )
+        : buildMissionDescriptionFromInstructions(
+          withDetails.instructions,
+          buildMissionDescription(exerciseName, withDetails.metric_type, withDetails.metric_value, withDetails.sets),
+        );
 
       return {
         period: missionPeriod,

@@ -1,6 +1,7 @@
 import {
   buildMissionFallbackMediaDataUrl,
   inferMissionVisualTarget,
+  normalizeMissionMediaUrl,
 } from "../../shared/missionLocalization";
 
 type RapidApiEnv = {
@@ -16,8 +17,28 @@ type ExerciseDbExercise = {
   equipment?: string | undefined;
   gifUrl?: string | undefined;
   imageUrl?: string | undefined;
+  videoUrl?: string | undefined;
+  thumbnailUrl?: string | undefined;
   secondaryMuscles?: string[] | undefined;
   instructions?: string[] | undefined;
+};
+
+type PublicExerciseDbExercise = {
+  exerciseId?: string | undefined;
+  name?: string | undefined;
+  gifUrl?: string | undefined;
+  imageUrl?: string | undefined;
+  videoUrl?: string | undefined;
+  thumbnailUrl?: string | undefined;
+  targetMuscles?: string[] | undefined;
+  bodyParts?: string[] | undefined;
+  equipments?: string[] | undefined;
+  secondaryMuscles?: string[] | undefined;
+  instructions?: string[] | undefined;
+};
+
+type PublicExerciseDbListResponse = {
+  data?: PublicExerciseDbExercise[] | undefined;
 };
 
 type AscendExercise = {
@@ -62,6 +83,7 @@ type CacheEntry<T> = {
 const RAPID_TIMEOUT_MS = 3_000;
 const CACHE_TTL_MS = 15 * 60_000;
 const CACHE_MAX_ENTRIES = 250;
+const EXERCISE_DB_PUBLIC_API_BASE = "https://www.exercisedb.dev/api/v1";
 
 let exerciseCatalogCache: CacheEntry<ExerciseDbExercise[]> | null = null;
 const searchCache = new Map<string, CacheEntry<ExerciseDbExercise[]>>();
@@ -173,6 +195,63 @@ async function rapidGet<T>(url: string, host: string, env: RapidApiEnv): Promise
   return (await response.json()) as T;
 }
 
+async function publicExerciseDbGet<T>(path: string): Promise<T> {
+  const response = await fetchWithTimeout(`${EXERCISE_DB_PUBLIC_API_BASE}${path}`, {
+    method: "GET",
+    headers: {
+      Accept: "application/json",
+    },
+  }, RAPID_TIMEOUT_MS);
+
+  if (!response.ok) {
+    throw new Error(`exercisedb-public-request-failed:${response.status}`);
+  }
+
+  return (await response.json()) as T;
+}
+
+function normalizeExerciseDbExercise(raw: PublicExerciseDbExercise | ExerciseDbExercise | null | undefined): ExerciseDbExercise | null {
+  if (!raw) return null;
+
+  const id = ("id" in raw && typeof raw.id === "string")
+    ? raw.id
+    : ("exerciseId" in raw && typeof raw.exerciseId === "string")
+      ? raw.exerciseId
+      : "";
+  const name = typeof raw.name === "string" ? raw.name.trim() : "";
+  if (!id || !name) return null;
+
+  const bodyParts = ("bodyParts" in raw && Array.isArray(raw.bodyParts)) ? raw.bodyParts : [];
+  const targetMuscles = ("targetMuscles" in raw && Array.isArray(raw.targetMuscles)) ? raw.targetMuscles : [];
+  const equipments = ("equipments" in raw && Array.isArray(raw.equipments)) ? raw.equipments : [];
+
+  return {
+    id,
+    name,
+    bodyPart: ("bodyPart" in raw && typeof raw.bodyPart === "string") ? raw.bodyPart : (typeof bodyParts[0] === "string" ? bodyParts[0] : undefined),
+    target: ("target" in raw && typeof raw.target === "string") ? raw.target : (typeof targetMuscles[0] === "string" ? targetMuscles[0] : undefined),
+    equipment: ("equipment" in raw && typeof raw.equipment === "string") ? raw.equipment : (typeof equipments[0] === "string" ? equipments[0] : undefined),
+    gifUrl: normalizeMissionMediaUrl(raw.gifUrl) ?? undefined,
+    imageUrl: normalizeMissionMediaUrl(raw.imageUrl ?? ("thumbnailUrl" in raw ? raw.thumbnailUrl : undefined)) ?? undefined,
+    videoUrl: normalizeMissionMediaUrl(raw.videoUrl) ?? undefined,
+    thumbnailUrl: normalizeMissionMediaUrl(("thumbnailUrl" in raw ? raw.thumbnailUrl : undefined) ?? raw.imageUrl) ?? undefined,
+    secondaryMuscles: Array.isArray(raw.secondaryMuscles) ? raw.secondaryMuscles : undefined,
+    instructions: Array.isArray(raw.instructions) ? raw.instructions : undefined,
+  };
+}
+
+function normalizeExerciseDbCollection(payload: unknown): ExerciseDbExercise[] {
+  const items = Array.isArray(payload)
+    ? payload
+    : (typeof payload === "object" && payload !== null && Array.isArray((payload as PublicExerciseDbListResponse).data))
+      ? (payload as PublicExerciseDbListResponse).data ?? []
+      : [];
+
+  return items
+    .map((item) => normalizeExerciseDbExercise(item as PublicExerciseDbExercise | ExerciseDbExercise))
+    .filter((item): item is ExerciseDbExercise => item !== null);
+}
+
 async function getExerciseCatalog(env: RapidApiEnv): Promise<ExerciseDbExercise[]> {
   const cached = exerciseCatalogCache;
   if (cached && cached.expiresAt > Date.now()) {
@@ -185,7 +264,7 @@ async function getExerciseCatalog(env: RapidApiEnv): Promise<ExerciseDbExercise[
     env
   );
 
-  const normalized = Array.isArray(payload) ? payload : [];
+  const normalized = normalizeExerciseDbCollection(payload);
   exerciseCatalogCache = {
     value: normalized,
     expiresAt: Date.now() + CACHE_TTL_MS,
@@ -246,16 +325,31 @@ export async function searchExerciseDB(exerciseName: string, env: RapidApiEnv): 
 
   let results: ExerciseDbExercise[] = [];
   try {
-    const directByName = await rapidGet<ExerciseDbExercise[]>(
-      `https://exercisedb.p.rapidapi.com/exercises/name/${encodeURIComponent(normalizedQuery)}?offset=0&limit=24`,
-      "exercisedb.p.rapidapi.com",
-      env,
+    const directByName = await publicExerciseDbGet<PublicExerciseDbListResponse>(
+      `/exercises/search?q=${encodeURIComponent(normalizedQuery)}&offset=0&limit=12&threshold=0.25`,
     );
-    if (Array.isArray(directByName) && directByName.length > 0) {
-      results = rankExercisesByName(directByName, normalizedQuery);
+    const normalizedResults = normalizeExerciseDbCollection(directByName);
+    if (normalizedResults.length > 0) {
+      results = rankExercisesByName(normalizedResults, normalizedQuery);
     }
   } catch {
     results = [];
+  }
+
+  if (results.length === 0) {
+    try {
+      const directByName = await rapidGet<ExerciseDbExercise[]>(
+        `https://exercisedb.p.rapidapi.com/exercises/name/${encodeURIComponent(normalizedQuery)}?offset=0&limit=24`,
+        "exercisedb.p.rapidapi.com",
+        env,
+      );
+      const normalizedResults = normalizeExerciseDbCollection(directByName);
+      if (normalizedResults.length > 0) {
+        results = rankExercisesByName(normalizedResults, normalizedQuery);
+      }
+    } catch {
+      results = [];
+    }
   }
 
   if (results.length === 0) {
@@ -324,13 +418,21 @@ export async function enrichExercise(exerciseName: string, env: RapidApiEnv): Pr
   }
 
   const exercise = exercises[0];
-  const media = await fetchExerciseMedia(exercise.id, env);
-  const exerciseDbGifUrl = typeof exercise.gifUrl === "string" ? exercise.gifUrl : null;
-  const video = !media?.gifUrl && !exerciseDbGifUrl ? await fetchExerciseVideo(exercise.id, env) : null;
+  const [media, video] = await Promise.all([
+    fetchExerciseMedia(exercise.id, env),
+    fetchExerciseVideo(exercise.id, env),
+  ]);
+  const ascendGifUrl = normalizeMissionMediaUrl(media?.gifUrl) ?? null;
+  const ascendImageUrl = normalizeMissionMediaUrl(media?.imageUrl) ?? null;
+  const exerciseDbGifUrl = normalizeMissionMediaUrl(exercise.gifUrl) ?? null;
   const exerciseDbImageUrl =
-    typeof exercise.imageUrl === "string"
-      ? exercise.imageUrl
-      : exerciseDbGifUrl;
+    normalizeMissionMediaUrl(exercise.imageUrl)
+    ?? normalizeMissionMediaUrl(exercise.thumbnailUrl)
+    ?? exerciseDbGifUrl;
+  const exerciseDbVideoUrl = normalizeMissionMediaUrl(exercise.videoUrl) ?? null;
+  const exerciseDbThumbnailUrl =
+    normalizeMissionMediaUrl(exercise.thumbnailUrl)
+    ?? exerciseDbImageUrl;
   const exerciseInstructions =
     Array.isArray(exercise.instructions) && exercise.instructions.length > 0
       ? exercise.instructions
@@ -339,16 +441,21 @@ export async function enrichExercise(exerciseName: string, env: RapidApiEnv): Pr
         : [];
   const target = exercise.target ?? "full body";
   const fallbackIconUrl = buildMissionFallbackMediaDataUrl(exercise.name || exerciseName);
+  const resolvedVideoUrl =
+    normalizeMissionMediaUrl(video?.videoUrl)
+    ?? exerciseDbVideoUrl;
   const resolvedImageUrl =
-    media?.gifUrl
+    ascendGifUrl
     ?? exerciseDbGifUrl
-    ?? media?.imageUrl
-    ?? video?.thumbnailUrl
+    ?? ascendImageUrl
+    ?? normalizeMissionMediaUrl(video?.thumbnailUrl)
+    ?? exerciseDbThumbnailUrl
     ?? exerciseDbImageUrl
     ?? fallbackIconUrl;
   const resolvedThumbnailUrl =
-    video?.thumbnailUrl
-    ?? media?.imageUrl
+    normalizeMissionMediaUrl(video?.thumbnailUrl)
+    ?? ascendImageUrl
+    ?? exerciseDbThumbnailUrl
     ?? exerciseDbImageUrl
     ?? fallbackIconUrl;
 
@@ -360,12 +467,12 @@ export async function enrichExercise(exerciseName: string, env: RapidApiEnv): Pr
     equipment: exercise.equipment ?? "body weight",
     secondaryMuscles: Array.isArray(exercise.secondaryMuscles) ? exercise.secondaryMuscles : [],
     instructions: exerciseInstructions,
-    gifUrl: media?.gifUrl ?? null,
-    ascendImageUrl: media?.imageUrl ?? null,
+    gifUrl: ascendGifUrl,
+    ascendImageUrl,
     exerciseDbGifUrl,
     exerciseDbImageUrl,
     imageUrl: resolvedImageUrl,
-    videoUrl: video?.videoUrl ?? null,
+    videoUrl: resolvedVideoUrl,
     thumbnailUrl: resolvedThumbnailUrl,
   };
 }

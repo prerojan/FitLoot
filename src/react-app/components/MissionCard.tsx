@@ -21,7 +21,7 @@ import { useAppChrome } from "@/react-app/contexts/appChrome";
 import LoadingBall from "@/react-app/components/LoadingBall";
 import { formatMissionGoal, shouldShowMissionDuration } from "@/constants/missionMetrics";
 import type { CircuitTask, Mission, MissionMetricType } from "@/shared/types";
-import { localizeMissionText, localizeMissionTextArray } from "@/shared/missionLocalization";
+import { localizeMissionText, localizeMissionTextArray, normalizeMissionMediaUrl } from "@/shared/missionLocalization";
 import { api } from "@/react-app/utils/api";
 
 type MissionCardProps = {
@@ -170,15 +170,19 @@ function isPixelOrLineArtUrl(url: string | null | undefined): boolean {
 }
 
 function resolveMissionMediaUrl(mission: Mission): string | null {
-  const primaryImage = mission.image_url ?? null;
+  const primaryImage = normalizeMissionMediaUrl(mission.image_url);
   const ascendGif = isGifUrl(primaryImage) ? primaryImage : null;
+  const exerciseDbGif = normalizeMissionMediaUrl(mission.exercise_db_gif_url);
+  const thumbnail = normalizeMissionMediaUrl(mission.thumbnail_url);
+  const exerciseDbImage = normalizeMissionMediaUrl(mission.exercise_db_image_url);
+  const videoUrl = normalizeMissionMediaUrl(mission.video_url);
 
   return ascendGif
-    ?? mission.exercise_db_gif_url
-    ?? (mission.video_url ? (mission.thumbnail_url ?? null) : null)
-    ?? mission.exercise_db_image_url
+    ?? exerciseDbGif
+    ?? (videoUrl ? (thumbnail ?? null) : null)
+    ?? exerciseDbImage
     ?? primaryImage
-    ?? mission.thumbnail_url
+    ?? thumbnail
     ?? null;
 }
 
@@ -205,6 +209,7 @@ function MissionExecutionModal({
   const setDuration = metricType === "duration_seconds" || metricType === "duration_minutes"
     ? Math.max(1, Math.floor(totalTimeSeconds / sets))
     : 0;
+  const missionVideoUrl = normalizeMissionMediaUrl(mission.video_url);
   const isTimeMission = metricType === "duration_seconds" || metricType === "duration_minutes";
   const isCounterMission = metricType === "repetitions" || metricType === "sets_reps";
   const isDistanceMission = metricType === "steps" || metricType === "distance_meters";
@@ -486,9 +491,9 @@ function MissionExecutionModal({
 
             {/* Mission Media */}
             <div className="relative w-full max-w-md aspect-video overflow-hidden rounded-2xl border shadow-2xl" style={{ borderColor: "var(--fl-border-soft)", boxShadow: "var(--fl-shadow-glass)" }}>
-              {mission.video_url ? (
+              {missionVideoUrl ? (
                 <video
-                  src={mission.video_url}
+                  src={missionVideoUrl}
                   poster={detailMissionMediaUrl ?? undefined}
                   className="absolute inset-0 h-full w-full object-cover"
                   autoPlay
@@ -723,6 +728,7 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
   const missionDetails = detailedMission ?? mission;
   const detailMetricType = normalizeMetricType(missionDetails);
   const detailMissionMediaUrl = resolveMissionMediaUrl(missionDetails);
+  const detailMissionVideoUrl = normalizeMissionMediaUrl(missionDetails.video_url);
   const detailTitle = localizeMissionText(missionDetails.title) ?? missionDetails.title;
   const detailDescription = missionDetails.description
     ? (localizeMissionText(missionDetails.description) ?? missionDetails.description)
@@ -983,10 +989,10 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
                   className="relative w-full aspect-video rounded-xl overflow-hidden group"
                   style={{ background: "color-mix(in srgb, var(--app-primary-color) 5%, transparent)" }}
                 >
-                  {missionDetails.video_url ? (
+                  {detailMissionVideoUrl ? (
                     <>
                       <video
-                        src={missionDetails.video_url}
+                        src={detailMissionVideoUrl}
                         poster={detailMissionMediaUrl ?? undefined}
                         className="absolute inset-0 h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
                         autoPlay

@@ -224,6 +224,40 @@ function iconColorByTarget(target: string): { fill: string; accent: string } {
   return { fill: "#e9d5ff", accent: "#7c3aed" };
 }
 
+export function normalizeMissionMediaUrl(value: string | null | undefined): string | null {
+  if (typeof value !== "string") return null;
+
+  const trimmed = value.trim();
+  const lowered = trimmed.toLowerCase();
+  if (trimmed.length === 0) return null;
+  if (
+    lowered.startsWith("http://")
+    || lowered.startsWith("https://")
+    || lowered.startsWith("data:")
+    || lowered.startsWith("blob:")
+  ) {
+    return trimmed;
+  }
+
+  const sanitized = trimmed.startsWith("./")
+    ? trimmed.slice(2)
+    : trimmed.startsWith("/")
+      ? trimmed.slice(1)
+      : trimmed;
+  const sanitizedLower = sanitized.toLowerCase();
+  const filename = sanitizedLower.split("?")[0] ?? sanitizedLower;
+  const hasKnownExtension = [".gif", ".png", ".jpg", ".jpeg", ".webp", ".mp4"]
+    .some((extension) => filename.endsWith(extension));
+  if (sanitizedLower.startsWith("media/")) {
+    return `https://static.exercisedb.dev/${encodeURI(sanitized)}`;
+  }
+  if (!sanitized.includes("/") && hasKnownExtension) {
+    return `https://static.exercisedb.dev/media/${encodeURI(sanitized)}`;
+  }
+
+  return trimmed;
+}
+
 export function buildMissionFallbackMediaDataUrl(value: string | null | undefined): string {
   const target = inferMissionVisualTarget(value);
   const { fill, accent } = iconColorByTarget(target);
