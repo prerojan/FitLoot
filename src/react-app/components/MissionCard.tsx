@@ -555,10 +555,10 @@ function MissionExecutionModal({
                 <video
                   src={missionVideoUrl}
                   poster={detailMissionMediaUrl ?? undefined}
-                  className="absolute inset-0 h-full w-full object-cover"
+                  className="absolute inset-0 h-full w-full object-contain"
                   style={{
-                    imageRendering: "auto" as any,
-                    filter: "contrast(1.02) saturate(1.05) brightness(1.02)",
+                    imageRendering: "pixelated" as any,
+                    filter: "contrast(1.08) saturate(1.1) brightness(1.02)",
                   }}
                   autoPlay
                   loop
@@ -569,12 +569,12 @@ function MissionExecutionModal({
                 <img 
                   src={detailMissionMediaUrl} 
                   alt={localizeMissionText(mission.title) ?? mission.title} 
-                  className="absolute inset-0 h-full w-full object-cover" 
+                  className="absolute inset-0 h-full w-full object-contain" 
                   style={{
-                    imageRendering: isPixelOrLineArtUrl(detailMissionMediaUrl) ? "crisp-edges" : ("auto" as any),
+                    imageRendering: (isPixelOrLineArtUrl(detailMissionMediaUrl) ? "crisp-edges" : "pixelated") as any,
                     filter: isPixelOrLineArtUrl(detailMissionMediaUrl) || isGifUrl(detailMissionMediaUrl)
-                      ? "contrast(1.05) brightness(1.02)"
-                      : "contrast(1.08) saturate(1.15) brightness(1.02)",
+                      ? "contrast(1.1) saturate(1.1) brightness(1.02)"
+                      : "contrast(1.1) saturate(1.2) brightness(1.02)",
                   }}
                 />
               ) : (
@@ -951,18 +951,18 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
       </div>
 
       {!isWeeklyMission && missionMediaUrl ? (
-        <div className="hidden sm:block w-full mb-3">
+        <div className="hidden sm:block w-full mb-3 bg-black/5 rounded-2xl overflow-hidden aspect-video relative">
           <img
             src={missionMediaUrl}
             alt={localizeMissionText(mission.title) ?? mission.title}
             loading="lazy"
             decoding="async"
-            className="w-full h-36 object-cover rounded-2xl border border-gray-200"
+            className="w-full h-full object-contain"
             style={{
-              imageRendering: (isPixelOrLineArtUrl(missionMediaUrl) ? "crisp-edges" : "auto") as any,
+              imageRendering: (isPixelOrLineArtUrl(missionMediaUrl) ? "crisp-edges" : "pixelated") as any,
               filter: isPixelOrLineArtUrl(missionMediaUrl) || isGifUrl(missionMediaUrl)
-                ? "contrast(1.05) brightness(1.02)"
-                : "contrast(1.08) saturate(1.15) brightness(1.02)",
+                ? "contrast(1.1) saturate(1.1) brightness(1.02)"
+                : "contrast(1.1) saturate(1.2) brightness(1.02)",
             }}
           />
         </div>
@@ -1092,10 +1092,10 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
                         <video
                           src={detailMissionVideoUrl}
                           poster={detailMissionMediaUrl ?? undefined}
-                          className="absolute inset-0 h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+                          className="absolute inset-0 h-full w-full object-contain transition-transform duration-500 group-hover:scale-105"
                           style={{
-                            imageRendering: "auto",
-                            filter: "contrast(1.02) saturate(1.05) brightness(1.02)",
+                            imageRendering: "pixelated" as any,
+                            filter: "contrast(1.08) saturate(1.1) brightness(1.02)",
                           }}
                           autoPlay
                           loop
@@ -1114,12 +1114,12 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
                         <img
                           src={detailMissionMediaUrl}
                           alt={detailTitle}
-                          className="absolute inset-0 h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+                          className="absolute inset-0 h-full w-full object-contain transition-transform duration-500 group-hover:scale-105"
                           style={{
-                            imageRendering: pixelOrLineArt ? ("crisp-edges" as any) : "auto",
+                            imageRendering: pixelOrLineArt ? ("crisp-edges" as any) : ("pixelated" as any),
                             filter: pixelOrLineArt || gifLikeMedia 
-                              ? "contrast(1.05) brightness(1.02)" 
-                              : "contrast(1.08) saturate(1.15) brightness(1.02)",
+                              ? "contrast(1.1) saturate(1.1) brightness(1.02)" 
+                              : "contrast(1.1) saturate(1.2) brightness(1.02)",
                           }}
                         />
                         <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent" />

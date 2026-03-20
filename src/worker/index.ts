@@ -5556,6 +5556,7 @@ app.post("/api/missions/complete", authMiddleware, zValidator("json", CompleteMi
       let newStreak = Number(progression?.current_streak || 0);
 
       if (progression?.last_activity_date !== today) {
+        completionPhase = "calculate_streak";
         const yesterday = assertString(safeGet(new Date(Date.now() - 86400000).toISOString().split('T'), 0));
         newStreak = 1;
 
@@ -5565,7 +5566,7 @@ app.post("/api/missions/complete", authMiddleware, zValidator("json", CompleteMi
 
         streakMultiplier = 1 + (newStreak * 0.1);
 
-        completionPhase = "update_streak";
+        completionPhase = "update_streak_db";
         await c.env.fitloot_db.prepare(
           `UPDATE user_progression SET current_streak = ?, best_streak = MAX(best_streak, ?), 
           last_activity_date = ?, updated_at = datetime('now')
@@ -5575,16 +5576,17 @@ app.post("/api/missions/complete", authMiddleware, zValidator("json", CompleteMi
         streakMultiplier = 1 + (Number(progression?.current_streak || 0) * 0.1);
       }
 
-      xpGained = Math.floor(Number(mission.xp_reward || 0) * streakMultiplier);
-      pointsGained = Number(mission.points_reward || 0);
+      completionPhase = "calculate_rewards";
+      xpGained = Math.max(0, Math.floor(Number(mission.xp_reward || 0) * streakMultiplier));
+      pointsGained = Math.max(0, Number(mission.points_reward || 0));
 
-      completionPhase = "award_xp";
+      completionPhase = "award_xp_db";
       await c.env.fitloot_db.prepare(
         `UPDATE user_progression SET xp = COALESCE(xp, 0) + ?, points = COALESCE(points, 0) + ?, updated_at = datetime('now')
         WHERE user_id = ?`
       ).bind(xpGained, pointsGained, user.id).run();
 
-      completionPhase = "check_level";
+      completionPhase = "check_level_up";
       const updatedProgression = await c.env.fitloot_db.prepare(
         "SELECT * FROM user_progression WHERE user_id = ?"
       ).bind(user.id).first();
@@ -5592,19 +5594,25 @@ app.post("/api/missions/complete", authMiddleware, zValidator("json", CompleteMi
       const currentXp = Number(updatedProgression?.xp || 0);
       const currentLevel = Number(updatedProgression?.level || 1);
       const xpForNextLevel = currentLevel * 100;
+
       if (currentXp >= xpForNextLevel) {
+        completionPhase = "award_level_up";
         await c.env.fitloot_db.prepare(
           `UPDATE user_progression SET level = COALESCE(level, 1) + 1, xp = COALESCE(xp, 0) - ?, points = COALESCE(points, 0) + 100, updated_at = datetime('now')
           WHERE user_id = ?`
         ).bind(xpForNextLevel, user.id).run();
         leveledUp = true;
+        
+        completionPhase = "lifecycle_level_up";
         const afterLevel = await c.env.fitloot_db.prepare("SELECT level FROM user_progression WHERE user_id = ?").bind(user.id).first<{ level: number }>();
         const newLevel = Number(afterLevel?.level ?? currentLevel + 1);
-        await onLevelUp(c.env.fitloot_db, user.id, newLevel);
-        await tryUnlockSkillsForLevel(c.env.fitloot_db, user.id, newLevel);
+        
+        // Wrap level-up hooks in safety
+        await runMissionLifecycleHookSafely(user.id, "on_level_up", () => onLevelUp(c.env.fitloot_db, user.id, newLevel));
+        await runMissionLifecycleHookSafely(user.id, "unlock_skills", () => tryUnlockSkillsForLevel(c.env.fitloot_db, user.id, newLevel));
       }
 
-      completionPhase = "update_event_counters";
+      completionPhase = "update_event_counters_db";
       await ensureUserCounterRow(c.env.fitloot_db, user.id);
       const currentHour = new Date().getHours();
       await c.env.fitloot_db.prepare(
@@ -5615,6 +5623,8 @@ app.post("/api/missions/complete", authMiddleware, zValidator("json", CompleteMi
               updated_at = datetime('now')
           WHERE user_id = ?`
       ).bind(newStreak, newStreak, user.id).run();
+
+      completionPhase = "lifecycle_mission_events";
       await runMissionLifecycleHookSafely(user.id, "mission_complete_event", () =>
         logUserEvent(c.env.fitloot_db, user.id, 'mission_complete', {
           missionId: mission.id,
@@ -5625,27 +5635,34 @@ app.post("/api/missions/complete", authMiddleware, zValidator("json", CompleteMi
           leveledUp,
         }),
       );
+
+      completionPhase = "lifecycle_streak";
       const completedToday = await c.env.fitloot_db.prepare("SELECT COUNT(*) as c FROM missions WHERE user_id = ? AND is_completed = 1 AND date(completed_at) = date('now')").bind(user.id).first<{ c: number }>();
       await runMissionLifecycleHookSafely(user.id, "streak_continued", () =>
         onStreakContinued(c.env.fitloot_db, user.id, newStreak, Number(completedToday?.c ?? 1), new Date().toISOString()),
       );
-      await onMissionComplete(c.env.fitloot_db, user.id, Number(mission.id));
 
-      completionPhase = "update_subtasks";
+      completionPhase = "lifecycle_on_mission_complete";
+      await runMissionLifecycleHookSafely(user.id, "on_mission_complete_hook", () => 
+        onMissionComplete(c.env.fitloot_db, user.id, Number(mission.id))
+      );
+
+      completionPhase = "lifecycle_subtasks";
       await runMissionLifecycleHookSafely(user.id, "update_subtasks", () =>
         updateMissionSubtaskProgress(user.id, mission as Record<string, unknown>, c.env.fitloot_db),
       );
 
-      completionPhase = "update_weekly_circuits";
+      completionPhase = "lifecycle_weekly_circuits";
       await runMissionLifecycleHookSafely(user.id, "update_weekly_circuits", () =>
         updateCircuitProgress(user.id, mission as Record<string, unknown>, c.env.fitloot_db),
       );
 
-      completionPhase = "update_monthly_progress";
+      completionPhase = "lifecycle_monthly_progress";
       await runMissionLifecycleHookSafely(user.id, "update_monthly_progress", () =>
         updateMonthlyMissionProgress(user.id, c.env.fitloot_db),
       );
 
+      completionPhase = "lifecycle_goal_progress";
       await runMissionLifecycleHookSafely(user.id, "goal_progress", async () => {
         const relevance = await checkMissionRelevance(user.id, Number(mission.id), c.env.fitloot_db, 'completed');
         if (!relevance.isGoalRelevant) return;
@@ -5655,12 +5672,15 @@ app.post("/api/missions/complete", authMiddleware, zValidator("json", CompleteMi
         await c.env.fitloot_db.prepare("UPDATE user_goal_stats SET goal_progress_percent = ?, updated_at = datetime('now') WHERE user_id = ?").bind(progressPercent, user.id).run();
         await onGoalProgress(c.env.fitloot_db, user.id, progressPercent);
       });
+
       if (currentHour >= 2 && currentHour < 4) {
+        completionPhase = "lifecycle_night_achievement";
         await runMissionLifecycleHookSafely(user.id, "night_achievement", () =>
           unlockAchievementIfNeeded(c.env.fitloot_db, user.id, 'InsÃƒÂ´nia', 1, 1),
         );
       }
 
+      completionPhase = "update_skill_progress";
       const missionRecord = mission as Record<string, unknown>;
       const missionMetricType = normalizeMissionMetricType(
         missionRecord.metric_type,
@@ -5676,7 +5696,7 @@ app.post("/api/missions/complete", authMiddleware, zValidator("json", CompleteMi
           : 0;
 
       if (mission.skill_id && (repsForSkill > 0 || timeForSkill > 0)) {
-        completionPhase = "update_skill_stats";
+        completionPhase = "update_skill_stats_db";
         await c.env.fitloot_db.prepare(
           `UPDATE user_skills SET total_reps = total_reps + ?, total_time = total_time + ?, best_reps = MAX(best_reps, ?), updated_at = datetime('now')
           WHERE user_id = ? AND skill_id = ?`
@@ -5687,7 +5707,7 @@ app.post("/api/missions/complete", authMiddleware, zValidator("json", CompleteMi
         ).bind(mission.skill_id).first();
 
         if (skill) {
-          completionPhase = "update_attributes";
+          completionPhase = "update_attributes_db";
           await c.env.fitloot_db.prepare(
             `UPDATE user_attributes SET 
             strength = strength + ?, constitution = constitution + ?, 
@@ -5701,6 +5721,7 @@ app.post("/api/missions/complete", authMiddleware, zValidator("json", CompleteMi
           ).run();
         }
       }
+      completionPhase = "completed";
     });
 
     invalidateRankingCache();
