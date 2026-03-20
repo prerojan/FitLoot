@@ -120,22 +120,22 @@ export default function AIMissionGenerator({ onMissionsGenerated }: AIMissionGen
 
       const payload = (await response.json().catch(() => null)) as MissionGenerationResponse | null;
       if (!response.ok) {
-        throw new Error(payload?.error ?? "Nao foi possivel gerar missoes agora.");
+        throw new Error(payload?.error ?? "Não foi possível gerar missões agora.");
       }
 
       triggerDashboardRefresh();
       setNotice({
         tone: payload?.generated === false ? "info" : "success",
         message: payload?.generated === false
-          ? "Voce ja possui missoes ativas neste ciclo."
-          : "Missoes geradas e adicionadas ao dashboard.",
+          ? "Você já possui missões ativas neste ciclo."
+          : "Missões geradas e adicionadas ao dashboard.",
       });
     } catch (generationError) {
       console.error("[AIMissionGenerator]", generationError);
       setError(
         generationError instanceof Error && generationError.message.trim().length > 0
           ? generationError.message
-          : "Nao foi possivel gerar missoes. Tente novamente.",
+          : "Não foi possível gerar missões. Tente novamente.",
       );
     } finally {
       setLoading(false);
@@ -149,9 +149,9 @@ export default function AIMissionGenerator({ onMissionsGenerated }: AIMissionGen
           <Wand2 className="w-5 h-5 text-white" />
         </div>
         <div className="flex-1 text-white">
-          <h3 className="font-bold mb-1">Gerador de Missoes IA</h3>
+          <h3 className="font-bold mb-1">Gerador de Missões IA</h3>
           <p className="text-sm text-white/90">
-            Gera um ciclo completo de missoes personalizadas com base no seu perfil, historico e progresso recente.
+            Gera um ciclo completo de missões personalizadas com base no seu perfil, histórico e progresso recente.
           </p>
         </div>
       </div>
@@ -186,18 +186,18 @@ export default function AIMissionGenerator({ onMissionsGenerated }: AIMissionGen
         {loading ? (
           <div className="flex items-center justify-center gap-2">
             <LoadingBall size="sm" />
-            <span>Gerando e sincronizando missoes...</span>
+            <span>Gerando e sincronizando missões...</span>
           </div>
         ) : (
           <div className="flex items-center justify-center gap-2">
             <Wand2 className="w-4 h-4" />
-            <span>Gerar Missoes Personalizadas</span>
+            <span>Gerar Missões Personalizadas</span>
           </div>
         )}
       </button>
 
       <p className="text-xs text-white/75 text-center mt-2">
-        Gera ate 5 diarias, 5 semanais e 5 mensais, com polling automatico do dashboard a cada 2 segundos.
+        Gera até 5 diárias, 5 semanais e 5 mensais, com polling automático do dashboard a cada 2 segundos.
       </p>
     </div>
   );

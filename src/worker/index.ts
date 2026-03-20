@@ -25,6 +25,12 @@ import {
   repairKnownMojibakeString,
 } from "../shared/textEncoding";
 import {
+  buildMissionDisplayGoalFromTasks,
+  buildMissionFallbackMediaDataUrl,
+  localizeMissionText,
+  localizeMissionTextArray,
+} from "../shared/missionLocalization";
+import {
   MISSION_LIMITS,
   classifyMission,
   formatMissionGoal,
@@ -4311,43 +4317,56 @@ function normalizeMissionRow(rawMission: Record<string, unknown>): Record<string
   const metricUnit = typeof rawMission.metric_unit === "string" && rawMission.metric_unit.length > 0
     ? rawMission.metric_unit
     : metricUnitByType(metricType);
+  const circuitTasks = localizeCircuitTasksForDisplay(parseCircuitTaskField(rawMission.circuit_tasks_json));
+  const displayTitle = typeof rawMission.title === "string"
+    ? (localizeMissionText(rawMission.title) ?? rawMission.title)
+    : "Miss\u00e3o";
+  const displayDescription = typeof rawMission.description === "string"
+    ? (localizeMissionText(rawMission.description) ?? rawMission.description)
+    : rawMission.description;
+  const localizedGoal = resolveMissionDisplayGoal(rawMission.goal, rawMission.type, circuitTasks);
+  const progressValue = rawMission.progress_value === null || rawMission.progress_value === undefined
+    ? (circuitTasks.length > 0 ? circuitTasks.filter((task) => task.completed).length : undefined)
+    : Number(rawMission.progress_value);
+  const displayImageUrl = resolveMissionDisplayImage(rawMission, displayTitle);
 
   return {
     ...rawMission,
+    title: displayTitle,
+    description: displayDescription,
     metric_type: metricType,
     metric_value: metricValue > 0 ? metricValue : 1,
     metric_unit: metricUnit,
     sets: rawMission.sets === null || rawMission.sets === undefined ? null : Number(rawMission.sets),
     rest_seconds: rawMission.rest_seconds === null || rawMission.rest_seconds === undefined ? null : Number(rawMission.rest_seconds),
-    instructions: parseMissionArrayField(rawMission.instructions_json),
-    exercise_instructions_en: parseMissionArrayField(rawMission.exercise_instructions_en_json),
-    exercise_instructions_pt: parseMissionArrayField(rawMission.exercise_instructions_pt_json),
-    muscle_groups: parseMissionArrayField(rawMission.muscle_groups_json),
-    exercise_secondary_muscles: parseMissionArrayField(rawMission.exercise_secondary_muscles_json),
-    attributes_benefited: parseMissionArrayField(rawMission.attributes_benefited_json),
-    safety_tips: parseMissionArrayField(rawMission.safety_tips_json),
-    circuit_tasks: parseCircuitTaskField(rawMission.circuit_tasks_json),
+    instructions: localizeMissionTextArray(parseMissionArrayField(rawMission.instructions_json)),
+    exercise_instructions_en: localizeMissionTextArray(parseMissionArrayField(rawMission.exercise_instructions_en_json)),
+    exercise_instructions_pt: localizeMissionTextArray(parseMissionArrayField(rawMission.exercise_instructions_pt_json)),
+    muscle_groups: localizeMissionTextArray(parseMissionArrayField(rawMission.muscle_groups_json)),
+    exercise_secondary_muscles: localizeMissionTextArray(parseMissionArrayField(rawMission.exercise_secondary_muscles_json)),
+    attributes_benefited: localizeMissionTextArray(parseMissionArrayField(rawMission.attributes_benefited_json)),
+    safety_tips: localizeMissionTextArray(parseMissionArrayField(rawMission.safety_tips_json)),
+    circuit_tasks: circuitTasks,
     exercise_type: typeof rawMission.exercise_type === "string" ? rawMission.exercise_type : "forca",
     body_area: rawMission.body_area === "upper" || rawMission.body_area === "lower" || rawMission.body_area === "core" || rawMission.body_area === "full_body"
       ? rawMission.body_area
       : "full_body",
-    exercise_name: typeof rawMission.exercise_name === "string" ? rawMission.exercise_name : null,
-    exercise_equipment: typeof rawMission.exercise_equipment === "string" ? rawMission.exercise_equipment : null,
-    exercise_body_part: typeof rawMission.exercise_body_part === "string" ? rawMission.exercise_body_part : null,
-    exercise_target: typeof rawMission.exercise_target === "string" ? rawMission.exercise_target : null,
+    exercise_name: typeof rawMission.exercise_name === "string" ? (localizeMissionText(rawMission.exercise_name) ?? rawMission.exercise_name) : null,
+    exercise_equipment: typeof rawMission.exercise_equipment === "string" ? (localizeMissionText(rawMission.exercise_equipment) ?? rawMission.exercise_equipment) : null,
+    exercise_body_part: typeof rawMission.exercise_body_part === "string" ? (localizeMissionText(rawMission.exercise_body_part) ?? rawMission.exercise_body_part) : null,
+    exercise_target: typeof rawMission.exercise_target === "string" ? (localizeMissionText(rawMission.exercise_target) ?? rawMission.exercise_target) : null,
+    image_url: displayImageUrl,
     exercise_db_gif_url: typeof rawMission.exercise_db_gif_url === "string" ? rawMission.exercise_db_gif_url : null,
     exercise_db_image_url: typeof rawMission.exercise_db_image_url === "string" ? rawMission.exercise_db_image_url : null,
     duration_estimate_minutes: durationEstimate > 0 ? durationEstimate : undefined,
     exercise_category: typeof rawMission.exercise_category === "string" ? rawMission.exercise_category : "default",
-    difficulty_level: typeof rawMission.difficulty_level === "string" ? rawMission.difficulty_level : undefined,
+    difficulty_level: localizeDifficultyLabel(typeof rawMission.difficulty_level === "string" ? rawMission.difficulty_level : undefined),
     video_url: typeof rawMission.video_url === "string" ? rawMission.video_url : null,
     thumbnail_url: typeof rawMission.thumbnail_url === "string" ? rawMission.thumbnail_url : null,
     mission_origin: rawMission.mission_origin === "ai" ? "ai" : "regular",
-    goal: typeof rawMission.goal === "string" ? rawMission.goal : null,
+    goal: localizedGoal,
     is_ai_special: Number(rawMission.is_ai_special ?? 0) === 1 ? 1 : 0,
-    progress_value: rawMission.progress_value === null || rawMission.progress_value === undefined
-      ? undefined
-      : Number(rawMission.progress_value),
+    progress_value: progressValue,
   };
 }
 
@@ -4694,6 +4713,7 @@ function createMissionRefreshPromise(env: Env, db: D1Database, userId: string): 
 
   const refreshPromise = (async () => {
     try {
+      await repairLegacyPeriodicMissions(env, db, userId);
       await ensurePeriodicMissions(env, db, userId);
       await updateMonthlyMissionProgress(userId, db);
       clearMissionListCache(userId);
@@ -4747,6 +4767,55 @@ function normalizeMatchText(value: string): string {
     .normalize("NFD")
     .replace(/\p{Diacritic}/gu, "")
     .toLowerCase();
+}
+
+function localizeDifficultyLabel(value: string | null | undefined): string | undefined {
+  if (typeof value !== "string" || value.trim().length === 0) return undefined;
+  const normalized = normalizeMatchText(value);
+  if (normalized.includes("avanc")) return "Avan\u00e7ado";
+  if (normalized.includes("inter")) return "Intermedi\u00e1rio";
+  if (normalized.includes("sedent")) return "Sedent\u00e1rio";
+  if (normalized.includes("inic")) return "Iniciante";
+  return localizeMissionText(value) ?? value;
+}
+
+function localizeCircuitTasksForDisplay(tasks: CircuitTask[]): CircuitTask[] {
+  return tasks.map((task) => ({
+    ...task,
+    label: localizeMissionText(task.label) ?? task.label,
+  }));
+}
+
+function resolveMissionDisplayGoal(
+  rawGoal: unknown,
+  missionType: unknown,
+  circuitTasks: CircuitTask[],
+): string | null {
+  if (typeof rawGoal === "string" && rawGoal.trim().length > 0) {
+    return localizeMissionText(rawGoal) ?? rawGoal;
+  }
+  if ((missionType !== "weekly" && missionType !== "monthly") || circuitTasks.length === 0) {
+    return null;
+  }
+  return buildMissionDisplayGoalFromTasks(
+    circuitTasks.map((task) => task.label),
+    missionType,
+  );
+}
+
+function resolveMissionDisplayImage(rawMission: Record<string, unknown>, fallbackLabel: string): string {
+  const imageCandidates = [
+    rawMission.image_url,
+    rawMission.exercise_db_gif_url,
+    rawMission.thumbnail_url,
+    rawMission.exercise_db_image_url,
+  ];
+  for (const candidate of imageCandidates) {
+    if (typeof candidate === "string" && candidate.trim().length > 0) {
+      return candidate;
+    }
+  }
+  return buildMissionFallbackMediaDataUrl(fallbackLabel);
 }
 
 function missionMatchesTask(completedMission: Record<string, unknown>, task: CircuitTask): boolean {
@@ -4827,11 +4896,12 @@ async function refreshMissionFromSubtasks(
   if (subtasks.length === 0) return;
 
   const circuitTasks = missionSubtasksToCircuitTasks(subtasks);
+  const completedSubtaskCount = subtasks.filter((subtask) => subtask.is_completed).length;
   await db.prepare(
     `UPDATE missions
-      SET circuit_tasks_json = ?, updated_at = datetime('now')
+      SET circuit_tasks_json = ?, progress_value = ?, updated_at = datetime('now')
       WHERE id = ?`
-  ).bind(JSON.stringify(circuitTasks), parentMissionId).run();
+  ).bind(JSON.stringify(circuitTasks), completedSubtaskCount, parentMissionId).run();
 
   const allCompleted = subtasks.every((subtask) => subtask.is_completed);
   if (!allCompleted) return;
@@ -6621,9 +6691,12 @@ function buildCircuitTasks(exerciseName: string, period: MissionPeriod): Circuit
   const baseRequired = period === "weekly" ? 5 : period === "monthly" ? 7 : 3;
   const fullBodyRequired = period === "weekly" ? 3 : baseRequired;
 
-  const toTask = (missionType: string, label: string, requiredCount = baseRequired): CircuitTask => ({
+  const toTaskLabel = (exerciseLabel: string, requiredCount: number): string =>
+    `Conclua ${requiredCount} missões diárias de ${exerciseLabel}`;
+
+  const toTask = (missionType: string, exerciseLabel: string, requiredCount = baseRequired): CircuitTask => ({
     id: crypto.randomUUID(),
-    label,
+    label: toTaskLabel(exerciseLabel, requiredCount),
     mission_type: missionType,
     required_count: requiredCount,
     current_count: 0,
@@ -6632,70 +6705,61 @@ function buildCircuitTasks(exerciseName: string, period: MissionPeriod): Circuit
 
   if (lower.includes("upper body")) {
     return [
-      toTask("push-up", "Completar 5 missoes de Flexao"),
-      toTask("pull-up", "Completar 5 missoes de Barra"),
-      toTask("abdominal", "Completar 5 missoes de Abdominal"),
-      toTask("plank", "Completar 5 missoes de Prancha"),
+      toTask("push-up", "flexão"),
+      toTask("pull-up", "barra fixa"),
+      toTask("abdominal", "abdominal"),
+      toTask("plank", "prancha"),
     ];
   }
 
   if (lower.includes("lower body")) {
     return [
-      toTask("squat", "Completar 5 missoes de Agachamento"),
-      toTask("lunge", "Completar 5 missoes de Avanco"),
-      toTask("glute", "Completar 5 missoes de Gluteo"),
-      toTask("run", "Completar 3 missoes de Corrida", 3),
+      toTask("squat", "agachamento"),
+      toTask("lunge", "avanço"),
+      toTask("glute", "glúteos"),
+      toTask("run", "corrida", 3),
     ];
   }
 
   if (lower.includes("core")) {
     return [
-      toTask("abdominal", "Completar 5 missoes de Abdominal"),
-      toTask("plank", "Completar 5 missoes de Prancha"),
-      toTask("hollow body", "Completar 5 missoes de Hollow Body"),
-      toTask("wall sit", "Completar 5 missoes de Wall Sit"),
+      toTask("abdominal", "abdominal"),
+      toTask("plank", "prancha"),
+      toTask("hollow body", "hollow body"),
+      toTask("wall sit", "cadeira isométrica"),
     ];
   }
 
   if (lower.includes("mobility") || lower.includes("recovery")) {
     return [
-      toTask("stretching", "Completar 5 missoes de Alongamento"),
-      toTask("mobility", "Completar 5 missoes de Mobilidade"),
-      toTask("walk", "Completar 5 missoes de Caminhada"),
-      toTask("yoga", "Completar 5 missoes de Yoga"),
+      toTask("stretching", "alongamento"),
+      toTask("mobility", "mobilidade"),
+      toTask("walk", "caminhada"),
+      toTask("yoga", "yoga"),
     ];
   }
 
   return [
-    toTask("push-up", "Completar 3 missoes de Flexao", fullBodyRequired),
-    toTask("squat", "Completar 3 missoes de Agachamento", fullBodyRequired),
-    toTask("abdominal", "Completar 3 missoes de Abdominal", fullBodyRequired),
-    toTask("plank", "Completar 3 missoes de Prancha", fullBodyRequired),
-    toTask("burpee", "Completar 3 missoes de Burpee", fullBodyRequired),
+    toTask("push-up", "flexão", fullBodyRequired),
+    toTask("squat", "agachamento", fullBodyRequired),
+    toTask("abdominal", "abdominal", fullBodyRequired),
+    toTask("plank", "prancha", fullBodyRequired),
+    toTask("burpee", "burpee", fullBodyRequired),
   ];
-}
-
-function weeklyCircuitNameFromFocus(dayFocus: string, muscle: string): string {
-  const combined = `${dayFocus} ${muscle}`.toLowerCase();
-  if (combined.includes("upper") || combined.includes("push")) return "Upper Body Strength & Core";
-  if (combined.includes("lower") || combined.includes("legs")) return "Lower Body Power";
-  if (combined.includes("core")) return "Core Control Circuit";
-  if (combined.includes("mobility") || combined.includes("recover") || combined.includes("rest")) return "Mobility & Recovery Circuit";
-  return "Full Body Calisthenics Circuit";
 }
 
 function buildMissionDescription(exerciseName: string, metricType: MissionMetricType, metricValue: number, sets: number | null): string {
   const goalText = formatMissionGoal(metricType, metricValue, sets ?? undefined);
   if (metricType === "circuit_tasks") {
-    return `Conclua o circuito semanal ${exerciseName}. O progresso das tarefas atualiza automaticamente ao completar missoes diarias.`;
+    return `Conclua o circuito semanal ${exerciseName}. O progresso das tarefas atualiza automaticamente ao completar missões diárias compatíveis.`;
   }
   if (metricType === "duration_seconds" && sets) {
     const secondsPerSet = Math.max(10, Math.floor(metricValue / sets));
-    return `Execute ${sets} series de ${exerciseName}, mantendo ${secondsPerSet} segundos por serie.`;
+    return `Execute ${sets} séries de ${exerciseName}, mantendo ${secondsPerSet} segundos por série.`;
   }
   if (metricType === "sets_reps" && sets) {
     const repsPerSet = Math.max(4, Math.floor(metricValue / sets));
-    return `Complete ${sets} series de ${repsPerSet} repeticoes de ${exerciseName} com boa tecnica.`;
+    return `Complete ${sets} séries de ${repsPerSet} repetições de ${exerciseName} com boa técnica.`;
   }
   if (metricType === "steps") {
     return `Acumule ${metricValue.toLocaleString("pt-BR")} passos no dia usando caminhada ativa.`;
@@ -6705,7 +6769,7 @@ function buildMissionDescription(exerciseName: string, metricType: MissionMetric
     return `Cubra ${km} km de corrida ou trote em ritmo constante.`;
   }
   if (metricType === "duration_minutes") {
-    return `Realize ${metricValue} minutos de ${exerciseName} mantendo respiracao e postura.`;
+    return `Realize ${metricValue} minutos de ${exerciseName} mantendo respiração e postura.`;
   }
   return `Cumpra a meta de ${goalText} em ${exerciseName} com controle total do movimento.`;
 }
@@ -7010,87 +7074,7 @@ function getWeekdayPtBr(now = new Date()) {
 }
 
 function fallbackMissionsForPeriod(period: MissionPeriod, titlePrefix: string, xp: number, points: number): MissionPayload[] {
-  if (period === "weekly") {
-    return [
-      buildMissionPayload({
-        period,
-        titlePrefix,
-        exerciseName: "Upper Body Strength & Core",
-        muscle: "upper",
-        xp,
-        points,
-        forceCategory: "cardio_circuit",
-      }),
-      buildMissionPayload({
-        period,
-        titlePrefix,
-        exerciseName: "Lower Body Power",
-        muscle: "lower",
-        xp,
-        points,
-        forceCategory: "cardio_circuit",
-      }),
-      buildMissionPayload({
-        period,
-        titlePrefix,
-        exerciseName: "Core Control Circuit",
-        muscle: "core",
-        xp,
-        points,
-        forceCategory: "cardio_circuit",
-      }),
-      buildMissionPayload({
-        period,
-        titlePrefix,
-        exerciseName: "Full Body Calisthenics Circuit",
-        muscle: "full body",
-        xp,
-        points,
-        forceCategory: "cardio_circuit",
-      }),
-      buildMissionPayload({
-        period,
-        titlePrefix,
-        exerciseName: "Mobility & Recovery Circuit",
-        muscle: "mobility",
-        xp,
-        points,
-        forceCategory: "cardio_circuit",
-      }),
-    ];
-  }
-
-  if (period === "monthly") {
-    return [
-      buildMissionPayload({
-        period,
-        titlePrefix,
-        exerciseName: "Consistencia Mensal",
-        muscle: "full body",
-        xp,
-        points,
-        forceCategory: "strength",
-      }),
-      buildMissionPayload({
-        period,
-        titlePrefix,
-        exerciseName: "Distancia Acumulada no Mes",
-        muscle: "legs",
-        xp,
-        points,
-        forceCategory: "run",
-      }),
-      buildMissionPayload({
-        period,
-        titlePrefix,
-        exerciseName: "Streak de Treino Mensal",
-        muscle: "full body",
-        xp,
-        points,
-        forceCategory: "walk",
-      }),
-    ];
-  }
+  if (period !== "daily") return [];
 
   return [
     buildMissionPayload({
@@ -7410,6 +7394,19 @@ async function mapWithConcurrency<TInput, TResult>(
 }
 
 async function createMissionsForPeriod(env: Env, db: D1Database, userId: string, period: MissionPeriod, requestedAmount?: number) {
+  if (period !== "daily") {
+    const boundedRequestedAmount = Math.max(1, Math.min(requestedAmount ?? MISSION_LIMITS[period], MISSION_LIMITS[period]));
+    const activeCounts = await getActiveCycleMissionCounts(db, userId, "regular");
+    if (activeCounts.daily === 0) {
+      await createMissionsForPeriod(env, db, userId, "daily", MISSION_LIMITS.daily);
+    }
+    await ensureStructuredPeriodicMissionsFromExistingDailyBlueprints(env, db, userId, {
+      weeklyTarget: period === "weekly" ? boundedRequestedAmount : 0,
+      monthlyTarget: period === "monthly" ? boundedRequestedAmount : 0,
+    });
+    return;
+  }
+
   const [
     profile,
     progression,
@@ -7586,15 +7583,12 @@ async function createMissionsForPeriod(env: Env, db: D1Database, userId: string,
   const validateMission = (mission: MissionPayload): MissionPayload => {
     const exerciseName = extractExerciseName(mission.title);
     let metricType = mission.metric_type;
-    if (period === "daily") {
-      const expected = getMissionMetricType(exerciseName);
-      metricType = expected === "circuit_tasks" ? "sets_reps" : expected;
-    }
-    if (period === "weekly") metricType = "circuit_tasks";
-    const metricValue = conditionedMetricValue(metricType, period, conditioning, volumeMultiplier);
+    const expected = getMissionMetricType(exerciseName);
+    metricType = expected === "circuit_tasks" ? "sets_reps" : expected;
+    const metricValue = conditionedMetricValue(metricType, "daily", conditioning, volumeMultiplier);
     let fixed = applyMissionMetricContext(
       mission,
-      period,
+      "daily",
       exerciseName,
       metricType,
       metricValue,
@@ -7602,16 +7596,13 @@ async function createMissionsForPeriod(env: Env, db: D1Database, userId: string,
     );
     fixed.instructions = ensureInstructionSteps(fixed.instructions, exerciseName, fixed.metric_type, fixed.sets, fixed.rest_seconds);
     fixed.description = buildMissionDescription(exerciseName, fixed.metric_type, fixed.metric_value, fixed.sets);
-    if (period === "weekly" && fixed.circuit_tasks.length === 0) {
-      fixed.circuit_tasks = buildCircuitTasks(exerciseName, period);
-    }
-    if (period === "daily" && classifyMission(fixed.title, fixed.duration_estimate_minutes ?? undefined) === "weekly") {
+    if (classifyMission(fixed.title, fixed.duration_estimate_minutes ?? undefined) === "weekly") {
       fixed = applyMissionMetricContext(
         fixed,
-        period,
+        "daily",
         exerciseName,
         "sets_reps",
-        conditionedMetricValue("sets_reps", period, conditioning, volumeMultiplier),
+        conditionedMetricValue("sets_reps", "daily", conditioning, volumeMultiplier),
         { conditioning, volumeMultiplier },
       );
       fixed.duration_estimate_minutes = Math.min(25, fixed.duration_estimate_minutes ?? 25);
@@ -7764,92 +7755,32 @@ async function createMissionsForPeriod(env: Env, db: D1Database, userId: string,
   };
 
   const missionsToInsert: MissionPayload[] = [];
-  if (period === "daily") {
-    const weekday = getWeekdayPtBr() as WeekdayPtBr;
-    const dayPlan = normalizedWeeklyPlan[weekday] ?? normalizedWeeklyPlan.segunda;
-    const primaryMuscle = safeGet(dayPlan.muscles, 0) ?? "full body";
-    const sourceExercises = await resolveExercisesWithFallback(env, primaryMuscle, equipment || "bodyweight");
-    const plannedCount = Math.max(1, Math.round(targetAmount * 0.7));
-    const variationCount = Math.max(0, targetAmount - plannedCount);
-    const plannedEntries = [
-      ...dayPlan.exercises.map((name) => ({ name, muscle: primaryMuscle })),
-      ...sourceExercises.exercises.map((exercise) => ({ name: exercise.name, muscle: exercise.muscle })),
-    ];
-    const plannedUnique = uniqueExercises(plannedEntries).slice(0, plannedCount);
-    const variationEntries = uniqueExercises([
-      ...capacityRows.results.map((row) => ({ name: row.skill_name, muscle: primaryMuscle })),
-      ...localExercisePool.map((exercise) => ({ name: exercise.name, muscle: exercise.muscle })),
-      ...sourceExercises.exercises.map((exercise) => ({ name: exercise.name, muscle: exercise.muscle })),
-    ]).filter((entry) => !plannedUnique.some((planned) => normalizeMatchText(planned.name) === normalizeMatchText(entry.name)))
-      .slice(0, variationCount);
-    const selectedEntries = [...plannedUnique, ...variationEntries].slice(0, targetAmount);
-    const built = await mapWithConcurrency(
-      selectedEntries,
-      2,
-      async (entry) => buildFromExercise(entry.name, entry.muscle),
-    );
-    missionsToInsert.push(...built);
-  } else if (period === "weekly") {
-    const weeklyEntries = uniqueExercises(
-      WEEKDAY_ORDER
-        .map((day) => normalizedWeeklyPlan[day])
-        .filter((day) => !day.rest_day)
-        .map((day) => ({
-          name: weeklyCircuitNameFromFocus(day.focus, safeGet(day.muscles, 0) ?? "full body"),
-          muscle: safeGet(day.muscles, 0) ?? "full body",
-        })),
-    ).slice(0, targetAmount);
-    const built = await mapWithConcurrency(
-      weeklyEntries,
-      2,
-      async (entry) => buildFromExercise(entry.name, entry.muscle, "cardio_circuit"),
-    );
-    missionsToInsert.push(...built);
-  } else {
-    const monthlyTargets = [
-      {
-        name: "Consistencia Mensal de Missoes",
-        muscle: "full body",
-        metricType: "repetitions" as MissionMetricType,
-        metricValue: Math.max(40, completedCount * 4),
-        description: "Conclua o volume total de missoes planejadas no mes.",
-      },
-      {
-        name: "Distancia Mensal Acumulada",
-        muscle: "legs",
-        metricType: "distance_meters" as MissionMetricType,
-        metricValue: mainGoal.toLowerCase().includes("corrida") ? 60000 : 35000,
-        description: "Acumule distancia total em corrida e caminhada no mes.",
-      },
-      {
-        name: "Streak Mensal Ativo",
-        muscle: "full body",
-        metricType: "repetitions" as MissionMetricType,
-        metricValue: Math.max(12, Math.round(currentRate * 30)),
-        description: "Mantenha dias consecutivos de treino ao longo do mes.",
-      },
-    ].slice(0, targetAmount);
-    const built = await mapWithConcurrency(
-      monthlyTargets,
-      2,
-      async (target) => {
-        const base = await buildFromExercise(target.name, target.muscle);
-        const tuned = applyMissionMetricContext(
-          base,
-          period,
-          target.name,
-          target.metricType,
-          target.metricValue,
-          { conditioning, volumeMultiplier },
-        );
-        tuned.description = target.description;
-        return validateMission(tuned);
-      },
-    );
-    missionsToInsert.push(...built);
-  }
+  const weekday = getWeekdayPtBr() as WeekdayPtBr;
+  const dayPlan = normalizedWeeklyPlan[weekday] ?? normalizedWeeklyPlan.segunda;
+  const primaryMuscle = safeGet(dayPlan.muscles, 0) ?? "full body";
+  const sourceExercises = await resolveExercisesWithFallback(env, primaryMuscle, equipment || "bodyweight");
+  const plannedCount = Math.max(1, Math.round(targetAmount * 0.7));
+  const variationCount = Math.max(0, targetAmount - plannedCount);
+  const plannedEntries = [
+    ...dayPlan.exercises.map((name) => ({ name, muscle: primaryMuscle })),
+    ...sourceExercises.exercises.map((exercise) => ({ name: exercise.name, muscle: exercise.muscle })),
+  ];
+  const plannedUnique = uniqueExercises(plannedEntries).slice(0, plannedCount);
+  const variationEntries = uniqueExercises([
+    ...capacityRows.results.map((row) => ({ name: row.skill_name, muscle: primaryMuscle })),
+    ...localExercisePool.map((exercise) => ({ name: exercise.name, muscle: exercise.muscle })),
+    ...sourceExercises.exercises.map((exercise) => ({ name: exercise.name, muscle: exercise.muscle })),
+  ]).filter((entry) => !plannedUnique.some((planned) => normalizeMatchText(planned.name) === normalizeMatchText(entry.name)))
+    .slice(0, variationCount);
+  const selectedEntries = [...plannedUnique, ...variationEntries].slice(0, targetAmount);
+  const built = await mapWithConcurrency(
+    selectedEntries,
+    2,
+    async (entry) => buildFromExercise(entry.name, entry.muscle),
+  );
+  missionsToInsert.push(...built);
 
-  const fallbackPool = fallbackMissionsForPeriod(period, config.titlePrefix, config.xp, config.points);
+  const fallbackPool = fallbackMissionsForPeriod("daily", config.titlePrefix, config.xp, config.points);
   while (missionsToInsert.length < targetAmount) {
     const fallback = fallbackPool[missionsToInsert.length % fallbackPool.length];
     missionsToInsert.push(validateMission(fallback));
@@ -8062,17 +7993,33 @@ function convertStructuredMetricValue(metricType: MissionMetricType, rawValue: u
 function buildMissionCompatibilityTerms(name: string, muscle: string, metricType: MissionMetricType): string[] {
   const exerciseName = extractExerciseName(name);
   const category = normalizeExerciseCategory(exerciseName, muscle);
+  const localizedName = localizeMissionText(name);
+  const localizedExerciseName = localizeMissionText(exerciseName);
+  const localizedMuscle = localizeMissionText(muscle);
+  const localizedCategory = localizeMissionText(category);
   return mergeUniqueStrings(
     [
       exerciseName,
       name,
+      localizedExerciseName ?? "",
+      localizedName ?? "",
       muscle,
+      localizedMuscle ?? "",
       category,
+      localizedCategory ?? "",
       metricType,
     ],
-    8,
+    12,
   );
 }
+
+const LEGACY_WEEKLY_CIRCUIT_NAMES = [
+  "Full Body Calisthenics Circuit",
+  "Upper Body Strength & Core",
+  "Lower Body Power",
+  "Core Control Circuit",
+  "Mobility & Recovery Circuit",
+] as const;
 
 function summarizeRecentMissionHistory(history: MissionHistorySummaryRow[]): string {
   if (history.length === 0) return "Sem historico recente";
@@ -8322,23 +8269,25 @@ function buildFallbackStructuredPlan(
     } satisfies StructuredDailyMissionDraft;
   });
 
-  const weeklyMissions = dailyMissions.slice(0, options.weeklyTarget).map((dailyMission) => ({
-    name: `Circuito Semanal: ${dailyMission.name ?? "Treino"}`,
-    description: `Avance esta missao automaticamente ao concluir a missao diaria ${dailyMission.name ?? "treino"}.`,
-    goal: `Conclua a missao diaria ${dailyMission.name ?? "treino"} nesta semana`,
-    xp_reward: clampXpRewardByPeriod("weekly", 260),
-    fitcoins_reward: derivePointsRewardByPeriod("weekly", 55, 260),
-    subtasks: [dailyMission.name ?? "Missao diaria"],
-  }));
+  const weeklyMissions = LEGACY_WEEKLY_CIRCUIT_NAMES
+    .slice(0, options.weeklyTarget)
+    .map((missionName, index) => ({
+      name: missionName,
+      description: `O progresso desta miss\u00e3o semanal \u00e9 atualizado automaticamente ao concluir as miss\u00f5es di\u00e1rias compat\u00edveis do circuito ${missionName}.`,
+      goal: `Conclua as miss\u00f5es di\u00e1rias compat\u00edveis do circuito ${missionName} nesta semana.`,
+      xp_reward: clampXpRewardByPeriod("weekly", 260 + index * 15),
+      fitcoins_reward: derivePointsRewardByPeriod("weekly", 55 + index * 3, 260 + index * 15),
+      subtasks: [],
+    }));
 
   const monthlyRepeatCount = Math.max(2, Math.min(4, profile.trainingFrequency));
   const monthlyMissions = dailyMissions.slice(0, options.monthlyTarget).map((dailyMission) => ({
     name: `Meta Mensal: ${dailyMission.name ?? "Treino"}`,
-    description: `Evolua esta missao com repeticoes da missao diaria ${dailyMission.name ?? "treino"} ao longo do mes.`,
-    goal: `Complete ${monthlyRepeatCount} vezes a missao diaria ${dailyMission.name ?? "treino"} neste mes`,
+    description: `Evolua esta missão com repetições da missão diária ${dailyMission.name ?? "treino"} ao longo do mês.`,
+    goal: `Complete ${monthlyRepeatCount} vezes a missão diária ${dailyMission.name ?? "treino"} neste mês.`,
     xp_reward: clampXpRewardByPeriod("monthly", 620),
     fitcoins_reward: derivePointsRewardByPeriod("monthly", 140, 620),
-    subtasks: Array.from({ length: monthlyRepeatCount }, () => dailyMission.name ?? "Missao diaria"),
+    subtasks: Array.from({ length: monthlyRepeatCount }, () => dailyMission.name ?? "Missão diária"),
   }));
 
   return {
@@ -8365,12 +8314,33 @@ function resolveDailyBlueprintForSubtask(
   return null;
 }
 
+function buildLegacyCircuitSubtaskNames(missionName: string, period: MissionPeriod): string[] {
+  if (period !== "weekly") return [];
+  const circuitTasks = buildCircuitTasks(missionName, period);
+  return circuitTasks.flatMap((task) =>
+    Array.from({ length: Math.max(1, task.required_count) }, () => {
+      const localizedLabel = localizeMissionText(task.label) ?? task.label;
+      const compatibleDailyName = localizedLabel
+        .replace(/^Conclua\s+\d+\s+miss(?:ões|oes)\s+di[aá]rias\s+de\s+/i, "")
+        .trim();
+      return compatibleDailyName.length > 0 ? compatibleDailyName : task.mission_type;
+    }),
+  );
+}
+
 function buildFallbackPeriodicSubtaskNames(
   period: MissionPeriod,
   index: number,
   dailyBlueprints: readonly MissionBlueprint[],
   profile: MissionGenerationProfileSnapshot,
+  missionName?: string,
 ): string[] {
+  if (typeof missionName === "string" && missionName.trim().length > 0) {
+    const legacyCircuitSubtasks = buildLegacyCircuitSubtaskNames(missionName, period);
+    if (legacyCircuitSubtasks.length > 0) {
+      return legacyCircuitSubtasks;
+    }
+  }
   if (dailyBlueprints.length === 0) return ["Missao diaria"];
   if (period === "weekly") {
     return [dailyBlueprints[index % dailyBlueprints.length].name];
@@ -8385,18 +8355,22 @@ function resolveMissionSubtasks(
   period: MissionPeriod,
   index: number,
   profile: MissionGenerationProfileSnapshot,
+  missionName?: string,
 ): { subtasks: ResolvedMissionSubtask[]; invalidCount: number } {
   const requestedSubtasks = Array.isArray(rawSubtasks) && rawSubtasks.length > 0
     ? rawSubtasks
-    : buildFallbackPeriodicSubtaskNames(period, index, dailyBlueprints, profile);
+    : buildFallbackPeriodicSubtaskNames(period, index, dailyBlueprints, profile, missionName);
 
   const aggregated = new Map<string, ResolvedMissionSubtask>();
   let invalidCount = 0;
 
   for (const rawSubtask of requestedSubtasks) {
     const directMatch = resolveDailyBlueprintForSubtask(rawSubtask, dailyBlueprints);
-    const match = directMatch ?? dailyBlueprints[index % Math.max(1, dailyBlueprints.length)] ?? null;
-    if (!match) continue;
+    const match = directMatch;
+    if (!match) {
+      invalidCount += 1;
+      continue;
+    }
     if (!directMatch) {
       invalidCount += 1;
     }
@@ -8415,10 +8389,107 @@ function resolveMissionSubtasks(
     });
   }
 
+  if (aggregated.size === 0) {
+    const fallbackMatch = dailyBlueprints[index % Math.max(1, dailyBlueprints.length)] ?? null;
+    if (fallbackMatch) {
+      invalidCount += 1;
+      aggregated.set(fallbackMatch.compatibilityKey, {
+        title: fallbackMatch.name,
+        compatibilityKey: fallbackMatch.compatibilityKey,
+        compatibilityTerms: fallbackMatch.compatibilityTerms,
+        requiredCount: period === "monthly" ? Math.max(2, Math.min(4, profile.trainingFrequency)) : 1,
+      });
+    }
+  }
+
   return {
     subtasks: Array.from(aggregated.values()),
     invalidCount,
   };
+}
+
+function resolvePeriodicMissionBlueprints(params: {
+  period: "weekly" | "monthly";
+  targetCount: number;
+  drafts: readonly StructuredPeriodicMissionDraft[];
+  fallbackDrafts: readonly StructuredPeriodicMissionDraft[];
+  dailyBlueprints: readonly MissionBlueprint[];
+  profile: MissionGenerationProfileSnapshot;
+  missionOrigin: "regular" | "ai";
+  isAiSpecial: boolean;
+}): { blueprints: MissionBlueprint[]; invalidCount: number; totalCount: number } {
+  const blueprints: MissionBlueprint[] = [];
+  let invalidCount = 0;
+  let totalCount = 0;
+
+  for (let index = 0; index < params.targetCount; index += 1) {
+    totalCount += 1;
+    const draft = params.drafts[index];
+    const source = draft ?? params.fallbackDrafts[index % Math.max(1, params.fallbackDrafts.length)] ?? null;
+    if (!source) continue;
+    if (!draft) invalidCount += 1;
+
+    const name = toSafeString(source.name, `${params.period === "weekly" ? "Missão Semanal" : "Missão Mensal"} ${index + 1}`);
+    const description = toSafeString(
+      source.description,
+      `Progresso automático baseado em missões diárias compatíveis para ${name}.`,
+    );
+    const subtaskResolution = resolveMissionSubtasks(
+      source.subtasks,
+      params.dailyBlueprints,
+      params.period,
+      index,
+      params.profile,
+      name,
+    );
+    invalidCount += subtaskResolution.invalidCount;
+    if (subtaskResolution.subtasks.length === 0) {
+      invalidCount += 1;
+      continue;
+    }
+
+    const goalInput = typeof source.goal === "string" ? source.goal.trim() : "";
+    if (goalInput.length === 0) {
+      invalidCount += 1;
+    }
+
+    const goal = buildMissionDisplayGoalFromTasks(
+      subtaskResolution.subtasks.map((subtask) => subtask.title),
+      params.period,
+    ) ?? toSafeString(
+      source.goal,
+      params.period === "weekly"
+        ? `Conclua as miss\u00f5es di\u00e1rias compat\u00edveis desta miss\u00e3o nesta semana.`
+        : `Conclua as miss\u00f5es di\u00e1rias compat\u00edveis desta miss\u00e3o ao longo deste m\u00eas.`,
+    );
+
+    const rawXpReward = toPositiveInt(source.xp_reward, missionConfigByPeriod(params.period).xp);
+    const xpReward = clampXpRewardByPeriod(params.period, source.xp_reward);
+    if (xpReward !== rawXpReward) {
+      invalidCount += 1;
+    }
+
+    blueprints.push({
+      period: params.period,
+      name,
+      description,
+      goal,
+      exerciseName: name,
+      muscle: "full body",
+      metricType: "circuit_tasks",
+      metricValue: Math.max(1, subtaskResolution.subtasks.reduce((total, subtask) => total + subtask.requiredCount, 0)),
+      xpReward,
+      pointsReward: derivePointsRewardByPeriod(params.period, source.fitcoins_reward, xpReward),
+      difficultyLevel: params.profile.conditioning,
+      missionOrigin: params.missionOrigin,
+      isAiSpecial: params.isAiSpecial,
+      compatibilityKey: normalizeMatchText(name),
+      compatibilityTerms: [name, goal],
+      subtasks: subtaskResolution.subtasks,
+    });
+  }
+
+  return { blueprints, invalidCount, totalCount };
 }
 
 function metricValidationRange(
@@ -8552,59 +8623,21 @@ function validateStructuredMissionPlan(
   };
 
   for (const period of ["weekly", "monthly"] as const) {
-    const targetCount = period === "weekly" ? options.weeklyTarget : options.monthlyTarget;
-    const periodDrafts = periodicSourceByPeriod[period];
-    for (let index = 0; index < targetCount; index += 1) {
-      totalCount += 1;
-      const draft = periodDrafts[index];
-      const fallbackDrafts = period === "weekly"
+    const resolution = resolvePeriodicMissionBlueprints({
+      period,
+      targetCount: period === "weekly" ? options.weeklyTarget : options.monthlyTarget,
+      drafts: periodicSourceByPeriod[period],
+      fallbackDrafts: period === "weekly"
         ? (fallbackPlan.weekly_plan?.weekly_missions ?? [])
-        : (fallbackPlan.weekly_plan?.monthly_missions ?? []);
-      const source = draft ?? fallbackDrafts[index % Math.max(1, fallbackDrafts.length)] ?? null;
-      if (!source) continue;
-      if (!draft) invalidCount += 1;
-
-      const name = toSafeString(source.name, `${period === "weekly" ? "Missao Semanal" : "Missao Mensal"} ${index + 1}`);
-      const description = toSafeString(source.description, `Progresso automatico baseado em missoes diarias compativeis para ${name}.`);
-      const subtaskResolution = resolveMissionSubtasks(source.subtasks, dailyBlueprints, period, index, profile);
-      invalidCount += subtaskResolution.invalidCount;
-      if (subtaskResolution.subtasks.length === 0) {
-        invalidCount += 1;
-      }
-      const goalInput = typeof source.goal === "string" ? source.goal.trim() : "";
-      if (goalInput.length === 0) {
-        invalidCount += 1;
-      }
-      const goal = toSafeString(
-        source.goal,
-        period === "weekly"
-          ? `Conclua ${subtaskResolution.subtasks.map((subtask) => subtask.title).join(", ")} nesta semana`
-          : `Complete ${subtaskResolution.subtasks.reduce((total, subtask) => total + subtask.requiredCount, 0)} tarefas compativeis neste mes`,
-      );
-      const rawXpReward = toPositiveInt(source.xp_reward, missionConfigByPeriod(period).xp);
-      const xpReward = clampXpRewardByPeriod(period, source.xp_reward);
-      if (xpReward !== rawXpReward) {
-        invalidCount += 1;
-      }
-      blueprints.push({
-        period,
-        name,
-        description,
-        goal,
-        exerciseName: name,
-        muscle: "full body",
-        metricType: "circuit_tasks",
-        metricValue: Math.max(1, subtaskResolution.subtasks.reduce((total, subtask) => total + subtask.requiredCount, 0)),
-        xpReward,
-        pointsReward: derivePointsRewardByPeriod(period, source.fitcoins_reward, xpReward),
-        difficultyLevel: profile.conditioning,
-        missionOrigin: "regular",
-        isAiSpecial: false,
-        compatibilityKey: normalizeMatchText(name),
-        compatibilityTerms: [name, goal],
-        subtasks: subtaskResolution.subtasks,
-      });
-    }
+        : (fallbackPlan.weekly_plan?.monthly_missions ?? []),
+      dailyBlueprints,
+      profile,
+      missionOrigin: "regular",
+      isAiSpecial: false,
+    });
+    totalCount += resolution.totalCount;
+    invalidCount += resolution.invalidCount;
+    blueprints.push(...resolution.blueprints);
   }
 
   return { blueprints, invalidCount, totalCount };
@@ -8849,16 +8882,105 @@ async function listCurrentCycleMissions(
       const cycleStart = Date.parse(missionCycleStartIso(mission.type));
       return Number.isFinite(createdAt) ? createdAt >= cycleStart : true;
     })
-    .map((mission) => missionSummaryFromNormalized(mission) as unknown as MissionPayload & { type: MissionPeriod });
+     .map((mission) => missionSummaryFromNormalized(mission) as unknown as MissionPayload & { type: MissionPeriod });
 }
 
-async function persistGeneratedMissionPlan(
+type MaterializedMissionEntry = {
+  blueprint: MissionBlueprint;
+  mission: MissionPayload;
+};
+
+function buildDailyBlueprintFromMissionPayload(
+  mission: MissionPayload & { type: MissionPeriod },
+  profile: MissionGenerationProfileSnapshot,
+): MissionBlueprint | null {
+  if (mission.type !== "daily") return null;
+  const exerciseName = typeof mission.exercise_name === "string" && mission.exercise_name.trim().length > 0
+    ? mission.exercise_name.trim()
+    : extractExerciseName(mission.title);
+  const muscle = mission.exercise_target
+    ?? mission.muscle_groups?.[0]
+    ?? "full body";
+  const metricType = mission.metric_type;
+  if (
+    metricType !== "repetitions" &&
+    metricType !== "duration_seconds" &&
+    metricType !== "sets_reps" &&
+    metricType !== "steps" &&
+    metricType !== "distance_meters" &&
+    metricType !== "duration_minutes" &&
+    metricType !== "circuit_tasks"
+  ) {
+    return null;
+  }
+
+  const missionName = exerciseName.trim().length > 0 ? exerciseName : extractExerciseName(mission.title);
+  return {
+    period: "daily",
+    name: missionName,
+    description: mission.description ?? `Complete a meta proposta em ${missionName}.`,
+    goal: null,
+    exerciseName: missionName,
+    muscle,
+    metricType,
+    metricValue: Math.max(1, Number(mission.metric_value ?? mission.target_reps ?? mission.target_time ?? 1)),
+    xpReward: Math.max(1, Number(mission.xp_reward ?? missionConfigByPeriod("daily").xp)),
+    pointsReward: Math.max(1, Number(mission.points_reward ?? missionConfigByPeriod("daily").points)),
+    difficultyLevel: normalizeDifficultyLabel(mission.difficulty_level, profile.conditioning),
+    missionOrigin: "regular",
+    isAiSpecial: false,
+    compatibilityKey: normalizeMatchText(extractExerciseName(mission.title)),
+    compatibilityTerms: mergeUniqueStrings(
+      [
+        ...buildMissionCompatibilityTerms(missionName, muscle, metricType),
+        mission.title,
+        ...(Array.isArray(mission.muscle_groups) ? mission.muscle_groups : []),
+        ...(Array.isArray(mission.exercise_secondary_muscles) ? mission.exercise_secondary_muscles : []),
+      ],
+      12,
+    ),
+    subtasks: [],
+  };
+}
+
+function buildPeriodicFallbackDraftsFromDailyBlueprints(
+  profile: MissionGenerationProfileSnapshot,
+  dailyBlueprints: readonly MissionBlueprint[],
+  targets: { weekly: number; monthly: number },
+): { weekly: StructuredPeriodicMissionDraft[]; monthly: StructuredPeriodicMissionDraft[] } {
+  const monthlyRepeatCount = Math.max(2, Math.min(4, profile.trainingFrequency));
+  const weekly = LEGACY_WEEKLY_CIRCUIT_NAMES
+    .slice(0, targets.weekly)
+    .map((missionName, index) => ({
+      name: missionName,
+      description: `O progresso desta miss\u00e3o semanal \u00e9 atualizado automaticamente ao concluir as miss\u00f5es di\u00e1rias compat\u00edveis do circuito ${missionName}.`,
+      goal: `Conclua as miss\u00f5es di\u00e1rias compat\u00edveis do circuito ${missionName} nesta semana.`,
+      xp_reward: clampXpRewardByPeriod("weekly", 260 + index * 15),
+      fitcoins_reward: derivePointsRewardByPeriod("weekly", 55 + index * 3, 260 + index * 15),
+      subtasks: [],
+    }));
+  const monthly = Array.from({ length: targets.monthly }, (_, index) => {
+    const dailyBlueprint = dailyBlueprints[index % Math.max(1, dailyBlueprints.length)];
+    const dailyMissionName = dailyBlueprint?.name ?? "Missão diária";
+    return {
+      name: `Meta Mensal: ${dailyMissionName}`,
+      description: `Evolua esta miss\u00e3o mensal com repeti\u00e7\u00f5es da miss\u00e3o di\u00e1ria ${dailyMissionName} ao longo do m\u00eas.`,
+      goal: `Conclua as miss\u00f5es di\u00e1rias compat\u00edveis de ${dailyMissionName} ao longo deste m\u00eas.`,
+      xp_reward: clampXpRewardByPeriod("monthly", 620 + index * 25),
+      fitcoins_reward: derivePointsRewardByPeriod("monthly", 140 + index * 8, 620 + index * 25),
+      subtasks: Array.from({ length: monthlyRepeatCount }, () => dailyMissionName),
+    } satisfies StructuredPeriodicMissionDraft;
+  });
+
+  return { weekly, monthly };
+}
+
+async function materializeMissionBlueprints(
   env: Env,
-  db: D1Database,
   profile: MissionGenerationProfileSnapshot,
   blueprints: readonly MissionBlueprint[],
-): Promise<Array<MissionPayload & { type: MissionPeriod }>> {
-  const materialized = await mapWithConcurrency(
+): Promise<MaterializedMissionEntry[]> {
+  return mapWithConcurrency(
     blueprints,
     MISSION_GENERATION_MEDIA_CONCURRENCY,
     async (blueprint) => ({
@@ -8866,6 +8988,28 @@ async function persistGeneratedMissionPlan(
       mission: await materializeMissionBlueprint(env, profile, blueprint),
     }),
   );
+}
+
+async function deleteMissionEntries(db: D1Database, missionIds: readonly number[]): Promise<void> {
+  if (missionIds.length === 0) return;
+  const placeholders = missionIds.map(() => "?").join(", ");
+  await db.prepare(
+    `DELETE FROM mission_subtasks
+      WHERE parent_mission_id IN (${placeholders})`
+  ).bind(...missionIds).run();
+  await db.prepare(
+    `DELETE FROM missions
+      WHERE id IN (${placeholders})`
+  ).bind(...missionIds).run();
+}
+
+async function persistMaterializedMissionEntries(
+  db: D1Database,
+  profile: MissionGenerationProfileSnapshot,
+  materialized: readonly MaterializedMissionEntry[],
+  options?: { replaceMissionIds?: readonly number[] | undefined },
+): Promise<void> {
+  const replaceMissionIds = options?.replaceMissionIds ?? [];
 
   await withTransaction(db, async () => {
     if (!materialized.some((entry) => entry.blueprint.isAiSpecial)) {
@@ -8887,6 +9031,8 @@ async function persistGeneratedMissionPlan(
       );
     }
 
+    await deleteMissionEntries(db, replaceMissionIds);
+
     for (const entry of materialized) {
       const insertedMissionId = await insertMission(
         db,
@@ -8901,9 +9047,156 @@ async function persistGeneratedMissionPlan(
       }
     }
   });
+}
+
+async function persistGeneratedMissionPlan(
+  env: Env,
+  db: D1Database,
+  profile: MissionGenerationProfileSnapshot,
+  blueprints: readonly MissionBlueprint[],
+): Promise<Array<MissionPayload & { type: MissionPeriod }>> {
+  const materialized = await materializeMissionBlueprints(env, profile, blueprints);
+  await persistMaterializedMissionEntries(db, profile, materialized);
 
   invalidateMissionListCache(profile.userId);
   return materialized.map((entry) => ({ ...entry.mission, type: entry.blueprint.period }));
+}
+
+async function listCurrentCycleRegularDailyBlueprints(
+  db: D1Database,
+  userId: string,
+  profile: MissionGenerationProfileSnapshot,
+): Promise<MissionBlueprint[]> {
+  const missions = await listCurrentCycleMissions(db, userId, "regular");
+  return missions
+    .map((mission) => buildDailyBlueprintFromMissionPayload(mission, profile))
+    .filter((mission): mission is MissionBlueprint => mission !== null);
+}
+
+async function ensureStructuredPeriodicMissionsFromExistingDailyBlueprints(
+  env: Env,
+  db: D1Database,
+  userId: string,
+  params: {
+    weeklyTarget: number;
+    monthlyTarget: number;
+    weeklyDrafts?: readonly StructuredPeriodicMissionDraft[] | undefined;
+    monthlyDrafts?: readonly StructuredPeriodicMissionDraft[] | undefined;
+    replaceMissionIds?: readonly number[] | undefined;
+  },
+): Promise<number> {
+  if (params.weeklyTarget <= 0 && params.monthlyTarget <= 0) {
+    return 0;
+  }
+
+  const profile = await loadMissionGenerationProfile(db, userId);
+  if (!profile) return 0;
+
+  const dailyBlueprints = await listCurrentCycleRegularDailyBlueprints(db, userId, profile);
+  if (dailyBlueprints.length === 0) {
+    return 0;
+  }
+
+  const fallbackDrafts = buildPeriodicFallbackDraftsFromDailyBlueprints(profile, dailyBlueprints, {
+    weekly: params.weeklyTarget,
+    monthly: params.monthlyTarget,
+  });
+  const weeklyResolution = resolvePeriodicMissionBlueprints({
+    period: "weekly",
+    targetCount: params.weeklyTarget,
+    drafts: params.weeklyDrafts ?? [],
+    fallbackDrafts: fallbackDrafts.weekly,
+    dailyBlueprints,
+    profile,
+    missionOrigin: "regular",
+    isAiSpecial: false,
+  });
+  const monthlyResolution = resolvePeriodicMissionBlueprints({
+    period: "monthly",
+    targetCount: params.monthlyTarget,
+    drafts: params.monthlyDrafts ?? [],
+    fallbackDrafts: fallbackDrafts.monthly,
+    dailyBlueprints,
+    profile,
+    missionOrigin: "regular",
+    isAiSpecial: false,
+  });
+  const blueprints = [...weeklyResolution.blueprints, ...monthlyResolution.blueprints];
+  if (blueprints.length === 0) {
+    return 0;
+  }
+
+  const materialized = await materializeMissionBlueprints(env, profile, blueprints);
+  await persistMaterializedMissionEntries(db, profile, materialized, {
+    replaceMissionIds: params.replaceMissionIds,
+  });
+  invalidateMissionListCache(profile.userId);
+  return blueprints.length;
+}
+
+function isLegacyMonthlyMissionTitle(title: string): boolean {
+  const normalized = normalizeMatchText(title);
+  return normalized.includes("consistencia mensal")
+    || normalized.includes("distancia mensal")
+    || normalized.includes("streak mensal")
+    || normalized.includes("treino mensal");
+}
+
+async function repairLegacyPeriodicMissions(env: Env, db: D1Database, userId: string): Promise<void> {
+  const rows = await db.prepare(
+    `SELECT id, type, title, description, goal
+      FROM missions
+      WHERE user_id = ?
+        AND type IN ('weekly', 'monthly')
+        AND is_completed = 0
+        AND COALESCE(mission_origin, 'regular') = 'regular'
+        AND (deadline IS NULL OR deadline > datetime('now'))`
+  ).bind(userId).all<Record<string, unknown>>();
+  const periodicRows = Array.isArray(rows.results) ? rows.results : [];
+  if (periodicRows.length === 0) return;
+
+  const parentIds = periodicRows
+    .map((row) => Number(row.id))
+    .filter((missionId) => Number.isInteger(missionId) && missionId > 0);
+  if (parentIds.length === 0) return;
+
+  const subtasksByParentId = await loadMissionSubtasksByParentIds(db, parentIds);
+  const weeklyRowsToRepair = periodicRows.filter((row) => {
+    if (row.type !== "weekly") return false;
+    const missionId = Number(row.id);
+    const hasGoal = typeof row.goal === "string" && row.goal.trim().length > 0;
+    return (subtasksByParentId.get(missionId)?.length ?? 0) === 0 || !hasGoal;
+  });
+  const monthlyRowsToRepair = periodicRows.filter((row) => {
+    if (row.type !== "monthly") return false;
+    const missionId = Number(row.id);
+    const hasGoal = typeof row.goal === "string" && row.goal.trim().length > 0;
+    const title = typeof row.title === "string" ? row.title : "";
+    return (subtasksByParentId.get(missionId)?.length ?? 0) === 0 || !hasGoal || isLegacyMonthlyMissionTitle(title);
+  });
+
+  if (weeklyRowsToRepair.length === 0 && monthlyRowsToRepair.length === 0) {
+    return;
+  }
+
+  const weeklyDrafts = weeklyRowsToRepair.map((row) => ({
+    name: typeof row.title === "string" ? row.title : "Full Body Calisthenics Circuit",
+    description: typeof row.description === "string" && row.description.trim().length > 0
+      ? row.description
+      : "O progresso desta miss\u00e3o semanal \u00e9 atualizado automaticamente ao concluir as miss\u00f5es di\u00e1rias compat\u00edveis.",
+    goal: typeof row.goal === "string" ? row.goal : undefined,
+    subtasks: [],
+  } satisfies StructuredPeriodicMissionDraft));
+  const replaceMissionIds = [...weeklyRowsToRepair, ...monthlyRowsToRepair]
+    .map((row) => Number(row.id))
+    .filter((missionId) => Number.isInteger(missionId) && missionId > 0);
+
+  await ensureStructuredPeriodicMissionsFromExistingDailyBlueprints(env, db, userId, {
+    weeklyTarget: weeklyRowsToRepair.length,
+    monthlyTarget: monthlyRowsToRepair.length,
+    weeklyDrafts,
+    replaceMissionIds,
+  });
 }
 
 async function generateStructuredMissionPlanForUser(
@@ -8915,6 +9208,10 @@ async function generateStructuredMissionPlanForUser(
   const profile = await loadMissionGenerationProfile(db, userId);
   if (!profile) {
     throw new Error("MISSION_GENERATION_PROFILE_INCOMPLETE");
+  }
+
+  if (!options.isAiSpecial) {
+    await repairLegacyPeriodicMissions(env, db, userId);
   }
 
   const activeCounts = await getActiveCycleMissionCounts(db, userId, options.isAiSpecial ? "ai_special" : "regular");
@@ -9000,6 +9297,10 @@ async function ensurePeriodicMissions(env: Env, db: D1Database, userId: string) 
   }
 
   const periods: MissionPeriod[] = ["daily", "weekly", "monthly"];
+  const missingPeriodicTargets = {
+    weekly: 0,
+    monthly: 0,
+  };
 
   for (const period of periods) {
     const cycleStart = missionCycleStartIso(period);
@@ -9026,8 +9327,19 @@ async function ensurePeriodicMissions(env: Env, db: D1Database, userId: string) 
     const existingCount = Number(generatedInCycle?.count ?? 0);
     const missingCount = Math.max(0, MISSION_LIMITS[period] - existingCount);
     if (missingCount > 0) {
-      await createMissionsForPeriod(env, db, userId, period, missingCount);
+      if (period === "daily") {
+        await createMissionsForPeriod(env, db, userId, period, missingCount);
+      } else {
+        missingPeriodicTargets[period] = missingCount;
+      }
     }
+  }
+
+  if (missingPeriodicTargets.weekly > 0 || missingPeriodicTargets.monthly > 0) {
+    await ensureStructuredPeriodicMissionsFromExistingDailyBlueprints(env, db, userId, {
+      weeklyTarget: missingPeriodicTargets.weekly,
+      monthlyTarget: missingPeriodicTargets.monthly,
+    });
   }
 }
 

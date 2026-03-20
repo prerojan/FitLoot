@@ -151,7 +151,7 @@ export default function Dashboard() {
 
         if (!hasCachedEntry) {
           hasRequestError = true;
-          setError("Nao foi possivel carregar todos os dados do dashboard agora.");
+          setError("Não foi possível carregar todos os dados do dashboard agora.");
         }
       } finally {
         setSectionLoading(section, false);
@@ -263,7 +263,7 @@ export default function Dashboard() {
 
       if (!response.ok) {
         const payload = (await response.json().catch(() => null)) as { error?: string | undefined } | null;
-        setError(payload?.error ?? "Nao foi possivel concluir a missao.");
+        setError(payload?.error ?? "Não foi possível concluir a missão.");
         return;
       }
 
@@ -283,7 +283,7 @@ export default function Dashboard() {
 
       await refreshData();
     } catch {
-      setError("Nao foi possivel concluir a missao agora.");
+      setError("Não foi possível concluir a missão agora.");
     }
   };
 
@@ -311,11 +311,11 @@ export default function Dashboard() {
   const missionFeedSections = useMemo(
     () =>
       [
-        { title: "Todas as missoes de hoje", missions: allDailyMissions },
-        { title: "Missoes especiais da IA", missions: aiSpecialMissions },
-        { title: "Missoes semanais", missions: weeklyMissions },
-        { title: "Missoes mensais", missions: monthlyMissions },
-        { title: "Missoes expiradas", missions: failedMissions },
+        { title: "Todas as missões de hoje", missions: allDailyMissions },
+        { title: "Missões especiais da IA", missions: aiSpecialMissions },
+        { title: "Missões semanais", missions: weeklyMissions },
+        { title: "Missões mensais", missions: monthlyMissions },
+        { title: "Missões expiradas", missions: failedMissions },
       ].filter((section) => section.missions.length > 0),
     [aiSpecialMissions, allDailyMissions, failedMissions, monthlyMissions, weeklyMissions],
   );
@@ -451,11 +451,11 @@ export default function Dashboard() {
                 <div className="flex flex-col justify-center gap-2 sm:gap-3 md:gap-4 pl-1 min-w-0">
                   <div className="inline-flex items-center gap-1.5 sm:gap-2 text-[9px] sm:text-[0.64rem] md:text-[0.68rem] font-black uppercase tracking-[0.2em] sm:tracking-[0.24em] md:tracking-[0.28em] text-black/80">
                     <Cloud className="h-4 w-4" />
-                    <span>Experience Points</span>
+                    <span>Pontos de experiência</span>
                   </div>
                   <div className="inline-flex w-fit items-center gap-1.5 sm:gap-2 rounded-full px-2 py-1 md:px-4 md:py-3 text-[10px] sm:text-xs md:text-sm font-black bg-black/10 text-black">
                       <Flame className="h-4 w-4" />
-                      <span>{loadingState.progression ? <LoadingBall size="sm" /> : `${progression?.current_streak ?? 0}-Day Streak`}</span>
+                      <span>{loadingState.progression ? <LoadingBall size="sm" /> : `${progression?.current_streak ?? 0} dias de sequência`}</span>
                   </div>
                   {showcasedAchievement && showcasedAchievementDisplay ? (
                     <div className="min-w-0">
@@ -482,7 +482,7 @@ export default function Dashboard() {
                     </div>
                   ) : null}
                   <div className="mt-1 sm:mt-2 text-[8px] sm:text-[0.6rem] md:text-xs font-black uppercase tracking-[0.15em] sm:tracking-[0.2em] text-black/60 truncate">
-                    {loadingState.progression ? <LoadingBall size="sm" /> : `${formatNumber(Math.max(0, progression?.xp ?? 0))} / ${formatNumber(xpForNextLevel)} PARA O PROXIMO NIVEL`}
+                    {loadingState.progression ? <LoadingBall size="sm" /> : `${formatNumber(Math.max(0, progression?.xp ?? 0))} / ${formatNumber(xpForNextLevel)} PARA O PRÓXIMO NÍVEL`}
                   </div>
                 </div>
 
@@ -562,7 +562,7 @@ export default function Dashboard() {
                         ? "bg-[var(--app-primary-color)] text-[var(--fl-background-color,#0f172a)] shadow-lg"
                         : "bg-transparent text-slate-400"
                     }`}
-                    aria-label={`Abrir missoes de ${weekdayLabel} ${String(date.getDate()).padStart(2, "0")}`}
+                    aria-label={`Abrir missões de ${weekdayLabel} ${String(date.getDate()).padStart(2, "0")}`}
                     style={isCurrentDay ? {
                       boxShadow: "0 8px 20px color-mix(in srgb, var(--app-primary-color) 20%, transparent)"
                     } : {}}
@@ -576,7 +576,7 @@ export default function Dashboard() {
           </section>
 
           <section>
-            <SectionHeader title="Missoes de Hoje" actionLabel="Ver todas" onAction={() => scrollToSection("mission-feed")} />
+            <SectionHeader title="Missões de Hoje" actionLabel="Ver todas" onAction={() => scrollToSection("mission-feed")} />
             <div className="rounded-[2rem] p-3 md:p-5" style={SUBTLE_PANEL_STYLE}>
               <div className="mb-5 inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-[0.68rem] font-bold" style={{ background: "color-mix(in srgb, var(--fl-surface-strong) 86%, transparent)", color: "var(--fl-color-text-muted)", border: "1px solid var(--fl-border-soft)" }}>
                 <CalendarDays className="h-3.5 w-3.5" />
@@ -595,7 +595,7 @@ export default function Dashboard() {
                   ))}
                 </div>
               ) : (
-                <div className="rounded-[1.25rem] sm:rounded-[1.5rem] p-4 sm:p-5 text-xs sm:text-sm" style={PANEL_STYLE}>Nenhuma missao disponivel para hoje no momento.</div>
+                <div className="rounded-[1.25rem] sm:rounded-[1.5rem] p-4 sm:p-5 text-xs sm:text-sm" style={PANEL_STYLE}>Nenhuma missão disponível para hoje no momento.</div>
               )}
             </div>
           </section>
@@ -617,7 +617,7 @@ export default function Dashboard() {
 
           {missionFeedSections.length > 0 ? (
             <section id="mission-feed" className="space-y-6">
-              <SectionHeader title="Explorar Missoes" />
+              <SectionHeader title="Explorar Missões" />
               {missionFeedSections.map((section) => (
                 <div key={section.title}>
                   <h3 className="mb-2 sm:mb-3 text-[10px] sm:text-xs md:text-sm font-black uppercase tracking-[0.12em] sm:tracking-[0.18em] truncate" style={{ color: "var(--fl-color-text-muted)" }}>{section.title}</h3>

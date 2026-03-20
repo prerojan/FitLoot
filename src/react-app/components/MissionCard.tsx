@@ -21,6 +21,7 @@ import { useAppChrome } from "@/react-app/contexts/appChrome";
 import LoadingBall from "@/react-app/components/LoadingBall";
 import { formatMissionGoal, shouldShowMissionDuration } from "@/constants/missionMetrics";
 import type { CircuitTask, Mission, MissionMetricType } from "@/shared/types";
+import { localizeMissionText, localizeMissionTextArray } from "@/shared/missionLocalization";
 import { api } from "@/react-app/utils/api";
 
 type MissionCardProps = {
@@ -71,14 +72,19 @@ function normalizeMetricType(mission: Mission): MissionMetricType {
 
 function resolveCircuitTasks(mission: Mission): CircuitTask[] {
   if (!Array.isArray(mission.circuit_tasks)) return [];
-  return mission.circuit_tasks.filter((task) =>
-    typeof task.id === "string" &&
-    typeof task.label === "string" &&
-    typeof task.mission_type === "string" &&
-    typeof task.required_count === "number" &&
-    typeof task.current_count === "number" &&
-    typeof task.completed === "boolean"
-  );
+  return mission.circuit_tasks
+    .filter((task) =>
+      typeof task.id === "string" &&
+      typeof task.label === "string" &&
+      typeof task.mission_type === "string" &&
+      typeof task.required_count === "number" &&
+      typeof task.current_count === "number" &&
+      typeof task.completed === "boolean"
+    )
+    .map((task) => ({
+      ...task,
+      label: localizeMissionText(task.label) ?? task.label,
+    }));
 }
 
 function missionTotalGoal(mission: Mission, metricType: MissionMetricType): number {
@@ -122,9 +128,28 @@ function formatGoal(mission: Mission, metricType: MissionMetricType): string {
 
 function resolveMissionGoalText(mission: Mission, metricType: MissionMetricType): string {
   if (typeof mission.goal === "string" && mission.goal.trim().length > 0) {
-    return mission.goal.trim();
+    return (localizeMissionText(mission.goal) ?? mission.goal).trim();
   }
-  return formatGoal(mission, metricType);
+  return localizeMissionText(formatGoal(mission, metricType)) ?? formatGoal(mission, metricType);
+}
+
+function formatDifficultyLabel(value: string | null | undefined): string {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    return "Iniciante";
+  }
+
+  const localized = (localizeMissionText(value) ?? value).trim();
+  const normalized = localized
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+
+  if (normalized.includes("avanc")) return "Avançado";
+  if (normalized.includes("inter")) return "Intermediário";
+  if (normalized.includes("sedent")) return "Sedentário";
+  if (normalized.includes("inic")) return "Iniciante";
+
+  return localized.charAt(0).toUpperCase() + localized.slice(1);
 }
 
 function bodyAreaLabel(bodyArea: Mission["body_area"]): string {
@@ -402,7 +427,7 @@ function MissionExecutionModal({
             <div className="flex justify-between items-end mb-2 sm:mb-3 gap-2">
               <div className="min-w-0 overflow-hidden">
                 <p className="text-[10px] sm:text-xs md:text-sm font-medium uppercase tracking-widest truncate" style={{ color: "var(--app-primary-color)" }}>Missão Ativa</p>
-                <h1 className="text-lg sm:text-xl md:text-2xl lg:text-3xl font-bold mt-0.5 sm:mt-1 truncate">{mission.title}</h1>
+                <h1 className="text-lg sm:text-xl md:text-2xl lg:text-3xl font-bold mt-0.5 sm:mt-1 truncate">{localizeMissionText(mission.title) ?? mission.title}</h1>
               </div>
               <p className="text-base sm:text-lg md:text-xl font-bold shrink-0" style={{ color: "var(--app-primary-color)" }}>{Math.round(activeProgress)}%</p>
             </div>
@@ -472,7 +497,7 @@ function MissionExecutionModal({
                   playsInline
                 />
               ) : detailMissionMediaUrl ? (
-                <img src={detailMissionMediaUrl} alt={mission.title} className="absolute inset-0 h-full w-full object-cover" />
+                <img src={detailMissionMediaUrl} alt={localizeMissionText(mission.title) ?? mission.title} className="absolute inset-0 h-full w-full object-cover" />
               ) : (
                 <div className="absolute inset-0 flex items-center justify-center" style={{ backgroundColor: "color-mix(in srgb, var(--fl-surface-muted) 60%, transparent)" }}>
                   <Dumbbell className="w-16 h-16 opacity-20" />
@@ -525,14 +550,14 @@ function MissionExecutionModal({
             {/* Input Overlay for Reps Manual count */}
             {isCounterMission && !isTimeMission && (
                <div className="mt-4 sm:mt-6 w-full max-w-md flex flex-col items-center justify-center space-y-2 min-w-0">
-                 <p className="text-[10px] sm:text-xs md:text-sm uppercase tracking-widest font-bold" style={{ color: "var(--app-primary-color)" }}>Repetições</p>
+                  <p className="text-[10px] sm:text-xs md:text-sm uppercase tracking-widest font-bold" style={{ color: "var(--app-primary-color)" }}>Repetições</p>
                  <div className="flex items-center gap-4 sm:gap-6 min-w-0">
                     <button type="button" onClick={decrementRep} disabled={state.resting} className="size-10 sm:size-14 rounded-full border text-lg sm:text-2xl active:scale-95 disabled:opacity-50" style={{ borderColor: "var(--fl-border-soft)", backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 78%, transparent)" }}>-</button>
                    <span className="text-3xl sm:text-5xl font-bold w-16 sm:w-20 text-center">{state.repsDone}</span>
                     <button type="button" onClick={incrementRep} disabled={state.resting} className="size-10 sm:size-14 rounded-full border text-lg sm:text-2xl active:scale-95 disabled:opacity-50" style={{ borderColor: "var(--fl-border-soft)", backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 78%, transparent)" }}>+</button>
                  </div>
                  <p className="text-[10px] sm:text-xs text-center" style={{ color: "var(--fl-color-text-muted)" }}>
-                   Meta da série: {setGoal} | Progresso: {totalCounterProgress}/{totalGoal}
+                    Meta da série: {setGoal} | Progresso: {totalCounterProgress}/{totalGoal}
                  </p>
                </div>
             )}
@@ -575,7 +600,7 @@ function MissionExecutionModal({
 
         {/* Footer */}
         <footer className="mt-auto py-3 sm:py-6 flex justify-center uppercase tracking-[0.2em] sm:tracking-[0.3em] font-medium" style={{ color: "var(--fl-color-text-muted)", fontSize: 0 }}>
-          <span className="text-[9px] sm:text-[10px]">Loot desta sessao: {sessionXp} / {mission.xp_reward} XP</span>
+          <span className="text-[9px] sm:text-[10px]">Loot desta sessão: {sessionXp} / {mission.xp_reward} XP</span>
         </footer>
       </div>
     </div>
@@ -601,24 +626,31 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
   const isAutoProgressMission = isWeeklyMission || isMonthlyMission;
   const isAIMission = Number(mission.is_ai_special ?? 0) === 1 || mission.mission_origin === "ai";
   const circuitTasks = useMemo(() => resolveCircuitTasks(mission), [mission]);
-  const completedCircuitTasks = circuitTasks.filter((task) => task.completed).length;
-  const circuitProgress = circuitTasks.length > 0 ? (completedCircuitTasks / circuitTasks.length) * 100 : 0;
+  const autoProgressRequiredTotal = circuitTasks.reduce((total, task) => total + Math.max(1, task.required_count), 0);
+  const autoProgressCurrentTotal = circuitTasks.reduce(
+    (total, task) => total + Math.min(Math.max(0, task.current_count), Math.max(1, task.required_count)),
+    0,
+  );
+  const circuitProgress = autoProgressRequiredTotal > 0 ? (autoProgressCurrentTotal / autoProgressRequiredTotal) * 100 : 0;
   const missionMediaUrl = resolveMissionMediaUrl(mission);
-  const primaryMuscle = mission.muscle_groups?.[0] ?? bodyAreaLabel(mission.body_area);
+  const primaryMuscle = localizeMissionText(mission.muscle_groups?.[0] ?? bodyAreaLabel(mission.body_area))
+    ?? bodyAreaLabel(mission.body_area);
   const hasCircuitProgress = circuitTasks.some((task) => task.current_count > 0);
   const isInProgress = !isFailed && !isCompleted && (missionStatus === "in_progress" || hasCircuitProgress);
   const visualState = isFailed ? "failed" : isCompleted ? "completed" : isInProgress ? "in_progress" : "available";
   const stateLabel = visualState === "failed"
     ? "Falhou"
     : visualState === "completed"
-      ? "Concluida"
+      ? "Concluída"
       : visualState === "in_progress"
         ? "Em progresso"
-        : "Disponivel";
-  const missionTypeLabel = mission.type === "daily" ? "Diaria" : mission.type === "weekly" ? "Semanal" : "Mensal";
+        : "Disponível";
+  const missionTypeLabel = mission.type === "daily" ? "Diária" : mission.type === "weekly" ? "Semanal" : "Mensal";
   const monthlyTarget = Math.max(1, missionTotalGoal(mission, metricType));
   const monthlyProgressValue = Number((mission as Mission & { progress_value?: number | undefined }).progress_value ?? 0);
-  const monthlyCurrent = isCompleted ? monthlyTarget : Math.max(0, Math.min(monthlyTarget, monthlyProgressValue));
+  const monthlyCurrent = circuitTasks.length > 0
+    ? (isCompleted ? autoProgressRequiredTotal : autoProgressCurrentTotal)
+    : (isCompleted ? monthlyTarget : Math.max(0, Math.min(monthlyTarget, monthlyProgressValue)));
   const monthlyProgress = Math.min(100, Math.round((monthlyCurrent / monthlyTarget) * 100));
   const missionGoalText = resolveMissionGoalText(mission, metricType);
   const hasInlineInstructions =
@@ -691,19 +723,23 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
   const missionDetails = detailedMission ?? mission;
   const detailMetricType = normalizeMetricType(missionDetails);
   const detailMissionMediaUrl = resolveMissionMediaUrl(missionDetails);
+  const detailTitle = localizeMissionText(missionDetails.title) ?? missionDetails.title;
+  const detailDescription = missionDetails.description
+    ? (localizeMissionText(missionDetails.description) ?? missionDetails.description)
+    : null;
   const safetyTips = Array.isArray(missionDetails.safety_tips) && missionDetails.safety_tips.length > 0
-    ? missionDetails.safety_tips
+    ? localizeMissionTextArray(missionDetails.safety_tips)
     : ["Mantenha alinhamento postural e interrompa em caso de dor aguda."];
   const instructionList =
     (Array.isArray(missionDetails.instructions) && missionDetails.instructions.length > 0
-      ? missionDetails.instructions
+      ? localizeMissionTextArray(missionDetails.instructions)
       : Array.isArray(missionDetails.exercise_instructions_pt) && missionDetails.exercise_instructions_pt.length > 0
-        ? missionDetails.exercise_instructions_pt
+        ? localizeMissionTextArray(missionDetails.exercise_instructions_pt)
         : Array.isArray(missionDetails.exercise_instructions_en) && missionDetails.exercise_instructions_en.length > 0
-          ? missionDetails.exercise_instructions_en
-          : missionDetails.description
-            ? [missionDetails.description]
-            : ["Siga o movimento com controle e respire durante cada repeticao."]);
+          ? localizeMissionTextArray(missionDetails.exercise_instructions_en)
+          : detailDescription
+            ? [detailDescription]
+            : ["Siga o movimento com controle e respire durante cada repetição."]);
   const pixelOrLineArt = isPixelOrLineArtUrl(detailMissionMediaUrl);
   const gifLikeMedia = isGifUrl(detailMissionMediaUrl);
   const showMissionDuration = shouldShowMissionDuration(mission.type)
@@ -737,7 +773,7 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
         </div>
         <div className="min-w-0">
           <h3 className="truncate text-xs sm:text-sm md:text-base font-bold" style={{ color: "var(--fl-color-text)" }}>
-            {mission.title}
+            {localizeMissionText(mission.title) ?? mission.title}
           </h3>
           <p className="truncate text-[10px] sm:text-xs font-medium" style={{ color: "var(--fl-color-text-muted)" }}>
             {compactSummary}
@@ -814,7 +850,7 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
         <div className="hidden sm:block w-full mb-3">
           <img
             src={missionMediaUrl}
-            alt={mission.title}
+            alt={localizeMissionText(mission.title) ?? mission.title}
             loading="lazy"
             decoding="async"
             className="w-full h-36 object-cover rounded-2xl border border-gray-200"
@@ -822,19 +858,23 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
         </div>
       ) : null}
 
-      <h3 className="font-semibold text-gray-900 mb-1">{mission.title}</h3>
+      <h3 className="font-semibold text-gray-900 mb-1">{localizeMissionText(mission.title) ?? mission.title}</h3>
       <p className="text-sm text-gray-500 mb-2">{primaryMuscle}</p>
-      {mission.description ? <p className="text-sm text-gray-600 mb-3 line-clamp-2">{mission.description}</p> : null}
+      {mission.description ? (
+        <p className="text-sm text-gray-600 mb-3 line-clamp-2">
+          {localizeMissionText(mission.description) ?? mission.description}
+        </p>
+      ) : null}
 
-      {isWeeklyMission ? (
+      {isWeeklyMission || (isMonthlyMission && circuitTasks.length > 0) ? (
         <div className="space-y-3 mb-3">
           <p className="text-sm text-gray-600">Meta: {missionGoalText}</p>
           <div className="flex items-center justify-between text-xs text-gray-600">
-            <span>Progresso geral</span>
-            <span>{completedCircuitTasks}/{circuitTasks.length || 1}</span>
+            <span>{isWeeklyMission ? "Progresso geral" : "Progresso mensal"}</span>
+            <span>{autoProgressCurrentTotal}/{autoProgressRequiredTotal || 1}</span>
           </div>
           <div className="h-2 rounded-full bg-gray-100 overflow-hidden">
-            <div className="h-full bg-emerald-500" style={{ width: `${circuitProgress}%` }} />
+            <div className={`h-full ${isWeeklyMission ? "bg-emerald-500" : "bg-cyan-500"}`} style={{ width: `${circuitProgress}%` }} />
           </div>
           <div className="space-y-2">
             {circuitTasks.map((task) => {
@@ -842,18 +882,18 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
                 ? Math.min(100, Math.round((task.current_count / task.required_count) * 100))
                 : 0;
               return (
-                <div key={task.id} className="rounded-xl border border-gray-200 p-2">
-                  <div className="flex items-center justify-between text-xs text-gray-700 mb-1">
-                    <span className="line-clamp-1">{task.label}</span>
-                    <span className="font-semibold">{task.current_count}/{task.required_count}</span>
+                  <div key={task.id} className="rounded-xl border border-gray-200 p-2">
+                    <div className="flex items-center justify-between text-xs text-gray-700 mb-1">
+                      <span className="line-clamp-1">{localizeMissionText(task.label) ?? task.label}</span>
+                      <span className="font-semibold">{task.current_count}/{task.required_count}</span>
+                    </div>
+                    <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden">
+                      <div className={`h-full ${isWeeklyMission ? "bg-teal-500" : "bg-cyan-500"}`} style={{ width: `${progress}%` }} />
+                    </div>
                   </div>
-                  <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden">
-                    <div className="h-full bg-teal-500" style={{ width: `${progress}%` }} />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
         </div>
       ) : isMonthlyMission ? (
         <div className="space-y-2 mb-3">
@@ -869,7 +909,7 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
       ) : (
         <div className="space-y-1 mb-3">
           <p className="text-sm text-gray-600">Meta: {formatGoal(mission, metricType)}</p>
-          {mission.rest_seconds ? <p className="text-xs text-gray-500">Descanso entre series: {mission.rest_seconds}s</p> : null}
+          {mission.rest_seconds ? <p className="text-xs text-gray-500">Descanso entre séries: {mission.rest_seconds}s</p> : null}
         </div>
       )}
 
@@ -900,14 +940,14 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
       ) : null}
 
       {isFailed ? (
-        <div className="w-full py-3 text-center rounded-xl bg-red-100 text-red-700 font-medium">Missao falhou por expiracao</div>
+        <div className="w-full py-3 text-center rounded-xl bg-red-100 text-red-700 font-medium">Missão falhou por expiração</div>
       ) : isCompleted ? (
         <div className="w-full py-3 text-center rounded-xl bg-emerald-100 text-emerald-700 font-medium">
-          Missao concluida (+{mission.xp_reward} XP)
+          Missão concluída (+{mission.xp_reward} XP)
         </div>
       ) : (
         <Button onClick={() => { void openDetails(); }} variant="primary" className="w-full py-3 rounded-xl shadow-md hover:shadow-lg" disabled={completing}>
-          Ver Detalhes
+          Ver detalhes
         </Button>
       )}
     </Card>
@@ -965,7 +1005,7 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
                     <>
                       <img
                         src={detailMissionMediaUrl}
-                        alt={missionDetails.title}
+                        alt={detailTitle}
                         className="absolute inset-0 h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
                         style={{
                           imageRendering: pixelOrLineArt ? "crisp-edges" : "auto",
@@ -989,10 +1029,15 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
 
               {/* Title & Description */}
               <div className="px-6 py-2">
-                <h1 className="text-3xl font-black leading-tight" style={{ color: "var(--fl-color-text)" }}>{missionDetails.title}</h1>
+                <h1 className="text-3xl font-black leading-tight" style={{ color: "var(--fl-color-text)" }}>{detailTitle}</h1>
                 <p className="text-base font-medium mt-1" style={{ color: "var(--app-primary-color)" }}>
-                  Dificuldade: {missionDetails.difficulty_level ? missionDetails.difficulty_level.charAt(0).toUpperCase() + missionDetails.difficulty_level.slice(1) : "Iniciante"}{showDetailDuration ? ` • Est. ${missionDetails.duration_estimate_minutes} min` : isAutoProgressMission ? " • Progresso automatico" : ""}
+                  Dificuldade: {formatDifficultyLabel(missionDetails.difficulty_level)}{showDetailDuration ? ` • Est. ${missionDetails.duration_estimate_minutes} min` : isAutoProgressMission ? " • Progresso automático" : ""}
                 </p>
+                {detailDescription ? (
+                  <p className="text-sm mt-2" style={{ color: "var(--fl-color-text-muted)" }}>
+                    {detailDescription}
+                  </p>
+                ) : null}
                 {isAutoProgressMission ? (
                   <p className="text-sm mt-2" style={{ color: "var(--fl-color-text-muted)" }}>
                     Meta: {detailMissionGoalText}
@@ -1027,7 +1072,7 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
               <div className="px-6 pt-8">
                 <h3 className="text-lg font-bold mb-3 flex items-center gap-2" style={{ color: "var(--fl-color-text)" }}>
                   <Info className="w-5 h-5" style={{ color: "var(--app-primary-color)" }} />
-                  Execucao
+                  Execução
                 </h3>
                 <div className="space-y-3">
                   {instructionList.map((instruction, index) => (
