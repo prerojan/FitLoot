@@ -53,7 +53,7 @@ type CacheEntry<T> = {
   expiresAt: number;
 };
 
-const RAPID_TIMEOUT_MS = 8_000;
+const RAPID_TIMEOUT_MS = 3_000;
 const CACHE_TTL_MS = 15 * 60_000;
 const CACHE_MAX_ENTRIES = 250;
 
@@ -90,6 +90,40 @@ function setCachedValue<T>(cache: Map<string, CacheEntry<T>>, key: string, value
   if (typeof firstKey === "string") {
     cache.delete(firstKey);
   }
+}
+
+function iconColorByMuscle(target: string): { fill: string; accent: string } {
+  const normalized = target.trim().toLowerCase();
+  if (normalized.includes("core") || normalized.includes("abs")) {
+    return { fill: "#d9f99d", accent: "#4d7c0f" };
+  }
+  if (normalized.includes("leg") || normalized.includes("glute") || normalized.includes("calf")) {
+    return { fill: "#bfdbfe", accent: "#1d4ed8" };
+  }
+  if (normalized.includes("mobility") || normalized.includes("stretch") || normalized.includes("yoga")) {
+    return { fill: "#fde68a", accent: "#b45309" };
+  }
+  return { fill: "#fecaca", accent: "#b91c1c" };
+}
+
+function buildMuscleGroupIconDataUrl(target: string): string {
+  const { fill, accent } = iconColorByMuscle(target);
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 180" role="img" aria-label="Exercise fallback">
+      <rect width="240" height="180" rx="24" fill="${fill}" />
+      <circle cx="120" cy="48" r="22" fill="${accent}" opacity="0.92" />
+      <rect x="104" y="72" width="32" height="54" rx="16" fill="${accent}" opacity="0.92" />
+      <rect x="68" y="76" width="28" height="16" rx="8" fill="${accent}" opacity="0.92" />
+      <rect x="144" y="76" width="28" height="16" rx="8" fill="${accent}" opacity="0.92" />
+      <rect x="94" y="124" width="16" height="40" rx="8" fill="${accent}" opacity="0.92" />
+      <rect x="130" y="124" width="16" height="40" rx="8" fill="${accent}" opacity="0.92" />
+      <text x="120" y="156" text-anchor="middle" font-size="16" font-family="Arial, sans-serif" fill="${accent}">
+        FitLoot
+      </text>
+    </svg>
+  `.replace(/\s+/g, " ").trim();
+
+  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
 }
 
 async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
@@ -268,8 +302,8 @@ export async function enrichExercise(exerciseName: string, env: RapidApiEnv): Pr
 
   const exercise = exercises[0];
   const media = await fetchExerciseMedia(exercise.id, env);
-  const video = !media?.gifUrl ? await fetchExerciseVideo(exercise.id, env) : null;
   const exerciseDbGifUrl = typeof exercise.gifUrl === "string" ? exercise.gifUrl : null;
+  const video = !media?.gifUrl && !exerciseDbGifUrl ? await fetchExerciseVideo(exercise.id, env) : null;
   const exerciseDbImageUrl =
     typeof exercise.imageUrl === "string"
       ? exercise.imageUrl
@@ -280,12 +314,14 @@ export async function enrichExercise(exerciseName: string, env: RapidApiEnv): Pr
       : Array.isArray(media?.instructions)
         ? media.instructions
         : [];
+  const target = exercise.target ?? "full body";
+  const fallbackIconUrl = buildMuscleGroupIconDataUrl(target);
 
   return {
     id: exercise.id,
     name: exercise.name,
     bodyPart: exercise.bodyPart ?? "full body",
-    target: exercise.target ?? "full body",
+    target,
     equipment: exercise.equipment ?? "body weight",
     secondaryMuscles: Array.isArray(exercise.secondaryMuscles) ? exercise.secondaryMuscles : [],
     instructions: exerciseInstructions,
@@ -293,7 +329,7 @@ export async function enrichExercise(exerciseName: string, env: RapidApiEnv): Pr
     ascendImageUrl: media?.imageUrl ?? null,
     exerciseDbGifUrl,
     exerciseDbImageUrl,
-    imageUrl: exerciseDbImageUrl,
+    imageUrl: media?.gifUrl ?? fallbackIconUrl,
     videoUrl: video?.videoUrl ?? null,
     thumbnailUrl: video?.thumbnailUrl ?? null,
   };

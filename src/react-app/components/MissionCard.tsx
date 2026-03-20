@@ -19,7 +19,7 @@ import { Button } from "@/react-app/components/ui/button";
 import { Badge } from "@/react-app/components/ui/badge";
 import { useAppChrome } from "@/react-app/contexts/appChrome";
 import LoadingBall from "@/react-app/components/LoadingBall";
-import { formatMissionGoal } from "@/constants/missionMetrics";
+import { formatMissionGoal, shouldShowMissionDuration } from "@/constants/missionMetrics";
 import type { CircuitTask, Mission, MissionMetricType } from "@/shared/types";
 import { api } from "@/react-app/utils/api";
 
@@ -118,6 +118,13 @@ function formatGoal(mission: Mission, metricType: MissionMetricType): string {
   }
 
   return formatMissionGoal(metricType, goal, sets);
+}
+
+function resolveMissionGoalText(mission: Mission, metricType: MissionMetricType): string {
+  if (typeof mission.goal === "string" && mission.goal.trim().length > 0) {
+    return mission.goal.trim();
+  }
+  return formatGoal(mission, metricType);
 }
 
 function bodyAreaLabel(bodyArea: Mission["body_area"]): string {
@@ -586,12 +593,13 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
 
   const metricType = useMemo(() => normalizeMetricType(mission), [mission]);
   const missionStatus = (mission as Mission & { status?: string | undefined }).status || (mission.is_completed === 1 ? "completed" : "pending");
-  const isFailed = missionStatus === "failed";
+  const isFailed = missionStatus === "failed" || missionStatus === "expired";
   const isCompleted = mission.is_completed === 1 || missionStatus === "completed";
   const isCircuitMission = metricType === "circuit_tasks";
   const isWeeklyMission = mission.type === "weekly";
   const isMonthlyMission = mission.type === "monthly";
-  const isAIMission = mission.mission_origin === "ai";
+  const isAutoProgressMission = isWeeklyMission || isMonthlyMission;
+  const isAIMission = Number(mission.is_ai_special ?? 0) === 1 || mission.mission_origin === "ai";
   const circuitTasks = useMemo(() => resolveCircuitTasks(mission), [mission]);
   const completedCircuitTasks = circuitTasks.filter((task) => task.completed).length;
   const circuitProgress = circuitTasks.length > 0 ? (completedCircuitTasks / circuitTasks.length) * 100 : 0;
@@ -612,6 +620,7 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
   const monthlyProgressValue = Number((mission as Mission & { progress_value?: number | undefined }).progress_value ?? 0);
   const monthlyCurrent = isCompleted ? monthlyTarget : Math.max(0, Math.min(monthlyTarget, monthlyProgressValue));
   const monthlyProgress = Math.min(100, Math.round((monthlyCurrent / monthlyTarget) * 100));
+  const missionGoalText = resolveMissionGoalText(mission, metricType);
   const hasInlineInstructions =
     (Array.isArray(mission.instructions) && mission.instructions.length > 0) ||
     (Array.isArray(mission.exercise_instructions_pt) && mission.exercise_instructions_pt.length > 0) ||
@@ -697,14 +706,26 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
             : ["Siga o movimento com controle e respire durante cada repeticao."]);
   const pixelOrLineArt = isPixelOrLineArtUrl(detailMissionMediaUrl);
   const gifLikeMedia = isGifUrl(detailMissionMediaUrl);
+  const showMissionDuration = shouldShowMissionDuration(mission.type)
+    && typeof mission.duration_estimate_minutes === "number"
+    && mission.duration_estimate_minutes > 0;
+  const showDetailDuration = shouldShowMissionDuration(missionDetails.type)
+    && typeof missionDetails.duration_estimate_minutes === "number"
+    && missionDetails.duration_estimate_minutes > 0;
+  const detailMissionGoalText = resolveMissionGoalText(missionDetails, detailMetricType);
 
-  const compactDurationLabel = mission.duration_estimate_minutes && mission.duration_estimate_minutes > 0
+  const compactDurationLabel = showMissionDuration
     ? `${mission.duration_estimate_minutes} min`
     : null;
-  const compactSummary = isCircuitMission
-    ? [compactDurationLabel, `${circuitTasks.length || monthlyTarget} tarefas`].filter(Boolean).join(" | ")
-    : [compactDurationLabel, formatGoal(mission, metricType)].filter(Boolean).join(" | ");
-  const compactActionLabel = isCircuitMission ? "Ver detalhes" : "Iniciar Treino";
+  const compactXpLabel = `+${mission.xp_reward} XP`;
+  const compactSummary = isWeeklyMission
+    ? [missionGoalText, compactXpLabel].join(" | ")
+    : isMonthlyMission
+      ? [missionGoalText, compactXpLabel].join(" | ")
+      : isCircuitMission
+        ? [compactDurationLabel, `${circuitTasks.length || monthlyTarget} tarefas`].filter(Boolean).join(" | ")
+        : [compactDurationLabel, formatGoal(mission, metricType)].filter(Boolean).join(" | ");
+  const compactActionLabel = isAutoProgressMission ? "Ver progresso" : isCircuitMission ? "Ver detalhes" : "Iniciar Treino";
   const triggerContent = layout === "compact" ? (
     <div className="flex min-w-0 w-full items-center justify-between gap-4">
       <div className="flex min-w-0 flex-1 items-center gap-4">
@@ -807,6 +828,7 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
 
       {isWeeklyMission ? (
         <div className="space-y-3 mb-3">
+          <p className="text-sm text-gray-600">Meta: {missionGoalText}</p>
           <div className="flex items-center justify-between text-xs text-gray-600">
             <span>Progresso geral</span>
             <span>{completedCircuitTasks}/{circuitTasks.length || 1}</span>
@@ -842,7 +864,7 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
           <div className="h-2 rounded-full bg-gray-100 overflow-hidden">
             <div className="h-full bg-cyan-500" style={{ width: `${monthlyProgress}%` }} />
           </div>
-          <p className="text-sm text-gray-600">Meta: {formatGoal(mission, metricType)}</p>
+          <p className="text-sm text-gray-600">Meta: {missionGoalText}</p>
         </div>
       ) : (
         <div className="space-y-1 mb-3">
@@ -851,19 +873,23 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
         </div>
       )}
 
-      <div className="grid grid-cols-3 gap-2 mb-3">
+      <div className={`mb-3 grid gap-2 ${isAutoProgressMission ? "grid-cols-1" : "grid-cols-3"}`}>
         <div className="rounded-xl border border-emerald-100 bg-emerald-50 p-2 text-center">
           <p className="text-[10px] text-emerald-700 uppercase tracking-wide">XP</p>
           <p className="text-sm font-bold text-emerald-700">+{mission.xp_reward}</p>
         </div>
-        <div className="rounded-xl border border-teal-100 bg-teal-50 p-2 text-center">
-          <p className="text-[10px] text-teal-700 uppercase tracking-wide">Pontos</p>
-          <p className="text-sm font-bold text-teal-700">+{mission.points_reward}</p>
-        </div>
-        <div className="rounded-xl border border-cyan-100 bg-cyan-50 p-2 text-center">
-          <p className="text-[10px] text-cyan-700 uppercase tracking-wide">Tempo</p>
-          <p className="text-sm font-bold text-cyan-700">{mission.duration_estimate_minutes ?? 10} min</p>
-        </div>
+        {!isAutoProgressMission ? (
+          <>
+            <div className="rounded-xl border border-teal-100 bg-teal-50 p-2 text-center">
+              <p className="text-[10px] text-teal-700 uppercase tracking-wide">Pontos</p>
+              <p className="text-sm font-bold text-teal-700">+{mission.points_reward}</p>
+            </div>
+            <div className="rounded-xl border border-cyan-100 bg-cyan-50 p-2 text-center">
+              <p className="text-[10px] text-cyan-700 uppercase tracking-wide">Tempo</p>
+              <p className="text-sm font-bold text-cyan-700">{mission.duration_estimate_minutes} min</p>
+            </div>
+          </>
+        ) : null}
       </div>
 
       {mission.deadline ? (
@@ -965,8 +991,13 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
               <div className="px-6 py-2">
                 <h1 className="text-3xl font-black leading-tight" style={{ color: "var(--fl-color-text)" }}>{missionDetails.title}</h1>
                 <p className="text-base font-medium mt-1" style={{ color: "var(--app-primary-color)" }}>
-                  Dificuldade: {missionDetails.difficulty_level ? missionDetails.difficulty_level.charAt(0).toUpperCase() + missionDetails.difficulty_level.slice(1) : "Iniciante"} • Est. {missionDetails.duration_estimate_minutes ?? 10} min
+                  Dificuldade: {missionDetails.difficulty_level ? missionDetails.difficulty_level.charAt(0).toUpperCase() + missionDetails.difficulty_level.slice(1) : "Iniciante"}{showDetailDuration ? ` • Est. ${missionDetails.duration_estimate_minutes} min` : isAutoProgressMission ? " • Progresso automatico" : ""}
                 </p>
+                {isAutoProgressMission ? (
+                  <p className="text-sm mt-2" style={{ color: "var(--fl-color-text-muted)" }}>
+                    Meta: {detailMissionGoalText}
+                  </p>
+                ) : null}
                 {detailsLoading ? (
                   <div className="flex items-center gap-2 text-sm mt-3" style={{ color: "var(--fl-color-text-muted)" }}>
                     <LoadingBall size="sm" />
@@ -1034,7 +1065,7 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
                   <Trophy className="w-5 h-5" style={{ color: "var(--app-primary-color)" }} />
                   Recompensas
                 </h3>
-                <div className="grid grid-cols-2 gap-4">
+                <div className={`grid gap-4 ${isAutoProgressMission ? "grid-cols-1" : "grid-cols-2"}`}>
                   <div className="p-4 rounded-xl flex items-center gap-4 border" style={{ background: "color-mix(in srgb, var(--fl-surface-muted) 50%, transparent)", borderColor: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)" }}>
                     <div className="w-10 h-10 rounded-full flex items-center justify-center shrink-0" style={{ background: "color-mix(in srgb, var(--app-primary-color) 20%, transparent)" }}>
                       <Star className="w-5 h-5" style={{ color: "var(--app-primary-color)" }} />
@@ -1044,15 +1075,17 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
                       <p className="text-lg font-bold" style={{ color: "var(--fl-color-text)" }}>+{missionDetails.xp_reward} XP</p>
                     </div>
                   </div>
-                  <div className="p-4 rounded-xl flex items-center gap-4 border" style={{ background: "color-mix(in srgb, var(--fl-surface-muted) 50%, transparent)", borderColor: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)" }}>
-                    <div className="w-10 h-10 rounded-full flex items-center justify-center shrink-0" style={{ background: "color-mix(in srgb, var(--app-primary-color) 20%, transparent)" }}>
-                      <Trophy className="w-5 h-5" style={{ color: "var(--app-primary-color)" }} />
+                  {!isAutoProgressMission ? (
+                    <div className="p-4 rounded-xl flex items-center gap-4 border" style={{ background: "color-mix(in srgb, var(--fl-surface-muted) 50%, transparent)", borderColor: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)" }}>
+                      <div className="w-10 h-10 rounded-full flex items-center justify-center shrink-0" style={{ background: "color-mix(in srgb, var(--app-primary-color) 20%, transparent)" }}>
+                        <Trophy className="w-5 h-5" style={{ color: "var(--app-primary-color)" }} />
+                      </div>
+                      <div>
+                        <p className="text-xs font-bold uppercase" style={{ color: "color-mix(in srgb, var(--app-primary-color) 60%, var(--fl-color-text))" }}>FitCoins</p>
+                        <p className="text-lg font-bold" style={{ color: "var(--fl-color-text)" }}>{missionDetails.points_reward}</p>
+                      </div>
                     </div>
-                    <div>
-                      <p className="text-xs font-bold uppercase" style={{ color: "color-mix(in srgb, var(--app-primary-color) 60%, var(--fl-color-text))" }}>FitCoins</p>
-                      <p className="text-lg font-bold" style={{ color: "var(--fl-color-text)" }}>{missionDetails.points_reward}</p>
-                    </div>
-                  </div>
+                  ) : null}
                 </div>
               </div>
             </div>
@@ -1061,7 +1094,7 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
             <div className="absolute bottom-0 left-0 right-0 p-6 backdrop-blur-md flex flex-col items-center" style={{ borderTop: "1px solid var(--fl-border-soft)", background: "color-mix(in srgb, var(--fl-surface-strong) 92%, transparent)" }}>
               <button 
                 onClick={() => {
-                  if (isCircuitMission || isCompleted || visualState === "failed") {
+                  if (isAutoProgressMission || isCompleted || visualState === "failed") {
                     setShowDetails(false);
                   } else {
                     setShowDetails(false);
@@ -1074,19 +1107,23 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
                   boxShadow: "0 0 20px color-mix(in srgb, var(--app-primary-color) 25%, transparent)" 
                 }}
               >
-                {!isCircuitMission && !isCompleted && visualState !== "failed" && <Play className="w-6 h-6 fill-black text-black" strokeWidth={1.5} />}
-                {isCompleted ? "CONCLUÍDA" : visualState === "failed" ? "FECHAR" : isCircuitMission ? "FECHAR" : isInProgress ? "CONTINUAR" : "INICIAR MISSÃO"}
+                {!isAutoProgressMission && !isCompleted && visualState !== "failed" && <Play className="w-6 h-6 fill-black text-black" strokeWidth={1.5} />}
+                {isCompleted ? "CONCLUÍDA" : visualState === "failed" ? "FECHAR" : isAutoProgressMission ? "FECHAR" : isInProgress ? "CONTINUAR" : "INICIAR MISSÃO"}
               </button>
-              {!isCircuitMission && (
+              {!isAutoProgressMission ? (
                  <p className="text-center text-xs mt-3 font-medium uppercase tracking-widest relative z-10" style={{ color: "var(--fl-color-text-muted)" }}>
                    {missionDetails.sets && missionDetails.sets > 0 ? `${missionDetails.sets} séries • ` : ""}{formatGoal(missionDetails, detailMetricType)}{missionDetails.rest_seconds && missionDetails.rest_seconds > 0 ? ` • ${missionDetails.rest_seconds}s descanso` : ""}
                  </p>
+              ) : (
+                <p className="text-center text-xs mt-3 font-medium uppercase tracking-widest relative z-10" style={{ color: "var(--fl-color-text-muted)" }}>
+                  {detailMissionGoalText}
+                </p>
               )}
             </div>
           </div>
         </div>
       )}
-      {!isCircuitMission && (
+      {!isAutoProgressMission && (
         <MissionExecutionModal
           mission={missionDetails}
           metricType={detailMetricType}

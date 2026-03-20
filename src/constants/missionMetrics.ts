@@ -1,10 +1,14 @@
 import type { MissionMetricType } from "@/shared/types";
 
 export const MISSION_LIMITS = {
-  daily: 7,
+  daily: 5,
   weekly: 5,
-  monthly: 3,
+  monthly: 5,
 } as const;
+
+export function shouldShowMissionDuration(missionType: string | null | undefined): boolean {
+  return missionType === "daily";
+}
 
 export const WEEKLY_MISSION_KEYWORDS = [
   "full body",

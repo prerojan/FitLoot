@@ -64,6 +64,14 @@ const DEFAULT_LOADING_STATE: DashboardLoadingState = {
 export default function Dashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const isExpiredMission = useCallback(
+    (mission: Mission) => mission.status === "failed" || mission.status === "expired",
+    [],
+  );
+  const isAiSpecialMission = useCallback(
+    (mission: Mission) => Number(mission.is_ai_special ?? 0) === 1 || mission.mission_origin === "ai",
+    [],
+  );
 
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [progression, setProgression] = useState<UserProgression | null>(null);
@@ -280,25 +288,25 @@ export default function Dashboard() {
   };
 
   const allDailyMissions = useMemo(
-    () => sortMissions(missions.filter((mission) => mission.type === "daily" && mission.mission_origin !== "ai")),
-    [missions],
+    () => sortMissions(missions.filter((mission) => mission.type === "daily" && !isAiSpecialMission(mission))),
+    [isAiSpecialMission, missions],
   );
   const visibleDailyMissions = useMemo(() => allDailyMissions.slice(0, 3), [allDailyMissions]);
   const aiSpecialMissions = useMemo(
-    () => sortMissions(missions.filter((mission) => mission.mission_origin === "ai" && mission.is_completed !== 1)),
-    [missions],
+    () => sortMissions(missions.filter((mission) => isAiSpecialMission(mission) && mission.is_completed !== 1 && !isExpiredMission(mission))),
+    [isAiSpecialMission, isExpiredMission, missions],
   );
   const weeklyMissions = useMemo(
-    () => sortMissions(missions.filter((mission) => mission.type === "weekly" && mission.is_completed !== 1 && mission.status !== "failed" && mission.mission_origin !== "ai")),
-    [missions],
+    () => sortMissions(missions.filter((mission) => mission.type === "weekly" && mission.is_completed !== 1 && !isExpiredMission(mission) && !isAiSpecialMission(mission))),
+    [isAiSpecialMission, isExpiredMission, missions],
   );
   const monthlyMissions = useMemo(
-    () => sortMissions(missions.filter((mission) => mission.type === "monthly" && mission.is_completed !== 1 && mission.status !== "failed" && mission.mission_origin !== "ai")),
-    [missions],
+    () => sortMissions(missions.filter((mission) => mission.type === "monthly" && mission.is_completed !== 1 && !isExpiredMission(mission) && !isAiSpecialMission(mission))),
+    [isAiSpecialMission, isExpiredMission, missions],
   );
   const failedMissions = useMemo(
-    () => sortMissions(missions.filter((mission) => mission.status === "failed" && mission.is_completed !== 1 && mission.mission_origin !== "ai")),
-    [missions],
+    () => sortMissions(missions.filter((mission) => isExpiredMission(mission) && mission.is_completed !== 1 && !isAiSpecialMission(mission))),
+    [isAiSpecialMission, isExpiredMission, missions],
   );
   const missionFeedSections = useMemo(
     () =>
@@ -630,7 +638,7 @@ export default function Dashboard() {
 
           <section id="assistant-tools" className="space-y-2 sm:space-y-4 min-w-0">
             <SectionHeader title="Ferramentas de IA" />
-            <AIMissionGenerator onMissionsGenerated={() => { void refreshData(); }} {...(profile?.initial_conditioning ? { conditioning: profile.initial_conditioning } : {})} />
+            <AIMissionGenerator onMissionsGenerated={() => { void refreshData(); }} />
             <AIRecommendations />
           </section>
         </div>

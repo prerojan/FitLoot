@@ -1,195 +1,146 @@
-﻿// ====================================
-// src/react-app/components/AIMissionGenerator.tsx
-// Botão para gerar missões personalizadas com IA
-// ====================================
-
-import { useState } from "react";
-import { Wand2, CheckCircle, XCircle } from "lucide-react";
-import { api } from "@/react-app/utils/api";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { CheckCircle, Wand2, XCircle } from "lucide-react";
 import LoadingBall from "@/react-app/components/LoadingBall";
-import { formatMissionGoal } from "@/constants/missionMetrics";
-import type { Mission, MissionMetricType } from "@/shared/types";
+import type { Mission } from "@/shared/types";
+import { api, clearJsonCache } from "@/react-app/utils/api";
 
-type GeneratedMission = Mission & { difficulty?: string | undefined };
+type AIMissionGeneratorProps = {
+  onMissionsGenerated?: () => void;
+};
 
-function resolveMetricType(mission: GeneratedMission): MissionMetricType {
-  if (
-    mission.metric_type === "repetitions" ||
-    mission.metric_type === "duration_seconds" ||
-    mission.metric_type === "duration_minutes" ||
-    mission.metric_type === "sets_reps" ||
-    mission.metric_type === "steps" ||
-    mission.metric_type === "distance_meters" ||
-    mission.metric_type === "circuit_tasks"
-  ) {
-    return mission.metric_type;
-  }
-  return "sets_reps";
+type MissionGenerationResponse = {
+  success?: boolean | undefined;
+  generated?: boolean | undefined;
+  code?: string | undefined;
+  error?: string | undefined;
+};
+
+type NoticeState = {
+  tone: "success" | "info";
+  message: string;
+};
+
+function isRegularActiveMission(mission: Mission): boolean {
+  const status = mission.status ?? (mission.is_completed === 1 ? "completed" : "pending");
+  const isAiSpecial = Number(mission.is_ai_special ?? 0) === 1 || mission.mission_origin === "ai";
+
+  return !isAiSpecial && mission.is_completed !== 1 && status !== "failed" && status !== "expired";
 }
 
-export default function AIMissionGenerator({ onMissionsGenerated, conditioning }: { onMissionsGenerated?: () => void; conditioning?: string | undefined }) {
+export default function AIMissionGenerator({ onMissionsGenerated }: AIMissionGeneratorProps) {
   const [loading, setLoading] = useState(false);
-  const [success, setSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [generatedMissions, setGeneratedMissions] = useState<GeneratedMission[]>([]);
+  const [notice, setNotice] = useState<NoticeState | null>(null);
+  const baselineMissionIdsRef = useRef<Set<number>>(new Set());
+  const refreshTriggeredRef = useRef(false);
 
-  const generateMissions = async () => {
+  const triggerDashboardRefresh = useCallback(() => {
+    if (refreshTriggeredRef.current) return;
+    refreshTriggeredRef.current = true;
+    clearJsonCache("/api/missions");
+    onMissionsGenerated?.();
+  }, [onMissionsGenerated]);
+
+  const readCurrentRegularMissionIds = useCallback(async (): Promise<Set<number>> => {
+    try {
+      const response = await api("/api/missions", { timeoutMs: 10_000 });
+      if (!response.ok) return new Set<number>();
+
+      const payload = (await response.json()) as Mission[];
+      return new Set(
+        (Array.isArray(payload) ? payload : [])
+          .filter(isRegularActiveMission)
+          .map((mission) => Number(mission.id))
+          .filter((missionId) => Number.isInteger(missionId) && missionId > 0),
+      );
+    } catch {
+      return new Set<number>();
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!loading) return;
+
+    const intervalId = window.setInterval(() => {
+      void (async () => {
+        try {
+          const response = await api("/api/missions", { timeoutMs: 10_000 });
+          if (!response.ok) return;
+
+          const payload = (await response.json()) as Mission[];
+          const currentMissionIds = new Set(
+            (Array.isArray(payload) ? payload : [])
+              .filter(isRegularActiveMission)
+              .map((mission) => Number(mission.id))
+              .filter((missionId) => Number.isInteger(missionId) && missionId > 0),
+          );
+
+          const hasNewMission = Array.from(currentMissionIds).some(
+            (missionId) => !baselineMissionIdsRef.current.has(missionId),
+          );
+
+          if (hasNewMission) {
+            triggerDashboardRefresh();
+          }
+        } catch {
+          // Polling is best-effort while the backend is generating missions.
+        }
+      })();
+    }, 2_000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [loading, triggerDashboardRefresh]);
+
+  useEffect(() => {
+    if (!notice) return;
+
+    const timeoutId = window.setTimeout(() => {
+      setNotice(null);
+    }, 4_000);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [notice]);
+
+  const generateMissions = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
-      setSuccess(false);
+      setNotice(null);
+      refreshTriggeredRef.current = false;
+      baselineMissionIdsRef.current = await readCurrentRegularMissionIds();
 
-      const response = await api("/api/ai/generate-missions", {
+      const response = await api("/api/missions/generate", {
         method: "POST",
-        body: JSON.stringify({ conditioning }),
+        timeoutMs: 30_000,
       });
 
-      const data = (await response.json()) as {
-        status?: string | undefined;
-        job_id?: string | undefined;
-        missions?: GeneratedMission[] | undefined;
-        error?: string | undefined;
-      };
+      const payload = (await response.json().catch(() => null)) as MissionGenerationResponse | null;
       if (!response.ok) {
-        throw new Error(data?.error || "Failed to generate missions");
+        throw new Error(payload?.error ?? "Nao foi possivel gerar missoes agora.");
       }
 
-      if (Array.isArray(data.missions)) {
-        setGeneratedMissions(data.missions);
-        setSuccess(true);
-      } else if (typeof data.job_id === "string" && data.job_id.length > 0) {
-        await new Promise<void>((resolve) => {
-          window.setTimeout(() => resolve(), 2500);
-        });
-
-        const statusResponse = await api(`/api/ai/generate-missions/status?job_id=${encodeURIComponent(data.job_id)}`);
-        const statusData = (await statusResponse.json()) as {
-          status?: string | undefined;
-          missions?: GeneratedMission[] | undefined;
-          error?: string | undefined;
-        };
-
-        if (statusResponse.ok && statusData.status === "completed") {
-          setGeneratedMissions(Array.isArray(statusData.missions) ? statusData.missions : []);
-          setSuccess(true);
-        } else if (statusResponse.status === 202 || statusData.status === "processing") {
-          setGeneratedMissions([]);
-          setSuccess(true);
-        } else {
-          throw new Error(statusData.error || "Falha ao concluir geração de missões.");
-        }
-      } else {
-        setGeneratedMissions([]);
-        setSuccess(true);
-      }
-
-      window.setTimeout(() => {
-        if (onMissionsGenerated) {
-          onMissionsGenerated();
-        }
-        setSuccess(false);
-      }, 3000);
-
-    } catch (err) {
-      console.error("Error generating missions:", err);
-      setError("Não foi possível gerar missões. Tente novamente.");
+      triggerDashboardRefresh();
+      setNotice({
+        tone: payload?.generated === false ? "info" : "success",
+        message: payload?.generated === false
+          ? "Voce ja possui missoes ativas neste ciclo."
+          : "Missoes geradas e adicionadas ao dashboard.",
+      });
+    } catch (generationError) {
+      console.error("[AIMissionGenerator]", generationError);
+      setError(
+        generationError instanceof Error && generationError.message.trim().length > 0
+          ? generationError.message
+          : "Nao foi possivel gerar missoes. Tente novamente.",
+      );
     } finally {
       setLoading(false);
     }
-  };
-
-  const getDifficultyColor = (difficulty?: string) => {
-    switch (difficulty) {
-      case "easy":
-        return "text-green-600 bg-green-100";
-      case "medium":
-        return "text-yellow-600 bg-yellow-100";
-      case "hard":
-        return "text-red-600 bg-red-100";
-      default:
-        return "text-gray-600 bg-gray-100";
-    }
-  };
-
-  const getDifficultyLabel = (difficulty?: string) => {
-    switch (difficulty) {
-      case "easy":
-        return "Fácil";
-      case "medium":
-        return "Médio";
-      case "hard":
-        return "Difícil";
-      default:
-        return difficulty ?? "Médio";
-    }
-  };
-
-  if (success) {
-    return (
-      <div className="bg-green-50 border-2 border-green-200 rounded-2xl p-4 space-y-3">
-        <div className="flex items-center gap-2 text-green-600">
-          <CheckCircle className="w-5 h-5" />
-          <span className="font-medium">
-            {generatedMissions.length > 0
-              ? "Missões geradas com sucesso!"
-              : "Geração iniciada. As missões serão exibidas no dashboard em instantes."}
-          </span>
-        </div>
-
-        {generatedMissions.length > 0 ? (
-          <div className="space-y-2">
-            {generatedMissions.map((mission, index) => (
-              <div key={index} className="bg-white rounded-lg p-3 border border-green-200">
-                <div className="flex items-start justify-between gap-2 mb-2">
-                  <h4 className="font-bold text-sm text-gray-900">{mission.title}</h4>
-                  <span
-                    className={`px-2 py-1 rounded-full text-xs font-medium ${getDifficultyColor(
-                      mission.difficulty
-                    )}`}
-                  >
-                    {getDifficultyLabel(mission.difficulty)}
-                  </span>
-                </div>
-                <p className="text-xs text-gray-600 mb-2">{mission.description}</p>
-                <div className="flex items-center gap-3 text-xs">
-                  <span className="text-purple-600 font-medium">
-                    {mission.xp_reward} XP
-                  </span>
-                  <span className="text-yellow-600 font-medium">
-                    {mission.points_reward} pts
-                  </span>
-                  <span className="text-emerald-600 font-medium">
-                    {formatMissionGoal(
-                      resolveMetricType(mission),
-                      Number(mission.metric_value ?? mission.target_reps ?? 1),
-                      mission.sets ?? undefined
-                    )}
-                  </span>
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : null}
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="bg-red-50 border-2 border-red-200 rounded-2xl p-4">
-        <div className="flex items-center gap-2 text-red-600 mb-3">
-          <XCircle className="w-5 h-5" />
-          <span className="font-medium">{error}</span>
-        </div>
-        <button
-          onClick={generateMissions}
-          className="w-full px-4 py-2 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700 transition-colors"
-        >
-          Tentar Novamente
-        </button>
-      </div>
-    );
-  }
+  }, [readCurrentRegularMissionIds, triggerDashboardRefresh]);
 
   return (
     <div className="bg-gradient-to-r from-purple-500 to-pink-500 rounded-2xl p-4 shadow-lg">
@@ -198,33 +149,55 @@ export default function AIMissionGenerator({ onMissionsGenerated, conditioning }
           <Wand2 className="w-5 h-5 text-white" />
         </div>
         <div className="flex-1 text-white">
-          <h3 className="font-bold mb-1">Gerador de Missões IA</h3>
+          <h3 className="font-bold mb-1">Gerador de Missoes IA</h3>
           <p className="text-sm text-white/90">
-            Deixe a IA criar missões personalizadas para você baseadas no seu perfil e progresso!
+            Gera um ciclo completo de missoes personalizadas com base no seu perfil, historico e progresso recente.
           </p>
         </div>
       </div>
 
+      {notice ? (
+        <div className={`mb-3 rounded-xl border px-3 py-2 text-sm ${
+          notice.tone === "success"
+            ? "border-emerald-200 bg-white/95 text-emerald-700"
+            : "border-sky-200 bg-white/95 text-sky-700"
+        }`}>
+          <div className="flex items-center gap-2">
+            <CheckCircle className="h-4 w-4 shrink-0" />
+            <span>{notice.message}</span>
+          </div>
+        </div>
+      ) : null}
+
+      {error ? (
+        <div className="mb-3 rounded-xl border border-red-200 bg-white/95 px-3 py-2 text-sm text-red-700">
+          <div className="flex items-center gap-2">
+            <XCircle className="h-4 w-4 shrink-0" />
+            <span>{error}</span>
+          </div>
+        </div>
+      ) : null}
+
       <button
-        onClick={generateMissions}
+        onClick={() => { void generateMissions(); }}
         disabled={loading}
         className="w-full px-4 py-3 bg-white text-purple-600 rounded-xl font-medium shadow-lg hover:shadow-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed"
       >
         {loading ? (
           <div className="flex items-center justify-center gap-2">
             <LoadingBall size="sm" />
-            <span>Gerando missões...</span>
+            <span>Gerando e sincronizando missoes...</span>
           </div>
         ) : (
           <div className="flex items-center justify-center gap-2">
             <Wand2 className="w-4 h-4" />
-            <span>Gerar Missões Personalizadas</span>
+            <span>Gerar Missoes Personalizadas</span>
           </div>
         )}
       </button>
 
-      <p className="text-xs text-white/70 text-center mt-2">
-        Gera 3 missões diárias adaptadas ao seu nível
+      <p className="text-xs text-white/75 text-center mt-2">
+        Gera ate 5 diarias, 5 semanais e 5 mensais, com polling automatico do dashboard a cada 2 segundos.
       </p>
     </div>
   );
