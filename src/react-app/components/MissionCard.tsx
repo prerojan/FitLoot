@@ -126,6 +126,10 @@ function formatGoal(mission: Mission, metricType: MissionMetricType): string {
   return formatMissionGoal(metricType, goal, sets);
 }
 
+function formatProgressAmount(value: number): string {
+  return Math.max(0, Math.round(value)).toLocaleString("pt-BR");
+}
+
 function resolveMissionGoalText(mission: Mission, metricType: MissionMetricType): string {
   if (typeof mission.goal === "string" && mission.goal.trim().length > 0) {
     return (localizeMissionText(mission.goal) ?? mission.goal).trim();
@@ -830,7 +834,7 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
     : isMonthlyMission && circuitTasks.length > 0
       ? [`${autoProgressCurrentTotal}/${autoProgressRequiredTotal || 1} tarefas`, compactXpLabel].join(" | ")
       : isMonthlyMission
-        ? [`${monthlyCurrent}/${monthlyTarget}`, compactXpLabel].join(" | ")
+        ? [`${formatProgressAmount(monthlyCurrent)}/${formatProgressAmount(monthlyTarget)}`, compactXpLabel].join(" | ")
         : isCircuitMission
         ? [compactDurationLabel, `${circuitTasks.length || monthlyTarget} tarefas`].filter(Boolean).join(" | ")
         : [compactDurationLabel, formatGoal(mission, metricType)].filter(Boolean).join(" | ");
@@ -966,7 +970,7 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
         <div className="space-y-2 mb-3">
           <div className="flex items-center justify-between text-xs text-gray-600">
             <span>Progresso mensal</span>
-            <span>{monthlyCurrent}/{monthlyTarget}</span>
+            <span>{formatProgressAmount(monthlyCurrent)}/{formatProgressAmount(monthlyTarget)}</span>
           </div>
           <div className="h-2 rounded-full bg-gray-100 overflow-hidden">
             <div className="h-full bg-cyan-500" style={{ width: `${monthlyProgress}%` }} />

@@ -4416,8 +4416,20 @@ function resolveExplicitMonthlyDisplayGoal(rawMission: Record<string, unknown>):
     return `${formatIntegerPtBr(stepTarget)} passos acumulados`;
   }
 
-  if (normalizedTitle.includes("streak mensal")) {
+  if (normalizedTitle.includes("dias ativos") || normalizedTitle.includes("streak mensal") || normalizedTitle.includes("pratica ativa")) {
     return `${formatIntegerPtBr(target)} dias ativos no m\u00eas`;
+  }
+
+  if (normalizedTitle.includes("circuitos semanais")) {
+    return `${formatIntegerPtBr(target)} circuitos semanais conclu\u00eddos`;
+  }
+
+  if (normalizedTitle.includes("volume mensal") || normalizedTitle.includes("ritmo mensal")) {
+    return `${formatIntegerPtBr(target)} miss\u00f5es conclu\u00eddas`;
+  }
+
+  if (normalizedTitle.includes("desafio cardio")) {
+    return `${formatIntegerPtBr(target)} passos acumulados`;
   }
 
   if (metricType === "steps") {
@@ -4544,8 +4556,12 @@ function monthStartIso(reference = new Date()): string {
 
 function monthlyCounterValueByMission(mission: Record<string, unknown>, counters: MonthlyCounterSnapshot): number {
   const title = normalizeMatchText(String(mission.title ?? ""));
-  if (title.includes("distancia")) return counters.distance_meters;
-  if (title.includes("streak")) return counters.streak_days;
+  const metricType = normalizeMissionMetricType(mission.metric_type, mission.target_time);
+  if (title.includes("circuitos semanais")) return counters.weekly_circuits_completed;
+  if (title.includes("dias ativos") || title.includes("streak") || title.includes("pratica ativa")) return counters.streak_days;
+  if (metricType === "steps" || title.includes("passos") || title.includes("distancia") || title.includes("cardio")) {
+    return Math.max(0, Math.round(counters.distance_meters / 0.75));
+  }
   return counters.missions_completed;
 }
 
@@ -8121,6 +8137,182 @@ type MissionBlueprint = {
   subtasks: ResolvedMissionSubtask[];
 };
 
+type MonthlyCounterSource = "missions_completed" | "steps_equivalent" | "streak_days" | "weekly_circuits_completed";
+
+function roundToNearest(value: number, step: number): number {
+  if (step <= 1) return Math.round(value);
+  return Math.round(value / step) * step;
+}
+
+function clampMonthlyTarget(value: number, min: number, max: number, step = 1): number {
+  return Math.max(min, Math.min(max, roundToNearest(value, step)));
+}
+
+function normalizeGoalKeyword(value: string): string {
+  return normalizeMatchText(value);
+}
+
+function monthlyMissionCompletionTarget(profile: MissionGenerationProfileSnapshot): number {
+  const conditioningBonus = profile.conditioning === "avancado"
+    ? 8
+    : profile.conditioning === "intermediario"
+      ? 4
+      : 0;
+  const estimated = profile.trainingFrequency * 6 + Math.round(profile.completionRate * 10) + conditioningBonus;
+  return clampMonthlyTarget(estimated, 20, 45, 5);
+}
+
+function monthlyStepsEquivalentTarget(profile: MissionGenerationProfileSnapshot, boost = 0): number {
+  const goal = normalizeGoalKeyword(profile.mainGoal);
+  let estimated = 80_000 + Math.max(0, profile.trainingFrequency - 3) * 10_000 + boost;
+  if (
+    goal.includes("perda") ||
+    goal.includes("emagrec") ||
+    goal.includes("condicion") ||
+    goal.includes("resist") ||
+    goal.includes("corrid") ||
+    goal.includes("caminha") ||
+    goal.includes("cardio")
+  ) {
+    estimated += 20_000;
+  }
+  if (profile.conditioning === "intermediario") estimated += 10_000;
+  if (profile.conditioning === "avancado") estimated += 20_000;
+  return clampMonthlyTarget(estimated, 80_000, 180_000, 5_000);
+}
+
+function monthlyActiveDaysTarget(profile: MissionGenerationProfileSnapshot, boost = 0): number {
+  const conditioningBonus = profile.conditioning === "avancado"
+    ? 2
+    : profile.conditioning === "intermediario"
+      ? 1
+      : 0;
+  const estimated = profile.trainingFrequency * 4 + Math.round(profile.completionRate * 4) + conditioningBonus + boost;
+  return clampMonthlyTarget(estimated, 12, 24);
+}
+
+function monthlyWeeklyCircuitTarget(profile: MissionGenerationProfileSnapshot): number {
+  const estimated = Math.round(profile.trainingFrequency / 2) + 1;
+  return clampMonthlyTarget(estimated, 2, 4);
+}
+
+function buildMonthlyCounterGoal(
+  source: MonthlyCounterSource,
+  metricValue: number,
+): string {
+  if (source === "steps_equivalent") {
+    return `${formatIntegerPtBr(metricValue)} passos acumulados`;
+  }
+  if (source === "streak_days") {
+    return `${formatIntegerPtBr(metricValue)} dias ativos no mês`;
+  }
+  if (source === "weekly_circuits_completed") {
+    return `${formatIntegerPtBr(metricValue)} circuitos semanais concluídos`;
+  }
+  return `${formatIntegerPtBr(metricValue)} missões concluídas`;
+}
+
+function buildMonthlyCounterMissionBlueprints(
+  profile: MissionGenerationProfileSnapshot,
+  targetCount: number,
+  options?: {
+    missionOrigin?: "regular" | "ai" | undefined;
+    isAiSpecial?: boolean | undefined;
+  },
+): MissionBlueprint[] {
+  if (targetCount <= 0) return [];
+
+  const missionTarget = monthlyMissionCompletionTarget(profile);
+  const stepsTarget = monthlyStepsEquivalentTarget(profile);
+  const activeDaysTarget = monthlyActiveDaysTarget(profile);
+  const circuitsTarget = monthlyWeeklyCircuitTarget(profile);
+  const mainGoal = normalizeGoalKeyword(profile.mainGoal);
+
+  const goalBasedChallenge = mainGoal.includes("flex")
+    || mainGoal.includes("mobil")
+    || mainGoal.includes("along")
+    || mainGoal.includes("yoga")
+    ? {
+      name: "Prática Ativa do Mês",
+      source: "streak_days" as MonthlyCounterSource,
+      metricType: "repetitions" as MissionMetricType,
+      metricValue: monthlyActiveDaysTarget(profile, 2),
+      muscle: "full body",
+    }
+    : mainGoal.includes("massa")
+      || mainGoal.includes("forca")
+      || mainGoal.includes("hipertrof")
+      ? {
+        name: "Volume Mensal de Treinos",
+        source: "missions_completed" as MonthlyCounterSource,
+        metricType: "repetitions" as MissionMetricType,
+        metricValue: clampMonthlyTarget(missionTarget + 5, 25, 50, 5),
+        muscle: "full body",
+      }
+      : {
+        name: "Desafio Cardio do Mês",
+        source: "steps_equivalent" as MonthlyCounterSource,
+        metricType: "steps" as MissionMetricType,
+        metricValue: monthlyStepsEquivalentTarget(profile, 20_000),
+        muscle: "legs",
+      };
+
+  const definitions = [
+    {
+      name: "Consistência Mensal de Missões",
+      source: "missions_completed" as MonthlyCounterSource,
+      metricType: "repetitions" as MissionMetricType,
+      metricValue: missionTarget,
+      muscle: "full body",
+    },
+    {
+      name: "Distância Mensal Acumulada",
+      source: "steps_equivalent" as MonthlyCounterSource,
+      metricType: "steps" as MissionMetricType,
+      metricValue: stepsTarget,
+      muscle: "legs",
+    },
+    {
+      name: "Dias Ativos no Mês",
+      source: "streak_days" as MonthlyCounterSource,
+      metricType: "repetitions" as MissionMetricType,
+      metricValue: activeDaysTarget,
+      muscle: "full body",
+    },
+    {
+      name: "Circuitos Semanais Concluídos",
+      source: "weekly_circuits_completed" as MonthlyCounterSource,
+      metricType: "repetitions" as MissionMetricType,
+      metricValue: circuitsTarget,
+      muscle: "full body",
+    },
+    goalBasedChallenge,
+  ].slice(0, targetCount);
+
+  return definitions.map((definition, index) => {
+    const goal = buildMonthlyCounterGoal(definition.source, definition.metricValue);
+    const xpReward = clampXpRewardByPeriod("monthly", 620 + index * 25);
+    return {
+      period: "monthly",
+      name: definition.name,
+      description: "",
+      goal,
+      exerciseName: definition.name,
+      muscle: definition.muscle,
+      metricType: definition.metricType,
+      metricValue: definition.metricValue,
+      xpReward,
+      pointsReward: derivePointsRewardByPeriod("monthly", 140 + index * 8, xpReward),
+      difficultyLevel: profile.conditioning,
+      missionOrigin: options?.missionOrigin ?? "regular",
+      isAiSpecial: options?.isAiSpecial ?? false,
+      compatibilityKey: normalizeMatchText(definition.name),
+      compatibilityTerms: [definition.name, goal],
+      subtasks: [],
+    } satisfies MissionBlueprint;
+  });
+}
+
 type StructuredGenerationOptions = {
   isAiSpecial: boolean;
   dailyTarget: number;
@@ -8413,13 +8605,14 @@ function buildStructuredPlanPrompt(
     "Prancha nunca usa repeticoes.",
     "Circuito completo ou sessao longa nunca pode ser daily_mission.",
     "Weekly e monthly nao podem ter tempo estimado.",
-    "Weekly e monthly devem ter goal e subtasks compostas por nomes de daily_missions compativeis.",
+    "Weekly devem ter goal e subtasks compostas por nomes de daily_missions compativeis.",
+    "Monthly_missions podem vir vazias, porque as metas mensais regulares sao geradas pelo sistema com objetivos acumulados do mes.",
     "Em daily_missions.description, escreva 3 a 5 passos curtos de execucao em portugues brasileiro.",
     "O primeiro passo da description deve incluir alongamento ou aquecimento leve antes do treino.",
     "O ultimo passo da description deve incluir alongamento final para evitar dores musculares intensas.",
-    "Para indicar quantidade em weekly_missions.subtasks e monthly_missions.subtasks, repita o nome da mesma daily_mission no array.",
+    "Para indicar quantidade em weekly_missions.subtasks, repita o nome da mesma daily_mission no array.",
     'Exemplo de circuito: "Forca de Membros Superiores e Core" => subtasks repetidas de "flexao", "abdominal" e "prancha" ate representar 5 missoes de cada.',
-    "Weekly e monthly devem concentrar os detalhes em goal e subtasks. Nao liste as subtasks dentro de description.",
+    "Weekly devem concentrar os detalhes em goal e subtasks. Nao liste as subtasks dentro de description.",
     `Objetivo principal: ${profile.mainGoal}`,
     `Objetivos adicionais: ${profile.goals.join(", ")}`,
     `Condicionamento: ${profile.conditioning}`,
@@ -8520,21 +8713,11 @@ function buildFallbackStructuredPlan(
       subtasks: [],
     }));
 
-  const monthlyRepeatCount = Math.max(2, Math.min(4, profile.trainingFrequency));
-  const monthlyMissions = dailyMissions.slice(0, options.monthlyTarget).map((dailyMission) => ({
-    name: `Meta Mensal: ${dailyMission.name ?? "Treino"}`,
-    description: `Evolua esta missão com repetições da missão diária ${dailyMission.name ?? "treino"} ao longo do mês.`,
-    goal: `Complete ${monthlyRepeatCount} vezes a missão diária ${dailyMission.name ?? "treino"} neste mês.`,
-    xp_reward: clampXpRewardByPeriod("monthly", 620),
-    fitcoins_reward: derivePointsRewardByPeriod("monthly", 140, 620),
-    subtasks: Array.from({ length: monthlyRepeatCount }, () => dailyMission.name ?? "Missão diária"),
-  }));
-
   return {
     weekly_plan: {
       daily_missions: dailyMissions,
       weekly_missions: options.isAiSpecial ? [] : weeklyMissions,
-      monthly_missions: options.isAiSpecial ? [] : monthlyMissions,
+      monthly_missions: [],
     },
   };
 }
@@ -8751,7 +8934,6 @@ function validateStructuredMissionPlan(
 ): { blueprints: MissionBlueprint[]; invalidCount: number; totalCount: number } {
   const dailyDrafts = Array.isArray(planDraft.weekly_plan?.daily_missions) ? planDraft.weekly_plan?.daily_missions ?? [] : [];
   const weeklyDrafts = Array.isArray(planDraft.weekly_plan?.weekly_missions) ? planDraft.weekly_plan?.weekly_missions ?? [] : [];
-  const monthlyDrafts = Array.isArray(planDraft.weekly_plan?.monthly_missions) ? planDraft.weekly_plan?.monthly_missions ?? [] : [];
   const blueprints: MissionBlueprint[] = [];
   let invalidCount = 0;
   let totalCount = 0;
@@ -8853,27 +9035,28 @@ function validateStructuredMissionPlan(
     };
   }
 
-  const periodicSourceByPeriod: Record<"weekly" | "monthly", StructuredPeriodicMissionDraft[]> = {
-    weekly: [...weeklyDrafts, ...promotedWeeklyDrafts],
-    monthly: monthlyDrafts,
-  };
+  const weeklyResolution = resolvePeriodicMissionBlueprints({
+    period: "weekly",
+    targetCount: options.weeklyTarget,
+    drafts: [...weeklyDrafts, ...promotedWeeklyDrafts],
+    fallbackDrafts: fallbackPlan.weekly_plan?.weekly_missions ?? [],
+    dailyBlueprints,
+    profile,
+    missionOrigin: "regular",
+    isAiSpecial: false,
+  });
+  totalCount += weeklyResolution.totalCount;
+  invalidCount += weeklyResolution.invalidCount;
+  blueprints.push(...weeklyResolution.blueprints);
 
-  for (const period of ["weekly", "monthly"] as const) {
-    const resolution = resolvePeriodicMissionBlueprints({
-      period,
-      targetCount: period === "weekly" ? options.weeklyTarget : options.monthlyTarget,
-      drafts: periodicSourceByPeriod[period],
-      fallbackDrafts: period === "weekly"
-        ? (fallbackPlan.weekly_plan?.weekly_missions ?? [])
-        : (fallbackPlan.weekly_plan?.monthly_missions ?? []),
-      dailyBlueprints,
-      profile,
-      missionOrigin: "regular",
-      isAiSpecial: false,
-    });
-    totalCount += resolution.totalCount;
-    invalidCount += resolution.invalidCount;
-    blueprints.push(...resolution.blueprints);
+  if (options.monthlyTarget > 0) {
+    totalCount += options.monthlyTarget;
+    blueprints.push(
+      ...buildMonthlyCounterMissionBlueprints(profile, options.monthlyTarget, {
+        missionOrigin: "regular",
+        isAiSpecial: false,
+      }),
+    );
   }
 
   return { blueprints, invalidCount, totalCount };
@@ -8976,6 +9159,47 @@ async function materializeMissionBlueprint(
       ],
       6,
     );
+    return withMetric;
+  }
+
+  if (blueprint.period === "monthly" && blueprint.subtasks.length === 0 && blueprint.metricType !== "circuit_tasks") {
+    const withMetric = applyMissionMetricContext(
+      baseMission,
+      "monthly",
+      resolvedName,
+      blueprint.metricType,
+      blueprint.metricValue,
+      { conditioning: profile.conditioning, volumeMultiplier: profile.volumeMultiplier },
+    );
+    withMetric.title = `${config.titlePrefix}: ${blueprint.name}`;
+    withMetric.description = "";
+    withMetric.goal = blueprint.goal;
+    withMetric.mission_origin = blueprint.missionOrigin;
+    withMetric.is_ai_special = blueprint.isAiSpecial ? 1 : 0;
+    withMetric.instructions = [];
+    withMetric.exercise_instructions_en = [];
+    withMetric.exercise_instructions_pt = [];
+    withMetric.safety_tips = [];
+    withMetric.difficulty_level = blueprint.difficultyLevel;
+    withMetric.image_url = null;
+    withMetric.exercise_db_gif_url = null;
+    withMetric.exercise_db_image_url = null;
+    withMetric.video_url = null;
+    withMetric.thumbnail_url = null;
+    withMetric.exercise_name = null;
+    withMetric.exercise_equipment = null;
+    withMetric.exercise_body_part = null;
+    withMetric.exercise_target = null;
+    withMetric.exercise_secondary_muscles = [];
+    withMetric.muscle_groups = [];
+    withMetric.circuit_tasks = [];
+    withMetric.duration_estimate_minutes = null;
+    withMetric.sets = null;
+    withMetric.rest_seconds = null;
+    withMetric.target_time = null;
+    withMetric.target_reps = blueprint.metricType === "steps" || blueprint.metricType === "distance_meters"
+      ? null
+      : Math.max(1, blueprint.metricValue);
     return withMetric;
   }
 
@@ -9362,17 +9586,11 @@ async function ensureStructuredPeriodicMissionsFromExistingDailyBlueprints(
     missionOrigin: "regular",
     isAiSpecial: false,
   });
-  const monthlyResolution = resolvePeriodicMissionBlueprints({
-    period: "monthly",
-    targetCount: params.monthlyTarget,
-    drafts: params.monthlyDrafts ?? [],
-    fallbackDrafts: fallbackDrafts.monthly,
-    dailyBlueprints,
-    profile,
+  const monthlyBlueprints = buildMonthlyCounterMissionBlueprints(profile, params.monthlyTarget, {
     missionOrigin: "regular",
     isAiSpecial: false,
   });
-  const blueprints = [...weeklyResolution.blueprints, ...monthlyResolution.blueprints];
+  const blueprints = [...weeklyResolution.blueprints, ...monthlyBlueprints];
   if (blueprints.length === 0) {
     return 0;
   }
@@ -9385,17 +9603,37 @@ async function ensureStructuredPeriodicMissionsFromExistingDailyBlueprints(
   return blueprints.length;
 }
 
-function isLegacyMonthlyMissionTitle(title: string): boolean {
-  const normalized = normalizeMatchText(title);
-  return normalized.includes("consistencia mensal")
-    || normalized.includes("distancia mensal")
-    || normalized.includes("streak mensal")
-    || normalized.includes("treino mensal");
+function isCurrentMonthlyCounterMissionRow(row: Record<string, unknown>): boolean {
+  const title = normalizeMatchText(typeof row.title === "string" ? row.title : "");
+  const goal = normalizeMatchText(typeof row.goal === "string" ? row.goal : "");
+  const metricType = normalizeMissionMetricType(row.metric_type, row.target_time);
+  const metricValue = Math.max(0, Number(row.metric_value ?? row.target_reps ?? row.target_time ?? 0));
+
+  if (title.includes("consistencia mensal")) {
+    return goal.includes("missoes concluidas") && metricValue >= 20 && metricValue <= 50;
+  }
+  if (title.includes("distancia mensal")) {
+    return (goal.includes("passos acumulados") || metricType === "steps") && metricValue >= 80_000 && metricValue <= 180_000;
+  }
+  if (title.includes("dias ativos") || title.includes("streak mensal") || title.includes("pratica ativa")) {
+    return goal.includes("dias ativos") && metricValue >= 12 && metricValue <= 24;
+  }
+  if (title.includes("circuitos semanais")) {
+    return goal.includes("circuitos semanais") && metricValue >= 2 && metricValue <= 4;
+  }
+  if (title.includes("volume mensal") || title.includes("ritmo mensal")) {
+    return goal.includes("missoes concluidas") && metricValue >= 20 && metricValue <= 50;
+  }
+  if (title.includes("desafio cardio")) {
+    return goal.includes("passos acumulados") && metricValue >= 100_000 && metricValue <= 200_000;
+  }
+
+  return false;
 }
 
 async function repairLegacyPeriodicMissions(env: Env, db: D1Database, userId: string): Promise<void> {
   const rows = await db.prepare(
-    `SELECT id, type, title, description, goal
+    `SELECT id, type, title, description, goal, metric_type, metric_value, target_reps, target_time
       FROM missions
       WHERE user_id = ?
         AND type IN ('weekly', 'monthly')
@@ -9420,10 +9658,7 @@ async function repairLegacyPeriodicMissions(env: Env, db: D1Database, userId: st
   });
   const monthlyRowsToRepair = periodicRows.filter((row) => {
     if (row.type !== "monthly") return false;
-    const missionId = Number(row.id);
-    const hasGoal = typeof row.goal === "string" && row.goal.trim().length > 0;
-    const title = typeof row.title === "string" ? row.title : "";
-    return (subtasksByParentId.get(missionId)?.length ?? 0) === 0 || !hasGoal || isLegacyMonthlyMissionTitle(title);
+    return !isCurrentMonthlyCounterMissionRow(row);
   });
 
   if (weeklyRowsToRepair.length === 0 && monthlyRowsToRepair.length === 0) {
