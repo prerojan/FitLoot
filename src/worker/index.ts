@@ -51,7 +51,7 @@ import {
   type CaktoOrderSnapshot,
   type CaktoPlanCatalog,
 } from "./services/cakto";
-import { enrichExercise, searchExerciseDB } from "./services/exerciseEnrichment";
+import { enrichExercise, searchExerciseDB, type EnrichedExercise } from "./services/exerciseEnrichment";
 
 // Tipo do usuÃƒÂ¡rio autenticado
 interface AuthUser {
@@ -1080,7 +1080,6 @@ export interface Env {
   RAPID_API_KEY?: string | undefined;
   RAPID_API_HOST?: string | undefined;
   ANTHROPIC_API_KEY?: string | undefined;
-  EXERCISE_DB_KEY?: string | undefined;
   API_NINJAS_KEY?: string | undefined;
   GYMFIT_API_KEY?: string | undefined;
   FRONTEND_ORIGIN?: string | undefined;
@@ -1432,6 +1431,23 @@ async function logUserEvent(db: D1Database, userId: string, eventType: string, p
     .bind(userId, eventType, JSON.stringify(payload)).run();
 }
 
+async function runMissionLifecycleHookSafely(
+  userId: string,
+  phase: string,
+  run: () => Promise<void>,
+): Promise<void> {
+  try {
+    await run();
+  } catch (error) {
+    console.error("[missions][lifecycle]", {
+      userId,
+      phase,
+      message: getErrorMessage(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    });
+  }
+}
+
 async function unlockTitleIfNeeded(db: D1Database, userId: string, titleName: string) {
   const title = await db.prepare("SELECT id FROM titles WHERE name = ?").bind(titleName).first<{ id: number }>();
   if (!title?.id) return;
@@ -1711,8 +1727,12 @@ async function onGoalChanged(db: D1Database, userId: string, oldGoal: string, ne
 }
 
 async function onMissionComplete(db: D1Database, userId: string, missionId: number) {
-  await logUserEvent(db, userId, "onMissionComplete", { missionId });
-  await evaluateMissionAchievementsAndTitles(db, userId);
+  await runMissionLifecycleHookSafely(userId, "mission_complete_log", () =>
+    logUserEvent(db, userId, "onMissionComplete", { missionId }),
+  );
+  await runMissionLifecycleHookSafely(userId, "mission_complete_achievements", () =>
+    evaluateMissionAchievementsAndTitles(db, userId),
+  );
 }
 
 async function onLevelUp(db: D1Database, userId: string, newLevel: number) {
@@ -4808,6 +4828,7 @@ function createMissionRefreshPromise(env: Env, db: D1Database, userId: string): 
     try {
       await repairLegacyPeriodicMissions(env, db, userId);
       await ensurePeriodicMissions(env, db, userId);
+      await repairLegacyDailyMissionMetadata(env, db, userId);
       await updateMonthlyMissionProgress(userId, db);
       clearMissionListCache(userId);
       missionRefreshLastRun.set(userId, Date.now());
@@ -4820,7 +4841,17 @@ function createMissionRefreshPromise(env: Env, db: D1Database, userId: string): 
   return refreshPromise;
 }
 
-async function ensurePeriodicMissionsWithGuard(env: Env, db: D1Database, userId: string): Promise<void> {
+async function ensurePeriodicMissionsWithGuard(
+  env: Env,
+  db: D1Database,
+  userId: string,
+  options?: { force?: boolean | undefined },
+): Promise<void> {
+  if (options?.force === true) {
+    await createMissionRefreshPromise(env, db, userId);
+    return;
+  }
+
   const now = Date.now();
   cleanupMissionRefreshTracking(now);
   if (shouldDebounceMissionRefresh(userId, now)) {
@@ -4998,11 +5029,20 @@ async function refreshMissionFromSubtasks(
 
   const circuitTasks = missionSubtasksToCircuitTasks(subtasks);
   const completedSubtaskCount = subtasks.filter((subtask) => subtask.is_completed).length;
-  await db.prepare(
-    `UPDATE missions
-      SET circuit_tasks_json = ?, progress_value = ?, updated_at = datetime('now')
-      WHERE id = ?`
-  ).bind(JSON.stringify(circuitTasks), completedSubtaskCount, parentMissionId).run();
+  const hasProgressValueColumn = await hasTableColumn(db, "missions", "progress_value");
+  if (hasProgressValueColumn) {
+    await db.prepare(
+      `UPDATE missions
+        SET circuit_tasks_json = ?, progress_value = ?, updated_at = datetime('now')
+        WHERE id = ?`
+    ).bind(JSON.stringify(circuitTasks), completedSubtaskCount, parentMissionId).run();
+  } else {
+    await db.prepare(
+      `UPDATE missions
+        SET circuit_tasks_json = ?, updated_at = datetime('now')
+        WHERE id = ?`
+    ).bind(JSON.stringify(circuitTasks), parentMissionId).run();
+  }
 
   const allCompleted = subtasks.every((subtask) => subtask.is_completed);
   if (!allCompleted) return;
@@ -5121,6 +5161,92 @@ async function updateCircuitProgress(userId: string, completedMission: Record<st
   }
 }
 
+async function repairLegacyDailyMissionMetadata(env: Env, db: D1Database, userId: string): Promise<void> {
+  const rows = await db.prepare(
+    `SELECT
+        id,
+        title,
+        exercise_name,
+        exercise_equipment,
+        exercise_body_part,
+        exercise_target,
+        exercise_db_gif_url,
+        exercise_db_image_url,
+        image_url,
+        video_url,
+        thumbnail_url
+      FROM missions
+      WHERE user_id = ?
+        AND type = 'daily'
+        AND is_completed = 0
+        AND (deadline IS NULL OR deadline > datetime('now'))`
+  ).bind(userId).all<Record<string, unknown>>();
+
+  for (const row of Array.isArray(rows.results) ? rows.results : []) {
+    const hasMedia = [
+      row.exercise_db_gif_url,
+      row.exercise_db_image_url,
+      row.image_url,
+      row.video_url,
+      row.thumbnail_url,
+    ].some((value) => typeof value === "string" && normalizeMissionMediaUrl(value) !== null);
+    const hasExerciseMetadata = [
+      row.exercise_equipment,
+      row.exercise_body_part,
+      row.exercise_target,
+    ].some((value) => typeof value === "string" && value.trim().length > 0 && normalizeMatchText(value) !== "full body");
+
+    if (hasMedia && hasExerciseMetadata) {
+      continue;
+    }
+
+    const rawExerciseName = typeof row.exercise_name === "string" && row.exercise_name.trim().length > 0
+      ? row.exercise_name
+      : extractExerciseName(typeof row.title === "string" ? row.title : "");
+    const exerciseName = rawExerciseName.trim();
+    if (exerciseName.length === 0) {
+      continue;
+    }
+
+    const enriched = await enrichExercise(exerciseName, env).catch(() => null);
+    if (!enriched) {
+      continue;
+    }
+
+    await db.prepare(
+      `UPDATE missions
+         SET exercise_name = ?,
+             exercise_equipment = ?,
+             exercise_body_part = ?,
+             exercise_target = ?,
+             exercise_secondary_muscles_json = ?,
+             exercise_db_gif_url = ?,
+             exercise_db_image_url = ?,
+             image_url = ?,
+             video_url = ?,
+             thumbnail_url = ?,
+             muscle_groups_json = ?,
+             body_area = ?,
+             updated_at = datetime('now')
+       WHERE id = ?`
+    ).bind(
+      enriched.name,
+      enriched.equipment || null,
+      enriched.bodyPart || null,
+      enriched.target || null,
+      JSON.stringify(Array.isArray(enriched.secondaryMuscles) ? enriched.secondaryMuscles : []),
+      enriched.exerciseDbGifUrl,
+      enriched.exerciseDbImageUrl,
+      enriched.imageUrl,
+      enriched.videoUrl,
+      enriched.thumbnailUrl,
+      JSON.stringify(resolveExerciseApiMuscleGroups(enriched)),
+      resolveExerciseApiBodyArea(enriched, exerciseName),
+      row.id,
+    ).run();
+  }
+}
+
 app.get("/api/missions", authMiddleware, async (c) => {
   const user = c.get("user");
   if (!user) return c.json({ error: "Unauthorized" }, 401);
@@ -5128,7 +5254,7 @@ app.get("/api/missions", authMiddleware, async (c) => {
   try {
     const forceRefresh = c.req.query("refresh") === "1";
     if (forceRefresh) {
-      await ensurePeriodicMissionsWithGuard(c.env, c.env.fitloot_db, user.id);
+      await ensurePeriodicMissionsWithGuard(c.env, c.env.fitloot_db, user.id, { force: true });
     } else {
       schedulePeriodicMissionsRefreshWithGuard(c.env, c.env.fitloot_db, user.id, c.executionCtx);
     }
@@ -5325,181 +5451,211 @@ app.post("/api/missions/complete", authMiddleware, zValidator("json", CompleteMi
 
   const data = c.req.valid("json");
   const completedMetricValue = Number(data.metric_completed ?? data.reps_completed ?? data.time_completed ?? 0);
+  let completionPhase = "load_mission";
 
-  const mission = await c.env.fitloot_db.prepare(
-    "SELECT * FROM missions WHERE id = ? AND user_id = ? AND is_completed = 0"
-  ).bind(data.mission_id, user.id).first();
+  try {
+    const mission = await c.env.fitloot_db.prepare(
+      "SELECT * FROM missions WHERE id = ? AND user_id = ? AND is_completed = 0"
+    ).bind(data.mission_id, user.id).first();
 
-  if (!mission) {
-    return c.json({ error: "Mission not found" }, 404);
-  }
-
-  if (mission.type === "weekly" || mission.type === "monthly") {
-    return c.json(
-      {
-        error: "Missoes semanais e mensais nao podem ser concluidas manualmente. O progresso acontece automaticamente pelas missoes diarias compativeis.",
-        code: "MISSION_AUTO_PROGRESS_ONLY",
-      },
-      400,
-    );
-  }
-
-  let streakMultiplier = 1;
-  let xpGained = 0;
-  let pointsGained = 0;
-  let leveledUp = false;
-
-  await withTransaction(c.env.fitloot_db, async () => {
-  // Update mission
-  await c.env.fitloot_db.prepare(
-    `UPDATE missions SET is_completed = 1, status = 'completed', completed_at = datetime('now'), 
-    verified_by_sensor = ?, updated_at = datetime('now')
-    WHERE id = ?`
-  ).bind(data.sensor_verified ? 1 : 0, data.mission_id).run();
-
-  // Get current streak and progression
-  const progression = await c.env.fitloot_db.prepare(
-    "SELECT * FROM user_progression WHERE user_id = ?"
-  ).bind(user.id).first();
-
-  const today = assertString(safeGet(new Date().toISOString().split('T'), 0));
-  let newStreak = Number(progression?.current_streak || 0);
-
-  if (progression?.last_activity_date !== today) {
-    const yesterday = assertString(safeGet(new Date(Date.now() - 86400000).toISOString().split('T'), 0));
-    newStreak = 1;
-
-    if (progression?.last_activity_date === yesterday) {
-      newStreak = Number(progression?.current_streak || 0) + 1;
+    if (!mission) {
+      return c.json({ error: "Mission not found" }, 404);
     }
 
-    streakMultiplier = 1 + (newStreak * 0.1);
+    if (mission.type === "weekly" || mission.type === "monthly") {
+      return c.json(
+        {
+          error: "Missoes semanais e mensais nao podem ser concluidas manualmente. O progresso acontece automaticamente pelas missoes diarias compativeis.",
+          code: "MISSION_AUTO_PROGRESS_ONLY",
+        },
+        400,
+      );
+    }
 
-    await c.env.fitloot_db.prepare(
-      `UPDATE user_progression SET current_streak = ?, best_streak = MAX(best_streak, ?), 
-      last_activity_date = ?, updated_at = datetime('now')
-      WHERE user_id = ?`
-    ).bind(newStreak, newStreak, today, user.id).run();
-  } else {
-    streakMultiplier = 1 + (Number(progression?.current_streak || 0) * 0.1);
-  }
+    let streakMultiplier = 1;
+    let xpGained = 0;
+    let pointsGained = 0;
+    let leveledUp = false;
 
-  // Award XP and points
-  xpGained = Math.floor(Number(mission.xp_reward || 0) * streakMultiplier);
-  pointsGained = Number(mission.points_reward || 0);
-
-  await c.env.fitloot_db.prepare(
-    `UPDATE user_progression SET xp = COALESCE(xp, 0) + ?, points = COALESCE(points, 0) + ?, updated_at = datetime('now')
-    WHERE user_id = ?`
-  ).bind(xpGained, pointsGained, user.id).run();
-
-  // Check for level up
-  const updatedProgression = await c.env.fitloot_db.prepare(
-    "SELECT * FROM user_progression WHERE user_id = ?"
-  ).bind(user.id).first();
-
-  const currentXp = Number(updatedProgression?.xp || 0);
-  const currentLevel = Number(updatedProgression?.level || 1);
-  const xpForNextLevel = currentLevel * 100;
-  if (currentXp >= xpForNextLevel) {
-    await c.env.fitloot_db.prepare(
-      `UPDATE user_progression SET level = COALESCE(level, 1) + 1, xp = COALESCE(xp, 0) - ?, points = COALESCE(points, 0) + 100, updated_at = datetime('now')
-      WHERE user_id = ?`
-    ).bind(xpForNextLevel, user.id).run();
-    leveledUp = true;
-    const afterLevel = await c.env.fitloot_db.prepare("SELECT level FROM user_progression WHERE user_id = ?").bind(user.id).first<{ level: number }>();
-    const newLevel = Number(afterLevel?.level ?? currentLevel + 1);
-    await onLevelUp(c.env.fitloot_db, user.id, newLevel);
-    await tryUnlockSkillsForLevel(c.env.fitloot_db, user.id, newLevel);
-  }
-
-  await ensureUserCounterRow(c.env.fitloot_db, user.id);
-  const currentHour = new Date().getHours();
-  await c.env.fitloot_db.prepare(
-    `UPDATE user_event_counters
-      SET missions_completed = COALESCE(missions_completed, 0) + 1,
-          consecutive_days_completed = ?,
-          longest_consecutive_days = MAX(COALESCE(longest_consecutive_days, 0), ?),
-          updated_at = datetime('now')
-      WHERE user_id = ?`
-  ).bind(newStreak, newStreak, user.id).run();
-  await logUserEvent(c.env.fitloot_db, user.id, 'mission_complete', {
-    missionId: mission.id,
-    period: mission.type,
-    xpGained,
-    pointsGained,
-    hour: currentHour,
-    leveledUp,
-  });
-  const completedToday = await c.env.fitloot_db.prepare("SELECT COUNT(*) as c FROM missions WHERE user_id = ? AND is_completed = 1 AND date(completed_at) = date('now')").bind(user.id).first<{ c: number }>();
-  await onStreakContinued(c.env.fitloot_db, user.id, newStreak, Number(completedToday?.c ?? 1), new Date().toISOString());
-  await onMissionComplete(c.env.fitloot_db, user.id, Number(mission.id));
-  await updateMissionSubtaskProgress(user.id, mission as Record<string, unknown>, c.env.fitloot_db);
-  await updateCircuitProgress(user.id, mission as Record<string, unknown>, c.env.fitloot_db);
-  await updateMonthlyMissionProgress(user.id, c.env.fitloot_db);
-  const relevance = await checkMissionRelevance(user.id, Number(mission.id), c.env.fitloot_db, 'completed');
-  if (relevance.isGoalRelevant) {
-    const gs = await c.env.fitloot_db.prepare("SELECT goal_completed_count FROM user_goal_stats WHERE user_id = ?").bind(user.id).first<{ goal_completed_count: number }>();
-    const progressPercent = Math.min(200, Math.floor((Number(gs?.goal_completed_count ?? 0) / 100) * 100));
-    await c.env.fitloot_db.prepare("UPDATE user_goal_stats SET goal_progress_percent = ?, updated_at = datetime('now') WHERE user_id = ?").bind(progressPercent, user.id).run();
-    await onGoalProgress(c.env.fitloot_db, user.id, progressPercent);
-  }
-  if (currentHour >= 2 && currentHour < 4) {
-    await unlockAchievementIfNeeded(c.env.fitloot_db, user.id, 'InsÃƒÂ´nia', 1, 1);
-  }
-
-  const missionRecord = mission as Record<string, unknown>;
-  const missionMetricType = normalizeMissionMetricType(
-    missionRecord.metric_type,
-    missionRecord.target_time
-  );
-  const repsForSkill = missionMetricType === "repetitions" || missionMetricType === "sets_reps"
-    ? completedMetricValue
-    : 0;
-  const timeForSkill = missionMetricType === "duration_seconds"
-    ? completedMetricValue
-    : missionMetricType === "duration_minutes"
-      ? completedMetricValue * 60
-      : 0;
-
-  // Update skill stats if applicable
-  if (mission.skill_id && (repsForSkill > 0 || timeForSkill > 0)) {
-    await c.env.fitloot_db.prepare(
-      `UPDATE user_skills SET total_reps = total_reps + ?, total_time = total_time + ?, best_reps = MAX(best_reps, ?), updated_at = datetime('now')
-      WHERE user_id = ? AND skill_id = ?`
-    ).bind(repsForSkill, timeForSkill, repsForSkill, user.id, mission.skill_id).run();
-
-    // Update attributes based on skill
-    const skill = await c.env.fitloot_db.prepare(
-      "SELECT * FROM skills WHERE id = ?"
-    ).bind(mission.skill_id).first();
-
-    if (skill) {
+    completionPhase = "transaction";
+    await withTransaction(c.env.fitloot_db, async () => {
+      completionPhase = "mark_completed";
       await c.env.fitloot_db.prepare(
-        `UPDATE user_attributes SET 
-        strength = strength + ?, constitution = constitution + ?, 
-        vitality = vitality + ?, dexterity = dexterity + ?, 
-        focus = focus + ?, updated_at = datetime('now')
+        `UPDATE missions SET is_completed = 1, status = 'completed', completed_at = datetime('now'), 
+        verified_by_sensor = ?, updated_at = datetime('now')
+        WHERE id = ?`
+      ).bind(data.sensor_verified ? 1 : 0, data.mission_id).run();
+
+      completionPhase = "load_progression";
+      const progression = await c.env.fitloot_db.prepare(
+        "SELECT * FROM user_progression WHERE user_id = ?"
+      ).bind(user.id).first();
+
+      const today = assertString(safeGet(new Date().toISOString().split('T'), 0));
+      let newStreak = Number(progression?.current_streak || 0);
+
+      if (progression?.last_activity_date !== today) {
+        const yesterday = assertString(safeGet(new Date(Date.now() - 86400000).toISOString().split('T'), 0));
+        newStreak = 1;
+
+        if (progression?.last_activity_date === yesterday) {
+          newStreak = Number(progression?.current_streak || 0) + 1;
+        }
+
+        streakMultiplier = 1 + (newStreak * 0.1);
+
+        completionPhase = "update_streak";
+        await c.env.fitloot_db.prepare(
+          `UPDATE user_progression SET current_streak = ?, best_streak = MAX(best_streak, ?), 
+          last_activity_date = ?, updated_at = datetime('now')
+          WHERE user_id = ?`
+        ).bind(newStreak, newStreak, today, user.id).run();
+      } else {
+        streakMultiplier = 1 + (Number(progression?.current_streak || 0) * 0.1);
+      }
+
+      xpGained = Math.floor(Number(mission.xp_reward || 0) * streakMultiplier);
+      pointsGained = Number(mission.points_reward || 0);
+
+      completionPhase = "award_xp";
+      await c.env.fitloot_db.prepare(
+        `UPDATE user_progression SET xp = COALESCE(xp, 0) + ?, points = COALESCE(points, 0) + ?, updated_at = datetime('now')
         WHERE user_id = ?`
-      ).bind(
-        skill.strength_gain, skill.constitution_gain,
-        skill.vitality_gain, skill.dexterity_gain,
-        skill.focus_gain, user.id
-      ).run();
-    }
+      ).bind(xpGained, pointsGained, user.id).run();
+
+      completionPhase = "check_level";
+      const updatedProgression = await c.env.fitloot_db.prepare(
+        "SELECT * FROM user_progression WHERE user_id = ?"
+      ).bind(user.id).first();
+
+      const currentXp = Number(updatedProgression?.xp || 0);
+      const currentLevel = Number(updatedProgression?.level || 1);
+      const xpForNextLevel = currentLevel * 100;
+      if (currentXp >= xpForNextLevel) {
+        await c.env.fitloot_db.prepare(
+          `UPDATE user_progression SET level = COALESCE(level, 1) + 1, xp = COALESCE(xp, 0) - ?, points = COALESCE(points, 0) + 100, updated_at = datetime('now')
+          WHERE user_id = ?`
+        ).bind(xpForNextLevel, user.id).run();
+        leveledUp = true;
+        const afterLevel = await c.env.fitloot_db.prepare("SELECT level FROM user_progression WHERE user_id = ?").bind(user.id).first<{ level: number }>();
+        const newLevel = Number(afterLevel?.level ?? currentLevel + 1);
+        await onLevelUp(c.env.fitloot_db, user.id, newLevel);
+        await tryUnlockSkillsForLevel(c.env.fitloot_db, user.id, newLevel);
+      }
+
+      completionPhase = "update_event_counters";
+      await ensureUserCounterRow(c.env.fitloot_db, user.id);
+      const currentHour = new Date().getHours();
+      await c.env.fitloot_db.prepare(
+        `UPDATE user_event_counters
+          SET missions_completed = COALESCE(missions_completed, 0) + 1,
+              consecutive_days_completed = ?,
+              longest_consecutive_days = MAX(COALESCE(longest_consecutive_days, 0), ?),
+              updated_at = datetime('now')
+          WHERE user_id = ?`
+      ).bind(newStreak, newStreak, user.id).run();
+      await runMissionLifecycleHookSafely(user.id, "mission_complete_event", () =>
+        logUserEvent(c.env.fitloot_db, user.id, 'mission_complete', {
+          missionId: mission.id,
+          period: mission.type,
+          xpGained,
+          pointsGained,
+          hour: currentHour,
+          leveledUp,
+        }),
+      );
+      const completedToday = await c.env.fitloot_db.prepare("SELECT COUNT(*) as c FROM missions WHERE user_id = ? AND is_completed = 1 AND date(completed_at) = date('now')").bind(user.id).first<{ c: number }>();
+      await runMissionLifecycleHookSafely(user.id, "streak_continued", () =>
+        onStreakContinued(c.env.fitloot_db, user.id, newStreak, Number(completedToday?.c ?? 1), new Date().toISOString()),
+      );
+      await onMissionComplete(c.env.fitloot_db, user.id, Number(mission.id));
+
+      completionPhase = "update_subtasks";
+      await updateMissionSubtaskProgress(user.id, mission as Record<string, unknown>, c.env.fitloot_db);
+
+      completionPhase = "update_weekly_circuits";
+      await updateCircuitProgress(user.id, mission as Record<string, unknown>, c.env.fitloot_db);
+
+      completionPhase = "update_monthly_progress";
+      await updateMonthlyMissionProgress(user.id, c.env.fitloot_db);
+
+      await runMissionLifecycleHookSafely(user.id, "goal_progress", async () => {
+        const relevance = await checkMissionRelevance(user.id, Number(mission.id), c.env.fitloot_db, 'completed');
+        if (!relevance.isGoalRelevant) return;
+
+        const gs = await c.env.fitloot_db.prepare("SELECT goal_completed_count FROM user_goal_stats WHERE user_id = ?").bind(user.id).first<{ goal_completed_count: number }>();
+        const progressPercent = Math.min(200, Math.floor((Number(gs?.goal_completed_count ?? 0) / 100) * 100));
+        await c.env.fitloot_db.prepare("UPDATE user_goal_stats SET goal_progress_percent = ?, updated_at = datetime('now') WHERE user_id = ?").bind(progressPercent, user.id).run();
+        await onGoalProgress(c.env.fitloot_db, user.id, progressPercent);
+      });
+      if (currentHour >= 2 && currentHour < 4) {
+        await runMissionLifecycleHookSafely(user.id, "night_achievement", () =>
+          unlockAchievementIfNeeded(c.env.fitloot_db, user.id, 'InsÃƒÂ´nia', 1, 1),
+        );
+      }
+
+      const missionRecord = mission as Record<string, unknown>;
+      const missionMetricType = normalizeMissionMetricType(
+        missionRecord.metric_type,
+        missionRecord.target_time
+      );
+      const repsForSkill = missionMetricType === "repetitions" || missionMetricType === "sets_reps"
+        ? completedMetricValue
+        : 0;
+      const timeForSkill = missionMetricType === "duration_seconds"
+        ? completedMetricValue
+        : missionMetricType === "duration_minutes"
+          ? completedMetricValue * 60
+          : 0;
+
+      if (mission.skill_id && (repsForSkill > 0 || timeForSkill > 0)) {
+        completionPhase = "update_skill_stats";
+        await c.env.fitloot_db.prepare(
+          `UPDATE user_skills SET total_reps = total_reps + ?, total_time = total_time + ?, best_reps = MAX(best_reps, ?), updated_at = datetime('now')
+          WHERE user_id = ? AND skill_id = ?`
+        ).bind(repsForSkill, timeForSkill, repsForSkill, user.id, mission.skill_id).run();
+
+        const skill = await c.env.fitloot_db.prepare(
+          "SELECT * FROM skills WHERE id = ?"
+        ).bind(mission.skill_id).first();
+
+        if (skill) {
+          completionPhase = "update_attributes";
+          await c.env.fitloot_db.prepare(
+            `UPDATE user_attributes SET 
+            strength = strength + ?, constitution = constitution + ?, 
+            vitality = vitality + ?, dexterity = dexterity + ?, 
+            focus = focus + ?, updated_at = datetime('now')
+            WHERE user_id = ?`
+          ).bind(
+            skill.strength_gain, skill.constitution_gain,
+            skill.vitality_gain, skill.dexterity_gain,
+            skill.focus_gain, user.id
+          ).run();
+        }
+      }
+    });
+
+    invalidateRankingCache();
+    invalidateMissionListCache(user.id);
+
+    return c.json({
+      success: true,
+      xpGained,
+      pointsGained,
+      leveledUp,
+      streakMultiplier: streakMultiplier.toFixed(1)
+    });
+  } catch (error) {
+    console.error("[/api/missions/complete]", {
+      userId: user.id,
+      missionId: data.mission_id,
+      phase: completionPhase,
+      message: getErrorMessage(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    });
+    return c.json({ error: "Erro interno", code: "INTERNAL_ERROR" }, 500);
   }
-  });
-
-  invalidateRankingCache();
-  invalidateMissionListCache(user.id);
-
-  return c.json({
-    success: true,
-    xpGained,
-    pointsGained,
-    leveledUp,
-    streakMultiplier: streakMultiplier.toFixed(1)
-  });
 });
 
 // Achievements and titles
@@ -6385,6 +6541,23 @@ type ExerciseRef = {
   image_url?: string | undefined;
   body_part?: string | undefined;
 };
+
+function resolveExerciseApiMuscleGroups(exercise: Pick<EnrichedExercise, "target" | "secondaryMuscles"> | null | undefined): string[] {
+  return mergeUniqueStrings(
+    [
+      typeof exercise?.target === "string" ? exercise.target : "",
+      ...(Array.isArray(exercise?.secondaryMuscles) ? exercise.secondaryMuscles : []),
+    ],
+    6,
+  );
+}
+
+function resolveExerciseApiBodyArea(
+  exercise: Pick<EnrichedExercise, "bodyPart" | "target"> | null | undefined,
+  fallbackMuscle: string,
+): MissionBodyArea {
+  return inferBodyArea(exercise?.bodyPart || exercise?.target || fallbackMuscle);
+}
 
 type WeeklyPlanDay = {
   focus: string;
@@ -7958,24 +8131,16 @@ async function createMissionsForPeriod(env: Env, db: D1Database, userId: string,
     withMetric.exercise_instructions_en = apiInstructionsEn;
     withMetric.exercise_instructions_pt = apiInstructionsPt;
     withMetric.safety_tips = aiContext.safetyTips.length > 0 ? aiContext.safetyTips.slice(0, 4) : withMetric.safety_tips;
-    withMetric.muscle_groups = mergeUniqueStrings(
-      [
-        ...apiMuscles,
-        ...normalizeInstructionList(aiContext.musclesAffected, 8),
-      ],
-      6,
-    );
-    if (withMetric.muscle_groups.length === 0) {
-      withMetric.muscle_groups = [enriched?.target || muscle];
-    }
+    withMetric.muscle_groups = apiMuscles;
     withMetric.exercise_secondary_muscles = mergeUniqueStrings(
       Array.isArray(enriched?.secondaryMuscles) ? enriched.secondaryMuscles : [],
       8,
     );
     withMetric.exercise_name = resolvedName;
-    withMetric.exercise_equipment = enriched?.equipment || withMetric.exercise_equipment;
-    withMetric.exercise_body_part = enriched?.bodyPart || withMetric.exercise_body_part;
-    withMetric.exercise_target = enriched?.target || (withMetric.exercise_target ?? muscle);
+    withMetric.exercise_equipment = enriched?.equipment ?? null;
+    withMetric.exercise_body_part = enriched?.bodyPart ?? null;
+    withMetric.exercise_target = enriched?.target ?? null;
+    withMetric.body_area = resolveExerciseApiBodyArea(enriched, muscle);
     withMetric.exercise_db_gif_url = enriched?.exerciseDbGifUrl ?? withMetric.exercise_db_gif_url;
     withMetric.exercise_db_image_url = enriched?.exerciseDbImageUrl ?? withMetric.exercise_db_image_url;
     withMetric.attributes_benefited = aiContext.attributesBenefited.length > 0
@@ -8601,6 +8766,8 @@ function buildStructuredPlanPrompt(
     "Responda APENAS JSON valido, sem markdown, sem comentarios e sem texto extra.",
     specialRule,
     `Limites: daily_missions=${options.dailyTarget}, weekly_missions=${options.weeklyTarget}, monthly_missions=${options.monthlyTarget}.`,
+    "Sua funcao aqui e somente montar o plano adaptado ao usuario: escolha exercicios, volume, metas e recompensas. Alvo muscular, equipamento, instrucoes tecnicas detalhadas, GIFs e videos serao preenchidos pelas APIs de exercicio depois.",
+    "Em daily_missions.name, use o nome canonico do exercicio em ingles, como aparece em catalogos de exercicios (ex.: Push-up, Air Squat, Plank, Crunch, Lunge, Glute Bridge, Walking, Running, Yoga Flow). Nao invente nomes criativos para o exercicio.",
     "Use SOMENTE metric_type: reps, seconds, distance, steps, minutes.",
     "Prancha nunca usa repeticoes.",
     "Circuito completo ou sessao longa nunca pode ser daily_mission.",
@@ -9151,14 +9318,16 @@ async function materializeMissionBlueprint(
     withMetric.exercise_instructions_pt = apiInstructionsPt;
     withMetric.safety_tips = aiContext?.safetyTips?.length ? aiContext.safetyTips.slice(0, 4) : withMetric.safety_tips;
     withMetric.difficulty_level = blueprint.difficultyLevel;
-    withMetric.muscle_groups = mergeUniqueStrings(
-      [
-        enriched?.target || blueprint.muscle,
-        ...(Array.isArray(enriched?.secondaryMuscles) ? enriched.secondaryMuscles : []),
-        ...normalizeInstructionList(aiContext?.musclesAffected, 8),
-      ],
-      6,
+    withMetric.exercise_name = enriched?.name ?? resolvedName;
+    withMetric.exercise_equipment = enriched?.equipment ?? null;
+    withMetric.exercise_body_part = enriched?.bodyPart ?? null;
+    withMetric.exercise_target = enriched?.target ?? null;
+    withMetric.exercise_secondary_muscles = mergeUniqueStrings(
+      Array.isArray(enriched?.secondaryMuscles) ? enriched.secondaryMuscles : [],
+      8,
     );
+    withMetric.muscle_groups = resolveExerciseApiMuscleGroups(enriched);
+    withMetric.body_area = resolveExerciseApiBodyArea(enriched, blueprint.muscle);
     return withMetric;
   }
 
@@ -10368,14 +10537,7 @@ async function generateAiMissionsForUser(
         mergedInstructionSource = aiInstructionSource;
       }
 
-      const combinedMuscles = mergeUniqueStrings(
-        [
-          enrichedMedia?.target || "",
-          ...(Array.isArray(enrichedMedia?.secondaryMuscles) ? enrichedMedia.secondaryMuscles : []),
-          ...normalizeInstructionList(aiContext.musclesAffected, 8),
-        ],
-        6,
-      );
+      const combinedMuscles = resolveExerciseApiMuscleGroups(enrichedMedia);
 
       const withDetails: MissionPayload = {
         ...withMetric,
@@ -10391,21 +10553,25 @@ async function generateAiMissionsForUser(
         exercise_instructions_pt: apiInstructionsPt,
         safety_tips: aiContext.safetyTips.length > 0 ? aiContext.safetyTips.slice(0, 4) : withMetric.safety_tips,
         difficulty_level: aiContext.difficultyLevel,
-        muscle_groups: combinedMuscles.length > 0 ? combinedMuscles : withMetric.muscle_groups,
+        muscle_groups: combinedMuscles,
         exercise_secondary_muscles: mergeUniqueStrings(
           Array.isArray(enrichedMedia?.secondaryMuscles) ? enrichedMedia.secondaryMuscles : [],
           8,
         ),
         exercise_name: enrichedMedia?.name || (withMetric.exercise_name ?? exerciseName),
-        exercise_equipment: enrichedMedia?.equipment || withMetric.exercise_equipment,
-        exercise_body_part: enrichedMedia?.bodyPart || withMetric.exercise_body_part,
-        exercise_target: enrichedMedia?.target || withMetric.exercise_target,
+        exercise_equipment: enrichedMedia?.equipment ?? null,
+        exercise_body_part: enrichedMedia?.bodyPart ?? null,
+        exercise_target: enrichedMedia?.target ?? null,
         exercise_db_gif_url: enrichedMedia?.exerciseDbGifUrl ?? withMetric.exercise_db_gif_url,
         exercise_db_image_url: enrichedMedia?.exerciseDbImageUrl ?? withMetric.exercise_db_image_url,
         attributes_benefited: aiContext.attributesBenefited.length > 0
           ? aiContext.attributesBenefited.slice(0, 6)
           : withMetric.attributes_benefited,
       };
+      withDetails.body_area = resolveExerciseApiBodyArea(
+        enrichedMedia,
+        mission.exercise_target ?? mission.muscle_groups[0] ?? exerciseName,
+      );
       withDetails.description = withDetails.metric_type === "circuit_tasks"
         ? ""
         : buildMissionDescriptionFromInstructions(

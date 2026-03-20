@@ -61,6 +61,39 @@ const DEFAULT_LOADING_STATE: DashboardLoadingState = {
   titles: true,
 };
 
+function normalizeMissionTextKey(value: string | null | undefined): string {
+  return (value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
+
+function missionNeedsSynchronousRefresh(mission: Mission): boolean {
+  if (mission.type !== "monthly") return false;
+  if (Array.isArray(mission.circuit_tasks) && mission.circuit_tasks.length > 0) return false;
+
+  const title = normalizeMissionTextKey(mission.title);
+  const goal = normalizeMissionTextKey(mission.goal);
+
+  if (title.includes("consistencia mensal")) return !goal.includes("missoes concluidas");
+  if (title.includes("distancia mensal")) return !goal.includes("passos acumulados");
+  if (title.includes("dias ativos") || title.includes("pratica ativa")) return !goal.includes("dias ativos");
+  if (title.includes("circuitos semanais")) return !goal.includes("circuitos semanais");
+  if (title.includes("volume mensal")) return !goal.includes("missoes concluidas");
+  if (title.includes("desafio cardio")) return !goal.includes("passos acumulados");
+
+  return false;
+}
+
+function resolveMissionsApiPath(forceRefresh: boolean, cachedMissions: Mission[] | null): string {
+  if (forceRefresh) return "/api/missions?refresh=1";
+  if (Array.isArray(cachedMissions) && cachedMissions.some(missionNeedsSynchronousRefresh)) {
+    return "/api/missions?refresh=1";
+  }
+  return "/api/missions";
+}
+
 export default function Dashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -100,6 +133,9 @@ export default function Dashboard() {
     const cacheMetrics = readCachedJson<DailyMetrics>("/api/metrics/today");
     const cacheAchievements = readCachedJson<AchievementWithUnlock[]>("/api/achievements");
     const cacheTitles = readCachedJson<Array<Title & { is_active?: number | undefined }>>("/api/titles");
+    const cachedMissionList = Array.isArray(cacheMissions?.data) ? cacheMissions.data : null;
+    const missionsApiPath = resolveMissionsApiPath(forceRefresh, cachedMissionList);
+    const shouldForceMissionRefresh = missionsApiPath !== "/api/missions";
 
     if (cacheProfile) setProfile(cacheProfile.data);
     if (cacheProgression) setProgression(cacheProgression.data);
@@ -113,7 +149,7 @@ export default function Dashboard() {
     setLoadingState({
       profile: forceRefresh || !cacheProfile,
       progression: forceRefresh || !cacheProgression,
-      missions: forceRefresh || !cacheMissions,
+      missions: shouldForceMissionRefresh || !cacheMissions,
       metrics: forceRefresh || !cacheMetrics,
       titles: forceRefresh || !cacheTitles,
     });
@@ -163,7 +199,7 @@ export default function Dashboard() {
         shouldRedirectToOnboarding = true;
       }),
       runRequest<UserProgression>("progression", "/api/progression", Boolean(cacheProgression), Boolean(cacheProgression?.stale), setProgression),
-      runRequest<Mission[]>("missions", "/api/missions", Boolean(cacheMissions), Boolean(cacheMissions?.stale), (payload) => {
+      runRequest<Mission[]>("missions", missionsApiPath, Boolean(cacheMissions), shouldForceMissionRefresh || Boolean(cacheMissions?.stale), (payload) => {
         setMissions(Array.isArray(payload) ? payload : []);
       }),
       runRequest<DailyMetrics>("metrics", "/api/metrics/today", Boolean(cacheMetrics), Boolean(cacheMetrics?.stale), setMetrics),
@@ -238,6 +274,7 @@ export default function Dashboard() {
     clearJsonCache("/api/profile");
     clearJsonCache("/api/progression");
     clearJsonCache("/api/missions");
+    clearJsonCache("/api/missions?refresh=1");
     clearJsonCache("/api/metrics/today");
     clearJsonCache("/api/titles");
     await loadData({ forceRefresh: true });

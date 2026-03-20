@@ -38,12 +38,13 @@ export default function AIMissionGenerator({ onMissionsGenerated }: AIMissionGen
     if (refreshTriggeredRef.current) return;
     refreshTriggeredRef.current = true;
     clearJsonCache("/api/missions");
+    clearJsonCache("/api/missions?refresh=1");
     onMissionsGenerated?.();
   }, [onMissionsGenerated]);
 
   const readCurrentRegularMissionIds = useCallback(async (): Promise<Set<number>> => {
     try {
-      const response = await api("/api/missions", { timeoutMs: 10_000 });
+      const response = await api("/api/missions?refresh=1", { timeoutMs: 10_000 });
       if (!response.ok) return new Set<number>();
 
       const payload = (await response.json()) as Mission[];
@@ -64,7 +65,7 @@ export default function AIMissionGenerator({ onMissionsGenerated }: AIMissionGen
     const intervalId = window.setInterval(() => {
       void (async () => {
         try {
-          const response = await api("/api/missions", { timeoutMs: 10_000 });
+          const response = await api("/api/missions?refresh=1", { timeoutMs: 10_000 });
           if (!response.ok) return;
 
           const payload = (await response.json()) as Mission[];

@@ -691,6 +691,7 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
   const isAutoProgressMission = isWeeklyMission || isMonthlyMission;
   const isAIMission = Number(mission.is_ai_special ?? 0) === 1 || mission.mission_origin === "ai";
   const circuitTasks = useMemo(() => resolveCircuitTasks(mission), [mission]);
+  const hasTaskProgressMission = isWeeklyMission || (isMonthlyMission && circuitTasks.length > 0);
   const autoProgressRequiredTotal = circuitTasks.reduce((total, task) => total + Math.max(1, task.required_count), 0);
   const autoProgressCurrentTotal = circuitTasks.reduce(
     (total, task) => total + Math.min(Math.max(0, task.current_count), Math.max(1, task.required_count)),
@@ -698,9 +699,12 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
   );
   const circuitProgress = autoProgressRequiredTotal > 0 ? (autoProgressCurrentTotal / autoProgressRequiredTotal) * 100 : 0;
   const missionMediaUrl = resolveMissionMediaUrl(mission);
-  const primaryLabel = isAutoProgressMission
+  const missionGoalText = resolveMissionGoalText(mission, metricType);
+  const primaryLabel = hasTaskProgressMission
     ? summarizeAutoProgressLabel(circuitTasks)
-    : resolveMissionFocusLabels(mission)[0] ?? bodyAreaLabel(mission.body_area);
+    : isMonthlyMission
+      ? missionGoalText
+      : resolveMissionFocusLabels(mission)[0] ?? bodyAreaLabel(mission.body_area);
   const hasCircuitProgress = circuitTasks.some((task) => task.current_count > 0);
   const isInProgress = !isFailed && !isCompleted && (missionStatus === "in_progress" || hasCircuitProgress);
   const visualState = isFailed ? "failed" : isCompleted ? "completed" : isInProgress ? "in_progress" : "available";
@@ -718,7 +722,6 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
     ? (isCompleted ? autoProgressRequiredTotal : autoProgressCurrentTotal)
     : (isCompleted ? monthlyTarget : Math.max(0, Math.min(monthlyTarget, monthlyProgressValue)));
   const monthlyProgress = Math.min(100, Math.round((monthlyCurrent / monthlyTarget) * 100));
-  const missionGoalText = resolveMissionGoalText(mission, metricType);
   const hasInlineInstructions =
     (Array.isArray(mission.instructions) && mission.instructions.length > 0) ||
     (Array.isArray(mission.exercise_instructions_pt) && mission.exercise_instructions_pt.length > 0) ||
@@ -789,6 +792,10 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
   const missionDetails = detailedMission ?? mission;
   const detailMetricType = normalizeMetricType(missionDetails);
   const detailCircuitTasks = resolveCircuitTasks(missionDetails);
+  const detailIsWeeklyMission = missionDetails.type === "weekly";
+  const detailIsMonthlyMission = missionDetails.type === "monthly";
+  const detailIsCompleted = missionDetails.is_completed === 1 || ((missionDetails as Mission & { status?: string | undefined }).status ?? "") === "completed";
+  const detailHasTaskProgressMission = detailIsWeeklyMission || (detailIsMonthlyMission && detailCircuitTasks.length > 0);
   const detailAutoProgressRequiredTotal = detailCircuitTasks.reduce((total, task) => total + Math.max(1, task.required_count), 0);
   const detailAutoProgressCurrentTotal = detailCircuitTasks.reduce(
     (total, task) => total + Math.min(Math.max(0, task.current_count), Math.max(1, task.required_count)),
@@ -797,6 +804,12 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
   const detailCircuitProgress = detailAutoProgressRequiredTotal > 0
     ? (detailAutoProgressCurrentTotal / detailAutoProgressRequiredTotal) * 100
     : 0;
+  const detailMonthlyTarget = Math.max(1, missionTotalGoal(missionDetails, detailMetricType));
+  const detailMonthlyProgressValue = Number((missionDetails as Mission & { progress_value?: number | undefined }).progress_value ?? 0);
+  const detailMonthlyCurrent = detailCircuitTasks.length > 0
+    ? (detailIsCompleted ? detailAutoProgressRequiredTotal : detailAutoProgressCurrentTotal)
+    : (detailIsCompleted ? detailMonthlyTarget : Math.max(0, Math.min(detailMonthlyTarget, detailMonthlyProgressValue)));
+  const detailMonthlyProgress = Math.min(100, Math.round((detailMonthlyCurrent / detailMonthlyTarget) * 100));
   const detailFocusLabels = isAutoProgressMission ? [] : resolveMissionFocusLabels(missionDetails);
   const detailMissionMediaUrl = resolveMissionMediaUrl(missionDetails);
   const detailMissionVideoUrl = normalizeMissionMediaUrl(missionDetails.video_url);
@@ -1128,71 +1141,96 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
                     <div className="flex items-center justify-between gap-4">
                       <div>
                         <p className="text-[11px] font-bold uppercase tracking-[0.28em]" style={{ color: "var(--app-primary-color)" }}>
-                          {isWeeklyMission ? "Circuito semanal" : "Meta mensal"}
+                          {detailIsWeeklyMission ? "Circuito semanal" : "Meta mensal"}
                         </p>
                       </div>
                       <Badge className="shrink-0 border-0" style={{ background: "color-mix(in srgb, var(--app-primary-color) 14%, transparent)", color: "var(--app-primary-color)" }}>
-                        {Math.round(detailCircuitProgress)}%
+                        {Math.round(detailHasTaskProgressMission ? detailCircuitProgress : detailMonthlyProgress)}%
                       </Badge>
                     </div>
 
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between text-xs font-semibold" style={{ color: "var(--fl-color-text-muted)" }}>
-                        <span>{isWeeklyMission ? "Progresso geral" : "Progresso mensal"}</span>
-                        <span>{detailAutoProgressCurrentTotal}/{detailAutoProgressRequiredTotal || 1}</span>
-                      </div>
-                      <div className="h-2.5 rounded-full overflow-hidden" style={{ background: "color-mix(in srgb, var(--fl-color-text) 10%, transparent)" }}>
-                        <div
-                          className="h-full rounded-full transition-all duration-500"
-                          style={{
-                            width: `${detailCircuitProgress}%`,
-                            background: isWeeklyMission ? "linear-gradient(90deg, #10b981, #14b8a6)" : "linear-gradient(90deg, #06b6d4, #22d3ee)",
-                          }}
-                        />
-                      </div>
-                    </div>
-
-                    <div className="space-y-3">
-                      {detailCircuitTasks.map((task) => {
-                        const taskProgress = task.required_count > 0
-                          ? Math.min(100, Math.round((task.current_count / task.required_count) * 100))
-                          : 0;
-                        return (
-                          <div
-                            key={task.id}
-                            className="rounded-2xl border p-3"
-                            style={{
-                              background: "color-mix(in srgb, var(--fl-surface-strong) 84%, transparent)",
-                              borderColor: "var(--fl-border-soft)",
-                            }}
-                          >
-                            <div className="flex items-center justify-between gap-3 mb-2">
-                              <div className="flex items-center gap-2 min-w-0">
-                                <CheckCircle2
-                                  className="w-4 h-4 shrink-0"
-                                  style={{ color: task.completed ? "var(--app-primary-color)" : "var(--fl-color-text-muted)" }}
-                                />
-                                <span className="text-sm font-semibold line-clamp-2" style={{ color: "var(--fl-color-text)" }}>
-                                  {localizeMissionText(task.label) ?? task.label}
-                                </span>
-                              </div>
-                              <span className="text-xs font-bold shrink-0" style={{ color: "var(--fl-color-text-muted)" }}>
-                                {task.current_count}/{task.required_count}
-                              </span>
-                            </div>
-                            <div className="h-2 rounded-full overflow-hidden" style={{ background: "color-mix(in srgb, var(--fl-color-text) 10%, transparent)" }}>
-                              <div
-                                className="h-full rounded-full transition-all duration-500"
-                                style={{
-                                  width: `${taskProgress}%`,
-                                  background: task.completed ? "var(--app-primary-color)" : (isWeeklyMission ? "#14b8a6" : "#22d3ee"),
-                                }}
-                              />
-                            </div>
+                    {detailHasTaskProgressMission ? (
+                      <>
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between text-xs font-semibold" style={{ color: "var(--fl-color-text-muted)" }}>
+                            <span>{detailIsWeeklyMission ? "Progresso geral" : "Progresso mensal"}</span>
+                            <span>{detailAutoProgressCurrentTotal}/{detailAutoProgressRequiredTotal || 1}</span>
                           </div>
-                        );
-                      })}
-                    </div>
+                          <div className="h-2.5 rounded-full overflow-hidden" style={{ background: "color-mix(in srgb, var(--fl-color-text) 10%, transparent)" }}>
+                            <div
+                              className="h-full rounded-full transition-all duration-500"
+                              style={{
+                                width: `${detailCircuitProgress}%`,
+                                background: detailIsWeeklyMission ? "linear-gradient(90deg, #10b981, #14b8a6)" : "linear-gradient(90deg, #06b6d4, #22d3ee)",
+                              }}
+                            />
+                          </div>
+                        </div>
+
+                        <div className="space-y-3">
+                          {detailCircuitTasks.map((task) => {
+                            const taskProgress = task.required_count > 0
+                              ? Math.min(100, Math.round((task.current_count / task.required_count) * 100))
+                              : 0;
+                            return (
+                              <div
+                                key={task.id}
+                                className="rounded-2xl border p-3"
+                                style={{
+                                  background: "color-mix(in srgb, var(--fl-surface-strong) 84%, transparent)",
+                                  borderColor: "var(--fl-border-soft)",
+                                }}
+                              >
+                                <div className="flex items-center justify-between gap-3 mb-2">
+                                  <div className="flex items-center gap-2 min-w-0">
+                                    <CheckCircle2
+                                      className="w-4 h-4 shrink-0"
+                                      style={{ color: task.completed ? "var(--app-primary-color)" : "var(--fl-color-text-muted)" }}
+                                    />
+                                    <span className="text-sm font-semibold line-clamp-2" style={{ color: "var(--fl-color-text)" }}>
+                                      {localizeMissionText(task.label) ?? task.label}
+                                    </span>
+                                  </div>
+                                  <span className="text-xs font-bold shrink-0" style={{ color: "var(--fl-color-text-muted)" }}>
+                                    {task.current_count}/{task.required_count}
+                                  </span>
+                                </div>
+                                <div className="h-2 rounded-full overflow-hidden" style={{ background: "color-mix(in srgb, var(--fl-color-text) 10%, transparent)" }}>
+                                  <div
+                                    className="h-full rounded-full transition-all duration-500"
+                                    style={{
+                                      width: `${taskProgress}%`,
+                                      background: task.completed ? "var(--app-primary-color)" : (detailIsWeeklyMission ? "#14b8a6" : "#22d3ee"),
+                                    }}
+                                  />
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </>
+                    ) : (
+                      <div className="space-y-3">
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between text-xs font-semibold" style={{ color: "var(--fl-color-text-muted)" }}>
+                            <span>Progresso mensal</span>
+                            <span>{formatProgressAmount(detailMonthlyCurrent)}/{formatProgressAmount(detailMonthlyTarget)}</span>
+                          </div>
+                          <div className="h-2.5 rounded-full overflow-hidden" style={{ background: "color-mix(in srgb, var(--fl-color-text) 10%, transparent)" }}>
+                            <div
+                              className="h-full rounded-full transition-all duration-500"
+                              style={{
+                                width: `${detailMonthlyProgress}%`,
+                                background: "linear-gradient(90deg, #06b6d4, #22d3ee)",
+                              }}
+                            />
+                          </div>
+                        </div>
+                        <p className="text-sm leading-relaxed" style={{ color: "var(--fl-color-text-muted)" }}>
+                          {resolveMissionGoalText(missionDetails, detailMetricType)}
+                        </p>
+                      </div>
+                    )}
                   </div>
                 </div>
               ) : null}

@@ -2,7 +2,6 @@ import { normalizeMissionMediaUrl } from "../../shared/missionLocalization";
 
 type RapidApiEnv = {
   RAPID_API_KEY?: string | undefined;
-  EXERCISE_DB_KEY?: string | undefined;
 };
 
 type ExerciseDbExercise = {
@@ -80,6 +79,25 @@ const RAPID_TIMEOUT_MS = 3_000;
 const CACHE_TTL_MS = 15 * 60_000;
 const CACHE_MAX_ENTRIES = 250;
 const EXERCISE_DB_PUBLIC_API_BASE = "https://www.exercisedb.dev/api/v1";
+const EXERCISE_SEARCH_ALIASES = new Map<string, readonly string[]>([
+  ["flexao", ["push-up"]],
+  ["agachamento", ["air squat", "squat"]],
+  ["agachamento livre", ["air squat", "squat"]],
+  ["prancha", ["plank"]],
+  ["abdominal", ["crunch", "sit-up"]],
+  ["avanco", ["lunge"]],
+  ["ponte de gluteos", ["glute bridge"]],
+  ["barra fixa", ["pull-up"]],
+  ["suspensao na barra", ["dead hang"]],
+  ["cadeira isometrica", ["wall sit"]],
+  ["caminhada", ["walking", "walk"]],
+  ["corrida", ["running", "run"]],
+  ["alongamento", ["stretching"]],
+  ["mobilidade", ["mobility flow", "mobility"]],
+  ["yoga", ["yoga flow", "yoga"]],
+  ["burpee", ["burpee"]],
+  ["hollow body", ["hollow body hold", "hollow body"]],
+]);
 
 let exerciseCatalogCache: CacheEntry<ExerciseDbExercise[]> | null = null;
 const searchCache = new Map<string, CacheEntry<ExerciseDbExercise[]>>();
@@ -117,10 +135,8 @@ function setCachedValue<T>(cache: Map<string, CacheEntry<T>>, key: string, value
 }
 
 function resolveRapidApiKey(env: RapidApiEnv): string | null {
-  const candidates = [env.RAPID_API_KEY, env.EXERCISE_DB_KEY]
-    .map((value) => (typeof value === "string" ? value.trim() : ""))
-    .filter((value) => value.length > 0);
-  return candidates[0] ?? null;
+  const apiKey = typeof env.RAPID_API_KEY === "string" ? env.RAPID_API_KEY.trim() : "";
+  return apiKey.length > 0 ? apiKey : null;
 }
 
 async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
@@ -245,6 +261,81 @@ function normalizeExerciseNameToken(value: string): string {
     .trim();
 }
 
+function stripMissionPrefix(value: string): string {
+  const normalized = value.trim();
+  const lower = normalizeExerciseNameToken(normalized);
+  const prefixes = [
+    "missao diaria:",
+    "missao semanal:",
+    "missao mensal:",
+  ];
+
+  for (const prefix of prefixes) {
+    if (lower.startsWith(prefix)) {
+      return normalized.slice(prefix.length).trim();
+    }
+  }
+
+  return normalized;
+}
+
+function stripParentheticalSegments(value: string): string {
+  let depth = 0;
+  let output = "";
+  for (const character of value) {
+    if (character === "(") {
+      depth += 1;
+      continue;
+    }
+    if (character === ")") {
+      depth = Math.max(0, depth - 1);
+      continue;
+    }
+    if (depth === 0) {
+      output += character;
+    }
+  }
+  return output;
+}
+
+function buildExerciseSearchQueries(exerciseName: string): string[] {
+  const normalizedBase = normalizeExerciseNameToken(stripMissionPrefix(exerciseName));
+  if (!normalizedBase) return [];
+
+  const queries = new Set<string>([normalizedBase]);
+  const descriptorWords = new Set([
+    "iniciante",
+    "intermediario",
+    "avancado",
+    "sedentario",
+    "leve",
+    "moderado",
+    "moderada",
+    "intenso",
+    "intensa",
+  ]);
+  const withoutTail = normalizedBase.split(" - ")[0] ?? normalizedBase;
+  const withoutParenthetical = stripParentheticalSegments(withoutTail);
+  const withoutDescriptors = withoutParenthetical
+    .split(" ")
+    .filter((token) => token.length > 0 && !descriptorWords.has(token))
+    .join(" ")
+    .trim();
+  if (withoutDescriptors && withoutDescriptors !== normalizedBase) {
+    queries.add(withoutDescriptors);
+  }
+
+  const aliases = EXERCISE_SEARCH_ALIASES.get(normalizedBase) ?? [];
+  for (const alias of aliases) {
+    const normalizedAlias = normalizeExerciseNameToken(alias);
+    if (normalizedAlias) {
+      queries.add(normalizedAlias);
+    }
+  }
+
+  return Array.from(queries);
+}
+
 function rankExercisesByName(exercises: ExerciseDbExercise[], query: string): ExerciseDbExercise[] {
   const normalizedQuery = normalizeExerciseNameToken(query);
   if (!normalizedQuery) return exercises.slice(0, 8);
@@ -279,7 +370,8 @@ function rankExercisesByName(exercises: ExerciseDbExercise[], query: string): Ex
 }
 
 export async function searchExerciseDB(exerciseName: string, env: RapidApiEnv): Promise<ExerciseDbExercise[]> {
-  const normalizedQuery = normalizeExerciseNameToken(exerciseName);
+  const queryCandidates = buildExerciseSearchQueries(exerciseName);
+  const normalizedQuery = queryCandidates[0] ?? "";
   if (!normalizedQuery) return [];
 
   const cached = getCachedValue(searchCache, normalizedQuery);
@@ -287,49 +379,72 @@ export async function searchExerciseDB(exerciseName: string, env: RapidApiEnv): 
     return cached;
   }
 
-  let results: ExerciseDbExercise[] = [];
-  try {
-    const directByName = await publicExerciseDbGet<PublicExerciseDbListResponse>(
-      `/exercises/search?q=${encodeURIComponent(normalizedQuery)}&offset=0&limit=12&threshold=0.25`,
-    );
-    const normalizedResults = normalizeExerciseDbCollection(directByName);
-    if (normalizedResults.length > 0) {
-      results = rankExercisesByName(normalizedResults, normalizedQuery);
-    }
-  } catch {
-    results = [];
-  }
-
-  if (results.length === 0) {
+  const hasRapidApiKey = resolveRapidApiKey(env) !== null;
+  const runRapidSearch = async (query: string): Promise<ExerciseDbExercise[]> => {
     try {
       const directByName = await rapidGet<ExerciseDbExercise[]>(
-        `https://exercisedb.p.rapidapi.com/exercises/name/${encodeURIComponent(normalizedQuery)}?offset=0&limit=24`,
+        `https://exercisedb.p.rapidapi.com/exercises/name/${encodeURIComponent(query)}?offset=0&limit=24`,
         "exercisedb.p.rapidapi.com",
         env,
       );
       const normalizedResults = normalizeExerciseDbCollection(directByName);
-      if (normalizedResults.length > 0) {
-        results = rankExercisesByName(normalizedResults, normalizedQuery);
-      }
+      return normalizedResults.length > 0
+        ? rankExercisesByName(normalizedResults, query)
+        : [];
     } catch {
-      results = [];
+      return [];
     }
-  }
-
-  if (results.length === 0) {
+  };
+  const runPublicSearch = async (query: string): Promise<ExerciseDbExercise[]> => {
     try {
-      const payload = await getExerciseCatalog(env);
-      const fallbackMatches = payload.filter((exercise) =>
-        normalizeExerciseNameToken(exercise.name).includes(normalizedQuery),
+      const directByName = await publicExerciseDbGet<PublicExerciseDbListResponse>(
+        `/exercises/search?q=${encodeURIComponent(query)}&offset=0&limit=12&threshold=0.25`,
       );
-      results = rankExercisesByName(fallbackMatches, normalizedQuery);
+      const normalizedResults = normalizeExerciseDbCollection(directByName);
+      return normalizedResults.length > 0
+        ? rankExercisesByName(normalizedResults, query)
+        : [];
     } catch {
-      results = [];
+      return [];
+    }
+  };
+
+  for (const query of queryCandidates) {
+    const queryCache = getCachedValue(searchCache, query);
+    if (queryCache && queryCache.length > 0) {
+      setCachedValue(searchCache, normalizedQuery, queryCache);
+      return queryCache;
+    }
+
+    let results = hasRapidApiKey
+      ? await runRapidSearch(query)
+      : await runPublicSearch(query);
+
+    if (results.length === 0 && hasRapidApiKey) {
+      results = await runPublicSearch(query);
+    }
+
+    if (results.length === 0 && hasRapidApiKey) {
+      try {
+        const payload = await getExerciseCatalog(env);
+        const fallbackMatches = payload.filter((exercise) =>
+          normalizeExerciseNameToken(exercise.name).includes(query),
+        );
+        results = rankExercisesByName(fallbackMatches, query);
+      } catch {
+        results = [];
+      }
+    }
+
+    setCachedValue(searchCache, query, results);
+    if (results.length > 0) {
+      setCachedValue(searchCache, normalizedQuery, results);
+      return results;
     }
   }
 
-  setCachedValue(searchCache, normalizedQuery, results);
-  return results;
+  setCachedValue(searchCache, normalizedQuery, []);
+  return [];
 }
 
 export async function fetchExerciseMedia(exerciseId: string, env: RapidApiEnv): Promise<AscendExercise | null> {

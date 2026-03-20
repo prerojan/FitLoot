@@ -1,0 +1,1 @@
+ALTER TABLE missions ADD COLUMN progress_value INTEGER DEFAULT 0;
