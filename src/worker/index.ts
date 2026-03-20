@@ -5676,7 +5676,7 @@ app.post("/api/missions/complete", authMiddleware, zValidator("json", CompleteMi
       if (currentHour >= 2 && currentHour < 4) {
         completionPhase = "lifecycle_night_achievement";
         await runMissionLifecycleHookSafely(user.id, "night_achievement", () =>
-          unlockAchievementIfNeeded(c.env.fitloot_db, user.id, 'InsÃƒÂ´nia', 1, 1),
+          unlockAchievementIfNeeded(c.env.fitloot_db, user.id, 'Insônia', 1, 1),
         );
       }
 
@@ -5724,8 +5724,13 @@ app.post("/api/missions/complete", authMiddleware, zValidator("json", CompleteMi
       completionPhase = "completed";
     });
 
-    invalidateRankingCache();
-    invalidateMissionListCache(user.id);
+    try {
+      invalidateRankingCache();
+      invalidateMissionListCache(user.id);
+    } catch (cacheError) {
+      console.error("[/api/missions/complete] cache invalidation failed:", cacheError);
+    }
+
     c.executionCtx.waitUntil(
       ensurePeriodicMissionsWithGuard(c.env, c.env.fitloot_db, user.id, { force: true }).catch((refreshError) => {
         console.error("[/api/missions/complete][refresh]", {
@@ -5744,14 +5749,15 @@ app.post("/api/missions/complete", authMiddleware, zValidator("json", CompleteMi
       streakMultiplier: streakMultiplier.toFixed(1)
     });
   } catch (error) {
+    const errorMsg = getErrorMessage(error);
     console.error("[/api/missions/complete]", {
       userId: user.id,
       missionId: data.mission_id,
       phase: completionPhase,
-      message: getErrorMessage(error),
+      message: errorMsg,
       stack: error instanceof Error ? error.stack : undefined,
     });
-    return c.json({ error: "Erro interno", code: "INTERNAL_ERROR" }, 500);
+    return c.json({ error: "Erro interno", code: "INTERNAL_ERROR", phase: completionPhase, detail: errorMsg }, 500);
   }
 });
 
