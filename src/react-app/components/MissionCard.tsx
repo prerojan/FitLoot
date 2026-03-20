@@ -556,13 +556,27 @@ function MissionExecutionModal({
                   src={missionVideoUrl}
                   poster={detailMissionMediaUrl ?? undefined}
                   className="absolute inset-0 h-full w-full object-cover"
+                  style={{
+                    imageRendering: "auto" as any,
+                    filter: "contrast(1.02) saturate(1.05) brightness(1.02)",
+                  }}
                   autoPlay
                   loop
                   muted
                   playsInline
                 />
               ) : detailMissionMediaUrl ? (
-                <img src={detailMissionMediaUrl} alt={localizeMissionText(mission.title) ?? mission.title} className="absolute inset-0 h-full w-full object-cover" />
+                <img 
+                  src={detailMissionMediaUrl} 
+                  alt={localizeMissionText(mission.title) ?? mission.title} 
+                  className="absolute inset-0 h-full w-full object-cover" 
+                  style={{
+                    imageRendering: isPixelOrLineArtUrl(detailMissionMediaUrl) ? "crisp-edges" : ("auto" as any),
+                    filter: isPixelOrLineArtUrl(detailMissionMediaUrl) || isGifUrl(detailMissionMediaUrl)
+                      ? "contrast(1.05) brightness(1.02)"
+                      : "contrast(1.08) saturate(1.15) brightness(1.02)",
+                  }}
+                />
               ) : (
                 <div className="absolute inset-0 flex items-center justify-center" style={{ backgroundColor: "color-mix(in srgb, var(--fl-surface-muted) 60%, transparent)" }}>
                   <Dumbbell className="w-16 h-16 opacity-20" />
@@ -944,6 +958,12 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
             loading="lazy"
             decoding="async"
             className="w-full h-36 object-cover rounded-2xl border border-gray-200"
+            style={{
+              imageRendering: (isPixelOrLineArtUrl(missionMediaUrl) ? "crisp-edges" : "auto") as any,
+              filter: isPixelOrLineArtUrl(missionMediaUrl) || isGifUrl(missionMediaUrl)
+                ? "contrast(1.05) brightness(1.02)"
+                : "contrast(1.08) saturate(1.15) brightness(1.02)",
+            }}
           />
         </div>
       ) : null}
@@ -1073,6 +1093,10 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
                           src={detailMissionVideoUrl}
                           poster={detailMissionMediaUrl ?? undefined}
                           className="absolute inset-0 h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+                          style={{
+                            imageRendering: "auto",
+                            filter: "contrast(1.02) saturate(1.05) brightness(1.02)",
+                          }}
                           autoPlay
                           loop
                           muted
@@ -1092,8 +1116,10 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
                           alt={detailTitle}
                           className="absolute inset-0 h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
                           style={{
-                            imageRendering: pixelOrLineArt ? "crisp-edges" : "auto",
-                            filter: pixelOrLineArt || gifLikeMedia ? "none" : "contrast(1.05) saturate(1.1)",
+                            imageRendering: pixelOrLineArt ? ("crisp-edges" as any) : "auto",
+                            filter: pixelOrLineArt || gifLikeMedia 
+                              ? "contrast(1.05) brightness(1.02)" 
+                              : "contrast(1.08) saturate(1.15) brightness(1.02)",
                           }}
                         />
                         <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent" />

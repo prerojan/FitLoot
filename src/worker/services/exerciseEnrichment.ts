@@ -84,19 +84,32 @@ const CACHE_TTL_MS = 15 * 60_000;
 const CACHE_MAX_ENTRIES = 250;
 const EXERCISE_DB_PUBLIC_API_BASE = "https://www.exercisedb.dev/api/v1";
 const EXERCISE_SEARCH_ALIASES = new Map<string, readonly string[]>([
-  ["flexao", ["push-up"]],
-  ["push up", ["push-up"]],
-  ["push-up", ["push-up"]],
+  ["flexao", ["push-up", "pushup"]],
+  ["push up", ["push-up", "pushup"]],
+  ["push-up", ["push-up", "pushup"]],
+  ["flexao diamante", ["diamond push-up"]],
+  ["flexao inclinada", ["incline push-up"]],
+  ["flexao declinada", ["decline push-up"]],
+  ["flexao aberta", ["wide-grip push-up"]],
   ["agachamento", ["air squat", "bodyweight squat", "squat"]],
   ["agachamento livre", ["air squat", "bodyweight squat", "squat"]],
   ["air squat", ["air squat", "bodyweight squat", "squat"]],
+  ["agachamento bÃºlgaro", ["bulgarian split squat"]],
+  ["agachamento sumÃ´", ["sumo squat"]],
   ["prancha", ["front plank", "plank"]],
   ["plank", ["front plank", "plank"]],
+  ["prancha lateral", ["side plank"]],
   ["abdominal", ["crunch", "sit-up"]],
+  ["abdominal supra", ["crunch"]],
+  ["abdominal infra", ["leg raise"]],
+  ["abdominal bicicleta", ["bicycle crunch"]],
   ["avanco", ["walking lunge", "lunge"]],
   ["lunge", ["walking lunge", "lunge"]],
+  ["afundo", ["lunge"]],
   ["ponte de gluteos", ["glute bridge"]],
+  ["elevacao pelvica", ["glute bridge", "hip thrust"]],
   ["barra fixa", ["pull-up"]],
+  ["barra supinada", ["chin-up"]],
   ["suspensao na barra", ["dead hang"]],
   ["cadeira isometrica", ["wall sit"]],
   ["caminhada", ["walking", "walk"]],
@@ -106,7 +119,8 @@ const EXERCISE_SEARCH_ALIASES = new Map<string, readonly string[]>([
   ["yoga", ["yoga flow", "yoga"]],
   ["burpee", ["burpee"]],
   ["hollow body", ["hollow body hold", "hollow body"]],
-]);
+  ["polichinelo", ["jumping jack"]],
+  ["mountain climber", ["mountain climber"]],]);
 
 type ExerciseSearchHint = {
   exactNames: readonly string[];
@@ -187,7 +201,27 @@ const EXERCISE_SEARCH_HINTS = new Map<string, ExerciseSearchHint>([
     preferredEquipments: ["body weight"],
     penalizedNameTokens: ["barbell", "weighted", "single leg"],
   }],
-]);
+  ["jumping jack", {
+    exactNames: ["jumping jack"],
+    preferredTargets: ["cardio", "full body"],
+    preferredBodyParts: ["cardiovascular system"],
+    preferredEquipments: ["body weight"],
+    penalizedNameTokens: ["weighted", "band"],
+  }],
+  ["mountain climber", {
+    exactNames: ["mountain climber"],
+    preferredTargets: ["abs", "core", "cardio"],
+    preferredBodyParts: ["waist"],
+    preferredEquipments: ["body weight"],
+    penalizedNameTokens: ["weighted", "slider"],
+  }],
+  ["diamond push-up", {
+    exactNames: ["diamond push-up", "close-grip push-up"],
+    preferredTargets: ["triceps", "pectorals"],
+    preferredBodyParts: ["upper arms", "chest"],
+    preferredEquipments: ["body weight"],
+    penalizedNameTokens: ["weighted", "wide"],
+  }],]);
 
 let exerciseCatalogCache: CacheEntry<ExerciseDbExercise[]> | null = null;
 const searchCache = new Map<string, CacheEntry<ExerciseDbExercise[]>>();
