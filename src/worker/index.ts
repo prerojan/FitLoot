@@ -5508,256 +5508,120 @@ app.post("/api/missions/generate/ai-special", authMiddleware, async (c) => {
 
 app.post("/api/missions/complete", authMiddleware, zValidator("json", CompleteMissionRequestSchema), async (c) => {
   const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
+  if (!user) return c.json({ error: "No user in context" }, 401);
 
-  const data = c.req.valid("json");
-  const completedMetricValue = Number(data.metric_completed ?? data.reps_completed ?? data.time_completed ?? 0);
-  let completionPhase = "load_mission";
+  const { missionId } = c.req.valid("json");
+  let completionPhase = "fetch_mission";
 
   try {
-    const mission = await c.env.fitloot_db.prepare(
-      "SELECT * FROM missions WHERE id = ? AND user_id = ? AND is_completed = 0"
-    ).bind(data.mission_id, user.id).first();
+    const mission = await c.env.fitloot_db.prepare("SELECT * FROM missions WHERE id = ?").bind(missionId).first<MissionPayload>();
+    if (!mission) return c.json({ error: "Miss\u00e3o n\u00e3o encontrada" }, 404);
+    if (mission.status === "completed") return c.json({ error: "Miss\u00e3o j\u00e1 completada" }, 400);
 
-    if (!mission) {
-      return c.json({ error: "Mission not found" }, 404);
+    completionPhase = "calc_rewards";
+    const progression = await c.env.fitloot_db.prepare("SELECT * FROM user_progression WHERE user_id = ?").bind(user.id).first<UserProgression>();
+    const today = new Date().toISOString().split('T')[0];
+    const lastAt = progression?.last_mission_at ? progression.last_mission_at.split('T')[0] : null;
+
+    let newStreak = Number(progression?.current_streak || 0);
+    if (lastAt !== today) {
+      const yesterday = new Date();
+      yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+      const yesterdayStr = yesterday.toISOString().split('T')[0];
+      newStreak = lastAt === yesterdayStr ? newStreak + 1 : 1;
     }
 
-    if (mission.type === "weekly" || mission.type === "monthly") {
-      return c.json(
-        {
-          error: "Missoes semanais e mensais nao podem ser concluidas manualmente. O progresso acontece automaticamente pelas missoes diarias compativeis.",
-          code: "MISSION_AUTO_PROGRESS_ONLY",
-        },
-        400,
+    const streakMultiplier = 1 + Math.min(0.5, (newStreak - 1) * 0.05);
+    const xpGained = Math.max(0, Math.floor(Number(mission.xp_reward || 0) * streakMultiplier));
+    const pointsGained = Math.max(0, Math.floor(Number(mission.points_reward || 0) * streakMultiplier));
+
+    const currentXp = Number(progression?.xp || 0);
+    const currentLevel = Number(progression?.level || 1);
+    const nextLevelXp = 100 * Math.pow(currentLevel, 1.5);
+    const totalXpAfter = currentXp + xpGained;
+    const isLevelUp = totalXpAfter >= nextLevelXp;
+
+    completionPhase = "prepare_batch";
+    const batchUpdates: D1PreparedStatement[] = [];
+
+    // 1. Mission Update
+    batchUpdates.push(
+      c.env.fitloot_db.prepare(
+        "UPDATE missions SET status = 'completed', updated_at = datetime('now'), completed_at = datetime('now'), is_completed = 1 WHERE id = ?"
+      ).bind(missionId)
+    );
+
+    // 2. Progression Update
+    if (isLevelUp) {
+      batchUpdates.push(
+        c.env.fitloot_db.prepare(
+          "UPDATE user_progression SET level = level + 1, xp = xp + ? - ?, current_streak = ?, last_mission_at = datetime('now'), points = points + ?, updated_at = datetime('now') WHERE user_id = ?"
+        ).bind(xpGained, Math.floor(nextLevelXp), newStreak, pointsGained, user.id)
+      );
+    } else {
+      batchUpdates.push(
+        c.env.fitloot_db.prepare(
+          "UPDATE user_progression SET xp = xp + ?, current_streak = ?, last_mission_at = datetime('now'), points = points + ?, updated_at = datetime('now') WHERE user_id = ?"
+        ).bind(xpGained, newStreak, pointsGained, user.id)
       );
     }
 
-    let streakMultiplier = 1;
-    let xpGained = 0;
-    let pointsGained = 0;
-    let leveledUp = false;
+    // 3. Counter Update
+    batchUpdates.push(
+      c.env.fitloot_db.prepare(
+        "INSERT OR IGNORE INTO user_event_counters (user_id, updated_at) VALUES (?, datetime('now'))"
+      ).bind(user.id)
+    );
+    batchUpdates.push(
+      c.env.fitloot_db.prepare(
+        "UPDATE user_event_counters SET missions_completed = missions_completed + 1, total_xp_earned = total_xp_earned + ?, updated_at = datetime('now') WHERE user_id = ?"
+      ).bind(xpGained, user.id)
+    );
 
-    completionPhase = "transaction";
-    await withTransaction(c.env.fitloot_db, async () => {
-      completionPhase = "mark_completed";
-      await c.env.fitloot_db.prepare(
-        `UPDATE missions SET is_completed = 1, status = 'completed', completed_at = datetime('now'), 
-        verified_by_sensor = ?, updated_at = datetime('now')
-        WHERE id = ?`
-      ).bind(data.sensor_verified ? 1 : 0, data.mission_id).run();
-
-      completionPhase = "load_progression";
-      const progression = await c.env.fitloot_db.prepare(
-        "SELECT * FROM user_progression WHERE user_id = ?"
-      ).bind(user.id).first();
-
-      const today = assertString(safeGet(new Date().toISOString().split('T'), 0));
-      let newStreak = Number(progression?.current_streak || 0);
-
-      if (progression?.last_activity_date !== today) {
-        completionPhase = "calculate_streak";
-        const yesterday = assertString(safeGet(new Date(Date.now() - 86400000).toISOString().split('T'), 0));
-        newStreak = 1;
-
-        if (progression?.last_activity_date === yesterday) {
-          newStreak = Number(progression?.current_streak || 0) + 1;
-        }
-
-        streakMultiplier = 1 + (newStreak * 0.1);
-
-        completionPhase = "update_streak_db";
-        await c.env.fitloot_db.prepare(
-          `UPDATE user_progression SET current_streak = ?, best_streak = MAX(best_streak, ?), 
-          last_activity_date = ?, updated_at = datetime('now')
-          WHERE user_id = ?`
-        ).bind(newStreak, newStreak, today, user.id).run();
-      } else {
-        streakMultiplier = 1 + (Number(progression?.current_streak || 0) * 0.1);
-      }
-
-      completionPhase = "calculate_rewards";
-      xpGained = Math.max(0, Math.floor(Number(mission.xp_reward || 0) * streakMultiplier));
-      pointsGained = Math.max(0, Number(mission.points_reward || 0));
-
-      completionPhase = "award_xp_db";
-      await c.env.fitloot_db.prepare(
-        `UPDATE user_progression SET xp = COALESCE(xp, 0) + ?, points = COALESCE(points, 0) + ?, updated_at = datetime('now')
-        WHERE user_id = ?`
-      ).bind(xpGained, pointsGained, user.id).run();
-
-      completionPhase = "check_level_up";
-      const updatedProgression = await c.env.fitloot_db.prepare(
-        "SELECT * FROM user_progression WHERE user_id = ?"
-      ).bind(user.id).first();
-
-      const currentXp = Number(updatedProgression?.xp || 0);
-      const currentLevel = Number(updatedProgression?.level || 1);
-      const xpForNextLevel = currentLevel * 100;
-
-      if (currentXp >= xpForNextLevel) {
-        completionPhase = "award_level_up";
-        await c.env.fitloot_db.prepare(
-          `UPDATE user_progression SET level = COALESCE(level, 1) + 1, xp = COALESCE(xp, 0) - ?, points = COALESCE(points, 0) + 100, updated_at = datetime('now')
-          WHERE user_id = ?`
-        ).bind(xpForNextLevel, user.id).run();
-        leveledUp = true;
-        
-        completionPhase = "lifecycle_level_up";
-        const afterLevel = await c.env.fitloot_db.prepare("SELECT level FROM user_progression WHERE user_id = ?").bind(user.id).first<{ level: number }>();
-        const newLevel = Number(afterLevel?.level ?? currentLevel + 1);
-        
-        // Wrap level-up hooks in safety
-        await runMissionLifecycleHookSafely(user.id, "on_level_up", () => onLevelUp(c.env.fitloot_db, user.id, newLevel));
-        await runMissionLifecycleHookSafely(user.id, "unlock_skills", () => tryUnlockSkillsForLevel(c.env.fitloot_db, user.id, newLevel));
-      }
-
-      completionPhase = "update_event_counters_db";
-      await ensureUserCounterRow(c.env.fitloot_db, user.id);
-      const currentHour = new Date().getHours();
-      await c.env.fitloot_db.prepare(
-        `UPDATE user_event_counters
-          SET missions_completed = COALESCE(missions_completed, 0) + 1,
-              consecutive_days_completed = ?,
-              longest_consecutive_days = MAX(COALESCE(longest_consecutive_days, 0), ?),
-              updated_at = datetime('now')
-          WHERE user_id = ?`
-      ).bind(newStreak, newStreak, user.id).run();
-
-      completionPhase = "lifecycle_mission_events";
-      await runMissionLifecycleHookSafely(user.id, "mission_complete_event", () =>
-        logUserEvent(c.env.fitloot_db, user.id, 'mission_complete', {
-          missionId: mission.id,
-          period: mission.type,
-          xpGained,
-          pointsGained,
-          hour: currentHour,
-          leveledUp,
-        }),
+    // 4. Attribute Gains
+    if (mission.attributes_benefited && mission.attributes_benefited.length > 0) {
+      const mainAttr = mission.attributes_benefited[0];
+      batchUpdates.push(
+        c.env.fitloot_db.prepare(
+          `UPDATE user_profiles SET ${mainAttr} = ${mainAttr} + 0.1, updated_at = datetime('now') WHERE user_id = ?`
+        ).bind(user.id)
       );
-
-      completionPhase = "lifecycle_streak";
-      const completedToday = await c.env.fitloot_db.prepare("SELECT COUNT(*) as c FROM missions WHERE user_id = ? AND is_completed = 1 AND date(completed_at) = date('now')").bind(user.id).first<{ c: number }>();
-      await runMissionLifecycleHookSafely(user.id, "streak_continued", () =>
-        onStreakContinued(c.env.fitloot_db, user.id, newStreak, Number(completedToday?.c ?? 1), new Date().toISOString()),
-      );
-
-      completionPhase = "lifecycle_on_mission_complete";
-      await runMissionLifecycleHookSafely(user.id, "on_mission_complete_hook", () => 
-        onMissionComplete(c.env.fitloot_db, user.id, Number(mission.id))
-      );
-
-      completionPhase = "lifecycle_subtasks";
-      await runMissionLifecycleHookSafely(user.id, "update_subtasks", () =>
-        updateMissionSubtaskProgress(user.id, mission as Record<string, unknown>, c.env.fitloot_db),
-      );
-
-      completionPhase = "lifecycle_weekly_circuits";
-      await runMissionLifecycleHookSafely(user.id, "update_weekly_circuits", () =>
-        updateCircuitProgress(user.id, mission as Record<string, unknown>, c.env.fitloot_db),
-      );
-
-      completionPhase = "lifecycle_monthly_progress";
-      await runMissionLifecycleHookSafely(user.id, "update_monthly_progress", () =>
-        updateMonthlyMissionProgress(user.id, c.env.fitloot_db),
-      );
-
-      completionPhase = "lifecycle_goal_progress";
-      await runMissionLifecycleHookSafely(user.id, "goal_progress", async () => {
-        const relevance = await checkMissionRelevance(user.id, Number(mission.id), c.env.fitloot_db, 'completed');
-        if (!relevance.isGoalRelevant) return;
-
-        const gs = await c.env.fitloot_db.prepare("SELECT goal_completed_count FROM user_goal_stats WHERE user_id = ?").bind(user.id).first<{ goal_completed_count: number }>();
-        const progressPercent = Math.min(200, Math.floor((Number(gs?.goal_completed_count ?? 0) / 100) * 100));
-        await c.env.fitloot_db.prepare("UPDATE user_goal_stats SET goal_progress_percent = ?, updated_at = datetime('now') WHERE user_id = ?").bind(progressPercent, user.id).run();
-        await onGoalProgress(c.env.fitloot_db, user.id, progressPercent);
-      });
-
-      if (currentHour >= 2 && currentHour < 4) {
-        completionPhase = "lifecycle_night_achievement";
-        await runMissionLifecycleHookSafely(user.id, "night_achievement", () =>
-          unlockAchievementIfNeeded(c.env.fitloot_db, user.id, 'Insônia', 1, 1),
-        );
-      }
-
-      completionPhase = "update_skill_progress";
-      const missionRecord = mission as Record<string, unknown>;
-      const missionMetricType = normalizeMissionMetricType(
-        missionRecord.metric_type,
-        missionRecord.target_time
-      );
-      const repsForSkill = missionMetricType === "repetitions" || missionMetricType === "sets_reps"
-        ? completedMetricValue
-        : 0;
-      const timeForSkill = missionMetricType === "duration_seconds"
-        ? completedMetricValue
-        : missionMetricType === "duration_minutes"
-          ? completedMetricValue * 60
-          : 0;
-
-      if (mission.skill_id && (repsForSkill > 0 || timeForSkill > 0)) {
-        completionPhase = "update_skill_stats_db";
-        await c.env.fitloot_db.prepare(
-          `UPDATE user_skills SET total_reps = total_reps + ?, total_time = total_time + ?, best_reps = MAX(best_reps, ?), updated_at = datetime('now')
-          WHERE user_id = ? AND skill_id = ?`
-        ).bind(repsForSkill, timeForSkill, repsForSkill, user.id, mission.skill_id).run();
-
-        const skill = await c.env.fitloot_db.prepare(
-          "SELECT * FROM skills WHERE id = ?"
-        ).bind(mission.skill_id).first();
-
-        if (skill) {
-          completionPhase = "update_attributes_db";
-          await c.env.fitloot_db.prepare(
-            `UPDATE user_attributes SET 
-            strength = strength + ?, constitution = constitution + ?, 
-            vitality = vitality + ?, dexterity = dexterity + ?, 
-            focus = focus + ?, updated_at = datetime('now')
-            WHERE user_id = ?`
-          ).bind(
-            skill.strength_gain, skill.constitution_gain,
-            skill.vitality_gain, skill.dexterity_gain,
-            skill.focus_gain, user.id
-          ).run();
-        }
-      }
-      completionPhase = "completed";
-    });
-
-    try {
-      invalidateRankingCache();
-      invalidateMissionListCache(user.id);
-    } catch (cacheError) {
-      console.error("[/api/missions/complete] cache invalidation failed:", cacheError);
     }
 
+    completionPhase = "execute_batch";
+    await c.env.fitloot_db.batch(batchUpdates);
+
+    completionPhase = "fetch_stats_for_hooks";
+    const completedToday = await c.env.fitloot_db.prepare(
+      "SELECT COUNT(*) as c FROM missions WHERE user_id = ? AND is_completed = 1 AND date(completed_at) = date('now')"
+    ).bind(user.id).first<{ c: number }>();
+
+    completionPhase = "lifecycle_hooks";
     c.executionCtx.waitUntil(
-      ensurePeriodicMissionsWithGuard(c.env, c.env.fitloot_db, user.id, { force: true }).catch((refreshError) => {
-        console.error("[/api/missions/complete][refresh]", {
-          userId: user.id,
-          missionId: data.mission_id,
-          message: getErrorMessage(refreshError),
-        });
-      }),
+      (async () => {
+        try {
+          if (isLevelUp) {
+            await runMissionLifecycleHookSafely(user.id, "onLevelUp", () => onLevelUp(c.env.fitloot_db, user.id, currentLevel + 1));
+          }
+          await runMissionLifecycleHookSafely(user.id, "onStreakContinued", () => onStreakContinued(c.env.fitloot_db, user.id, newStreak, Number(completedToday?.c ?? 1), new Date().toISOString()));
+          await runMissionLifecycleHookSafely(user.id, "onMissionComplete", () => onMissionComplete(c.env.fitloot_db, user.id, Number(missionId)));
+          await runMissionLifecycleHookSafely(user.id, "invalidateRankingCache", () => Promise.resolve(invalidateRankingCache()));
+          await runMissionLifecycleHookSafely(user.id, "invalidateMissionListCache", () => Promise.resolve(invalidateMissionListCache(user.id)));
+          await runMissionLifecycleHookSafely(user.id, "ensurePeriodicMissions", () => ensurePeriodicMissionsWithGuard(c.env, c.env.fitloot_db, user.id, { force: true }));
+        } catch (e) {
+          console.error("[/api/missions/complete] Hook Error:", e);
+        }
+      })()
     );
 
     return c.json({
       success: true,
-      xpGained,
-      pointsGained,
-      leveledUp,
-      streakMultiplier: streakMultiplier.toFixed(1)
+      reward: { xp: xpGained, points: pointsGained, streak: newStreak, levelUp: isLevelUp, newLevel: isLevelUp ? currentLevel + 1 : currentLevel }
     });
+
   } catch (error) {
-    const errorMsg = getErrorMessage(error);
-    console.error("[/api/missions/complete]", {
-      userId: user.id,
-      missionId: data.mission_id,
-      phase: completionPhase,
-      message: errorMsg,
-      stack: error instanceof Error ? error.stack : undefined,
-    });
-    return c.json({ error: "Erro interno", code: "INTERNAL_ERROR", phase: completionPhase, detail: errorMsg }, 500);
+    console.error("[/api/missions/complete] Fatal Error:", { phase: completionPhase, error: getErrorMessage(error) });
+    return c.json({ error: "Erro interno ao completar miss\u00e3o", phase: completionPhase, detail: getErrorMessage(error) }, 500);
   }
 });
 
@@ -6604,6 +6468,7 @@ type MissionPayload = {
   metric_value: number;
   metric_unit: string;
   sets: number | null;
+  sets: number | null;
   rest_seconds: number | null;
   instructions: string[];
   exercise_instructions_en: string[];
@@ -6716,6 +6581,7 @@ const METRIC_TYPE_MAP: Record<MissionExerciseCategory, MissionMetricType> = {
   mobility: "duration_minutes",
   strength: "sets_reps",
   cardio_circuit: "circuit_tasks",
+  abdominal: "sets_reps",
   default: "sets_reps",
 };
 
@@ -6744,6 +6610,7 @@ function futureIsoForPeriod(period: MissionPeriod, reference = new Date()): stri
 function normalizeExerciseCategory(name: string, muscle: string): MissionExerciseCategory {
   const text = `${name} ${muscle}`.toLowerCase();
 
+  if (text.includes("abdominal") || text.includes("crunch") || text.includes("sit up")) return "abdominal";
   if (text.includes("plank") || text.includes("prancha")) return "plank";
   if (text.includes("hold") || text.includes("isometric") || text.includes("isometr")) return "isometric";
   if (text.includes("walk") || text.includes("caminha") || text.includes("step")) return "walk";

@@ -24,7 +24,12 @@ export const WEEKLY_MISSION_KEYWORDS = [
 ] as const;
 
 export const EXERCISE_METRIC_MAP: Record<string, MissionMetricType> = {
+  // Priority order: check specific types first
+  abdominal: "sets_reps",
+  crunch: "sets_reps",
+  situp: "sets_reps",
   plank: "duration_seconds",
+  prancha: "duration_seconds",
   "hollow body": "duration_seconds",
   "wall sit": "duration_seconds",
   "dead hang": "duration_seconds",
@@ -45,8 +50,6 @@ export const EXERCISE_METRIC_MAP: Record<string, MissionMetricType> = {
   flexao: "sets_reps",
   squat: "sets_reps",
   agachamento: "sets_reps",
-  abdominal: "sets_reps",
-  crunch: "sets_reps",
   "full body circuit": "circuit_tasks",
   "upper body circuit": "circuit_tasks",
   "lower body circuit": "circuit_tasks",
@@ -62,6 +65,7 @@ function normalizeText(value: string): string {
 
 export function getMissionMetricType(exerciseName: string): MissionMetricType {
   const lower = normalizeText(exerciseName);
+  // Iterating through keys in defined order
   for (const [key, type] of Object.entries(EXERCISE_METRIC_MAP)) {
     if (lower.includes(normalizeText(key))) return type;
   }
