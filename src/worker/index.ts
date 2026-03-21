@@ -761,22 +761,16 @@ async function applyPromoCodeForUser(
   };
 }
 
-async function withTransaction<T>(db: D1Database, run: () => Promise<T>): Promise<T> {
-  await db.exec("BEGIN TRANSACTION");
-  try {
-    const result = await run();
-    await db.exec("COMMIT");
-    return result;
-  } catch (error) {
-    try {
-      await db.exec("ROLLBACK");
-    } catch (rollbackError) {
-      console.error("[transaction][rollback]", {
-        message: rollbackError instanceof Error ? rollbackError.message : String(rollbackError),
-      });
-    }
-    throw error;
-  }
+/**
+ * D1 (Cloudflare) does not support interactive `BEGIN TRANSACTION` / `COMMIT` via `db.exec()`.
+ * That call fails at runtime on Workers and breaks handlers such as `POST /api/missions/complete`.
+ * D1 auto-commits each statement; for atomic multi-writes use {@link D1Database.batch}.
+ * This helper only sequences the callback (same as most call sites previously intended).
+ *
+ * @see https://developers.cloudflare.com/d1/worker-api/d1-database/#batch
+ */
+async function withTransaction<T>(_db: D1Database, run: () => Promise<T>): Promise<T> {
+  return run();
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
