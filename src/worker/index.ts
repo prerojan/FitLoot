@@ -174,6 +174,8 @@ let catalogInitCheckedAt = 0;
 let catalogInitPromise: Promise<void> | null = null;
 const STREAK_REFRESH_DEBOUNCE_MS = 60_000;
 const STREAK_REFRESH_MAX_KEYS = 4_000;
+/** SQLite datetime() modifier: missões settled saem da DB pouco após ficarem finalizadas (UX após abrir o site). */
+const SETTLED_MISSION_MAX_AGE_SQL_MODIFIER = "-2 minutes";
 const streakRefreshLocks = new Map<string, Promise<void>>();
 const streakRefreshLastRun = new Map<string, number>();
 const SCHEMA_CACHE_TTL_MS = 10_000;
@@ -1359,7 +1361,7 @@ async function cleanupSettledMissions(db: D1Database, userId: string): Promise<v
     `DELETE FROM missions
       WHERE user_id = ?
         AND COALESCE(status, 'pending') IN ('completed', 'expired', 'failed')
-        AND datetime(updated_at) < datetime('now', '-12 hours')`
+        AND datetime(updated_at) < datetime('now', '${SETTLED_MISSION_MAX_AGE_SQL_MODIFIER}')`
   ).bind(userId).run();
 }
 
@@ -4677,6 +4679,7 @@ async function getMonthlyCounters(db: D1Database, userId: string): Promise<Month
 
 async function updateMonthlyMissionProgress(userId: string, db: D1Database): Promise<void> {
   const counters = await recomputeMonthlyCounters(db, userId);
+  const missionsHaveStatus = await hasTableColumn(db, "missions", "status");
   const monthlyMissions = await db.prepare(
     `SELECT * FROM missions
      WHERE user_id = ?
@@ -4693,11 +4696,19 @@ async function updateMonthlyMissionProgress(userId: string, db: D1Database): Pro
     const target = Math.max(1, Number(mission.metric_value ?? mission.target_reps ?? 1));
     if (progress < target) continue;
 
-    await db.prepare(
-      `UPDATE missions
+    if (missionsHaveStatus) {
+      await db.prepare(
+        `UPDATE missions
          SET is_completed = 1, status = 'completed', completed_at = datetime('now'), updated_at = datetime('now')
        WHERE id = ? AND is_completed = 0`
-    ).bind(mission.id).run();
+      ).bind(mission.id).run();
+    } else {
+      await db.prepare(
+        `UPDATE missions
+         SET is_completed = 1, completed_at = datetime('now'), updated_at = datetime('now')
+       WHERE id = ? AND is_completed = 0`
+      ).bind(mission.id).run();
+    }
 
     const xpReward = Number(mission.xp_reward ?? 0);
     const pointsReward = Number(mission.points_reward ?? 0);
@@ -5073,14 +5084,23 @@ async function refreshMissionFromSubtasks(
   const allCompleted = subtasks.every((subtask) => subtask.is_completed);
   if (!allCompleted) return;
 
-  const completionResult = await db.prepare(
-    `UPDATE missions
+  const missionsHaveStatus = await hasTableColumn(db, "missions", "status");
+  const completionResult = missionsHaveStatus
+    ? await db.prepare(
+        `UPDATE missions
       SET is_completed = 1,
           status = 'completed',
           completed_at = datetime('now'),
           updated_at = datetime('now')
       WHERE id = ? AND is_completed = 0`
-  ).bind(parentMissionId).run();
+      ).bind(parentMissionId).run()
+    : await db.prepare(
+        `UPDATE missions
+      SET is_completed = 1,
+          completed_at = datetime('now'),
+          updated_at = datetime('now')
+      WHERE id = ? AND is_completed = 0`
+      ).bind(parentMissionId).run();
 
   if (Number(completionResult.meta.changes ?? 0) === 0) return;
 
@@ -5175,11 +5195,20 @@ async function updateCircuitProgress(userId: string, completedMission: Record<st
     ).bind(JSON.stringify(tasks), tasks.filter((task) => task.completed).length, circuit.id).run();
 
     if (allCompleted) {
-      await db.prepare(
-        `UPDATE missions
+      const missionsHaveStatus = await hasTableColumn(db, "missions", "status");
+      if (missionsHaveStatus) {
+        await db.prepare(
+          `UPDATE missions
            SET is_completed = 1, status = 'completed', completed_at = datetime('now'), updated_at = datetime('now')
          WHERE id = ? AND is_completed = 0`
-      ).bind(circuit.id).run();
+        ).bind(circuit.id).run();
+      } else {
+        await db.prepare(
+          `UPDATE missions
+           SET is_completed = 1, completed_at = datetime('now'), updated_at = datetime('now')
+         WHERE id = ? AND is_completed = 0`
+        ).bind(circuit.id).run();
+      }
 
       await grantCircuitRewards(db, userId, circuit);
       await onMissionComplete(db, userId, Number(circuit.id));
@@ -5546,7 +5575,13 @@ app.post("/api/missions/complete", authMiddleware, zValidator("json", CompleteMi
     let leveledUp = false;
 
     completionPhase = "schema_probe";
-    const missionsTableHasStatus = await hasTableColumn(c.env.fitloot_db, "missions", "status");
+    const [missionsTableHasStatus, countersHaveConsecutiveDays, countersHaveLongestDays] =
+      await Promise.all([
+        hasTableColumn(c.env.fitloot_db, "missions", "status"),
+        hasTableColumn(c.env.fitloot_db, "user_event_counters", "consecutive_days_completed"),
+        hasTableColumn(c.env.fitloot_db, "user_event_counters", "longest_consecutive_days"),
+      ]);
+    const countersHaveStreakDayColumns = countersHaveConsecutiveDays && countersHaveLongestDays;
 
     completionPhase = "transaction";
     await withTransaction(c.env.fitloot_db, async () => {
@@ -5633,14 +5668,23 @@ app.post("/api/missions/complete", authMiddleware, zValidator("json", CompleteMi
       completionPhase = "update_event_counters_db";
       await ensureUserCounterRow(c.env.fitloot_db, user.id);
       const currentHour = new Date().getHours();
-      await c.env.fitloot_db.prepare(
-        `UPDATE user_event_counters
+      if (countersHaveStreakDayColumns) {
+        await c.env.fitloot_db.prepare(
+          `UPDATE user_event_counters
           SET missions_completed = COALESCE(missions_completed, 0) + 1,
               consecutive_days_completed = ?,
               longest_consecutive_days = MAX(COALESCE(longest_consecutive_days, 0), ?),
               updated_at = datetime('now')
           WHERE user_id = ?`
-      ).bind(newStreak, newStreak, user.id).run();
+        ).bind(newStreak, newStreak, user.id).run();
+      } else {
+        await c.env.fitloot_db.prepare(
+          `UPDATE user_event_counters
+          SET missions_completed = COALESCE(missions_completed, 0) + 1,
+              updated_at = datetime('now')
+          WHERE user_id = ?`
+        ).bind(user.id).run();
+      }
 
       completionPhase = "lifecycle_mission_events";
       await runMissionLifecycleHookSafely(user.id, "mission_complete_event", () =>
