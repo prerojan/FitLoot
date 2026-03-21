@@ -1905,6 +1905,80 @@ async function tryUnlockSkillsForLevel(db: D1Database, userId: string, level: nu
   }
 }
 
+/** XP para completar o nível atual e avançar (barra cheia). Igual ao front: `Math.max(100, level * 100)`. */
+function xpRequiredToAdvanceFromLevel(level: number): number {
+  const L = Math.max(1, Math.floor(Number(level) || 1));
+  return Math.max(100, L * 100);
+}
+
+function parseProgressionXpLevel(row: { xp?: unknown; level?: unknown } | null | undefined): { xp: number; level: number } {
+  const level = Math.max(1, Math.floor(Number(row?.level ?? 1)));
+  const xp = Math.max(0, Math.floor(Number(row?.xp ?? 0)));
+  return { xp, level };
+}
+
+/** Aplica ganho de XP e resolve todos os level-ups (evita depender de SELECT pós-UPDATE no D1 e permite vários níveis de uma vez). */
+function computeXpAndLevelAfterGain(xp: number, level: number, xpDelta: number): { xp: number; level: number; levelsGained: number } {
+  const add = Math.max(0, Math.floor(Number(xpDelta) || 0));
+  let x = Math.max(0, Math.floor(xp)) + add;
+  let L = Math.max(1, Math.floor(level));
+  let gained = 0;
+  const maxIterations = 1000;
+  for (let i = 0; i < maxIterations; i += 1) {
+    const need = xpRequiredToAdvanceFromLevel(L);
+    if (x < need) break;
+    x -= need;
+    L += 1;
+    gained += 1;
+  }
+  return { xp: x, level: L, levelsGained: gained };
+}
+
+/**
+ * Lê progression, soma XP/pontos, aplica todas as subidas de nível de uma vez e dispara hooks por nível.
+ * Usar em qualquer fluxo que conceda XP (missão, circuito, mensal, minigame).
+ */
+async function applyXpPointsAndResolveLevels(
+  db: D1Database,
+  userId: string,
+  xpDelta: number,
+  pointsDelta: number,
+): Promise<{ leveledUp: boolean; newLevel: number; levelsGained: number }> {
+  const row = await db
+    .prepare("SELECT xp, level FROM user_progression WHERE user_id = ?")
+    .bind(userId)
+    .first<{ xp: number | null; level: number | null }>();
+  if (!row) {
+    return { leveledUp: false, newLevel: 1, levelsGained: 0 };
+  }
+  const before = parseProgressionXpLevel(row);
+  const next = computeXpAndLevelAfterGain(before.xp, before.level, xpDelta);
+  const pointsAdd = Math.max(0, Math.floor(Number(pointsDelta) || 0)) + 100 * next.levelsGained;
+
+  await db
+    .prepare(
+      `UPDATE user_progression SET xp = ?, level = ?, points = COALESCE(points, 0) + ?, updated_at = datetime('now') WHERE user_id = ?`,
+    )
+    .bind(next.xp, next.level, pointsAdd, userId)
+    .run();
+
+  if (next.levelsGained > 0) {
+    invalidateRankingCache();
+    for (let lvl = before.level + 1; lvl <= next.level; lvl += 1) {
+      await runMissionLifecycleHookSafely(userId, "on_level_up", () => onLevelUp(db, userId, lvl));
+      await runMissionLifecycleHookSafely(userId, "unlock_skills", () => tryUnlockSkillsForLevel(db, userId, lvl));
+    }
+  } else if (xpDelta !== 0 || pointsDelta !== 0) {
+    invalidateRankingCache();
+  }
+
+  return {
+    leveledUp: next.levelsGained > 0,
+    newLevel: next.level,
+    levelsGained: next.levelsGained,
+  };
+}
+
 app.get("/favicon.ico", (c) => {
   return c.body(new Uint8Array(), {
     status: 200,
@@ -4707,12 +4781,7 @@ async function updateMonthlyMissionProgress(userId: string, db: D1Database): Pro
     const xpReward = Number(mission.xp_reward ?? 0);
     const pointsReward = Number(mission.points_reward ?? 0);
     if (xpReward > 0 || pointsReward > 0) {
-      await db.prepare(
-        `UPDATE user_progression
-           SET xp = COALESCE(xp, 0) + ?, points = COALESCE(points, 0) + ?, updated_at = datetime('now')
-         WHERE user_id = ?`
-      ).bind(xpReward, pointsReward, userId).run();
-      invalidateRankingCache();
+      await applyXpPointsAndResolveLevels(db, userId, xpReward, pointsReward);
     }
     await onMissionComplete(db, userId, Number(mission.id));
   }
@@ -5003,12 +5072,7 @@ async function grantCircuitRewards(db: D1Database, userId: string, missionRow: R
 
   if (xpReward <= 0 && pointsReward <= 0) return;
 
-  await db.prepare(
-    `UPDATE user_progression
-       SET xp = COALESCE(xp, 0) + ?, points = COALESCE(points, 0) + ?, updated_at = datetime('now')
-     WHERE user_id = ?`
-  ).bind(xpReward, pointsReward, userId).run();
-  invalidateRankingCache();
+  await applyXpPointsAndResolveLevels(db, userId, xpReward, pointsReward);
 }
 
 function buildCompletedMissionCorpus(completedMission: Record<string, unknown>): string {
@@ -5627,37 +5691,9 @@ app.post("/api/missions/complete", authMiddleware, zValidator("json", CompleteMi
       xpGained = Math.max(0, Math.floor(Number(mission.xp_reward || 0) * streakMultiplier));
       pointsGained = Math.max(0, Number(mission.points_reward || 0));
 
-      completionPhase = "award_xp_db";
-      await c.env.fitloot_db.prepare(
-        `UPDATE user_progression SET xp = COALESCE(xp, 0) + ?, points = COALESCE(points, 0) + ?, updated_at = datetime('now')
-        WHERE user_id = ?`
-      ).bind(xpGained, pointsGained, user.id).run();
-
-      completionPhase = "check_level_up";
-      const updatedProgression = await c.env.fitloot_db.prepare(
-        "SELECT * FROM user_progression WHERE user_id = ?"
-      ).bind(user.id).first<UserProgression>();
-
-      const currentXp = Number(updatedProgression?.xp || 0);
-      const currentLevel = Number(updatedProgression?.level || 1);
-      const xpForNextLevel = currentLevel * 100;
-
-      if (currentXp >= xpForNextLevel) {
-        completionPhase = "award_level_up";
-        await c.env.fitloot_db.prepare(
-          `UPDATE user_progression SET level = COALESCE(level, 1) + 1, xp = COALESCE(xp, 0) - ?, points = COALESCE(points, 0) + 100, updated_at = datetime('now')
-          WHERE user_id = ?`
-        ).bind(xpForNextLevel, user.id).run();
-        leveledUp = true;
-
-        completionPhase = "lifecycle_level_up";
-        const afterLevel = await c.env.fitloot_db.prepare("SELECT level FROM user_progression WHERE user_id = ?").bind(user.id).first<{ level: number }>();
-        const newLevel = Number(afterLevel?.level ?? currentLevel + 1);
-
-        // Wrap level-up hooks in safety
-        await runMissionLifecycleHookSafely(user.id, "on_level_up", () => onLevelUp(c.env.fitloot_db, user.id, newLevel));
-        await runMissionLifecycleHookSafely(user.id, "unlock_skills", () => tryUnlockSkillsForLevel(c.env.fitloot_db, user.id, newLevel));
-      }
+      completionPhase = "award_xp_and_levels";
+      const progressionOutcome = await applyXpPointsAndResolveLevels(c.env.fitloot_db, user.id, xpGained, pointsGained);
+      leveledUp = progressionOutcome.leveledUp;
 
       completionPhase = "update_event_counters_db";
       await ensureUserCounterRow(c.env.fitloot_db, user.id);
@@ -6603,14 +6639,8 @@ app.post("/api/mini-games/:id/complete", authMiddleware, zValidator("json", Mini
   const loserPoints = Math.floor(winnerPoints / 2);
 
   await Promise.all([
-    c.env.fitloot_db.prepare(
-      `UPDATE user_progression SET xp = COALESCE(xp, 0) + ?, points = COALESCE(points, 0) + ?, updated_at = datetime('now')
-        WHERE user_id = ?`
-    ).bind(winnerXp, winnerPoints, winnerUserId).run(),
-    c.env.fitloot_db.prepare(
-      `UPDATE user_progression SET xp = COALESCE(xp, 0) + ?, points = COALESCE(points, 0) + ?, updated_at = datetime('now')
-        WHERE user_id = ?`
-    ).bind(loserXp, loserPoints, loserUserId).run(),
+    applyXpPointsAndResolveLevels(c.env.fitloot_db, winnerUserId, winnerXp, winnerPoints),
+    applyXpPointsAndResolveLevels(c.env.fitloot_db, loserUserId, loserXp, loserPoints),
     registerMiniGameResult(c.env.fitloot_db, winnerUserId, true),
     registerMiniGameResult(c.env.fitloot_db, loserUserId, false),
     logUserEvent(c.env.fitloot_db, winnerUserId, "onMiniGameComplete", {
