@@ -64,6 +64,7 @@ export default function Profile() {
   const [skills, setSkills] = useState<SkillWithProgress[]>([]);
   const [achievements, setAchievements] = useState<AchievementWithUnlock[]>([]);
   const [titles, setTitles] = useState<TitleWithUnlock[]>([]);
+  const [benchmarks, setBenchmarks] = useState<any[]>([]);
   const [tab, setTab] = useState<"attributes" | "skills">("attributes");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -72,6 +73,39 @@ export default function Profile() {
   const [feedbackMessage, setFeedbackMessage] = useState("");
   const [feedbackSending, setFeedbackSending] = useState(false);
   const [feedbackStatus, setFeedbackStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
+
+  // Função para converter benchmarks da API para o formato esperado pelo sistema de rank
+  const getBenchmarkResults = useCallback(() => {
+    if (!benchmarks || benchmarks.length === 0) return undefined;
+    
+    // Pega o benchmark mais recente
+    const latest = benchmarks[0];
+    
+    // Calcula skillStageScore baseado nos skills
+    const skillStageScore = skills.reduce((score, skill) => {
+      // Adiciona pontos baseados no progresso do skill
+      if (skill.total_reps >= 100) score += 2;
+      else if (skill.total_reps >= 50) score += 1;
+      else if (skill.total_reps >= 10) score += 0.5;
+      return score;
+    }, 0);
+    
+    const result: {
+      pushUpMaxReps?: number;
+      squatMaxReps?: number;
+      plankMaxSeconds?: number;
+      sitUpMaxReps?: number;
+      skillStageScore?: number;
+    } = {};
+    
+    if (latest.pushups_max) result.pushUpMaxReps = Number(latest.pushups_max);
+    if (latest.squats_max) result.squatMaxReps = Number(latest.squats_max);
+    if (latest.plank_seconds) result.plankMaxSeconds = Number(latest.plank_seconds);
+    if (latest.situps_max) result.sitUpMaxReps = Number(latest.situps_max);
+    if (skillStageScore > 0) result.skillStageScore = skillStageScore;
+    
+    return result;
+  }, [benchmarks, skills]);
 
   // NOVO: Hook para calcular rank de treinamento (read-only, seguro)
   const { snapshot: trainingRank, isLoading: rankLoading, error: rankError } = useTrainingRank(
@@ -87,7 +121,7 @@ export default function Profile() {
       best_reps: skill.best_reps,
       unlocked_at: ''
     })),
-    undefined // TODO: Adicionar benchmarks quando disponíveis
+    getBenchmarkResults()
   );
 
 
@@ -122,13 +156,14 @@ export default function Profile() {
     if (hasCache) setLoading(false);
 
     try {
-      const [p, a, pr, s, ach, t] = await Promise.all([
+      const [p, a, pr, s, ach, t, b] = await Promise.all([
         fetchAndCacheJson<UserProfile>("/api/profile"),
         fetchAndCacheJson<UserAttributes>("/api/attributes"),
         fetchAndCacheJson<UserProgression>("/api/progression"),
         fetchAndCacheJson<SkillWithProgress[]>("/api/skills"),
         fetchAndCacheJson<AchievementWithUnlock[]>("/api/achievements"),
         fetchAndCacheJson<TitleWithUnlock[]>("/api/titles"),
+        fetchAndCacheJson<any[]>("/api/benchmarks").catch(() => ({ data: [] })) // Fallback para benchmarks
       ]);
 
       syncProfileThemeState(p);
@@ -137,6 +172,7 @@ export default function Profile() {
       setSkills(Array.isArray(s) ? s : []);
       setAchievements(Array.isArray(ach) ? sanitizeAchievementsForDisplay(ach) : []);
       setTitles(Array.isArray(t) ? t : []);
+      setBenchmarks(Array.isArray(b) ? b : Array.isArray(b?.data) ? b.data : []);
     } catch (loadError) {
       if (loadError instanceof ApiRequestError && (loadError.status === 401 || loadError.status === 403)) {
         navigate("/app", { replace: true });
