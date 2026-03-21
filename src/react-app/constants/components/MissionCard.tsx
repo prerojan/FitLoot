@@ -422,29 +422,6 @@ function MissionExecutionModal({
                   <Dumbbell className="w-16 h-16 opacity-20" />
                 </div>
               )}
-              
-              <div className="absolute inset-0 flex items-center justify-center backdrop-blur-[2px]" style={{ backgroundColor: "rgba(10, 10, 10, 0.4)" }}>
-                <button 
-                  onClick={() => setState((current) => ({ ...current, running: !current.running }))}
-                  className="size-20 rounded-full flex items-center justify-center hover:scale-110 transition-transform shadow-xl"
-                  style={{ backgroundColor: "var(--app-primary-color)", color: "var(--app-bg-color, #0a0a0a)", boxShadow: "0 20px 25px -5px color-mix(in srgb, var(--app-primary-color) 30%, transparent)" }}
-                >
-                  {state.running && !state.resting ? (
-                    <Pause className="w-8 h-8 fill-current" strokeWidth={1} />
-                  ) : (
-                    <Play className="w-8 h-8 fill-current ml-1" strokeWidth={1} />
-                  )}
-                </button>
-              </div>
-              
-              <div className="absolute bottom-4 left-4 right-4 flex justify-between items-center">
-                <span className="backdrop-blur-md px-4 py-1.5 rounded-full text-xs font-bold border" style={{ backgroundColor: "rgba(10, 10, 10, 0.8)", borderColor: "rgba(255, 255, 255, 0.1)" }}>
-                  VERIFICAR FORMA
-                </span>
-                <span className="backdrop-blur-md px-4 py-1.5 rounded-full text-xs font-bold border" style={{ backgroundColor: "rgba(10, 10, 10, 0.8)", borderColor: "rgba(255, 255, 255, 0.1)" }}>
-                  SÉRIE {state.currentSet}/{sets}
-                </span>
-              </div>
             </div>
             
             {/* Input Overlay for Distance Missions inside Media area or just below */}
