@@ -1,52 +1,27 @@
-/**
- * MissionCard Component - Versão corrigida e funcional
- * Integrado com APIs de saúde e mapas para missões de caminhada/corrida
- */
-
-import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useState } from "react";
 import {
   CheckCircle2,
+  Clock3,
+  Dumbbell,
+  MapPinned,
   Play,
+  Sparkles,
+  Star,
+  Trophy,
   X,
-  Info,
-  Pause,
-  Square,
 } from "lucide-react";
 import { Card } from "@/react-app/components/ui/card";
+import { Button } from "@/react-app/components/ui/button";
 import { Badge } from "@/react-app/components/ui/badge";
 import { useAppChrome } from "@/react-app/contexts/appChrome";
 import { formatMissionGoal } from "@/constants/missionMetrics";
-import type { CircuitTask, Mission, MissionMetricType } from "@/shared/types";
-import { localizeMissionText, normalizeMissionMediaUrl } from "@/shared/missionLocalization";
+import type { Mission, MissionMetricType } from "@/shared/types";
+import { localizeMissionText } from "@/shared/missionLocalization";
 import WalkingMissionExecution from "./WalkingMissionExecution";
 
 type MissionCardProps = {
   mission: Mission & { skill_name?: string | undefined };
   onComplete: (id: number, reps: number, verified: boolean) => Promise<void> | void;
-};
-
-type MissionExecutionState = {
-  currentSet: number;
-  remainingSeconds: number;
-  restSeconds: number;
-  running: boolean;
-  resting: boolean;
-  repsDone: number;
-  totalRepsDone: number;
-  inputValue: string;
-  finished: boolean;
-};
-
-const DEFAULT_EXECUTION_STATE: MissionExecutionState = {
-  currentSet: 1,
-  remainingSeconds: 0,
-  restSeconds: 0,
-  running: false,
-  resting: false,
-  repsDone: 0,
-  totalRepsDone: 0,
-  inputValue: "",
-  finished: false,
 };
 
 function normalizeMetricType(mission: Mission): MissionMetricType {
@@ -65,41 +40,8 @@ function normalizeMetricType(mission: Mission): MissionMetricType {
   return "sets_reps";
 }
 
-function resolveCircuitTasks(mission: Mission): CircuitTask[] {
-  if (!Array.isArray(mission.circuit_tasks)) return [];
-  return mission.circuit_tasks
-    .filter((task: any) =>
-      typeof task.id === "string" &&
-      typeof task.label === "string" &&
-      typeof task.mission_type === "string" &&
-      typeof task.required_count === "number" &&
-      typeof task.current_count === "number" &&
-      typeof task.completed === "boolean"
-    )
-    .map((task: any) => ({
-      ...task,
-      label: localizeMissionText(task.label) ?? task.label,
-    }));
-}
-
-function missionTotalGoal(mission: Mission, metricType: MissionMetricType): number {
-  if (metricType === "circuit_tasks") {
-    const tasks = resolveCircuitTasks(mission);
-    return tasks.length > 0
-      ? tasks.length
-      : Math.max(1, Number(mission.metric_value ?? 1));
-  }
-  if (typeof mission.metric_value === "number" && mission.metric_value > 0) {
-    return mission.metric_value;
-  }
-  if (metricType === "duration_seconds" || metricType === "duration_minutes") {
-    return Math.max(1, Number(mission.target_time ?? 0));
-  }
-  return Math.max(1, Number(mission.target_reps ?? 1));
-}
-
 function formatGoal(mission: Mission, metricType: MissionMetricType): string {
-  const goal = missionTotalGoal(mission, metricType);
+  const goal = mission.metric_value ?? 1;
   const sets = mission.sets ?? undefined;
 
   if (metricType === "duration_seconds" && sets && sets > 0) {
@@ -112,36 +54,7 @@ function formatGoal(mission: Mission, metricType: MissionMetricType): string {
     return formatMissionGoal(metricType, repsPerSet, sets);
   }
 
-  if (metricType === "circuit_tasks") {
-    const tasks = resolveCircuitTasks(mission);
-    const completedCount = tasks.filter((task) => task.completed).length;
-    return formatMissionGoal(metricType, completedCount);
-  }
-
   return formatMissionGoal(metricType, goal, sets);
-}
-
-function resolveMissionGoalText(mission: Mission, metricType: MissionMetricType): string {
-  if (typeof mission.goal === "string" && mission.goal.trim().length > 0) {
-    return mission.goal;
-  }
-  return formatGoal(mission, metricType);
-}
-
-function localizeDifficulty(difficulty: string | null | undefined): string {
-  if (!difficulty) return "Iniciante";
-  const localized = localizeMissionText(difficulty) ?? difficulty;
-  const normalized = localized
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase();
-
-  if (normalized.includes("avanc")) return "Avançado";
-  if (normalized.includes("inter")) return "Intermediário";
-  if (normalized.includes("sedent")) return "Sedentário";
-  if (normalized.includes("inic")) return "Iniciante";
-
-  return localized.charAt(0).toUpperCase() + localized.slice(1);
 }
 
 function bodyAreaLabel(bodyArea: Mission["body_area"]): string {
@@ -149,26 +62,6 @@ function bodyAreaLabel(bodyArea: Mission["body_area"]): string {
   if (bodyArea === "lower") return "Parte inferior";
   if (bodyArea === "core") return "Core";
   return "Corpo inteiro";
-}
-
-function isGifUrl(url: string | null | undefined): boolean {
-  if (!url) return false;
-  return /\.gif(?:$|\?)/i.test(url) || /format=gif/i.test(url);
-}
-
-function resolveMissionMediaUrl(mission: Mission): string | null {
-  const primaryImage = normalizeMissionMediaUrl(mission.image_url);
-  const ascendGif = isGifUrl(primaryImage) ? primaryImage : null;
-  const exerciseDbGif = normalizeMissionMediaUrl(mission.exercise_db_gif_url);
-  const thumbnail = normalizeMissionMediaUrl(mission.thumbnail_url);
-  const exerciseDbImage = normalizeMissionMediaUrl(mission.exercise_db_image_url);
-  const videoUrl = normalizeMissionMediaUrl(mission.video_url);
-
-  return ascendGif
-    ?? exerciseDbGif
-    ?? exerciseDbImage
-    ?? thumbnail
-    ?? videoUrl;
 }
 
 function MissionExecutionModal({
@@ -184,396 +77,83 @@ function MissionExecutionModal({
   onClose: () => void;
   onFinish: (value: number) => Promise<void>;
 }) {
-  const [state, setState] = useState<MissionExecutionState>(DEFAULT_EXECUTION_STATE);
+  const [reps, setReps] = useState(0);
+  const [sets, setSets] = useState(1);
+  const [isRunning, setIsRunning] = useState(false);
+  const [isCompleted, setIsCompleted] = useState(false);
 
-  const sets = Math.max(1, Number(mission.sets ?? 1));
-  const restSecondsConfigured = Math.max(0, Number(mission.rest_seconds ?? 0));
-  const totalGoal = missionTotalGoal(mission, metricType);
-  const setDuration = metricType === "duration_seconds" || metricType === "duration_minutes" ? totalGoal : Math.max(1, Math.floor(totalGoal / sets));
-  const isTimeMission = metricType === "duration_seconds" || metricType === "duration_minutes";
-  const isCounterMission = metricType === "repetitions" || metricType === "sets_reps";
-  const isDistanceMission = metricType === "steps" || metricType === "distance_meters";
-  const initialExecutionState = useMemo<MissionExecutionState>(() => ({
-    ...DEFAULT_EXECUTION_STATE,
-    remainingSeconds: setDuration,
-    running: isTimeMission,
-  }), [isTimeMission, setDuration]);
-
-  useEffect(() => {
-    if (!open) return;
-    setState(initialExecutionState);
-  }, [initialExecutionState, open]);
-
-  useEffect(() => {
-    if (!open) return;
-    if (!state.running) return;
-
-    const isTimeMission = metricType === "duration_seconds" || metricType === "duration_minutes";
-    if (!isTimeMission) return;
-
-    const timer = window.setInterval(() => {
-      setState((current) => {
-        if (!current.running) return current;
-
-        if (current.resting) {
-          if (current.restSeconds > 1) {
-            return { ...current, restSeconds: current.restSeconds - 1 };
-          }
-          return {
-            ...current,
-            resting: false,
-            running: true,
-            remainingSeconds: setDuration,
-            restSeconds: 0,
-          };
-        }
-
-        if (current.remainingSeconds > 1) {
-          return { ...current, remainingSeconds: current.remainingSeconds - 1 };
-        }
-
-        const nextSet = current.currentSet + 1;
-        if (nextSet <= sets) {
-          return {
-            ...current,
-            currentSet: nextSet,
-            repsDone: 0,
-            totalRepsDone: current.totalRepsDone + current.repsDone,
-            resting: restSecondsConfigured > 0,
-            running: restSecondsConfigured > 0,
-            restSeconds: restSecondsConfigured,
-            remainingSeconds: restSecondsConfigured > 0 ? 0 : setDuration,
-          };
-        }
-
-        return { ...current, running: false, resting: false, finished: true, remainingSeconds: 0 };
-      });
-    }, 1000);
-
-    return () => window.clearInterval(timer);
-  }, [metricType, open, restSecondsConfigured, setDuration, sets, state.running]);
-
-  useEffect(() => {
-    if (!open) return;
-    if (!state.running) return;
-
-    const isCounterMission = metricType === "repetitions" || metricType === "sets_reps";
-    if (!isCounterMission) return;
-
-    const timer = window.setInterval(() => {
-      setState((current) => {
-        if (!current.running || current.finished) return current;
-        if (current.repsDone >= setDuration) {
-          const nextSet = current.currentSet + 1;
-          if (nextSet <= sets) {
-            return {
-              ...current,
-              currentSet: nextSet,
-              repsDone: 0,
-              totalRepsDone: current.totalRepsDone + current.repsDone,
-              resting: restSecondsConfigured > 0,
-              running: restSecondsConfigured > 0,
-              restSeconds: restSecondsConfigured,
-              remainingSeconds: restSecondsConfigured > 0 ? 0 : setDuration,
-            };
-          }
-          return {
-            ...current,
-            running: false,
-            resting: false,
-            finished: true,
-            totalRepsDone: current.totalRepsDone + current.repsDone,
-            repsDone: 0,
-          };
-        }
-        return current;
-      });
-    }, 100);
-
-    return () => window.clearInterval(timer);
-  }, [metricType, open, restSecondsConfigured, setDuration, sets, state.running, state.finished]);
-
-  const incrementReps = useCallback(() => {
-    if (state.finished || state.resting) return;
-    setState((current) => ({
-      ...current,
-      repsDone: Math.min(current.repsDone + 1, setDuration),
-    }));
-  }, [setDuration, state.finished, state.resting]);
-
-  const decrementReps = useCallback(() => {
-    if (state.finished || state.resting) return;
-    setState((current) => ({
-      ...current,
-      repsDone: Math.max(0, current.repsDone - 1),
-    }));
-  }, [state.finished, state.resting]);
-
-  const finishSet = useCallback(() => {
-    setState((current) => {
-      if (current.finished || current.resting) return current;
-
-      const nextSet = current.currentSet + 1;
-      if (nextSet <= sets) {
-        return {
-          ...current,
-          currentSet: nextSet,
-          repsDone: 0,
-          totalRepsDone: current.totalRepsDone + current.repsDone,
-          resting: restSecondsConfigured > 0,
-          running: restSecondsConfigured > 0,
-          restSeconds: restSecondsConfigured,
-          remainingSeconds: restSecondsConfigured > 0 ? 0 : setDuration,
-        };
-      }
-
-      return {
-        ...current,
-        running: false,
-        resting: false,
-        finished: true,
-        totalRepsDone: current.totalRepsDone + current.repsDone,
-        repsDone: 0,
-        remainingSeconds: 0,
-        restSeconds: 0,
-      };
-    });
-  }, [setDuration, sets, restSecondsConfigured]);
-
-  const resetExecution = useCallback(() => {
-    setState(initialExecutionState);
-  }, [initialExecutionState]);
-
-  const toggleRunning = useCallback(() => {
-    setState((current) => {
-      if (current.finished || isDistanceMission) return current;
-      return { ...current, running: !current.running };
-    });
-  }, [isDistanceMission]);
-
-  const canFinishInputMission = isDistanceMission && Number(state.inputValue) > 0;
-  const totalCounterProgress = state.totalRepsDone + state.repsDone;
-  const canFinishCounterMission = isCounterMission && state.finished;
-  const canFinishMission = isDistanceMission ? canFinishInputMission : isTimeMission ? state.finished : canFinishCounterMission;
-  
-  const finishMission = async () => {
-    if (!canFinishMission) return;
-    const value = isDistanceMission
-      ? Number(state.inputValue)
-      : isCounterMission
-        ? Math.max(totalGoal, totalCounterProgress)
-        : totalGoal;
-    await onFinish(value);
-  };
-
-  let activeProgress = 0;
-  if (isTimeMission) {
-    const completedSets = Math.max(0, state.currentSet - 1);
-    const currentSetProgress = state.resting
-      ? 0
-      : setDuration > 0
-        ? Math.max(0, (setDuration - state.remainingSeconds) / setDuration)
-        : 0;
-    activeProgress = ((completedSets + currentSetProgress) / sets) * 100;
-  } else if (isCounterMission) {
-    activeProgress = Math.min(100, (totalCounterProgress / totalGoal) * 100 || 0);
-  } else if (isDistanceMission) {
-    activeProgress = Math.min(100, (Number(state.inputValue || 0) / totalGoal) * 100 || 0);
-  } else {
-    const completedSets = Math.max(0, state.currentSet - 1);
-    activeProgress = (completedSets / sets) * 100;
-  }
-
-  activeProgress = Math.max(0, Math.min(100, activeProgress));
-
-  const missionMediaUrl = resolveMissionMediaUrl(mission);
+  const completeMission = useCallback(async () => {
+    const totalReps = reps * sets;
+    await onFinish(totalReps);
+    setIsCompleted(true);
+  }, [reps, sets, onFinish]);
 
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl overflow-hidden">
-        <div className="relative">
-          {missionMediaUrl && (
-            <div className="relative aspect-video bg-gray-100">
-              {isGifUrl(missionMediaUrl) ? (
-                <img
-                  src={missionMediaUrl}
-                  alt={mission.title}
-                  className="w-full h-full object-cover"
-                  loading="eager"
-                />
-              ) : (
-                <img
-                  src={missionMediaUrl}
-                  alt={mission.title}
-                  className="w-full h-full object-cover"
-                  loading="lazy"
-                />
-              )}
-              <div className="absolute inset-0 flex items-center justify-center backdrop-blur-[2px]" style={{ backgroundColor: "rgba(0, 0, 0, 0.32)" }}>
-                <button
-                  type="button"
-                  onClick={toggleRunning}
-                  className="size-14 sm:size-20 rounded-full flex items-center justify-center hover:scale-110 transition-transform shadow-xl"
-                  style={{ backgroundColor: "var(--app-primary-color)", color: "var(--fl-nav-item-active-text)", boxShadow: "0 20px 25px -5px color-mix(in srgb, var(--app-primary-color) 30%, transparent)" }}
-                >
-                  {state.running && !state.resting ? (
-                    <Pause className="w-6 h-6 sm:w-8 sm:h-8 fill-current" strokeWidth={1} />
-                  ) : (
-                    <Play className="w-6 h-6 sm:w-8 sm:h-8 fill-current ml-1" strokeWidth={1} />
-                  )}
-                </button>
-              </div>
-            </div>
-          )}
-          
-          {/* Input Overlay for Distance Missions */}
-          {isDistanceMission && (
-            <div className="mt-6 w-full max-w-md space-y-3">
-              <p className="text-sm text-center" style={{ color: "var(--fl-color-text-muted)" }}>
-                Registre o valor atingido (Passos ou Metros)
-              </p>
-              <input
-                type="number"
-                className="w-full rounded-xl border-2 bg-transparent px-4 py-3 text-center text-xl font-bold focus:outline-none"
-                style={{ borderColor: "color-mix(in srgb, var(--app-primary-color) 30%, transparent)", color: "var(--app-primary-color)" }}
-                placeholder={metricType === "steps" ? "Passos" : "Metros"}
-                value={state.inputValue}
-                onChange={(event) => setState((current) => ({ ...current, inputValue: event.target.value }))}
-                min={0}
-              />
-            </div>
-          )}
-          
-          <div className="absolute top-4 right-4 flex gap-1 sm:gap-2 shrink-0">
-            <button type="button" className="flex size-8 sm:size-10 items-center justify-center rounded-full border transition-opacity hover:opacity-80" onClick={resetExecution} style={{ backgroundColor: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)", color: "var(--app-primary-color)", borderColor: "color-mix(in srgb, var(--app-primary-color) 20%, transparent)" }}>
-              <Info className="w-4 h-4 sm:w-5 sm:h-5" />
-            </button>
-            <button type="button" className="flex size-8 sm:size-10 items-center justify-center rounded-full border transition-opacity hover:opacity-80" onClick={onClose} style={{ backgroundColor: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)", color: "var(--app-primary-color)", borderColor: "color-mix(in srgb, var(--app-primary-color) 20%, transparent)" }}>
-              <X className="w-4 h-4 sm:w-5 sm:h-5" />
-            </button>
-          </div>
+    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+      <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold">{mission.title}</h3>
+          <button
+            onClick={onClose}
+            className="p-2 rounded-lg hover:bg-gray-100"
+          >
+            <X className="w-4 h-4" />
+          </button>
         </div>
 
-        <main className="p-6 space-y-6">
-          <header className="text-center">
-            <h2 className="text-lg sm:text-xl font-bold tracking-tight truncate">FitLoot</h2>
-          </header>
-
-          <div className="space-y-4">
-            <div className="text-center">
-              <div className="text-2xl sm:text-3xl font-bold" style={{ color: "var(--app-primary-color)" }}>
-                {localizeMissionText(mission.title) ?? mission.title}
-              </div>
-              <div className="text-sm text-gray-600 mt-1">
-                {resolveMissionGoalText(mission, metricType)}
-              </div>
+        <div className="space-y-4">
+          <div className="text-center">
+            <div className="text-2xl font-bold text-blue-600">
+              {isCompleted ? "Concluída!" : `${sets} x ${reps}`}
             </div>
-
-            <div className="relative">
-              <div className="w-full bg-gray-200 rounded-full h-3 overflow-hidden">
-                <div 
-                  className="h-full transition-all duration-500 ease-out"
-                  style={{ 
-                    width: `${activeProgress}%`,
-                    backgroundColor: "var(--app-primary-color)"
-                  }}
-                />
-              </div>
-              <div className="absolute inset-0 flex items-center justify-center">
-                <span className="text-sm font-medium text-gray-700">
-                  {Math.round(activeProgress)}%
-                </span>
-              </div>
+            <div className="text-sm text-gray-600">
+              Total: {reps * sets} repetições
             </div>
+          </div>
 
-            {isTimeMission && (
-              <div className="text-center">
-                <div className="text-4xl sm:text-5xl font-bold tabular-nums" style={{ color: "var(--app-primary-color)" }}>
-                  {Math.floor(state.remainingSeconds / 60)}:{(state.remainingSeconds % 60).toString().padStart(2, "0")}
-                </div>
-                <div className="text-sm text-gray-600 mt-1">
-                  {state.resting ? "Descanso" : `Série ${state.currentSet} de ${sets}`}
-                </div>
-              </div>
-            )}
-
-            {isCounterMission && (
-              <div className="space-y-4">
-                <div className="text-center">
-                  <div className="text-4xl sm:text-5xl font-bold tabular-nums" style={{ color: "var(--app-primary-color)" }}>
-                    {state.repsDone}
-                  </div>
-                  <div className="text-sm text-gray-600 mt-1">
-                    Repetições nesta série
-                  </div>
-                </div>
-                <div className="flex items-center justify-center gap-4">
-                  <button
-                    type="button"
-                    onClick={decrementReps}
-                    disabled={state.finished || state.resting}
-                    className="size-12 rounded-full border-2 flex items-center justify-center hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                    style={{ borderColor: "var(--app-primary-color)", color: "var(--app-primary-color)" }}
-                  >
-                    <span className="text-xl font-bold">-</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={incrementReps}
-                    disabled={state.finished || state.resting}
-                    className="size-12 rounded-full border-2 flex items-center justify-center hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                    style={{ borderColor: "var(--app-primary-color)", color: "var(--app-primary-color)" }}
-                  >
-                    <span className="text-xl font-bold">+</span>
-                  </button>
-                </div>
-                <div className="text-center">
-                  <div className="text-lg font-semibold">
-                    Total: {totalCounterProgress} / {totalGoal}
-                  </div>
-                  <div className="text-sm text-gray-600">
-                    Série {state.currentSet} de {sets}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {isCounterMission && (
-              <button 
-                className="w-full py-3 rounded-xl font-bold text-sm sm:text-base border transition-colors active:scale-95 hover:bg-white/10"
-                style={{ backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 82%, transparent)", borderColor: "var(--fl-border-soft)", color: "var(--fl-color-text-muted)" }}
-                onClick={finishSet}
-                disabled={state.finished || state.resting}
+          {!isCompleted && (
+            <div className="flex gap-2">
+              <button
+                onClick={() => setReps(Math.max(0, reps - 1))}
+                className="px-3 py-2 bg-gray-200 rounded-lg"
               >
-                {state.resting ? "Descansando..." : "Finalizar Série"}
+                -
               </button>
-            )}
-          </div>
+              <input
+                type="number"
+                value={reps}
+                onChange={(e) => setReps(Math.max(0, parseInt(e.target.value) || 0))}
+                className="flex-1 text-center border rounded-lg"
+              />
+              <button
+                onClick={() => setReps(reps + 1)}
+                className="px-3 py-2 bg-gray-200 rounded-lg"
+              >
+                +
+              </button>
+            </div>
+          )}
 
-          <div className="flex gap-3">
-            <button 
-              className="h-10 sm:h-14 rounded-xl sm:rounded-2xl font-bold text-xs sm:text-sm md:text-base flex items-center justify-center gap-1 sm:gap-2 border transition-colors active:scale-95 hover:bg-white/10 truncate"
-              style={{ backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 82%, transparent)", borderColor: "var(--fl-border-soft)", color: "var(--fl-color-text-muted)" }}
-              onClick={toggleRunning}
-              disabled={state.finished || isDistanceMission}
+          {!isCompleted && (
+            <button
+              onClick={completeMission}
+              className="w-full py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700"
             >
-              {state.running ? <Pause className="w-4 h-4 sm:w-5 sm:h-5 fill-current" strokeWidth={1} /> : <Play className="w-4 h-4 sm:w-5 sm:h-5 fill-current" strokeWidth={1} />}
-              {isDistanceMission ? "SEM TIMER" : state.running ? "PAUSAR" : "RETOMAR"}
+              Finalizar Missão
             </button>
-            
-            <button 
-              className="flex-1 h-10 sm:h-14 rounded-xl sm:rounded-2xl font-bold text-xs sm:text-sm md:text-base flex items-center justify-center gap-1 sm:gap-2 transition-colors active:scale-95 truncate"
-              style={{ backgroundColor: "var(--app-primary-color)", color: "var(--fl-nav-item-active-text)" }}
-              onClick={finishMission}
-              disabled={!canFinishMission}
+          )}
+
+          {isCompleted && (
+            <button
+              onClick={onClose}
+              className="w-full py-3 bg-green-600 text-white rounded-lg font-semibold hover:bg-green-700"
             >
-              <Square className="w-3 h-3 sm:w-4 sm:h-4 fill-current" strokeWidth={2} />
-              {isDistanceMission ? "REGISTRAR" : "FINALIZAR"}
+              Fechar
             </button>
-          </div>
-        </main>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -584,23 +164,23 @@ function MissionCardComponent({ mission, onComplete }: MissionCardProps) {
   const [showDetails, setShowDetails] = useState(false);
   const [showExecution, setShowExecution] = useState(false);
   const [showWalkingExecution, setShowWalkingExecution] = useState(false);
+  const [completing, setCompleting] = useState(false);
 
-  const metricType = useMemo(() => normalizeMetricType(mission), [mission]);
+  const metricType = normalizeMetricType(mission);
   const missionStatus = (mission as Mission & { status?: string | undefined }).status || (mission.is_completed === 1 ? "completed" : "pending");
   const isFailed = missionStatus === "failed" || missionStatus === "expired";
   const isCompleted = mission.is_completed === 1 || missionStatus === "completed";
-  
-  const missionDetails = mission;
-  const detailMetricType = normalizeMetricType(missionDetails);
-  const isWalkingMission = detailMetricType === "steps" || detailMetricType === "distance_meters";
-  const isAutoProgressMission = mission.type === "weekly" || mission.type === "monthly";
-  const visualState = missionStatus === "completed" ? "completed" : missionStatus === "failed" ? "failed" : "pending";
-  const isInProgress = missionStatus === "in_progress";
+  const isWalkingMission = metricType === "steps" || metricType === "distance_meters";
 
   const finishMission = useCallback(async (value: number) => {
-    await onComplete(mission.id, value, true);
-    setShowExecution(false);
-    setShowDetails(false);
+    setCompleting(true);
+    try {
+      await onComplete(mission.id, value, true);
+      setShowExecution(false);
+      setShowDetails(false);
+    } finally {
+      setCompleting(false);
+    }
   }, [mission.id, onComplete]);
 
   useEffect(() => {
@@ -619,103 +199,161 @@ function MissionCardComponent({ mission, onComplete }: MissionCardProps) {
 
   return (
     <>
-      {/* Mission Card */}
-      <Card className="relative overflow-hidden transition-all duration-300 hover:shadow-lg" style={{ backgroundColor: "var(--fl-surface-card)" }}>
-        <div className="relative">
-          {/* Card Header */}
-          <div className="p-6 pb-4">
-            <div className="flex items-start justify-between">
-              <div className="flex-1">
-                <h3 className="text-lg font-semibold mb-2" style={{ color: "var(--fl-color-text-primary)" }}>
-                  {localizeMissionText(mission.title) ?? mission.title}
-                </h3>
-                <p className="text-sm" style={{ color: "var(--fl-color-text-secondary)" }}>
-                  {resolveMissionGoalText(mission, metricType)}
-                </p>
-              </div>
-              <div className="flex items-center gap-2">
-                {isCompleted && (
-                  <div className="p-2 rounded-full bg-green-100">
-                    <CheckCircle2 className="w-5 h-5 text-green-600" />
-                  </div>
-                )}
-                {isFailed && (
-                  <div className="p-2 rounded-full bg-red-100">
-                    <X className="w-5 h-5 text-red-600" />
-                  </div>
-                )}
-              </div>
-            </div>
+      <Card
+        tone="soft"
+        className={`p-5 transition-all ${
+          isFailed ? "border-2 border-red-200 bg-red-50 opacity-90" : "hover:shadow-xl"
+        } ${isCompleted ? "border-2 border-emerald-200 bg-emerald-50" : ""}`}
+      >
+        <div className="flex items-start justify-between mb-3">
+          <div className="flex-1">
+            <h3 className="font-semibold text-gray-900 mb-1">
+              {localizeMissionText(mission.title) ?? mission.title}
+            </h3>
+            {mission.description && (
+              <p className="text-sm text-gray-600 mb-2">{mission.description}</p>
+            )}
+            {mission.skill_name && (
+              <Badge className="w-fit gap-1">
+                <Dumbbell className="w-3 h-3" />
+                <span>{mission.skill_name}</span>
+              </Badge>
+            )}
           </div>
-
-          {/* Card Body */}
-          <div className="px-6 pb-6">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                <div className="text-center">
-                  <div className="text-2xl font-bold" style={{ color: "var(--app-primary-color)" }}>
-                    {mission.xp_reward}
-                  </div>
-                  <div className="text-xs" style={{ color: "var(--fl-color-text-muted)" }}>XP</div>
-                </div>
-                <div className="text-center">
-                  <div className="text-2xl font-bold" style={{ color: "var(--app-primary-color)" }}>
-                    {mission.points_reward}
-                  </div>
-                  <div className="text-xs" style={{ color: "var(--fl-color-text-muted)" }}>FC</div>
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <Badge variant="neutral" style={{ borderColor: "var(--fl-border-soft)", color: "var(--fl-color-text-muted)" }}>
-                  {localizeDifficulty(mission.difficulty_level)}
-                </Badge>
-                {mission.body_area && (
-                  <Badge variant="neutral" style={{ borderColor: "var(--fl-border-soft)", color: "var(--fl-color-text-muted)" }}>
-                    {bodyAreaLabel(mission.body_area)}
-                  </Badge>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* Action Button */}
-          <div className="p-6 pt-0">
-            <button 
-              onClick={() => {
-                if (isAutoProgressMission || isCompleted || visualState === "failed") {
-                  setShowDetails(false);
-                } else if (isWalkingMission) {
-                  setShowDetails(false);
-                  setShowWalkingExecution(true);
-                } else {
-                  setShowDetails(false);
-                  setShowExecution(true);
-                }
-              }}
-              className="w-full py-3 rounded-xl font-bold transition-all active:scale-95 flex items-center justify-center gap-2"
-              style={{ 
-                backgroundColor: isCompleted ? "var(--fl-surface-strong)" : "var(--app-primary-color)", 
-                color: isCompleted ? "var(--fl-color-text-muted)" : "var(--fl-nav-item-active-text)"
-              }}
-              disabled={isCompleted || isFailed}
-            >
-              {!isAutoProgressMission && !isCompleted && visualState !== "failed" && <Play className="w-4 h-4" />}
-              {isCompleted ? "CONCLUÍDA" : visualState === "failed" ? "FECHAR" : isAutoProgressMission ? "FECHAR" : isInProgress ? "CONTINUAR" : isWalkingMission ? "INICIAR CAMINHADA" : "INICIAR MISSÃO"}
-            </button>
+          <div className="flex flex-col items-end gap-1">
+            <div className="text-emerald-600 font-bold text-lg">+{mission.xp_reward} XP</div>
+            <div className="text-teal-600 text-sm">+{mission.points_reward} pts</div>
           </div>
         </div>
+
+        <div className="text-sm text-gray-600 mb-3">
+          Meta: {formatGoal(mission, metricType)}
+        </div>
+
+        {mission.deadline && (
+          <div className={`flex items-center gap-1 text-xs mb-3 ${isFailed ? "text-red-600" : "text-gray-500"}`}>
+            <Clock3 className="w-3 h-3" />
+            <span>{isFailed ? "Expirada/falhou" : "Em andamento"}</span>
+          </div>
+        )}
+
+        {isFailed ? (
+          <div className="w-full py-3 text-center rounded-xl bg-red-100 text-red-700 font-medium">
+            Missão falhou por expiração
+          </div>
+        ) : isCompleted ? (
+          <div className="w-full py-3 text-center rounded-xl bg-emerald-100 text-emerald-700 font-medium">
+            Missão concluída
+          </div>
+        ) : (
+          <Button
+            onClick={() => {
+              if (isWalkingMission) {
+                setShowWalkingExecution(true);
+              } else {
+                setShowDetails(true);
+              }
+            }}
+            variant="primary"
+            className="w-full py-3 rounded-xl shadow-md hover:shadow-lg"
+            disabled={completing}
+          >
+            {isWalkingMission ? "Iniciar Caminhada" : "Ver Detalhes"}
+          </Button>
+        )}
       </Card>
 
-      {/* Standard Mission Execution Modal */}
-      {showExecution && !isWalkingMission && (
-        <MissionExecutionModal
-          mission={mission}
-          metricType={metricType}
-          open={showExecution}
-          onClose={() => setShowExecution(false)}
-          onFinish={finishMission}
-        />
+      {showDetails && !isWalkingMission && (
+        <div className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm flex items-center justify-center px-4">
+          <div className="w-full max-w-xl bg-white rounded-3xl shadow-2xl p-6 space-y-5 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xl font-bold text-gray-900">
+                {localizeMissionText(mission.title) ?? mission.title}
+              </h3>
+              <button
+                onClick={() => setShowDetails(false)}
+                className="p-2 rounded-xl hover:bg-gray-100"
+                aria-label="Fechar"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              {mission.image_url ? (
+                <img
+                  src={mission.image_url}
+                  alt={mission.title}
+                  className="w-full h-48 object-cover rounded-2xl border border-gray-200"
+                />
+              ) : (
+                <div className="w-full h-48 rounded-2xl border border-emerald-100 bg-gradient-to-br from-emerald-100 to-teal-100 flex items-center justify-center">
+                  <Dumbbell className="w-12 h-12 text-emerald-600" />
+                </div>
+              )}
+              <p className="text-sm text-gray-700">{mission.description}</p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="rounded-xl border border-gray-200 p-3">
+                <p className="text-xs text-gray-500">Área do corpo</p>
+                <p className="font-semibold text-gray-900">{bodyAreaLabel(mission.body_area)}</p>
+              </div>
+              <div className="rounded-xl border border-gray-200 p-3">
+                <p className="text-xs text-gray-500">Meta</p>
+                <p className="font-semibold text-gray-900">{formatGoal(mission, metricType)}</p>
+              </div>
+              <div className="rounded-xl border border-gray-200 p-3">
+                <p className="text-xs text-gray-500">XP</p>
+                <p className="font-semibold text-emerald-700">{mission.xp_reward}</p>
+              </div>
+              <div className="rounded-xl border border-gray-200 p-3">
+                <p className="text-xs text-gray-500">Pontos</p>
+                <p className="font-semibold text-teal-700">{mission.points_reward}</p>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <p className="text-sm font-semibold text-gray-900">Atributos beneficiados</p>
+              <div className="flex flex-wrap gap-2">
+                {(mission.attributes_benefited ?? []).map((attribute) => (
+                  <span
+                    key={attribute}
+                    className="px-2 py-1 text-xs rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200"
+                  >
+                    <Star className="w-3 h-3 inline mr-1" />
+                    {attribute}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex gap-3">
+              <Button variant="secondary" className="flex-1" onClick={() => setShowDetails(false)}>
+                Fechar
+              </Button>
+              <Button
+                className="flex-1"
+                onClick={() => {
+                  setShowDetails(false);
+                  setShowExecution(true);
+                }}
+              >
+                <Play className="w-4 h-4" />
+                Iniciar Missão
+              </Button>
+            </div>
+          </div>
+        </div>
       )}
+
+      <MissionExecutionModal
+        mission={mission}
+        metricType={metricType}
+        open={showExecution}
+        onClose={() => setShowExecution(false)}
+        onFinish={finishMission}
+      />
 
       {/* Walking Mission Execution Modal */}
       {showWalkingExecution && isWalkingMission && (
@@ -728,8 +366,19 @@ function MissionCardComponent({ mission, onComplete }: MissionCardProps) {
           onClose={() => setShowWalkingExecution(false)}
         />
       )}
+
+      {showDetails && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 text-xs text-gray-500 flex items-center gap-2">
+          <MapPinned className="w-3 h-3" />
+          <span>{bodyAreaLabel(mission.body_area)}</span>
+          <Trophy className="w-3 h-3" />
+          <span>{mission.xp_reward} XP</span>
+        </div>
+      )}
     </>
   );
 }
 
-export default memo(MissionCardComponent);
+const MissionCard = memo(MissionCardComponent);
+
+export default MissionCard;
