@@ -61,6 +61,14 @@ const DEFAULT_LOADING_STATE: DashboardLoadingState = {
   titles: true,
 };
 
+/** Alinhado ao worker: XP na barra do nível atual ≥ meta ⇒ estado inconsistente; forçar refetch de /api/progression. */
+function progressionHasXpOverflow(p: Pick<UserProgression, "xp" | "level">): boolean {
+  const level = Math.max(1, Math.floor(Number(p.level ?? 1)));
+  const xp = Math.max(0, Math.floor(Number(p.xp ?? 0)));
+  const cap = Math.max(100, level * 100);
+  return xp >= cap;
+}
+
 function normalizeMissionTextKey(value: string | null | undefined): string {
   return (value ?? "")
     .normalize("NFD")
@@ -136,6 +144,9 @@ export default function Dashboard() {
     const cachedMissionList = Array.isArray(cacheMissions?.data) ? cacheMissions.data : null;
     const missionsApiPath = resolveMissionsApiPath(forceRefresh, cachedMissionList);
     const shouldForceMissionRefresh = missionsApiPath !== "/api/missions";
+    const cachedProgressionPayload = cacheProgression?.data ?? null;
+    const progressionNeedsReconcile =
+      cachedProgressionPayload !== null && progressionHasXpOverflow(cachedProgressionPayload);
 
     if (cacheProfile) setProfile(cacheProfile.data);
     if (cacheProgression) setProgression(cacheProgression.data);
@@ -148,7 +159,7 @@ export default function Dashboard() {
 
     setLoadingState({
       profile: forceRefresh || !cacheProfile,
-      progression: forceRefresh || !cacheProgression,
+      progression: forceRefresh || !cacheProgression || progressionNeedsReconcile,
       missions: shouldForceMissionRefresh || !cacheMissions,
       metrics: forceRefresh || !cacheMetrics,
       titles: forceRefresh || !cacheTitles,
@@ -198,7 +209,20 @@ export default function Dashboard() {
       runRequest<UserProfile>("profile", "/api/profile", Boolean(cacheProfile), Boolean(cacheProfile?.stale), setProfile, () => {
         shouldRedirectToOnboarding = true;
       }),
-      runRequest<UserProgression>("progression", "/api/progression", Boolean(cacheProgression), Boolean(cacheProgression?.stale), setProgression),
+      runRequest<UserProgression>(
+        "progression",
+        "/api/progression",
+        Boolean(cacheProgression),
+        Boolean(cacheProgression?.stale) || progressionNeedsReconcile,
+        (payload) => {
+          const { celebrate_level: celebrateLevel, ...clean } = payload;
+          setProgression(clean);
+          if (typeof celebrateLevel === "number" && celebrateLevel > 0) {
+            setNewLevel(celebrateLevel);
+            setShowLevelUp(true);
+          }
+        },
+      ),
       runRequest<Mission[]>("missions", missionsApiPath, Boolean(cacheMissions), shouldForceMissionRefresh || Boolean(cacheMissions?.stale), (payload) => {
         setMissions(Array.isArray(payload) ? payload : []);
       }),
@@ -264,7 +288,6 @@ export default function Dashboard() {
     void import("@/react-app/pages/AIChat");
     void import("@/react-app/pages/FoodAnalysis");
     void prefetchJson("/api/profile");
-    void prefetchJson("/api/progression");
     void prefetchJson("/api/missions");
     void prefetchJson("/api/metrics/today");
     void prefetchJson("/api/titles");

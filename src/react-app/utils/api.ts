@@ -41,6 +41,15 @@ function buildCacheKey(path: string): string {
   return `GET:${normalizePath(path)}`;
 }
 
+/** Evita guardar `celebrate_level` no cache (só deve disparar modal uma vez). */
+function stripEphemeralProgressionFields(data: unknown): unknown {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return data;
+  const record = data as Record<string, unknown>;
+  if (record.celebrate_level === undefined) return data;
+  const { celebrate_level: _celebrate, ...rest } = record;
+  return rest;
+}
+
 async function parseJsonResponse<T>(response: Response): Promise<T> {
   const payload = (await response.json().catch(() => null)) as { error?: string | undefined } | T | null;
 
@@ -147,8 +156,10 @@ export async function fetchAndCacheJson<T>(path: string): Promise<T> {
 
   const inflight = fetchJson<T>(path)
     .then((data) => {
+      const toCache =
+        normalizePath(path) === "/api/progression" ? stripEphemeralProgressionFields(data) : data;
       requestCache.set(cacheKey, {
-        data,
+        data: toCache,
         timestamp: Date.now(),
         inflight: null,
       });

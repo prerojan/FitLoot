@@ -63,6 +63,8 @@ export const UserProgressionSchema = z.object({
   last_activity_date: z.string().nullable(),
   created_at: z.string(),
   updated_at: z.string(),
+  /** Presente só no GET /api/progression quando o servidor acabou de normalizar nível/XP atrasado (mostrar modal uma vez). */
+  celebrate_level: z.number().optional(),
 });
 
 export type UserProgression = z.infer<typeof UserProgressionSchema>;

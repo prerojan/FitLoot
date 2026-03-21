@@ -1955,6 +1955,10 @@ async function applyXpPointsAndResolveLevels(
   const next = computeXpAndLevelAfterGain(before.xp, before.level, xpDelta);
   const pointsAdd = Math.max(0, Math.floor(Number(pointsDelta) || 0)) + 100 * next.levelsGained;
 
+  if (next.levelsGained === 0 && next.xp === before.xp && next.level === before.level && pointsAdd === 0) {
+    return { leveledUp: false, newLevel: before.level, levelsGained: 0 };
+  }
+
   await db
     .prepare(
       `UPDATE user_progression SET xp = ?, level = ?, points = COALESCE(points, 0) + ?, updated_at = datetime('now') WHERE user_id = ?`,
@@ -4020,7 +4024,25 @@ app.get("/api/progression", authMiddleware, async (c) => {
       return c.json({ error: "Progress?o n?o encontrada", code: "PROGRESSION_NOT_FOUND" }, 404);
     }
 
-    return c.json(progression);
+    const beforeReconcile = parseProgressionXpLevel(progression);
+    const overflowPreview = computeXpAndLevelAfterGain(beforeReconcile.xp, beforeReconcile.level, 0);
+    let celebrateLevel: number | undefined;
+    if (overflowPreview.levelsGained > 0) {
+      const applied = await applyXpPointsAndResolveLevels(c.env.fitloot_db, user.id, 0, 0);
+      celebrateLevel = applied.newLevel;
+      const refreshed = await c.env.fitloot_db
+        .prepare("SELECT * FROM user_progression WHERE user_id = ?")
+        .bind(user.id)
+        .first<Record<string, unknown>>();
+      if (refreshed) {
+        progression = refreshed;
+      }
+    }
+
+    return c.json({
+      ...progression,
+      ...(typeof celebrateLevel === "number" && celebrateLevel > 0 ? { celebrate_level: celebrateLevel } : {}),
+    });
   } catch (error) {
     console.error("[/api/progression]", {
       message: getErrorMessage(error),
