@@ -720,7 +720,7 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
       {isWeeklyMission ? (
         <div className="space-y-3 mb-3">
           <div className="flex items-center justify-between text-xs text-gray-600">
-            <span>Progresso geral</span>
+            <span>Progresso do circuito semanal</span>
             <span>{completedCircuitTasks}/{circuitTasks.length || 1}</span>
           </div>
           <div className="h-2 rounded-full bg-gray-100 overflow-hidden">
@@ -837,33 +837,17 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
             <div className="overflow-y-auto pb-32 min-h-[50vh] max-h-[75vh]">
               {/* Hero Image Section */}
               <div className="px-6 py-4">
-                <div 
-                  className="relative w-full aspect-video rounded-xl overflow-hidden group"
-                  style={{ background: "color-mix(in srgb, var(--app-primary-color) 5%, transparent)" }}
-                >
-                  {detailMissionMediaUrl ? (
-                    <>
-                      <div 
-                        className="absolute inset-0 bg-cover bg-center transition-transform duration-500 group-hover:scale-105" 
-                        style={{ 
-                          backgroundImage: `url("${detailMissionMediaUrl}")`,
-                          imageRendering: pixelOrLineArt ? "crisp-edges" : "auto",
-                          filter: pixelOrLineArt || gifLikeMedia ? "blur(0px)" : "contrast(1.05) saturate(1.1) blur(0px)",
-                        }}
-                      />
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent" />
-                      <div className="absolute bottom-4 left-4">
-                        <span className="text-black text-xs font-bold px-2 py-1 rounded-full uppercase tracking-wider" style={{ background: "var(--app-primary-color)" }}>
-                          {stateLabel}
-                        </span>
-                      </div>
-                    </>
-                  ) : (
-                    <div className="absolute inset-0 flex items-center justify-center">
-                      <Dumbbell className="w-16 h-16 opacity-50" style={{ color: "var(--app-primary-color)" }} />
-                    </div>
-                  )}
-                </div>
+                {detailMissionMediaUrl ? (
+                  <img 
+                    src={detailMissionMediaUrl} 
+                    alt={mission.title} 
+                    className="w-full h-48 object-cover rounded-2xl border border-gray-200" 
+                  />
+                ) : (
+                  <div className="w-full h-48 rounded-2xl border border-emerald-100 bg-gradient-to-br from-emerald-100 to-teal-100 flex items-center justify-center">
+                    <Dumbbell className="w-12 h-12 text-emerald-600" />
+                  </div>
+                )}
               </div>
 
               {/* Title & Description */}
