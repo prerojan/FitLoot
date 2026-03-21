@@ -37,7 +37,7 @@ export interface UseWalkingMissionOptions {
 
 export const useWalkingMission = ({ mission, onComplete, autoRefresh = true }: UseWalkingMissionOptions) => {
   const { healthData, isAuthenticated } = useHealthData({
-    autoRefresh: autoRefresh ? 1 : 0, // Atualizar a cada 1 minuto
+    autoRefresh: autoRefresh,
     enableFallback: true,
   });
 
@@ -154,7 +154,7 @@ export const useWalkingMission = ({ mission, onComplete, autoRefresh = true }: U
       ];
 
       // Obter rota do OpenRouteService
-      const directions = await getDirections(currentLocation, destination, 'walking');
+      const directions = await getDirections(currentLocation, destination, 'foot-walking');
 
       setState(prev => ({
         ...prev,

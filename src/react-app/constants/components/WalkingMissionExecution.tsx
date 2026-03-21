@@ -129,7 +129,7 @@ const WalkingMissionExecution = ({ mission, onComplete, onClose }: WalkingMissio
       ];
 
       // Obter rota do OpenRouteService
-      const directions = await getDirections(currentLocation, destination, 'walking');
+      const directions = await getDirections(currentLocation, destination, 'foot-walking');
 
       setState(prev => ({
         ...prev,

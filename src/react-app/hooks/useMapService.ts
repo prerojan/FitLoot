@@ -135,7 +135,7 @@ export const useMapService = (options: UseMapServiceOptions = {}) => {
       const results = await openStreetMapService.reverseGeocode(coordinates[0], coordinates[1]);
       
       if (results.length > 0) {
-        return results[0].display_name;
+        return results[0]?.display_name || 'Localização desconhecida';
       }
       
       return 'Localização desconhecida';
@@ -179,7 +179,7 @@ export const useMapService = (options: UseMapServiceOptions = {}) => {
   const getDirections = useCallback(async (
     start: [number, number],
     end: [number, number],
-    profile: 'walking' | 'cycling' | 'driving' = 'walking'
+    profile: 'foot-walking' | 'cycling-regular' | 'driving-car' = 'foot-walking'
   ): Promise<{
     distance: number;
     duration: number;
@@ -191,7 +191,13 @@ export const useMapService = (options: UseMapServiceOptions = {}) => {
 
     try {
       const directions = await openStreetMapService.getDirections(start, end, profile);
-      return directions;
+      
+      // Mapear a resposta para o formato esperado
+      return {
+        distance: directions.distance,
+        duration: directions.duration,
+        coordinates: directions.geometry || []
+      };
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Falha ao obter direções';
       setMapState(prev => ({ ...prev, error: errorMessage }));
@@ -237,7 +243,7 @@ export const useMapService = (options: UseMapServiceOptions = {}) => {
     width: number = 600,
     height: number = 400,
     markers?: OSMMarker[]
-  ): string => {
+  ): Promise<string> => {
     if (!isInitialized) {
       throw new Error('Serviço de mapa não inicializado');
     }

@@ -6,34 +6,23 @@
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import {
   CheckCircle2,
-  Clock3,
-  Dumbbell,
-  MapPinned,
   Play,
-  Sparkles,
-  Star,
-  Trophy,
   X,
   Info,
   Pause,
-  FastForward,
   Square,
 } from "lucide-react";
 import { Card } from "@/react-app/components/ui/card";
-import { Button } from "@/react-app/components/ui/button";
 import { Badge } from "@/react-app/components/ui/badge";
 import { useAppChrome } from "@/react-app/contexts/appChrome";
-import LoadingBall from "@/react-app/components/LoadingBall";
-import { formatMissionGoal, shouldShowMissionDuration } from "@/constants/missionMetrics";
+import { formatMissionGoal } from "@/constants/missionMetrics";
 import type { CircuitTask, Mission, MissionMetricType } from "@/shared/types";
-import { localizeMissionText, localizeMissionTextArray, normalizeMissionMediaUrl } from "@/shared/missionLocalization";
-import { api } from "@/react-app/utils/api";
+import { localizeMissionText, normalizeMissionMediaUrl } from "@/shared/missionLocalization";
 import WalkingMissionExecution from "./WalkingMissionExecution";
 
 type MissionCardProps = {
   mission: Mission & { skill_name?: string | undefined };
   onComplete: (id: number, reps: number, verified: boolean) => Promise<void> | void;
-  layout?: "default" | "compact";
 };
 
 type MissionExecutionState = {
@@ -132,10 +121,6 @@ function formatGoal(mission: Mission, metricType: MissionMetricType): string {
   return formatMissionGoal(metricType, goal, sets);
 }
 
-function formatProgressAmount(value: number): string {
-  return Math.max(0, Math.round(value)).toLocaleString("pt-BR");
-}
-
 function resolveMissionGoalText(mission: Mission, metricType: MissionMetricType): string {
   if (typeof mission.goal === "string" && mission.goal.trim().length > 0) {
     return mission.goal;
@@ -169,11 +154,6 @@ function bodyAreaLabel(bodyArea: Mission["body_area"]): string {
 function isGifUrl(url: string | null | undefined): boolean {
   if (!url) return false;
   return /\.gif(?:$|\?)/i.test(url) || /format=gif/i.test(url);
-}
-
-function isPixelOrLineArtUrl(url: string | null | undefined): boolean {
-  if (!url) return false;
-  return /(pixel|lineart|sprite|icon|outline|vector)/i.test(url);
 }
 
 function resolveMissionMediaUrl(mission: Mission): string | null {
@@ -599,22 +579,18 @@ function MissionExecutionModal({
   );
 }
 
-function MissionCardComponent({ mission, onComplete, layout = "default" }: MissionCardProps) {
+function MissionCardComponent({ mission, onComplete }: MissionCardProps) {
   const { setMissionDetailsOpen, setMissionExecutionOpen } = useAppChrome();
   const [showDetails, setShowDetails] = useState(false);
   const [showExecution, setShowExecution] = useState(false);
   const [showWalkingExecution, setShowWalkingExecution] = useState(false);
-  const [completing, setCompleting] = useState(false);
-  const [detailsLoading, setDetailsLoading] = useState(false);
-  const [detailsError, setDetailsError] = useState<string | null>(null);
-  const [detailedMission, setDetailedMission] = useState<Mission | null>(null);
 
   const metricType = useMemo(() => normalizeMetricType(mission), [mission]);
   const missionStatus = (mission as Mission & { status?: string | undefined }).status || (mission.is_completed === 1 ? "completed" : "pending");
   const isFailed = missionStatus === "failed" || missionStatus === "expired";
   const isCompleted = mission.is_completed === 1 || missionStatus === "completed";
   
-  const missionDetails = detailedMission ?? mission;
+  const missionDetails = mission;
   const detailMetricType = normalizeMetricType(missionDetails);
   const isWalkingMission = detailMetricType === "steps" || detailMetricType === "distance_meters";
   const isAutoProgressMission = mission.type === "weekly" || mission.type === "monthly";
@@ -622,14 +598,9 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
   const isInProgress = missionStatus === "in_progress";
 
   const finishMission = useCallback(async (value: number) => {
-    setCompleting(true);
-    try {
-      await onComplete(mission.id, value, true);
-      setShowExecution(false);
-      setShowDetails(false);
-    } finally {
-      setCompleting(false);
-    }
+    await onComplete(mission.id, value, true);
+    setShowExecution(false);
+    setShowDetails(false);
   }, [mission.id, onComplete]);
 
   useEffect(() => {

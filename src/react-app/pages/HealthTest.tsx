@@ -62,14 +62,16 @@ export default function HealthTest() {
         const results = await searchLocation(searchQuery);
         if (results.length > 0) {
           const firstResult = results[0];
-          addMarker({
-            id: `search-${Date.now()}`,
-            longitude: firstResult.coordinates[0],
-            latitude: firstResult.coordinates[1],
-            title: firstResult.placeName,
-            description: firstResult.address,
-            color: 'red',
-          });
+          if (firstResult) {
+            addMarker({
+              id: `search-${Date.now()}`,
+              longitude: firstResult.coordinates?.[0] || 0,
+              latitude: firstResult.coordinates?.[1] || 0,
+              title: firstResult.placeName || 'Localização',
+              description: firstResult.address || 'Endereço não disponível',
+              color: 'red',
+            });
+          }
         }
       } catch (err) {
         console.error('Search failed:', err);

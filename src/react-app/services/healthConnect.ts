@@ -126,7 +126,6 @@ class HealthConnectService {
       // to read actual data. For now, we'll simulate the data
       
       const now = new Date();
-      const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
       
       // Simulate reading data from Health Connect
       return {
