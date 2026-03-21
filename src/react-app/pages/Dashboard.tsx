@@ -649,7 +649,7 @@ export default function Dashboard() {
                 <div className="space-y-4">
                   {visibleDailyMissions.map((mission, index) => (
                     <div key={mission.id}>
-                      <MissionCard mission={mission} onComplete={handleMissionComplete} />
+                      <MissionCard mission={mission} onComplete={handleMissionComplete} layout="compact" />
                       {index < visibleDailyMissions.length - 1 ? <div className="mt-3 sm:mt-4 h-px w-full" style={{ background: "color-mix(in srgb, var(--fl-color-text) 10%, transparent)" }} /> : null}
                     </div>
                   ))}
@@ -685,7 +685,7 @@ export default function Dashboard() {
                     <div className="space-y-4">
                       {section.missions.map((mission, index) => (
                         <div key={mission.id}>
-                          <MissionCard mission={mission} onComplete={handleMissionComplete} />
+                          <MissionCard mission={mission} onComplete={handleMissionComplete} layout="compact" />
                           {index < section.missions.length - 1 ? <div className="mt-3 sm:mt-4 h-px w-full" style={{ background: "color-mix(in srgb, var(--fl-color-text) 10%, transparent)" }} /> : null}
                         </div>
                       ))}
