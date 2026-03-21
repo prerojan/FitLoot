@@ -1350,6 +1350,13 @@ async function ensureUserCounterRow(db: D1Database, userId: string) {
   await db.prepare(`INSERT OR IGNORE INTO user_event_counters (user_id, updated_at) VALUES (?, datetime('now'))`).bind(userId).run();
 }
 
+async function ensureUserAttributesRow(db: D1Database, userId: string) {
+  await db.prepare(
+    `INSERT OR IGNORE INTO user_attributes (user_id, strength, constitution, vitality, dexterity, focus, updated_at)
+     VALUES (?, 0, 0, 0, 0, 0, datetime('now'))`,
+  ).bind(userId).run();
+}
+
 async function cleanupSettledMissions(db: D1Database, userId: string): Promise<void> {
   await db.prepare(
     `DELETE FROM missions
@@ -5345,7 +5352,14 @@ async function repairLegacyDailyMissionMetadata(env: Env, db: D1Database, userId
         exercise_db_image_url,
         image_url,
         video_url,
-        thumbnail_url
+        thumbnail_url,
+        metric_type,
+        target_time,
+        sets,
+        rest_seconds,
+        instructions_json,
+        exercise_instructions_en_json,
+        exercise_instructions_pt_json
       FROM missions
       WHERE user_id = ?
         AND type = 'daily'
@@ -5381,6 +5395,78 @@ async function repairLegacyDailyMissionMetadata(env: Env, db: D1Database, userId
 
     const enriched = await enrichExercise(exerciseName, env).catch(() => null);
     if (!enriched) {
+      continue;
+    }
+
+    const apiInstructionsEn = normalizeInstructionList(enriched.instructions, 8);
+    const resolvedExerciseName = enriched.name || exerciseName;
+    let instructionsPayload:
+      | {
+          exercise_instructions_en_json: string;
+          exercise_instructions_pt_json: string;
+          instructions_json: string;
+        }
+      | null = null;
+
+    if (apiInstructionsEn.length > 0) {
+      const apiInstructionsPt = await translateExerciseInstructionsToPt(apiInstructionsEn, resolvedExerciseName, env);
+      const metricType = normalizeMissionMetricType(row.metric_type, row.target_time);
+      const sets = row.sets === null || row.sets === undefined ? null : Number(row.sets);
+      const restSeconds = row.rest_seconds === null || row.rest_seconds === undefined ? null : Number(row.rest_seconds);
+      const mergedSteps =
+        apiInstructionsPt.length > 0 ? apiInstructionsPt : localizeInstructionListFallback(apiInstructionsEn);
+      const newInstructions = ensureInstructionSteps(
+        normalizeInstructionList(mergedSteps, 6),
+        resolvedExerciseName,
+        metricType,
+        sets,
+        restSeconds,
+      );
+      instructionsPayload = {
+        exercise_instructions_en_json: JSON.stringify(apiInstructionsEn),
+        exercise_instructions_pt_json: JSON.stringify(apiInstructionsPt),
+        instructions_json: JSON.stringify(newInstructions),
+      };
+    }
+
+    if (instructionsPayload) {
+      await db.prepare(
+        `UPDATE missions
+         SET exercise_name = ?,
+             exercise_equipment = ?,
+             exercise_body_part = ?,
+             exercise_target = ?,
+             exercise_secondary_muscles_json = ?,
+             exercise_db_gif_url = ?,
+             exercise_db_image_url = ?,
+             image_url = ?,
+             video_url = ?,
+             thumbnail_url = ?,
+             muscle_groups_json = ?,
+             body_area = ?,
+             exercise_instructions_en_json = ?,
+             exercise_instructions_pt_json = ?,
+             instructions_json = ?,
+             updated_at = datetime('now')
+       WHERE id = ?`
+      ).bind(
+        enriched.name,
+        enriched.equipment || null,
+        enriched.bodyPart || null,
+        enriched.target || null,
+        JSON.stringify(Array.isArray(enriched.secondaryMuscles) ? enriched.secondaryMuscles : []),
+        enriched.exerciseDbGifUrl,
+        enriched.exerciseDbImageUrl,
+        enriched.imageUrl,
+        enriched.videoUrl,
+        enriched.thumbnailUrl,
+        JSON.stringify(resolveExerciseApiMuscleGroups(enriched)),
+        resolveExerciseApiBodyArea(enriched, exerciseName),
+        instructionsPayload.exercise_instructions_en_json,
+        instructionsPayload.exercise_instructions_pt_json,
+        instructionsPayload.instructions_json,
+        row.id,
+      ).run();
       continue;
     }
 
@@ -5532,7 +5618,7 @@ app.get("/api/missions/:id", authMiddleware, async (c) => {
     }
 
     const hydratedRows = await hydrateMissionRowsWithSubtasks(c.env.fitloot_db, [row]);
-    const normalized = normalizeMissionRow(hydratedRows[0] ?? row);
+    const normalized = normalizeMissionRow(hydratedRows[0] ?? row) as NormalizedMissionRow;
     if (
       normalized.type === "monthly" &&
       Number(normalized.is_completed ?? 0) !== 1 &&
@@ -5540,6 +5626,54 @@ app.get("/api/missions/:id", authMiddleware, async (c) => {
     ) {
       const monthlyCounters = await getMonthlyCounters(c.env.fitloot_db, user.id);
       normalized.progress_value = monthlyMissionProgressValue(row, monthlyCounters);
+    }
+
+    const enSteps = normalized.exercise_instructions_en;
+    const ptSteps = normalized.exercise_instructions_pt;
+    if (
+      normalized.type === "daily" &&
+      exerciseInstructionPtNeedsAiTranslation(enSteps, ptSteps) &&
+      getHuggingFaceApiKey(c.env)
+    ) {
+      const exerciseLabel =
+        typeof normalized.exercise_name === "string" && normalized.exercise_name.trim().length > 0
+          ? normalized.exercise_name.trim()
+          : extractExerciseName(String(normalized.title ?? ""));
+      const ptTranslated = await translateExerciseInstructionsToPt(enSteps, exerciseLabel, c.env);
+      if (ptTranslated.length > 0) {
+        normalized.exercise_instructions_pt = ptTranslated;
+        const mainSteps = normalizeInstructionList(normalized.instructions, 8);
+        const refreshMain =
+          mainSteps.length === 0 ||
+          (mainSteps.length === enSteps.length &&
+            mainSteps.every((line, i) => normalizeMatchText(line) === normalizeMatchText(enSteps[i] ?? "")));
+        if (refreshMain) {
+          normalized.instructions = ensureInstructionSteps(
+            normalizeInstructionList(ptTranslated, 6),
+            exerciseLabel,
+            normalized.metric_type,
+            normalized.sets,
+            normalized.rest_seconds,
+          );
+        }
+        c.executionCtx.waitUntil(
+          (async () => {
+            try {
+              await c.env.fitloot_db
+                .prepare(
+                  `UPDATE missions SET exercise_instructions_pt_json = ?, instructions_json = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?`,
+                )
+                .bind(JSON.stringify(ptTranslated), JSON.stringify(normalized.instructions), missionId, user.id)
+                .run();
+            } catch (persistErr) {
+              console.error("[/api/missions/:id] persist translated instructions failed", {
+                missionId,
+                message: getErrorMessage(persistErr),
+              });
+            }
+          })(),
+        );
+      }
     }
 
     return c.json(normalized);
@@ -5627,19 +5761,19 @@ app.post("/api/missions/complete", authMiddleware, zValidator("json", CompleteMi
   try {
     const mission = await c.env.fitloot_db.prepare(
       "SELECT * FROM missions WHERE id = ? AND user_id = ? AND is_completed = 0"
-    ).bind(data.mission_id, user.id).first<{
-      id: number;
-      type: string;
-      xp_reward: number | null;
-      points_reward: number | null;
-      skill_id: number | null;
-    }>();
+    ).bind(data.mission_id, user.id).first<Record<string, unknown>>();
 
     if (!mission) {
       return c.json({ error: "Mission not found" }, 404);
     }
 
-    if (mission.type === "weekly" || mission.type === "monthly") {
+    const missionId = Number(mission.id ?? 0);
+    if (!Number.isInteger(missionId) || missionId <= 0) {
+      return c.json({ error: "Mission not found" }, 404);
+    }
+
+    const missionType = String(mission.type ?? "");
+    if (missionType === "weekly" || missionType === "monthly") {
       return c.json(
         {
           error: "Missoes semanais e mensais nao podem ser concluidas manualmente. O progresso acontece automaticamente pelas missoes diarias compativeis.",
@@ -5741,8 +5875,8 @@ app.post("/api/missions/complete", authMiddleware, zValidator("json", CompleteMi
       completionPhase = "lifecycle_mission_events";
       await runMissionLifecycleHookSafely(user.id, "mission_complete_event", () =>
         logUserEvent(c.env.fitloot_db, user.id, 'mission_complete', {
-          missionId: mission.id,
-          period: mission.type,
+          missionId,
+          period: missionType,
           xpGained,
           pointsGained,
           hour: currentHour,
@@ -5758,7 +5892,7 @@ app.post("/api/missions/complete", authMiddleware, zValidator("json", CompleteMi
 
       completionPhase = "lifecycle_on_mission_complete";
       await runMissionLifecycleHookSafely(user.id, "on_mission_complete_hook", () =>
-        onMissionComplete(c.env.fitloot_db, user.id, Number(mission.id))
+        onMissionComplete(c.env.fitloot_db, user.id, missionId)
       );
 
       completionPhase = "lifecycle_subtasks";
@@ -5778,7 +5912,7 @@ app.post("/api/missions/complete", authMiddleware, zValidator("json", CompleteMi
 
       completionPhase = "lifecycle_goal_progress";
       await runMissionLifecycleHookSafely(user.id, "goal_progress", async () => {
-        const relevance = await checkMissionRelevance(user.id, Number(mission.id), c.env.fitloot_db, 'completed');
+        const relevance = await checkMissionRelevance(user.id, missionId, c.env.fitloot_db, 'completed');
         if (!relevance.isGoalRelevant) return;
 
         const gs = await c.env.fitloot_db.prepare("SELECT goal_completed_count FROM user_goal_stats WHERE user_id = ?").bind(user.id).first<{ goal_completed_count: number }>();
@@ -5795,7 +5929,7 @@ app.post("/api/missions/complete", authMiddleware, zValidator("json", CompleteMi
       }
 
       completionPhase = "update_skill_progress";
-      const missionRecord = mission as Record<string, unknown>;
+      const missionRecord = mission;
       const missionMetricType = normalizeMissionMetricType(
         missionRecord.metric_type,
         missionRecord.target_time
@@ -5809,19 +5943,29 @@ app.post("/api/missions/complete", authMiddleware, zValidator("json", CompleteMi
           ? completedMetricValue * 60
           : 0;
 
-      if (mission.skill_id && (repsForSkill > 0 || timeForSkill > 0)) {
+      const skillIdRaw = missionRecord.skill_id;
+      const skillId =
+        skillIdRaw !== null && skillIdRaw !== undefined && String(skillIdRaw).trim() !== ""
+          ? Number(skillIdRaw)
+          : null;
+      const skillIdValid = skillId !== null && Number.isInteger(skillId) && skillId > 0;
+
+      let appliedAttributeGainFromSkill = false;
+
+      if (skillIdValid && (repsForSkill > 0 || timeForSkill > 0)) {
         completionPhase = "update_skill_stats_db";
         await c.env.fitloot_db.prepare(
           `UPDATE user_skills SET total_reps = total_reps + ?, total_time = total_time + ?, best_reps = MAX(best_reps, ?), updated_at = datetime('now')
           WHERE user_id = ? AND skill_id = ?`
-        ).bind(repsForSkill, timeForSkill, repsForSkill, user.id, mission.skill_id).run();
+        ).bind(repsForSkill, timeForSkill, repsForSkill, user.id, skillId).run();
 
         const skill = await c.env.fitloot_db.prepare(
           "SELECT * FROM skills WHERE id = ?"
-        ).bind(mission.skill_id).first();
+        ).bind(skillId).first<Record<string, unknown>>();
 
-        if (skill) {
+        if (skill && totalSkillTableAttributeGain(skill) > 0) {
           completionPhase = "update_attributes_db";
+          await ensureUserAttributesRow(c.env.fitloot_db, user.id);
           await c.env.fitloot_db.prepare(
             `UPDATE user_attributes SET 
             strength = strength + ?, constitution = constitution + ?, 
@@ -5829,11 +5973,21 @@ app.post("/api/missions/complete", authMiddleware, zValidator("json", CompleteMi
             focus = focus + ?, updated_at = datetime('now')
             WHERE user_id = ?`
           ).bind(
-            skill.strength_gain, skill.constitution_gain,
-            skill.vitality_gain, skill.dexterity_gain,
-            skill.focus_gain, user.id
+            Number(skill.strength_gain ?? 0),
+            Number(skill.constitution_gain ?? 0),
+            Number(skill.vitality_gain ?? 0),
+            Number(skill.dexterity_gain ?? 0),
+            Number(skill.focus_gain ?? 0),
+            user.id
           ).run();
+          appliedAttributeGainFromSkill = true;
         }
+      }
+
+      if (!appliedAttributeGainFromSkill) {
+        completionPhase = "update_attributes_from_exercise_profile";
+        const typeDelta = computeMissionTypeAttributeDelta(missionRecord, missionMetricType, completedMetricValue);
+        await applyMissionAttributeDeltaToUser(c.env.fitloot_db, user.id, typeDelta);
       }
       completionPhase = "completed";
     });
@@ -6890,6 +7044,156 @@ function inferAttributes(category: MissionExerciseCategory): string[] {
   return ["forca", "resistencia", "potencia"];
 }
 
+type MissionAttributeDelta = {
+  strength: number;
+  constitution: number;
+  vitality: number;
+  dexterity: number;
+  focus: number;
+};
+
+function emptyMissionAttributeDelta(): MissionAttributeDelta {
+  return { strength: 0, constitution: 0, vitality: 0, dexterity: 0, focus: 0 };
+}
+
+function scaleMissionAttributeDelta(delta: MissionAttributeDelta, factor: number): MissionAttributeDelta {
+  const f = Math.max(0, Math.min(3, Math.floor(factor)));
+  if (f <= 0) return emptyMissionAttributeDelta();
+  return {
+    strength: delta.strength * f,
+    constitution: delta.constitution * f,
+    vitality: delta.vitality * f,
+    dexterity: delta.dexterity * f,
+    focus: delta.focus * f,
+  };
+}
+
+/** Ganhos base por categoria de exercício da missão (quando não há skill ou skill sem gains). */
+function baseMissionAttributeDeltaForExerciseCategory(category: string): MissionAttributeDelta {
+  const c = String(category || "default").toLowerCase();
+  switch (c) {
+    case "plank":
+    case "isometric":
+      return { strength: 0, constitution: 1, vitality: 0, dexterity: 1, focus: 1 };
+    case "walk":
+      return { strength: 0, constitution: 1, vitality: 1, dexterity: 0, focus: 1 };
+    case "run":
+      return { strength: 0, constitution: 1, vitality: 2, dexterity: 1, focus: 0 };
+    case "yoga":
+      return { strength: 0, constitution: 0, vitality: 1, dexterity: 1, focus: 1 };
+    case "stretching":
+    case "mobility":
+      return { strength: 0, constitution: 1, vitality: 0, dexterity: 2, focus: 1 };
+    case "cardio_circuit":
+      return { strength: 1, constitution: 1, vitality: 1, dexterity: 1, focus: 0 };
+    case "abdominal":
+      return { strength: 1, constitution: 1, vitality: 0, dexterity: 1, focus: 1 };
+    case "strength":
+      return { strength: 1, constitution: 1, vitality: 1, dexterity: 1, focus: 0 };
+    default:
+      return { strength: 1, constitution: 1, vitality: 1, dexterity: 1, focus: 0 };
+  }
+}
+
+function tweakMissionAttributeDeltaForBodyArea(delta: MissionAttributeDelta, bodyArea: string): MissionAttributeDelta {
+  const out = { ...delta };
+  const b = String(bodyArea || "").toLowerCase();
+  if (b === "upper") out.strength += 1;
+  else if (b === "lower") out.vitality += 1;
+  else if (b === "core") out.constitution += 1;
+  return out;
+}
+
+function tweakMissionAttributeDeltaForExerciseType(delta: MissionAttributeDelta, exerciseType: string): MissionAttributeDelta {
+  const out = { ...delta };
+  const t = String(exerciseType || "").toLowerCase();
+  if (t === "cardio") {
+    out.vitality += 1;
+    out.constitution += 1;
+  } else if (t === "flexibilidade") {
+    out.dexterity += 1;
+    out.focus += 1;
+  } else if (t === "equilibrio") {
+    out.focus += 1;
+    out.constitution += 1;
+  }
+  return out;
+}
+
+function missionCompletionEffortFactor(
+  metricType: MissionMetricType,
+  completedValue: number,
+  missionMetricValue: number,
+): number {
+  if (completedValue <= 0) return 1;
+  const target = Math.max(1, Math.floor(Number(missionMetricValue) || 1));
+  if (metricType === "repetitions" || metricType === "sets_reps") {
+    const ratio = completedValue / target;
+    return Math.max(1, Math.min(2, Math.round(Math.min(1.15, Math.max(0.75, ratio)) * 1.5)));
+  }
+  if (metricType === "duration_seconds") {
+    return Math.max(1, Math.min(2, 1 + Math.floor(completedValue / 120)));
+  }
+  if (metricType === "duration_minutes") {
+    return Math.max(1, Math.min(2, 1 + Math.floor((completedValue * 60) / 120)));
+  }
+  if (metricType === "steps") {
+    return Math.max(1, Math.min(2, 1 + Math.floor(completedValue / 4000)));
+  }
+  if (metricType === "distance_meters") {
+    return Math.max(1, Math.min(2, 1 + Math.floor(completedValue / 1500)));
+  }
+  return 1;
+}
+
+function computeMissionTypeAttributeDelta(
+  missionRow: Record<string, unknown>,
+  metricType: MissionMetricType,
+  completedMetricValue: number,
+): MissionAttributeDelta {
+  const category = String(missionRow.exercise_category ?? "default");
+  const bodyArea = String(missionRow.body_area ?? "full_body");
+  const exerciseType = String(missionRow.exercise_type ?? "forca");
+  const metricValue = Number(
+    missionRow.metric_value ?? missionRow.target_reps ?? missionRow.target_time ?? 1,
+  );
+  let base = baseMissionAttributeDeltaForExerciseCategory(category);
+  base = tweakMissionAttributeDeltaForBodyArea(base, bodyArea);
+  base = tweakMissionAttributeDeltaForExerciseType(base, exerciseType);
+  const factor = missionCompletionEffortFactor(metricType, completedMetricValue, metricValue);
+  return scaleMissionAttributeDelta(base, factor);
+}
+
+function totalSkillTableAttributeGain(skill: Record<string, unknown>): number {
+  return (
+    Number(skill.strength_gain ?? 0) +
+    Number(skill.constitution_gain ?? 0) +
+    Number(skill.vitality_gain ?? 0) +
+    Number(skill.dexterity_gain ?? 0) +
+    Number(skill.focus_gain ?? 0)
+  );
+}
+
+async function applyMissionAttributeDeltaToUser(db: D1Database, userId: string, delta: MissionAttributeDelta): Promise<void> {
+  const total =
+    delta.strength + delta.constitution + delta.vitality + delta.dexterity + delta.focus;
+  if (total <= 0) return;
+  await ensureUserAttributesRow(db, userId);
+  await db
+    .prepare(
+      `UPDATE user_attributes SET
+        strength = strength + ?,
+        constitution = constitution + ?,
+        vitality = vitality + ?,
+        dexterity = dexterity + ?,
+        focus = focus + ?,
+        updated_at = datetime('now')
+      WHERE user_id = ?`,
+    )
+    .bind(delta.strength, delta.constitution, delta.vitality, delta.dexterity, delta.focus, userId)
+    .run();
+}
+
 function missionConfigByPeriod(period: MissionPeriod) {
   if (period === "weekly") {
     return {
@@ -7787,6 +8091,46 @@ function mergeUniqueStrings(values: string[], limit: number): string[] {
   return merged;
 }
 
+function stripModelJsonFence(raw: string): string {
+  const t = raw.trim();
+  const fence = /^```(?:json)?\s*([\s\S]*?)```$/im.exec(t);
+  if (fence?.[1]) return fence[1].trim();
+  return t;
+}
+
+function parseInstructionsPtFromModelContent(rawContent: string): string[] | null {
+  const trimmed = stripModelJsonFence(rawContent);
+  try {
+    const parsed = JSON.parse(trimmed) as { instructions_pt?: unknown };
+    const translated = normalizeInstructionList(parsed.instructions_pt, 8);
+    return translated.length > 0 ? translated : null;
+  } catch {
+    return null;
+  }
+}
+
+/** EN veio da API de exercício mas PT está vazio ou ainda é cópia 1:1 do inglês. */
+function exerciseInstructionPtNeedsAiTranslation(en: string[], pt: string[]): boolean {
+  const normEn = normalizeInstructionList(en, 8);
+  const normPt = normalizeInstructionList(pt, 8);
+  if (normEn.length === 0) return false;
+  if (normPt.length === 0) return true;
+  if (normEn.length !== normPt.length) return true;
+  for (let i = 0; i < normEn.length; i++) {
+    if (normalizeMatchText(normEn[i] ?? "") !== normalizeMatchText(normPt[i] ?? "")) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function localizeInstructionListFallback(instructionsEn: string[]): string[] {
+  return normalizeInstructionList(
+    instructionsEn.map((line) => localizeMissionText(line) ?? line),
+    8,
+  );
+}
+
 async function translateExerciseInstructionsToPt(
   instructionsEn: string[],
   exerciseName: string,
@@ -7795,13 +8139,17 @@ async function translateExerciseInstructionsToPt(
   const normalizedInstructions = normalizeInstructionList(instructionsEn, 8);
   if (normalizedInstructions.length === 0) return [];
   const apiKey = getHuggingFaceApiKey(env);
-  if (!apiKey) return normalizedInstructions;
+  if (!apiKey) {
+    return localizeInstructionListFallback(normalizedInstructions);
+  }
 
   const prompt = [
-    "Traduza os passos de execucao para portugues brasileiro.",
-    "Mantenha o mesmo numero de passos e nao adicione explicacoes extras.",
+    "Voce traduz passos de execucao de exercicios (ingles) para portugues brasileiro (PT-BR).",
+    "Mantenha exatamente o mesmo numero de itens no array, na mesma ordem.",
+    "Preserve numeros, unidades (s, min, kg, repeticoes) e nomes proprios de exercicios quando fizer sentido.",
+    "Tom: instrucoes curtas e claras para um app de fitness; sem introducao nem comentarios fora do JSON.",
     `Exercicio: ${exerciseName}`,
-    "Responda APENAS JSON valido no formato:",
+    "Responda APENAS JSON valido:",
     '{ "instructions_pt": ["passo 1", "passo 2"] }',
     "",
     `instructions_en: ${JSON.stringify(normalizedInstructions)}`,
@@ -7819,7 +8167,7 @@ async function translateExerciseInstructionsToPt(
         body: JSON.stringify({
           model: "openai/gpt-oss-120b:groq",
           messages: [{ role: "user", content: prompt }],
-          max_tokens: 500,
+          max_tokens: 900,
           response_format: { type: "json_object" },
         }),
       },
@@ -7827,12 +8175,20 @@ async function translateExerciseInstructionsToPt(
     );
 
     const rawContent = safeGet(completion.choices ?? [], 0)?.message?.content ?? "";
-    const parsed = JSON.parse(rawContent) as { instructions_pt?: unknown };
-    const translated = normalizeInstructionList(parsed.instructions_pt, 8);
-    return translated.length > 0 ? translated : normalizedInstructions;
-  } catch {
-    return normalizedInstructions;
+    const translated = parseInstructionsPtFromModelContent(rawContent);
+    if (translated && translated.length === normalizedInstructions.length) {
+      return translated;
+    }
+    if (translated && translated.length > 0) {
+      return translated;
+    }
+  } catch (err) {
+    console.warn("[translateExerciseInstructionsToPt] model call failed", {
+      exerciseName,
+      message: getErrorMessage(err),
+    });
   }
+  return localizeInstructionListFallback(normalizedInstructions);
 }
 
 async function getExerciseInstructionsFromAI(
@@ -11794,7 +12150,7 @@ Texto OCR do rÃƒÂ³tulo: ${ocr_text || "nÃƒÂ£o identificado"}.`;
             carbs: Number.isFinite(rapidCarbs) ? Number((rapidCarbs * multiplier).toFixed(1)) : null,
             fats: Number.isFinite(rapidFats) ? Number((rapidFats * multiplier).toFixed(1)) : null,
             source: "rapidapi",
-            warning: "Alimento nÃƒÂ£o encontrado no USDA. Valores retornados pela RapidAPI.",
+            warning: "Alimento não encontrado no USDA. Valores retornados pela RapidAPI.",
           });
         } catch (rapidError) {
           console.warn(`[analyze-food][rapidapi-fallback] ${query}`, rapidError);
@@ -11824,8 +12180,8 @@ Texto OCR do rÃƒÂ³tulo: ${ocr_text || "nÃƒÂ£o identificado"}.`;
 
     if (ocrNutrition) {
       analyzedItems.push({
-        food_name: "RÃƒÂ³tulo identificado",
-        portion_description: "dados extraÃƒÂ­dos do rÃƒÂ³tulo",
+        food_name: "Rótulo identificado",
+        portion_description: "dados extraí­dos do rótulo",
         calories: ocrNutrition.calories,
         energy_kj: ocrNutrition.energy_kj,
         protein: ocrNutrition.protein,

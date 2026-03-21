@@ -65,6 +65,81 @@ const PHRASE_REPLACEMENTS: ReadonlyArray<readonly [RegExp, string]> = [
   [/\bMissions\b/gi, "Miss\u00f5es"],
 ];
 
+/** Instruções de execução (ExerciseDB / APIs em inglês) → PT-BR */
+const INSTRUCTION_PHRASE_REPLACEMENTS: ReadonlyArray<readonly [RegExp, string]> = [
+  [/\bStep\s*(\d+)\s*[:.)-]\s*/gi, "Passo $1: "],
+  [/\bStep\s+(\d+)\b/gi, "Passo $1"],
+  [/\bStarting position\b/gi, "Posi\u00e7\u00e3o inicial"],
+  [/\bStart with\b/gi, "Comece com"],
+  [/\bStart in\b/gi, "Comece em"],
+  [/\bBegin with\b/gi, "Inicie com"],
+  [/\bBegin in\b/gi, "Inicie em"],
+  [/\bStand with\b/gi, "Fique em p\u00e9 com"],
+  [/\bStand up\b/gi, "Levante-se"],
+  [/\bStand tall\b/gi, "Fique ereto"],
+  [/\bLie down\b/gi, "Deite-se"],
+  [/\bLie flat\b/gi, "Deite-se de costas"],
+  [/\bSit down\b/gi, "Sente-se"],
+  [/\bSit on\b/gi, "Sente-se em"],
+  [/\bKneeling\b/gi, "Ajoelhado"],
+  [/\bKneel\b/gi, "Ajoelhe-se"],
+  [/\bPlace your feet\b/gi, "Apoie os p\u00e9s"],
+  [/\bPlace your hands\b/gi, "Apoie as m\u00e3os"],
+  [/\bPlace your arms\b/gi, "Posicione os bra\u00e7os"],
+  [/\bKeep your back\b/gi, "Mantenha as costas"],
+  [/\bKeep your core\b/gi, "Mantenha o core"],
+  [/\bKeep your head\b/gi, "Mantenha a cabe\u00e7a"],
+  [/\bKeep your neck\b/gi, "Mantenha o pesco\u00e7o"],
+  [/\bKeep your shoulders\b/gi, "Mantenha os ombros"],
+  [/\bEngage your core\b/gi, "Ative o core"],
+  [/\bBrace your core\b/gi, "Estabilize o core"],
+  [/\bNeutral spine\b/gi, "coluna neutra"],
+  [/\bMaintain (?:a |an )?neutral spine\b/gi, "Mantenha a coluna neutra"],
+  [/\bSlowly lower\b/gi, "Abaixe devagar"],
+  [/\bSlowly return\b/gi, "Volte devagar"],
+  [/\bLower yourself\b/gi, "Des\u00e7a o corpo com controle"],
+  [/\bLower the weight\b/gi, "Des\u00e7a a carga com controle"],
+  [/\bHold for\b/gi, "Segure por"],
+  [/\bHold this position\b/gi, "Mantenha esta posi\u00e7\u00e3o"],
+  [/\bHold the position\b/gi, "Mantenha a posi\u00e7\u00e3o"],
+  [/\bPause at\b/gi, "Pause em"],
+  [/\bPause for\b/gi, "Pause por"],
+  [/\bRepeat for\b/gi, "Repita por"],
+  [/\bRepeat the movement\b/gi, "Repita o movimento"],
+  [/\bPerform the\b/gi, "Execute o"],
+  [/\bPerform a\b/gi, "Execute uma"],
+  [/\bComplete the\b/gi, "Complete o"],
+  [/\bReturn to start\b/gi, "Volte ao in\u00edcio"],
+  [/\bReturn to the start\b/gi, "Volte ao in\u00edcio"],
+  [/\bReturn to starting position\b/gi, "Volte \u00e0 posi\u00e7\u00e3o inicial"],
+  [/\bBreathe normally\b/gi, "Respire com naturalidade"],
+  [/\bBreathe in\b/gi, "Inspire"],
+  [/\bBreathe out\b/gi, "Expire"],
+  [/\bExhale on\b/gi, "Expire ao"],
+  [/\bExhale as\b/gi, "Expire enquanto"],
+  [/\bInhale on\b/gi, "Inspire ao"],
+  [/\bInhale as\b/gi, "Inspire enquanto"],
+  [/\bDo not lock\b/gi, "N\u00e3o trave a articula\u00e7\u00e3o"],
+  [/\bDo not hyperextend\b/gi, "N\u00e3o hiperextenda"],
+  [/\bAvoid bouncing\b/gi, "Evite quicar"],
+  [/\bAvoid jerking\b/gi, "Evite trancos"],
+  [/\bKeep your elbows\b/gi, "Mantenha os cotovelos"],
+  [/\bKeep your knees\b/gi, "Mantenha os joelhos"],
+  [/\bFull range of motion\b/gi, "amplitude completa de movimento"],
+  [/\bControlled movement\b/gi, "movimento controlado"],
+  [/\bControlled tempo\b/gi, "ritmo controlado"],
+  [/\b(\d+)\s*seconds?\b/gi, "$1 segundos"],
+  [/\b(\d+)\s*minutes?\b/gi, "$1 minutos"],
+  [/\brepetitions?\b/gi, "repeti\u00e7\u00f5es"],
+  [/\bRest for\b/gi, "Descanse por"],
+  [/\bRest between\b/gi, "Descanse entre"],
+  [/\bSwitch sides\b/gi, "Troque de lado"],
+  [/\bSwitch legs\b/gi, "Troque de perna"],
+  [/\bAlternate sides\b/gi, "Alterne os lados"],
+  [/\bAlternate legs\b/gi, "Alterne as pernas"],
+  [/\bAlternate arms\b/gi, "Alterne os bra\u00e7os"],
+];
+
 const ACCENT_REPLACEMENTS: ReadonlyArray<readonly [RegExp, string]> = [
   [/\bMissao\b/g, "Miss\u00e3o"],
   [/\bmissao\b/g, "miss\u00e3o"],
@@ -137,6 +212,10 @@ export function localizeMissionText(value: string | null | undefined): string | 
   }
 
   for (const [pattern, replacement] of ACCENT_REPLACEMENTS) {
+    localized = localized.replace(pattern, replacement);
+  }
+
+  for (const [pattern, replacement] of INSTRUCTION_PHRASE_REPLACEMENTS) {
     localized = localized.replace(pattern, replacement);
   }
 
