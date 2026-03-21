@@ -1,4 +1,4 @@
-import AppLoader from "@/react-app/components/AppLoader";
+import AppLoader from "./AppLoader";
 
 type LoadingBallSize = "sm" | "md" | "lg";
 

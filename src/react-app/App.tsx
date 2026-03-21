@@ -2,7 +2,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from "r
 import { useState, useEffect, lazy, Suspense, useCallback, type ReactNode } from "react";
 import { Analytics } from "@vercel/analytics/react";
 import { SpeedInsights } from "@vercel/speed-insights/react";
-import PageLoader from "@/react-app/components/PageLoader";
+import PageLoader from "./constants/components/PageLoader";
 import { ROUTE_PATHS, AUTHENTICATED_HINT_KEY } from "@/react-app/constants/auth";
 import { AuthContext, useAuth } from "@/react-app/contexts/auth";
 import { AppChromeContext } from "@/react-app/contexts/appChrome";

@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { useLocation } from "react-router";
-import BottomNav from "@/react-app/components/BottomNav";
-import DesktopAppNavbar from "@/react-app/components/DesktopAppNavbar";
+import BottomNav from "./BottomNav";
+import DesktopAppNavbar from "./DesktopAppNavbar";
 import { ROUTE_PATHS } from "@/react-app/constants/auth";
 import { useAppChrome } from "@/react-app/contexts/appChrome";
 import type { UserProfile, UserProgression } from "@/shared/types";

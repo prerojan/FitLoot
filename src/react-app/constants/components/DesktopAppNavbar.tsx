@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
-import { Avatar } from "@/react-app/components/ui/avatar";
-import LoadingBall from "@/react-app/components/LoadingBall";
+import { Avatar } from "./ui/avatar";
+import LoadingBall from "./LoadingBall";
 import { useAuth } from "@/react-app/contexts/auth";
 import { ROUTE_PATHS } from "@/react-app/constants/auth";
 import { MaterialIcon } from "@/react-app/pages/dashboardHelpers";
