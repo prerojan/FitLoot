@@ -4172,6 +4172,238 @@ app.get("/api/attributes", authMiddleware, async (c) => {
   return c.json(attributes);
 });
 
+// Progress snapshots endpoints
+app.post("/api/progress/snapshot", authMiddleware, async (c) => {
+  const user = c.get("user");
+  if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+  try {
+    // Obter estado atual do usuário
+    const [progression, attributes, missionsCompleted] = await Promise.all([
+      c.env.fitloot_db.prepare("SELECT * FROM user_progression WHERE user_id = ?").bind(user.id).first(),
+      c.env.fitloot_db.prepare("SELECT * FROM user_attributes WHERE user_id = ?").bind(user.id).first(),
+      c.env.fitloot_db.prepare(
+        "SELECT COUNT(*) as count FROM missions WHERE user_id = ? AND is_completed = 1"
+      ).bind(user.id).first<{ count: number }>()
+    ]);
+
+    if (!progression || !attributes) {
+      return c.json({ error: "Dados do usuário não encontrados" }, 404);
+    }
+
+    // Inserir snapshot com INSERT OR IGNORE
+    const result = await c.env.fitloot_db.prepare(`
+      INSERT OR IGNORE INTO progress_snapshots 
+      (user_id, level, xp, strength, constitution, vitality, dexterity, focus, missions_completed, streak)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind(
+      user.id,
+      progression.level,
+      progression.xp,
+      attributes.strength,
+      attributes.constitution,
+      attributes.vitality,
+      attributes.dexterity,
+      attributes.focus,
+      missionsCompleted?.count || 0,
+      progression.current_streak
+    ).run();
+
+    // Se o snapshot já existia, buscar o existente
+    if ((result as any).changes === 0) {
+      const existingSnapshot = await c.env.fitloot_db.prepare(
+        "SELECT * FROM progress_snapshots WHERE user_id = ? AND snapshot_date = date('now')"
+      ).bind(user.id).first();
+
+      return c.json({ snapshot: existingSnapshot, status: "existing" });
+    }
+
+    // Buscar o snapshot recém-criado
+    const newSnapshot = await c.env.fitloot_db.prepare(
+      "SELECT * FROM progress_snapshots WHERE id = ?"
+    ).bind((result as any).meta.last_row_id).first();
+
+    return c.json({ snapshot: newSnapshot, status: "created" });
+  } catch (error) {
+    console.error("[/api/progress/snapshot]", error);
+    return internalErrorResponse(c);
+  }
+});
+
+app.get("/api/progress/snapshots", authMiddleware, async (c) => {
+  const user = c.get("user");
+  if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+  try {
+    const snapshots = await c.env.fitloot_db.prepare(`
+      SELECT * FROM progress_snapshots 
+      WHERE user_id = ? 
+      ORDER BY snapshot_date DESC 
+      LIMIT 30
+    `).bind(user.id).all();
+
+    return c.json({ snapshots: snapshots.results });
+  } catch (error) {
+    console.error("[/api/progress/snapshots]", error);
+    return internalErrorResponse(c);
+  }
+});
+
+// Physical benchmarks endpoints
+app.post("/api/benchmarks", authMiddleware, async (c) => {
+  const user = c.get("user");
+  if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+  try {
+    const body = await c.req.json();
+    const {
+      pushups_max,
+      squats_max,
+      situps_max,
+      plank_seconds,
+      pullups_max,
+      run_distance_km,
+      run_time_seconds,
+      notes
+    } = body;
+
+    // Obter benchmark anterior para calcular delta
+    const previousBenchmark = await c.env.fitloot_db.prepare(`
+      SELECT * FROM physical_benchmarks 
+      WHERE user_id = ? 
+      ORDER BY test_date DESC 
+      LIMIT 1
+    `).bind(user.id).first();
+
+    // Inserir novo benchmark
+    const result = await c.env.fitloot_db.prepare(`
+      INSERT INTO physical_benchmarks 
+      (user_id, pushups_max, squats_max, situps_max, plank_seconds, pullups_max, run_distance_km, run_time_seconds, notes)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind(
+      user.id,
+      pushups_max || null,
+      squats_max || null,
+      situps_max || null,
+      plank_seconds || null,
+      pullups_max || null,
+      run_distance_km || null,
+      run_time_seconds || null,
+      notes || null
+    ).run();
+
+    // Calcular delta de evolução
+    const delta = previousBenchmark ? {
+      pushups_delta: (pushups_max || 0) - ((previousBenchmark as any).pushups_max || 0),
+      squats_delta: (squats_max || 0) - ((previousBenchmark as any).squats_max || 0),
+      situps_delta: (situps_max || 0) - ((previousBenchmark as any).situps_max || 0),
+      plank_delta: (plank_seconds || 0) - ((previousBenchmark as any).plank_seconds || 0),
+      pullups_delta: (pullups_max || 0) - ((previousBenchmark as any).pullups_max || 0),
+      run_distance_delta: (run_distance_km || 0) - ((previousBenchmark as any).run_distance_km || 0),
+      run_time_delta: (run_time_seconds || 0) - ((previousBenchmark as any).run_time_seconds || 0)
+    } : {
+      pushups_delta: pushups_max || 0,
+      squats_delta: squats_max || 0,
+      situps_delta: situps_max || 0,
+      plank_delta: plank_seconds || 0,
+      pullups_delta: pullups_max || 0,
+      run_distance_delta: run_distance_km || 0,
+      run_time_delta: run_time_seconds || 0
+    };
+
+    // Atualizar atributos do usuário com base nos novos valores
+    const attributeUpdates = [];
+    const attributeValues = [];
+
+    if (pushups_max && pushups_max > 0) {
+      attributeUpdates.push("strength = strength + ?");
+      attributeValues.push(Math.floor(pushups_max / 5)); // +1 strength a cada 5 flexões
+    }
+
+    if (squats_max && squats_max > 0) {
+      attributeUpdates.push("vitality = vitality + ?");
+      attributeValues.push(Math.floor(squats_max / 5)); // +1 vitality a cada 5 agachamentos
+    }
+
+    if (situps_max && situps_max > 0) {
+      attributeUpdates.push("focus = focus + ?");
+      attributeValues.push(Math.floor(situps_max / 5)); // +1 focus a cada 5 abdominais
+    }
+
+    if (plank_seconds && plank_seconds > 0) {
+      attributeUpdates.push("dexterity = dexterity + ?");
+      attributeValues.push(Math.floor(plank_seconds / 30)); // +1 dexterity a cada 30 segundos
+    }
+
+    if (pullups_max && pullups_max > 0) {
+      attributeUpdates.push("strength = strength + ?");
+      attributeValues.push(pullups_max * 2); // +2 strength por barra (mais difícil)
+    }
+
+    if (run_distance_km && run_distance_km > 0) {
+      attributeUpdates.push("constitution = constitution + ?");
+      attributeValues.push(Math.floor(run_distance_km * 2)); // +1 constitution por 0.5km
+    }
+
+    if (attributeUpdates.length > 0) {
+      const updateQuery = `UPDATE user_attributes SET ${attributeUpdates.join(", ")}, updated_at = datetime('now') WHERE user_id = ?`;
+      await c.env.fitloot_db.prepare(updateQuery).bind(...attributeValues, user.id).run();
+    }
+
+    // Buscar o benchmark recém-criado
+    const newBenchmark = await c.env.fitloot_db.prepare(
+      "SELECT * FROM physical_benchmarks WHERE id = ?"
+    ).bind((result as any).meta.last_row_id).first();
+
+    return c.json({ 
+      benchmark: newBenchmark, 
+      delta,
+      attributes_updated: attributeUpdates.length > 0
+    });
+  } catch (error) {
+    console.error("[/api/benchmarks]", error);
+    return internalErrorResponse(c);
+  }
+});
+
+app.get("/api/benchmarks", authMiddleware, async (c) => {
+  const user = c.get("user");
+  if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+  try {
+    const benchmarks = await c.env.fitloot_db.prepare(`
+      SELECT * FROM physical_benchmarks 
+      WHERE user_id = ? 
+      ORDER BY test_date DESC
+    `).bind(user.id).all();
+
+    // Calcular delta entre registros consecutivos
+    const results = benchmarks.results.map((benchmark: any, index: number) => {
+      if (index === 0) {
+        return { ...benchmark, delta: null };
+      }
+
+      const previous: any = benchmarks.results[index - 1];
+      const delta = {
+        pushups_delta: (benchmark.pushups_max || 0) - (previous.pushups_max || 0),
+        squats_delta: (benchmark.squats_max || 0) - (previous.squats_max || 0),
+        situps_delta: (benchmark.situps_max || 0) - (previous.situps_max || 0),
+        plank_delta: (benchmark.plank_seconds || 0) - (previous.plank_seconds || 0),
+        pullups_delta: (benchmark.pullups_max || 0) - (previous.pullups_max || 0),
+        run_distance_delta: (benchmark.run_distance_km || 0) - (previous.run_distance_km || 0),
+        run_time_delta: (benchmark.run_time_seconds || 0) - (previous.run_time_seconds || 0)
+      };
+
+      return { ...benchmark, delta };
+    });
+
+    return c.json({ benchmarks: results });
+  } catch (error) {
+    console.error("[/api/benchmarks]", error);
+    return internalErrorResponse(c);
+  }
+});
+
 // Skills endpoints
 app.get("/api/skills", authMiddleware, async (c) => {
   const user = c.get("user");
@@ -12537,6 +12769,9 @@ async function processDailyReset(env: Env) {
         await cleanupSettledMissionsWithGuard(env.fitloot_db, userId);
         await expirePendingMissionsAndUpdateStreak(env.fitloot_db, userId);
         await ensurePeriodicMissions(env, env.fitloot_db, userId);
+        
+        // Snapshot diário automático para usuários ativos
+        await createDailySnapshot(env.fitloot_db, userId);
       } catch (error) {
         console.error("[processDailyReset][user]", {
           userId,
@@ -12545,6 +12780,218 @@ async function processDailyReset(env: Env) {
       }
     },
   });
+}
+
+// Função para criar snapshot diário automático
+async function createDailySnapshot(db: D1Database, userId: string): Promise<void> {
+  try {
+    // Verificar se o usuário está ativo (sessão nos últimos 7 dias)
+    const lastActivity = await db.prepare(
+      "SELECT last_activity_date FROM user_progression WHERE user_id = ?"
+    ).bind(userId).first<{ last_activity_date: string }>();
+
+    if (!lastActivity?.last_activity_date) {
+      return; // Usuário sem atividade registrada
+    }
+
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    
+    if (new Date(lastActivity.last_activity_date) < sevenDaysAgo) {
+      return; // Usuário inativo
+    }
+
+    // Obter dados atuais do usuário
+    const [progression, attributes, missionsCompleted] = await Promise.all([
+      db.prepare("SELECT * FROM user_progression WHERE user_id = ?").bind(userId).first(),
+      db.prepare("SELECT * FROM user_attributes WHERE user_id = ?").bind(userId).first(),
+      db.prepare(
+        "SELECT COUNT(*) as count FROM missions WHERE user_id = ? AND is_completed = 1"
+      ).bind(userId).first<{ count: number }>()
+    ]);
+
+    if (!progression || !attributes) {
+      return; // Dados incompletos
+    }
+
+    // Inserir snapshot com INSERT OR IGNORE (não duplicar se já existir)
+    await db.prepare(`
+      INSERT OR IGNORE INTO progress_snapshots 
+      (user_id, level, xp, strength, constitution, vitality, dexterity, focus, missions_completed, streak)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind(
+      userId,
+      progression.level,
+      progression.xp,
+      attributes.strength,
+      attributes.constitution,
+      attributes.vitality,
+      attributes.dexterity,
+      attributes.focus,
+      missionsCompleted?.count || 0,
+      progression.current_streak
+    ).run();
+
+  } catch (error) {
+    console.error("[createDailySnapshot]", { userId, error: getErrorMessage(error) });
+  }
+}
+
+// Função de recálculo semanal de atributos
+async function recalculateUserAttributes(db: D1Database, userId: string): Promise<void> {
+  try {
+    // Obter benchmark mais recente do usuário
+    const latestBenchmark = await db.prepare(`
+      SELECT * FROM physical_benchmarks 
+      WHERE user_id = ? 
+      ORDER BY test_date DESC 
+      LIMIT 1
+    `).bind(userId).first() as any;
+
+    // Obter histórico de missões da última semana
+    const oneWeekAgo = new Date();
+    oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+    
+    const weeklyMissions = await db.prepare(`
+      SELECT COUNT(*) as count FROM missions 
+      WHERE user_id = ? 
+      AND is_completed = 1 
+      AND completed_at >= datetime(?)
+    `).bind(userId, oneWeekAgo.toISOString()).first<{ count: number }>();
+
+    // Obter streak atual
+    const progression = await db.prepare(
+      "SELECT current_streak FROM user_progression WHERE user_id = ?"
+    ).bind(userId).first<{ current_streak: number }>();
+
+    if (!progression) {
+      return; // Sem dados de progressão
+    }
+
+    // Calcular novos atributos baseados nos benchmarks
+    let strengthBonus = 0;
+    let vitalityBonus = 0;
+    let focusBonus = 0;
+    let dexterityBonus = 0;
+    let constitutionBonus = 0;
+
+    if (latestBenchmark) {
+      const pushupsMax = latestBenchmark.pushups_max as number;
+      const squatsMax = latestBenchmark.squats_max as number;
+      const situpsMax = latestBenchmark.situps_max as number;
+      const plankSeconds = latestBenchmark.plank_seconds as number;
+      const pullupsMax = latestBenchmark.pullups_max as number;
+      const runDistanceKm = latestBenchmark.run_distance_km as number;
+
+      if (pushupsMax && pushupsMax > 0) {
+        strengthBonus += Math.floor(pushupsMax / 5);
+      }
+      if (squatsMax && squatsMax > 0) {
+        vitalityBonus += Math.floor(squatsMax / 5);
+      }
+      if (situpsMax && situpsMax > 0) {
+        focusBonus += Math.floor(situpsMax / 5);
+      }
+      if (plankSeconds && plankSeconds > 0) {
+        dexterityBonus += Math.floor(plankSeconds / 30);
+      }
+      if (pullupsMax && pullupsMax > 0) {
+        strengthBonus += pullupsMax * 2;
+      }
+      if (runDistanceKm && runDistanceKm > 0) {
+        constitutionBonus += Math.floor(runDistanceKm * 2);
+      }
+    }
+
+    // Bônus adicional baseado em missões semanais
+    const missionBonus = Math.min(Math.floor((weeklyMissions?.count || 0) / 5), 10);
+    
+    // Bônus baseado em streak
+    const streakBonus = Math.min(Math.floor(progression.current_streak / 7), 5);
+
+    // Aplicar bônus distribuídos
+    const totalBonus = missionBonus + streakBonus;
+    const perAttributeBonus = Math.floor(totalBonus / 5);
+
+    // Atualizar atributos
+    await db.prepare(`
+      UPDATE user_attributes SET 
+        strength = strength + ?,
+        constitution = constitution + ?,
+        vitality = vitality + ?,
+        dexterity = dexterity + ?,
+        focus = focus + ?,
+        updated_at = datetime('now')
+      WHERE user_id = ?
+    `).bind(
+      strengthBonus + perAttributeBonus,
+      constitutionBonus + perAttributeBonus,
+      vitalityBonus + perAttributeBonus,
+      dexterityBonus + perAttributeBonus,
+      focusBonus + perAttributeBonus,
+      userId
+    ).run();
+
+    // Registrar snapshot após recálculo
+    const [updatedAttributes, updatedProgression] = await Promise.all([
+      db.prepare("SELECT * FROM user_attributes WHERE user_id = ?").bind(userId).first(),
+      db.prepare("SELECT * FROM user_progression WHERE user_id = ?").bind(userId).first()
+    ]);
+
+    if (updatedAttributes && updatedProgression) {
+      await db.prepare(`
+        INSERT OR IGNORE INTO progress_snapshots 
+        (user_id, level, xp, strength, constitution, vitality, dexterity, focus, missions_completed, streak)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).bind(
+        userId,
+        updatedProgression.level,
+        updatedProgression.xp,
+        updatedAttributes.strength,
+        updatedAttributes.constitution,
+        updatedAttributes.vitality,
+        updatedAttributes.dexterity,
+        updatedAttributes.focus,
+        weeklyMissions?.count || 0,
+        updatedProgression.current_streak
+      ).run();
+    }
+
+  } catch (error) {
+    console.error("[recalculateUserAttributes]", { userId, error: getErrorMessage(error) });
+  }
+}
+
+// Função para processar recálculo semanal de todos os usuários ativos
+async function processWeeklyRecalculation(env: Env): Promise<void> {
+  const pageSize = 50;
+  let offset = 0;
+
+  while (true) {
+    const users = await env.fitloot_db.prepare(`
+      SELECT user_id FROM user_profiles 
+      WHERE user_id IN (
+        SELECT user_id FROM user_progression 
+        WHERE last_activity_date >= datetime('now', '-7 days')
+      )
+      ORDER BY user_id 
+      LIMIT ? OFFSET ?
+    `).bind(pageSize, offset).all<{ user_id: string }>();
+
+    const batch = Array.isArray(users.results) ? users.results : [];
+    if (batch.length === 0) {
+      break;
+    }
+
+    for (const user of batch) {
+      await recalculateUserAttributes(env.fitloot_db, user.user_id);
+    }
+
+    if (batch.length < pageSize) {
+      break;
+    }
+    offset += pageSize;
+  }
 }
 
 // 6. Healthchecks for external services
@@ -12675,6 +13122,14 @@ async function handleFetchWithGuard(request: Request, env: Env, ctx: ExecutionCo
 async function runScheduledWithGuard(event: ScheduledEvent, env: Env): Promise<void> {
   try {
     await processDailyReset(env);
+    
+    // Verificar se é segunda-feira (cron semanal)
+    // O cron "0 0 * * 1" significa: minuto 0, hora 0, qualquer dia do mês, qualquer mês, segunda-feira (dia 1)
+    if (event.cron === "0 0 * * 1") {
+      console.log("[worker][weekly-recalculation] Iniciando recálculo semanal de atributos");
+      await processWeeklyRecalculation(env);
+      console.log("[worker][weekly-recalculation] Recálculo semanal concluído");
+    }
   } catch (error) {
     console.error("[worker][scheduled-guard]", {
       cron: event.cron,
