@@ -4,7 +4,7 @@
  */
 
 import { memo, useCallback, useEffect, useState } from "react";
-import { MapPin, Navigation, Clock, Target, CheckCircle2, AlertCircle } from "lucide-react";
+import { MapPin, Navigation, Clock, CheckCircle2, AlertCircle } from "lucide-react";
 import { Card } from "@/react-app/components/ui/card";
 import { Button } from "@/react-app/components/ui/button";
 import { Badge } from "@/react-app/components/ui/badge";
@@ -38,7 +38,7 @@ type ExecutionState = {
 };
 
 const WalkingMissionExecution = ({ mission, onComplete, onClose }: WalkingMissionExecutionProps) => {
-  const { healthData, addSteps, isAuthenticated } = useHealthData({
+  const { healthData, isAuthenticated } = useHealthData({
     autoRefresh: true,
     refreshInterval: 1, // Atualizar a cada 1 minuto
   });
@@ -129,7 +129,7 @@ const WalkingMissionExecution = ({ mission, onComplete, onClose }: WalkingMissio
       ];
 
       // Obter rota do OpenRouteService
-      const directions = await getDirections(currentLocation, destination, 'foot-walking');
+      const directions = await getDirections(currentLocation, destination, 'walking');
 
       setState(prev => ({
         ...prev,
@@ -333,7 +333,7 @@ const WalkingMissionExecution = ({ mission, onComplete, onClose }: WalkingMissio
                 </div>
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-gray-600">Status:</span>
-                  <Badge variant={state.isCompleted ? "default" : "secondary"}>
+                  <Badge variant={state.isCompleted ? "default" : "neutral"}>
                     {state.isCompleted ? "Concluída" : state.isRunning ? "Em andamento" : "Pendente"}
                   </Badge>
                 </div>
@@ -356,7 +356,7 @@ const WalkingMissionExecution = ({ mission, onComplete, onClose }: WalkingMissio
           <div className="p-3 bg-blue-50 rounded-lg">
             <div className="flex items-center justify-between text-sm">
               <span className="text-blue-700">Fonte de dados:</span>
-              <Badge variant="outline">
+              <Badge variant="neutral">
                 {healthData?.source === 'google-fit' ? 'Google Fit' : 'Dados Simulados'}
               </Badge>
             </div>

@@ -1,5 +1,5 @@
 /**
- * MissionCard Component - Versão limpa e funcional
+ * MissionCard Component - Versão corrigida e funcional
  * Integrado com APIs de saúde e mapas para missões de caminhada/corrida
  */
 
@@ -78,8 +78,8 @@ function normalizeMetricType(mission: Mission): MissionMetricType {
 
 function resolveCircuitTasks(mission: Mission): CircuitTask[] {
   if (!Array.isArray(mission.circuit_tasks)) return [];
-  return mission.circuitTasks
-    .filter((task) =>
+  return mission.circuit_tasks
+    .filter((task: any) =>
       typeof task.id === "string" &&
       typeof task.label === "string" &&
       typeof task.mission_type === "string" &&
@@ -87,7 +87,7 @@ function resolveCircuitTasks(mission: Mission): CircuitTask[] {
       typeof task.current_count === "number" &&
       typeof task.completed === "boolean"
     )
-    .map((task) => ({
+    .map((task: any) => ({
       ...task,
       label: localizeMissionText(task.label) ?? task.label,
     }));
@@ -209,7 +209,7 @@ function MissionExecutionModal({
   const sets = Math.max(1, Number(mission.sets ?? 1));
   const restSecondsConfigured = Math.max(0, Number(mission.rest_seconds ?? 0));
   const totalGoal = missionTotalGoal(mission, metricType);
-  const setDuration = isTimeMission ? totalGoal : Math.max(1, Math.floor(totalGoal / sets));
+  const setDuration = metricType === "duration_seconds" || metricType === "duration_minutes" ? totalGoal : Math.max(1, Math.floor(totalGoal / sets));
   const isTimeMission = metricType === "duration_seconds" || metricType === "duration_minutes";
   const isCounterMission = metricType === "repetitions" || metricType === "sets_reps";
   const isDistanceMission = metricType === "steps" || metricType === "distance_meters";
@@ -257,6 +257,8 @@ function MissionExecutionModal({
           return {
             ...current,
             currentSet: nextSet,
+            repsDone: 0,
+            totalRepsDone: current.totalRepsDone + current.repsDone,
             resting: restSecondsConfigured > 0,
             running: restSecondsConfigured > 0,
             restSeconds: restSecondsConfigured,
@@ -404,7 +406,6 @@ function MissionExecutionModal({
 
   activeProgress = Math.max(0, Math.min(100, activeProgress));
 
-  const missionVideoUrl = normalizeMissionMediaUrl(mission.video_url);
   const missionMediaUrl = resolveMissionMediaUrl(mission);
 
   if (!open) return null;
@@ -447,151 +448,150 @@ function MissionExecutionModal({
             </div>
           )}
           
-          {/* Input Overlay for Distance Missions inside Media area or just below */}
+          {/* Input Overlay for Distance Missions */}
           {isDistanceMission && (
-               <div className="mt-6 w-full max-w-md space-y-3">
-                 <p className="text-sm text-center" style={{ color: "var(--fl-color-text-muted)" }}>
-                   Registre o valor atingido (Passos ou Metros)
-                 </p>
-                 <input
-                   type="number"
-                   className="w-full rounded-xl border-2 bg-transparent px-4 py-3 text-center text-xl font-bold focus:outline-none"
-                   style={{ borderColor: "color-mix(in srgb, var(--app-primary-color) 30%, transparent)", color: "var(--app-primary-color)" }}
-                   placeholder={metricType === "steps" ? "Passos" : "Metros"}
-                   value={state.inputValue}
-                   onChange={(event) => setState((current) => ({ ...current, inputValue: event.target.value }))}
-                   min={0}
-                 />
-               </div>
-            )}
-            
-            <div className="absolute top-4 right-4 flex gap-1 sm:gap-2 shrink-0">
-              <button type="button" className="flex size-8 sm:size-10 items-center justify-center rounded-full border transition-opacity hover:opacity-80" onClick={resetExecution} style={{ backgroundColor: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)", color: "var(--app-primary-color)", borderColor: "color-mix(in srgb, var(--app-primary-color) 20%, transparent)" }}>
-                <Info className="w-4 h-4 sm:w-5 sm:h-5" />
-              </button>
-              <button type="button" className="flex size-8 sm:size-10 items-center justify-center rounded-full border transition-opacity hover:opacity-80" onClick={onClose} style={{ backgroundColor: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)", color: "var(--app-primary-color)", borderColor: "color-mix(in srgb, var(--app-primary-color) 20%, transparent)" }}>
-                <X className="w-4 h-4 sm:w-5 sm:h-5" />
-              </button>
+            <div className="mt-6 w-full max-w-md space-y-3">
+              <p className="text-sm text-center" style={{ color: "var(--fl-color-text-muted)" }}>
+                Registre o valor atingido (Passos ou Metros)
+              </p>
+              <input
+                type="number"
+                className="w-full rounded-xl border-2 bg-transparent px-4 py-3 text-center text-xl font-bold focus:outline-none"
+                style={{ borderColor: "color-mix(in srgb, var(--app-primary-color) 30%, transparent)", color: "var(--app-primary-color)" }}
+                placeholder={metricType === "steps" ? "Passos" : "Metros"}
+                value={state.inputValue}
+                onChange={(event) => setState((current) => ({ ...current, inputValue: event.target.value }))}
+                min={0}
+              />
             </div>
+          )}
+          
+          <div className="absolute top-4 right-4 flex gap-1 sm:gap-2 shrink-0">
+            <button type="button" className="flex size-8 sm:size-10 items-center justify-center rounded-full border transition-opacity hover:opacity-80" onClick={resetExecution} style={{ backgroundColor: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)", color: "var(--app-primary-color)", borderColor: "color-mix(in srgb, var(--app-primary-color) 20%, transparent)" }}>
+              <Info className="w-4 h-4 sm:w-5 sm:h-5" />
+            </button>
+            <button type="button" className="flex size-8 sm:size-10 items-center justify-center rounded-full border transition-opacity hover:opacity-80" onClick={onClose} style={{ backgroundColor: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)", color: "var(--app-primary-color)", borderColor: "color-mix(in srgb, var(--app-primary-color) 20%, transparent)" }}>
+              <X className="w-4 h-4 sm:w-5 sm:h-5" />
+            </button>
           </div>
+        </div>
 
-          <main className="p-6 space-y-6">
-            <header className="text-center">
-              <h2 className="text-lg sm:text-xl font-bold tracking-tight truncate">FitLoot</h2>
-            </header>
+        <main className="p-6 space-y-6">
+          <header className="text-center">
+            <h2 className="text-lg sm:text-xl font-bold tracking-tight truncate">FitLoot</h2>
+          </header>
 
-            <div className="space-y-4">
+          <div className="space-y-4">
+            <div className="text-center">
+              <div className="text-2xl sm:text-3xl font-bold" style={{ color: "var(--app-primary-color)" }}>
+                {localizeMissionText(mission.title) ?? mission.title}
+              </div>
+              <div className="text-sm text-gray-600 mt-1">
+                {resolveMissionGoalText(mission, metricType)}
+              </div>
+            </div>
+
+            <div className="relative">
+              <div className="w-full bg-gray-200 rounded-full h-3 overflow-hidden">
+                <div 
+                  className="h-full transition-all duration-500 ease-out"
+                  style={{ 
+                    width: `${activeProgress}%`,
+                    backgroundColor: "var(--app-primary-color)"
+                  }}
+                />
+              </div>
+              <div className="absolute inset-0 flex items-center justify-center">
+                <span className="text-sm font-medium text-gray-700">
+                  {Math.round(activeProgress)}%
+                </span>
+              </div>
+            </div>
+
+            {isTimeMission && (
               <div className="text-center">
-                <div className="text-2xl sm:text-3xl font-bold" style={{ color: "var(--app-primary-color)" }}>
-                  {localizeMissionText(mission.title) ?? mission.title}
+                <div className="text-4xl sm:text-5xl font-bold tabular-nums" style={{ color: "var(--app-primary-color)" }}>
+                  {Math.floor(state.remainingSeconds / 60)}:{(state.remainingSeconds % 60).toString().padStart(2, "0")}
                 </div>
                 <div className="text-sm text-gray-600 mt-1">
-                  {resolveMissionGoalText(mission, metricType)}
+                  {state.resting ? "Descanso" : `Série ${state.currentSet} de ${sets}`}
                 </div>
               </div>
+            )}
 
-              <div className="relative">
-                <div className="w-full bg-gray-200 rounded-full h-3 overflow-hidden">
-                  <div 
-                    className="h-full transition-all duration-500 ease-out"
-                    style={{ 
-                      width: `${activeProgress}%`,
-                      backgroundColor: "var(--app-primary-color)"
-                    }}
-                  />
-                </div>
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <span className="text-sm font-medium text-gray-700">
-                    {Math.round(activeProgress)}%
-                  </span>
-                </div>
-              </div>
-
-              {isTimeMission && (
+            {isCounterMission && (
+              <div className="space-y-4">
                 <div className="text-center">
                   <div className="text-4xl sm:text-5xl font-bold tabular-nums" style={{ color: "var(--app-primary-color)" }}>
-                    {Math.floor(state.remainingSeconds / 60)}:{(state.remainingSeconds % 60).toString().padStart(2, "0")}
+                    {state.repsDone}
                   </div>
                   <div className="text-sm text-gray-600 mt-1">
-                    {state.resting ? "Descanso" : `Série ${state.currentSet} de ${sets}`}
+                    Repetições nesta série
                   </div>
                 </div>
-              )}
-
-              {isCounterMission && (
-                <div className="space-y-4">
-                  <div className="text-center">
-                    <div className="text-4xl sm:text-5xl font-bold tabular-nums" style={{ color: "var(--app-primary-color)" }}>
-                      {state.repsDone}
-                    </div>
-                    <div className="text-sm text-gray-600 mt-1">
-                      Repetições nesta série
-                    </div>
+                <div className="flex items-center justify-center gap-4">
+                  <button
+                    type="button"
+                    onClick={decrementReps}
+                    disabled={state.finished || state.resting}
+                    className="size-12 rounded-full border-2 flex items-center justify-center hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    style={{ borderColor: "var(--app-primary-color)", color: "var(--app-primary-color)" }}
+                  >
+                    <span className="text-xl font-bold">-</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={incrementReps}
+                    disabled={state.finished || state.resting}
+                    className="size-12 rounded-full border-2 flex items-center justify-center hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    style={{ borderColor: "var(--app-primary-color)", color: "var(--app-primary-color)" }}
+                  >
+                    <span className="text-xl font-bold">+</span>
+                  </button>
+                </div>
+                <div className="text-center">
+                  <div className="text-lg font-semibold">
+                    Total: {totalCounterProgress} / {totalGoal}
                   </div>
-                  <div className="flex items-center justify-center gap-4">
-                    <button
-                      type="button"
-                      onClick={decrementReps}
-                      disabled={state.finished || state.resting}
-                      className="size-12 rounded-full border-2 flex items-center justify-center hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                      style={{ borderColor: "var(--app-primary-color)", color: "var(--app-primary-color)" }}
-                    >
-                      <span className="text-xl font-bold">-</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={incrementReps}
-                      disabled={state.finished || state.resting}
-                      className="size-12 rounded-full border-2 flex items-center justify-center hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                      style={{ borderColor: "var(--app-primary-color)", color: "var(--app-primary-color)" }}
-                    >
-                      <span className="text-xl font-bold">+</span>
-                    </button>
-                  </div>
-                  <div className="text-center">
-                    <div className="text-lg font-semibold">
-                      Total: {totalCounterProgress} / {totalGoal}
-                    </div>
-                    <div className="text-sm text-gray-600">
-                      Série {state.currentSet} de {sets}
-                    </div>
+                  <div className="text-sm text-gray-600">
+                    Série {state.currentSet} de {sets}
                   </div>
                 </div>
-              )}
+              </div>
+            )}
 
-              {isCounterMission && (
-                <button 
-                  className="w-full py-3 rounded-xl font-bold text-sm sm:text-base border transition-colors active:scale-95 hover:bg-white/10"
-                  style={{ backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 82%, transparent)", borderColor: "var(--fl-border-soft)", color: "var(--fl-color-text-muted)" }}
-                  onClick={finishSet}
-                  disabled={state.finished || state.resting}
-                >
-                  {state.resting ? "Descansando..." : "Finalizar Série"}
-                </button>
-              )}
-            </div>
-
-            <div className="flex gap-3">
+            {isCounterMission && (
               <button 
-                className="h-10 sm:h-14 rounded-xl sm:rounded-2xl font-bold text-xs sm:text-sm md:text-base flex items-center justify-center gap-1 sm:gap-2 border transition-colors active:scale-95 hover:bg-white/10 truncate"
+                className="w-full py-3 rounded-xl font-bold text-sm sm:text-base border transition-colors active:scale-95 hover:bg-white/10"
                 style={{ backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 82%, transparent)", borderColor: "var(--fl-border-soft)", color: "var(--fl-color-text-muted)" }}
-                onClick={toggleRunning}
-                disabled={state.finished || isDistanceMission}
+                onClick={finishSet}
+                disabled={state.finished || state.resting}
               >
-                {state.running ? <Pause className="w-4 h-4 sm:w-5 sm:h-5 fill-current" strokeWidth={1} /> : <Play className="w-4 h-4 sm:w-5 sm:h-5 fill-current" strokeWidth={1} />}
-                {isDistanceMission ? "SEM TIMER" : state.running ? "PAUSAR" : "RETOMAR"}
+                {state.resting ? "Descansando..." : "Finalizar Série"}
               </button>
-              
-              <button 
-                className="flex-1 h-10 sm:h-14 rounded-xl sm:rounded-2xl font-bold text-xs sm:text-sm md:text-base flex items-center justify-center gap-1 sm:gap-2 transition-colors active:scale-95 truncate"
-                style={{ backgroundColor: "var(--app-primary-color)", color: "var(--fl-nav-item-active-text)" }}
-                onClick={finishMission}
-                disabled={!canFinishMission}
-              >
-                <Square className="w-3 h-3 sm:w-4 sm:h-4 fill-current" strokeWidth={2} />
-                {isDistanceMission ? "REGISTRAR" : "FINALIZAR"}
-              </button>
-            </div>
+            )}
+          </div>
+
+          <div className="flex gap-3">
+            <button 
+              className="h-10 sm:h-14 rounded-xl sm:rounded-2xl font-bold text-xs sm:text-sm md:text-base flex items-center justify-center gap-1 sm:gap-2 border transition-colors active:scale-95 hover:bg-white/10 truncate"
+              style={{ backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 82%, transparent)", borderColor: "var(--fl-border-soft)", color: "var(--fl-color-text-muted)" }}
+              onClick={toggleRunning}
+              disabled={state.finished || isDistanceMission}
+            >
+              {state.running ? <Pause className="w-4 h-4 sm:w-5 sm:h-5 fill-current" strokeWidth={1} /> : <Play className="w-4 h-4 sm:w-5 sm:h-5 fill-current" strokeWidth={1} />}
+              {isDistanceMission ? "SEM TIMER" : state.running ? "PAUSAR" : "RETOMAR"}
+            </button>
+            
+            <button 
+              className="flex-1 h-10 sm:h-14 rounded-xl sm:rounded-2xl font-bold text-xs sm:text-sm md:text-base flex items-center justify-center gap-1 sm:gap-2 transition-colors active:scale-95 truncate"
+              style={{ backgroundColor: "var(--app-primary-color)", color: "var(--fl-nav-item-active-text)" }}
+              onClick={finishMission}
+              disabled={!canFinishMission}
+            >
+              <Square className="w-3 h-3 sm:w-4 sm:h-4 fill-current" strokeWidth={2} />
+              {isDistanceMission ? "REGISTRAR" : "FINALIZAR"}
+            </button>
           </div>
         </main>
       </div>
@@ -613,7 +613,6 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
   const missionStatus = (mission as Mission & { status?: string | undefined }).status || (mission.is_completed === 1 ? "completed" : "pending");
   const isFailed = missionStatus === "failed" || missionStatus === "expired";
   const isCompleted = mission.is_completed === 1 || missionStatus === "completed";
-  const isCircuitMission = metricType === "circuit_tasks";
   
   const missionDetails = detailedMission ?? mission;
   const detailMetricType = normalizeMetricType(missionDetails);
@@ -696,11 +695,11 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                <Badge variant="outline" style={{ borderColor: "var(--fl-border-soft)", color: "var(--fl-color-text-muted)" }}>
+                <Badge variant="neutral" style={{ borderColor: "var(--fl-border-soft)", color: "var(--fl-color-text-muted)" }}>
                   {localizeDifficulty(mission.difficulty_level)}
                 </Badge>
                 {mission.body_area && (
-                  <Badge variant="outline" style={{ borderColor: "var(--fl-border-soft)", color: "var(--fl-color-text-muted)" }}>
+                  <Badge variant="neutral" style={{ borderColor: "var(--fl-border-soft)", color: "var(--fl-color-text-muted)" }}>
                     {bodyAreaLabel(mission.body_area)}
                   </Badge>
                 )}

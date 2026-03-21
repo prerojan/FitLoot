@@ -4,7 +4,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { openStreetMapService, OSMConfig, OSMMarker, NominatimResult } from '../services/openStreetMap';
+import { openStreetMapService, OSMConfig, OSMMarker } from '../services/openStreetMapService';
 
 export interface MapState {
   center: [number, number];
@@ -109,7 +109,7 @@ export const useMapService = (options: UseMapServiceOptions = {}) => {
 
       const results = await openStreetMapService.geocode(query);
       
-      const searchResults: SearchResult[] = results.map(result => ({
+      const searchResults: SearchResult[] = results.map((result: any) => ({
         id: result.place_id.toString(),
         placeName: result.display_name,
         coordinates: [parseFloat(result.lon), parseFloat(result.lat)],
@@ -214,7 +214,7 @@ export const useMapService = (options: UseMapServiceOptions = {}) => {
 
       const results = await openStreetMapService.searchNearby(center, query, radius);
       
-      const searchResults: SearchResult[] = results.map(result => ({
+      const searchResults: SearchResult[] = results.map((result: any) => ({
         id: result.place_id.toString(),
         placeName: result.display_name,
         coordinates: [parseFloat(result.lon), parseFloat(result.lat)],
