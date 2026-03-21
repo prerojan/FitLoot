@@ -794,7 +794,7 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
       ) : (
         <Button 
           onClick={() => { 
-            if (isWalkingMission) {
+            if (isWalkingMission && mission.type === "daily") {
               setShowWalkingExecution(true);
             } else {
               void openDetails();
@@ -804,7 +804,7 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
           className="w-full py-3 rounded-xl shadow-md hover:shadow-lg" 
           disabled={completing}
         >
-          {isWalkingMission ? "Iniciar Caminhada" : "Ver Detalhes"}
+          {isWalkingMission && mission.type === "daily" ? "Iniciar Caminhada" : "Ver Detalhes"}
         </Button>
       )}
     </Card>
