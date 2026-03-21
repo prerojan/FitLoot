@@ -214,14 +214,80 @@ export default function FoodAnalysis() {
   const startCamera = async () => {
     try {
       setCameraError(null);
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false });
+      
+      // Debug: Log para verificar se está sendo chamado
+      console.log('[Camera] Iniciando câmera...');
+      
+      // Configurações otimizadas para mobile
+      const constraints = {
+        video: {
+          facingMode: { ideal: "environment" }, // Evita exact para melhor compatibilidade
+          width: { ideal: 1280, max: 1920 },
+          height: { ideal: 720, max: 1080 }
+        },
+        audio: false
+      };
+      
+      console.log('[Camera] Requesting getUserMedia with constraints:', constraints);
+      
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      
+      console.log('[Camera] Stream obtido:', stream);
+      console.log('[Camera] Video tracks:', stream.getVideoTracks());
+      
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        await videoRef.current.play();
+        
+        // Adiciona eventos para debug
+        videoRef.current.onloadedmetadata = () => {
+          console.log('[Camera] Video metadata loaded');
+          console.log('[Camera] Video dimensions:', {
+            videoWidth: videoRef.current?.videoWidth,
+            videoHeight: videoRef.current?.videoHeight,
+            readyState: videoRef.current?.readyState
+          });
+        };
+        
+        videoRef.current.onplay = () => {
+          console.log('[Camera] Video started playing');
+        };
+        
+        videoRef.current.onerror = (e) => {
+          console.error('[Camera] Video error:', e);
+        };
+        
+        // Tenta reproduzir o vídeo
+        try {
+          await videoRef.current.play();
+          console.log('[Camera] Video play() chamado com sucesso');
+        } catch (playError) {
+          console.error('[Camera] Erro ao reproduzir vídeo:', playError);
+          throw playError;
+        }
       }
+      
       setStreamActive(true);
-    } catch {
-      setCameraError("Permissão de câmera negada ou indisponível neste dispositivo.");
+      console.log('[Camera] Stream ativo definido como true');
+      
+    } catch (error) {
+      console.error('[Camera] Erro ao iniciar câmera:', error);
+      let errorMessage = "Permissão de câmera negada ou indisponível neste dispositivo.";
+      
+      if (error instanceof Error) {
+        if (error.name === 'NotAllowedError') {
+          errorMessage = "Permissão de câmera negada. Por favor, permita o acesso à câmera nas configurações do navegador.";
+        } else if (error.name === 'NotFoundError') {
+          errorMessage = "Nenhuma câmera encontrada neste dispositivo.";
+        } else if (error.name === 'NotReadableError') {
+          errorMessage = "Câmera já está sendo usada por outro aplicativo.";
+        } else if (error.name === 'OverconstrainedError') {
+          errorMessage = "Câmera não suporta as configurações solicitadas.";
+        } else {
+          errorMessage = `Erro na câmera: ${error.message}`;
+        }
+      }
+      
+      setCameraError(errorMessage);
     }
   };
 
@@ -565,7 +631,19 @@ export default function FoodAnalysis() {
             {/* Simulated Camera Feed / Video Source */}
             <div className="absolute inset-0 z-0 overflow-hidden flex items-center justify-center bg-black">
               {!preview && streamActive ? (
-                <video ref={videoRef} className="h-full w-full object-cover" autoPlay playsInline muted />
+                <video 
+                  ref={videoRef} 
+                  className="h-full w-full object-cover" 
+                  autoPlay 
+                  playsInline 
+                  muted 
+                  style={{ 
+                    transform: 'scaleX(-1)', // Espelha para melhor experiência
+                    objectFit: 'cover',
+                    width: '100%',
+                    height: '100%'
+                  }}
+                />
               ) : preview ? (
                 <img src={preview} alt="Captured food" className="h-full w-full object-cover" />
               ) : (

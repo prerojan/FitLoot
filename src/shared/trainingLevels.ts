@@ -406,9 +406,15 @@ export function calculateTrainingRankSnapshot(profile: TrainingRankProfile): Tra
     100,
   );
 
-  const hasBenchmarkData = !!profile.benchmarkResults && Object.keys(profile.benchmarkResults).length > 0;
+  const hasBenchmarkData = !!profile.benchmarkResults && (
+    profile.benchmarkResults.pushUpMaxReps != null ||
+    profile.benchmarkResults.squatMaxReps != null ||
+    profile.benchmarkResults.plankMaxSeconds != null ||
+    profile.benchmarkResults.sitUpMaxReps != null ||
+    profile.benchmarkResults.skillStageScore != null
+  );
   const hasSkillData = profile.unlockedSkills > 0 || profile.unlockedSkillStages > 0;
-  const fallbackUsed = !hasBenchmarkData || !hasSkillData;
+  const fallbackUsed = !hasSkillData; // Remove verificação de benchmarks pois agora sempre temos estimativas
 
   const snapshot: TrainingRankSnapshot = {
     globalRank: scoreToTrainingRank(totalScore),
@@ -478,13 +484,28 @@ export function adaptExistingDataToRankProfile(
   const totalSessions = Math.floor(userProgression.xp / 50); // Estimativa: ~50 XP por sessão
   const activeWeeks = Math.min(Math.floor(totalSessions / 3), 52); // Estimativa: 3 sessões por semana
   
+  // Estima benchmarks baseados na progressão do usuário se não existirem
+  const estimatedBenchmarks = !benchmarkResults ? {
+    // Baseado em level e XP: estima capacidade física
+    pushUpMaxReps: Math.min(Math.max(Math.floor(userProgression.level * 2.5), 5), 50),
+    squatMaxReps: Math.min(Math.max(Math.floor(userProgression.level * 4), 8), 80),
+    plankMaxSeconds: Math.min(Math.max(Math.floor(userProgression.level * 15), 20), 180),
+    sitUpMaxReps: Math.min(Math.max(Math.floor(userProgression.level * 3), 6), 60),
+    skillStageScore: userSkills.reduce((score, skill) => {
+      if (skill.total_reps >= 100) score += 2;
+      else if (skill.total_reps >= 50) score += 1;
+      else if (skill.total_reps >= 10) score += 0.5;
+      return score;
+    }, 0)
+  } : benchmarkResults;
+  
   return {
     totalSessions,
     activeWeeks,
     longestStreak: userProgression.best_streak,
     unlockedSkills: userSkills.length,
     unlockedSkillStages: userSkills.filter(skill => skill.total_reps >= 100).length, // Estimativa de estágios
-    ...(benchmarkResults && { benchmarkResults }),
+    benchmarkResults: estimatedBenchmarks,
   };
 }
 

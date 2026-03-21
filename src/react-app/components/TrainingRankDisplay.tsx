@@ -118,8 +118,8 @@ export function TrainingRankDisplay({
             <AlertTriangle className="w-3 h-3" />
             <span>
               {snapshot.hasBenchmarkData && snapshot.hasSkillData 
-                ? "Rank calculado com dados parciais"
-                : "Rank estimado - complete benchmarks para maior precisão"
+                ? "Rank calculado com dados estimados - complete benchmarks para maior precisão"
+                : "Continue treinando para desbloquear ranking completo"
               }
             </span>
           </div>
