@@ -1,7 +1,7 @@
 import type { MissionMetricType } from "@/shared/types";
 
 export const MISSION_LIMITS = {
-  daily: 5,
+  daily: 8,
   weekly: 5,
   monthly: 5,
 } as const;

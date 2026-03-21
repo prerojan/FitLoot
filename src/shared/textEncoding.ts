@@ -10,6 +10,7 @@ const KNOWN_MOJIBAKE_REPLACEMENTS: ReadonlyArray<readonly [string, string]> = [
   ["\u00c3\u0192\u00c2\xaa", "ê"],
   ["\u00c3\u0192\u00c2\xb4", "ô"],
   ["\u00c3\u0192\u00c2\xa0", "à"],
+  ["\u00c3\u0192\u00c2\u00a2", "â"],
   ["\u00c3\u0192\u00e2\u20ac\xb0", "É"],
   ["\u00c3\u0192\u00c5\xa1", "Ú"],
   ["\u00c3\u00a3", "ã"],
@@ -41,7 +42,7 @@ export function repairKnownMojibake(value: string | null | undefined): string | 
 
   let repairedValue = value;
 
-  for (let pass = 0; pass < 3; pass += 1) {
+  for (let pass = 0; pass < 12; pass += 1) {
     if (!MOJIBAKE_MARKERS.some((marker) => repairedValue.includes(marker))) {
       break;
     }
