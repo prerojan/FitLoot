@@ -33,6 +33,7 @@ const MiniGames = lazy(() => import("@/react-app/pages/MiniGames"));
 const AIChat = lazy(() => import("@/react-app/pages/AIChat"));
 const Achievements = lazy(() => import("@/react-app/pages/Achievements"));
 const FoodAnalysis = lazy(() => import("@/react-app/pages/FoodAnalysis"));
+const HealthTest = lazy(() => import("@/react-app/pages/HealthTest"));
 
 const LandingPage = lazy(() => import("@/react-app/pages/Landing"));
 const NotFoundPage = lazy(() => import("@/react-app/pages/NotFound"));
@@ -264,6 +265,14 @@ export default function App({ initialThemeMode = DEFAULT_APP_THEME_MODE }: AppPr
                   element={
                     <ProtectedRoute>
                       <FoodAnalysis />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path={ROUTE_PATHS.healthTest}
+                  element={
+                    <ProtectedRoute>
+                      <HealthTest />
                     </ProtectedRoute>
                   }
                 />

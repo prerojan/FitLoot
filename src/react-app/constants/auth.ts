@@ -21,5 +21,6 @@ export const ROUTE_PATHS = {
   minigames: "/minigames",
   aiChat: "/ai-chat",
   foodAnalysis: "/food-analysis",
+  healthTest: "/health-test",
   wildcard: "*",
 } as const;
