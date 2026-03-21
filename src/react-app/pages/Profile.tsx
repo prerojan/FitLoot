@@ -25,6 +25,7 @@ import LoadingBall from "@/react-app/components/LoadingBall";
 import PageLoader from "@/react-app/components/PageLoader";
 import { Avatar } from "@/react-app/components/ui/avatar";
 import { ROUTE_PATHS } from "@/react-app/constants/auth";
+import { TrainingRankDisplay, useTrainingRank } from "@/react-app/components/TrainingRankDisplay";
 
 import type {
   AchievementWithUnlock,
@@ -71,6 +72,23 @@ export default function Profile() {
   const [feedbackMessage, setFeedbackMessage] = useState("");
   const [feedbackSending, setFeedbackSending] = useState(false);
   const [feedbackStatus, setFeedbackStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
+
+  // NOVO: Hook para calcular rank de treinamento (read-only, seguro)
+  const { snapshot: trainingRank, isLoading: rankLoading, error: rankError } = useTrainingRank(
+    progression,
+    skills.map(skill => ({
+      id: skill.id,
+      user_id: user?.id || '',
+      created_at: '',
+      updated_at: '',
+      skill_id: skill.id,
+      total_reps: skill.total_reps,
+      total_time: 0,
+      best_reps: skill.best_reps,
+      unlocked_at: ''
+    })),
+    undefined // TODO: Adicionar benchmarks quando disponíveis
+  );
 
 
   const syncProfileThemeState = useCallback((nextProfile: UserProfile) => {
@@ -321,6 +339,25 @@ export default function Profile() {
                 <span className="text-[8px] font-bold uppercase tracking-[0.1em] sm:text-[10px] sm:tracking-widest truncate">Amigos</span>
               </button>
             </div>
+          </section>
+
+          {/* NOVO: Training Rank Card */}
+          <section className="fl-theme-surface rounded-3xl p-6 sm:p-8">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-[10px] font-bold uppercase tracking-[0.2em]" style={{ color: "var(--fl-color-text-muted)" }}>Rank de Treinamento</h3>
+              <TrainingRankDisplay 
+                snapshot={trainingRank} 
+                isLoading={rankLoading}
+                error={rankError}
+                compact={true}
+              />
+            </div>
+            <TrainingRankDisplay 
+              snapshot={trainingRank} 
+              isLoading={rankLoading}
+              error={rankError}
+              showDetails={true}
+            />
           </section>
 
           {/* XP Progress Card */}

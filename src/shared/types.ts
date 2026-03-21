@@ -65,9 +65,42 @@ export const UserProgressionSchema = z.object({
   updated_at: z.string(),
   /** Presente só no GET /api/progression quando o servidor acabou de normalizar nível/XP atrasado (mostrar modal uma vez). */
   celebrate_level: z.number().optional(),
+  /** NOVO: Snapshot do rank de treinamento calculado (camada paralela) */
+  training_rank_snapshot: z.string().nullable().optional(), // JSON string do TrainingRankSnapshot
 });
 
 export type UserProgression = z.infer<typeof UserProgressionSchema>;
+
+// Training Rank System (camada paralela derivada)
+export type TrainingRank = 'iniciante' | 'intermediario' | 'avancado';
+
+export interface TrainingRankSnapshot {
+  /** Rank global calculado com base em todos os fatores */
+  globalRank: TrainingRank;
+  /** Score total usado para calcular o rank (0-100) */
+  globalScore: number;
+  /** Data do último cálculo do rank */
+  lastCalculatedAt: string;
+  /** Fatores individuais usados no cálculo */
+  factors: {
+    volumeScore: number;      // Baseado em totalSessions
+    consistencyScore: number; // Baseado em activeWeeks e streak
+    benchmarkScore: number;   // Baseado em benchmarks
+    skillMasteryScore: number; // Baseado em skills e stages
+  };
+  /** Rank por categoria específica */
+  categoryRanks?: {
+    flexoes: TrainingRank;
+    agachamentos: TrainingRank;
+    pranchas: TrainingRank;
+    abdominais: TrainingRank;
+    skills: TrainingRank;
+  };
+  /** Metadados para fallback */
+  hasBenchmarkData: boolean;
+  hasSkillData: boolean;
+  fallbackUsed: boolean;
+}
 
 // Skill Schema
 export const SkillSchema = z.object({
@@ -435,3 +468,22 @@ export const UpdateMeRequestSchema = z.object({
   fitness_level: z.string().optional(),
 });
 export type UpdateMeRequest = z.infer<typeof UpdateMeRequestSchema>;
+
+// Training Rank Profile (input para cálculo)
+export interface TrainingRankProfile {
+  /** Dados de volume (derivados de UserProgression) */
+  totalSessions: number;
+  activeWeeks: number;
+  longestStreak: number;
+  /** Dados de skills (derivados de UserSkill) */
+  unlockedSkills: number;
+  unlockedSkillStages: number;
+  /** Dados de benchmarks (opcionais) */
+  benchmarkResults?: {
+    pushUpMaxReps?: number;
+    squatMaxReps?: number;
+    plankMaxSeconds?: number;
+    sitUpMaxReps?: number;
+    skillStageScore?: number;
+  };
+}
