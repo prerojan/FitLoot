@@ -29,7 +29,7 @@ type Friend = {
   friend_xp: number;
   friend_streak: number;
   status?: string | undefined;
-  is_online?: boolean; // Mocked for design
+  is_online?: boolean; // Baseado na última atividade (últimos 5 minutos)
 };
 
 type SearchResult = {
@@ -66,8 +66,7 @@ export default function Friends() {
   const [error, setError] = useState<string | null>(null);
 
   const applyCachedFriends = useCallback((cache: { friends: Friend[]; pending: Friend[] }) => {
-    // We add a mock is_online for visual flair as requested by premium design
-    setFriends(cache.friends.map(f => ({ ...f, is_online: Math.random() > 0.4 })));
+    setFriends(cache.friends);
     setReceivedRequests(cache.pending);
     setLoading(false);
   }, []);
@@ -101,7 +100,7 @@ export default function Friends() {
       const nextFriends = Array.isArray(friendsData) ? friendsData : [];
       const nextPending = Array.isArray(requestsData) ? requestsData : [];
 
-      setFriends(nextFriends.map(f => ({ ...f, is_online: Math.random() > 0.4 })));
+      setFriends(nextFriends);
       setReceivedRequests(nextPending);
       friendsCache = { cachedAt: Date.now(), friends: nextFriends, pending: nextPending };
     } catch {

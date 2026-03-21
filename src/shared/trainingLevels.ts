@@ -431,37 +431,6 @@ export function calculateTrainingRankSnapshot(profile: TrainingRankProfile): Tra
     fallbackUsed,
   };
 
-  // Calcula ranks por categoria se houver dados de benchmarks
-  if (profile.benchmarkResults) {
-    snapshot.categoryRanks = {
-      flexoes: scoreToTrainingRank(
-        profile.benchmarkResults.pushUpMaxReps ? 
-          (profile.benchmarkResults.pushUpMaxReps >= 25 ? 80 : 
-           profile.benchmarkResults.pushUpMaxReps >= 10 ? 50 : 20) : 0
-      ),
-      agachamentos: scoreToTrainingRank(
-        profile.benchmarkResults.squatMaxReps ? 
-          (profile.benchmarkResults.squatMaxReps >= 50 ? 80 : 
-           profile.benchmarkResults.squatMaxReps >= 25 ? 50 : 20) : 0
-      ),
-      pranchas: scoreToTrainingRank(
-        profile.benchmarkResults.plankMaxSeconds ? 
-          (profile.benchmarkResults.plankMaxSeconds >= 90 ? 80 : 
-           profile.benchmarkResults.plankMaxSeconds >= 30 ? 50 : 20) : 0
-      ),
-      abdominais: scoreToTrainingRank(
-        profile.benchmarkResults.sitUpMaxReps ? 
-          (profile.benchmarkResults.sitUpMaxReps >= 35 ? 80 : 
-           profile.benchmarkResults.sitUpMaxReps >= 15 ? 50 : 20) : 0
-      ),
-      skills: scoreToTrainingRank(
-        profile.benchmarkResults.skillStageScore ? 
-          (profile.benchmarkResults.skillStageScore >= 7 ? 80 : 
-           profile.benchmarkResults.skillStageScore >= 3 ? 50 : 20) : 0
-      ),
-    };
-  }
-
   return snapshot;
 }
 

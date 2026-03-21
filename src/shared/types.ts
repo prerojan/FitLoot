@@ -88,14 +88,6 @@ export interface TrainingRankSnapshot {
     benchmarkScore: number;   // Baseado em benchmarks
     skillMasteryScore: number; // Baseado em skills e stages
   };
-  /** Rank por categoria específica */
-  categoryRanks?: {
-    flexoes: TrainingRank;
-    agachamentos: TrainingRank;
-    pranchas: TrainingRank;
-    abdominais: TrainingRank;
-    skills: TrainingRank;
-  };
   /** Metadados para fallback */
   hasBenchmarkData: boolean;
   hasSkillData: boolean;

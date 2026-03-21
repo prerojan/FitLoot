@@ -167,31 +167,6 @@ export function TrainingRankDisplay({
         </div>
       )}
 
-      {/* Ranks por Categoria */}
-      {showDetails && snapshot.categoryRanks && (
-        <div className="mt-4 pt-3 border-t border-gray-200">
-          <h4 className="text-xs font-semibold text-gray-700 uppercase tracking-wide mb-2">Rank por Categoria</h4>
-          <div className="flex flex-wrap gap-2">
-            {Object.entries(snapshot.categoryRanks).map(([category, rank]) => {
-              const categoryConfig = rankConfig[rank];
-              return (
-                <div 
-                  key={category}
-                  className={`px-2 py-1 rounded text-xs font-medium ${categoryConfig.bgColor} ${categoryConfig.color}`}
-                >
-                  {category === 'flexoes' && 'Flexões'}
-                  {category === 'agachamentos' && 'Agachamentos'}
-                  {category === 'pranchas' && 'Pranchas'}
-                  {category === 'abdominais' && 'Abdominais'}
-                  {category === 'skills' && 'Skills'}
-                  : {categoryConfig.label}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
       {/* Metadata */}
       <div className="mt-3 pt-2 border-t border-gray-200">
         <div className="text-xs text-gray-500">

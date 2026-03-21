@@ -62,6 +62,7 @@ export default function Profile() {
   const [attributes, setAttributes] = useState<UserAttributes | null>(null);
   const [progression, setProgression] = useState<UserProgression | null>(null);
   const [skills, setSkills] = useState<SkillWithProgress[]>([]);
+  const [availableSkills, setAvailableSkills] = useState<any[]>([]);
   const [achievements, setAchievements] = useState<AchievementWithUnlock[]>([]);
   const [titles, setTitles] = useState<TitleWithUnlock[]>([]);
   const [benchmarks, setBenchmarks] = useState<any[]>([]);
@@ -107,6 +108,32 @@ export default function Profile() {
     return result;
   }, [benchmarks, skills]);
 
+  // Combina habilidades desbloqueadas com todas as disponíveis
+  const getAllSkillsWithProgress = useCallback(() => {
+    if (availableSkills.length === 0) return skills;
+    
+    // Mapeia habilidades desbloqueadas por ID
+    const skillsMap = new Map(skills.map(skill => [skill.id, skill]));
+    
+    // Combina todas as habilidades com progresso (se existir)
+    return availableSkills.map(availableSkill => {
+      const userSkill = skillsMap.get(availableSkill.id);
+      return userSkill || {
+        id: availableSkill.id,
+        skill_id: availableSkill.id,
+        user_id: user?.id || '',
+        created_at: '',
+        updated_at: '',
+        name: availableSkill.name,
+        description: availableSkill.description,
+        icon: availableSkill.icon,
+        total_reps: 0,
+        best_reps: 0,
+        unlocked_at: null
+      };
+    });
+  }, [availableSkills, skills, user]);
+
   // NOVO: Hook para calcular rank de treinamento (read-only, seguro)
   const { snapshot: trainingRank, isLoading: rankLoading, error: rankError } = useTrainingRank(
     progression,
@@ -136,6 +163,7 @@ export default function Profile() {
     const cachedAttributes = readCachedJson<UserAttributes>("/api/attributes");
     const cachedProgression = readCachedJson<UserProgression>("/api/progression");
     const cachedSkills = readCachedJson<SkillWithProgress[]>("/api/skills");
+    const cachedAvailableSkills = readCachedJson<any[]>("/api/skills/available");
     const cachedAchievements = readCachedJson<AchievementWithUnlock[]>("/api/achievements");
     const cachedTitles = readCachedJson<TitleWithUnlock[]>("/api/titles");
 
@@ -143,6 +171,7 @@ export default function Profile() {
     if (cachedAttributes) setAttributes(cachedAttributes.data);
     if (cachedProgression) setProgression(cachedProgression.data);
     if (cachedSkills) setSkills(Array.isArray(cachedSkills.data) ? cachedSkills.data : []);
+    if (cachedAvailableSkills) setAvailableSkills(Array.isArray(cachedAvailableSkills.data) ? cachedAvailableSkills.data : []);
     if (cachedAchievements) {
       setAchievements(
         Array.isArray(cachedAchievements.data)
@@ -156,11 +185,12 @@ export default function Profile() {
     if (hasCache) setLoading(false);
 
     try {
-      const [p, a, pr, s, ach, t, b] = await Promise.all([
+      const [p, a, pr, s, as, ach, t, b] = await Promise.all([
         fetchAndCacheJson<UserProfile>("/api/profile"),
         fetchAndCacheJson<UserAttributes>("/api/attributes"),
         fetchAndCacheJson<UserProgression>("/api/progression"),
         fetchAndCacheJson<SkillWithProgress[]>("/api/skills"),
+        fetchAndCacheJson<any[]>("/api/skills/available"),
         fetchAndCacheJson<AchievementWithUnlock[]>("/api/achievements"),
         fetchAndCacheJson<TitleWithUnlock[]>("/api/titles"),
         fetchAndCacheJson<any[]>("/api/benchmarks").catch(() => ({ data: [] })) // Fallback para benchmarks
@@ -170,6 +200,7 @@ export default function Profile() {
       setAttributes(a);
       setProgression(pr);
       setSkills(Array.isArray(s) ? s : []);
+      setAvailableSkills(Array.isArray(as) ? as : []);
       setAchievements(Array.isArray(ach) ? sanitizeAchievementsForDisplay(ach) : []);
       setTitles(Array.isArray(t) ? t : []);
       setBenchmarks(Array.isArray(b) ? b : Array.isArray(b?.data) ? b.data : []);
@@ -565,11 +596,11 @@ export default function Profile() {
                 </header>
 
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-6 gap-4">
-                  {skills.length === 0 ? (
+                  {getAllSkillsWithProgress().length === 0 ? (
                     <div className="fl-theme-surface col-span-full rounded-3xl border border-dashed py-12 text-center" style={{ borderColor: "var(--fl-border-soft)" }}>
-                      <p className="text-xs font-bold text-slate-600 uppercase tracking-widest">Nenhuma skill dominada ainda.</p>
+                      <p className="text-xs font-bold text-slate-600 uppercase tracking-widest">Nenhuma skill disponível.</p>
                     </div>
-                  ) : skills.map((skill) => {
+                  ) : getAllSkillsWithProgress().map((skill) => {
                     const isUnlocked = skill.total_reps > 0;
                     return (
                       <div 

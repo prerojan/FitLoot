@@ -6889,7 +6889,7 @@ app.get("/api/friends", authMiddleware, async (c) => {
   const friends = await c.env.fitloot_db.prepare(
     `SELECT f.id, COALESCE(f.friend_id, f.friend_user_id) as friend_user_id, up.username as friend_username,
       up.full_name as friend_full_name, pr.level as friend_level, pr.xp as friend_xp,
-      pr.current_streak as friend_streak
+      pr.current_streak as friend_streak, pr.last_activity_date
     FROM friendships f
     INNER JOIN user_profiles up ON COALESCE(f.friend_id, f.friend_user_id) = up.user_id
     INNER JOIN user_progression pr ON COALESCE(f.friend_id, f.friend_user_id) = pr.user_id
@@ -6898,7 +6898,14 @@ app.get("/api/friends", authMiddleware, async (c) => {
     LIMIT ? OFFSET ?`
   ).bind(user.id, limit, offset).all();
 
-  return c.json(friends.results);
+  // Calcula status online baseado na última atividade (últimos 5 minutos)
+  const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+  const friendsWithOnlineStatus = friends.results.map(friend => ({
+    ...friend,
+    is_online: friend.last_activity_date ? new Date(friend.last_activity_date as string) > new Date(fiveMinutesAgo) : false
+  }));
+
+  return c.json(friendsWithOnlineStatus);
 });
 
 app.get("/api/friends/requests", authMiddleware, async (c) => {
