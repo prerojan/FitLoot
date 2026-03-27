@@ -336,13 +336,23 @@ export default function AIChat() {
 
       <div
         className="relative flex min-h-0 flex-1 flex-col overflow-hidden"
-        style={{ paddingTop: "calc(env(safe-area-inset-top, 0px) + 5.75rem)" }}
+        style={{
+          paddingTop: "calc(env(safe-area-inset-top, 0px) + 5.75rem)",
+          paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 9.5rem)",
+        }}
       >
         <div
           className="pointer-events-none fixed inset-x-0 top-0 z-20 px-3 pb-2 sm:px-4 lg:px-8"
           style={{ paddingTop: "calc(env(safe-area-inset-top, 0px) + 0.75rem)" }}
         >
-          <header className="fl-theme-topbar pointer-events-auto mx-auto flex w-full max-w-5xl items-center justify-between gap-3 rounded-[1.75rem] border px-3 py-3 shadow-xl backdrop-blur-md">
+          <header
+            className="fl-theme-topbar pointer-events-auto mx-auto flex w-full max-w-5xl items-center justify-between gap-3 rounded-[1.75rem] border px-3 py-3 shadow-xl backdrop-blur-md"
+            style={{
+              backgroundColor: "rgba(255, 255, 255, 0.96)",
+              borderColor: "rgba(15, 23, 42, 0.08)",
+              boxShadow: "0 18px 36px rgba(15, 23, 42, 0.12)",
+            }}
+          >
             <button
               type="button"
               onClick={() => navigate(-1)}
@@ -503,8 +513,17 @@ export default function AIChat() {
           <div ref={messagesEndRef} />
         </main>
 
-        <div className="fl-theme-topbar shrink-0 border-t px-3 pb-[calc(env(safe-area-inset-bottom,0px)+0.5rem)] pt-3 backdrop-blur-xl sm:px-4 lg:px-8 lg:pt-4">
-          <div className="mx-auto w-full max-w-5xl">
+        <div
+          className="pointer-events-none fixed inset-x-0 bottom-0 z-20 px-3 pb-[calc(env(safe-area-inset-bottom,0px)+0.5rem)] pt-3 sm:px-4 lg:px-8 lg:pt-4"
+        >
+          <div
+            className="fl-theme-topbar pointer-events-auto mx-auto w-full max-w-5xl rounded-[1.75rem] border px-3 py-3 shadow-xl backdrop-blur-xl"
+            style={{
+              backgroundColor: "rgba(255, 255, 255, 0.96)",
+              borderColor: "rgba(15, 23, 42, 0.08)",
+              boxShadow: "0 -12px 30px rgba(15, 23, 42, 0.12)",
+            }}
+          >
             {messages.length <= 1 && !loading ? (
               <div className="custom-scrollbar mb-3 flex gap-2 overflow-x-auto pb-1 sm:mb-4 sm:gap-3">
                 {QUICK_QUESTIONS.map((question) => (
@@ -537,6 +556,11 @@ export default function AIChat() {
                   disabled={loading}
                   className="fl-theme-input min-h-[3.5rem] w-full rounded-2xl px-4 py-3.5 pr-24 text-sm outline-none sm:text-base"
                   placeholder="Mensagem para o FitBot..."
+                  style={{
+                    backgroundColor: "#ffffff",
+                    borderColor: "rgba(15, 23, 42, 0.08)",
+                    boxShadow: "0 8px 24px rgba(15, 23, 42, 0.08)",
+                  }}
                 />
                 <div className="absolute right-4 top-1/2 flex -translate-y-1/2 items-center gap-2">
                   <button
