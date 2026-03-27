@@ -107,7 +107,7 @@ class GoogleFitService {
                 resolve(true);
               }
             }
-          } catch (error) {
+          } catch {
             // Cross-origin error, ignore and continue checking
           }
         }, 1000);

@@ -29,6 +29,7 @@ import { TrainingRankDisplay, useTrainingRank } from "@/react-app/components/Tra
 
 import type {
   AchievementWithUnlock,
+  Skill,
   SkillWithProgress,
   TitleWithUnlock,
   UserAttributes,
@@ -41,6 +42,32 @@ import { applyProfileTheme } from "@/react-app/utils/theme";
 
 const FEEDBACK_TYPES = ["Sugestao", "Bug", "Elogio", "Outro"] as const;
 type FeedbackType = (typeof FEEDBACK_TYPES)[number];
+
+type BenchmarkDelta = {
+  pushups_delta: number;
+  squats_delta: number;
+  situps_delta: number;
+  plank_delta: number;
+  pullups_delta: number;
+  run_distance_delta: number;
+  run_time_delta: number;
+};
+
+type BenchmarkRecord = {
+  id: number;
+  pushups_max: number | null;
+  squats_max: number | null;
+  situps_max: number | null;
+  plank_seconds: number | null;
+  pullups_max: number | null;
+  run_distance_km: number | null;
+  run_time_seconds: number | null;
+  delta?: BenchmarkDelta | null;
+};
+
+type BenchmarksResponse = {
+  benchmarks: BenchmarkRecord[];
+};
 
 function isFeedbackType(value: string): value is FeedbackType {
   return FEEDBACK_TYPES.includes(value as FeedbackType);
@@ -62,10 +89,10 @@ export default function Profile() {
   const [attributes, setAttributes] = useState<UserAttributes | null>(null);
   const [progression, setProgression] = useState<UserProgression | null>(null);
   const [skills, setSkills] = useState<SkillWithProgress[]>([]);
-  const [availableSkills, setAvailableSkills] = useState<any[]>([]);
+  const [availableSkills, setAvailableSkills] = useState<Skill[]>([]);
   const [achievements, setAchievements] = useState<AchievementWithUnlock[]>([]);
   const [titles, setTitles] = useState<TitleWithUnlock[]>([]);
-  const [benchmarks, setBenchmarks] = useState<any[]>([]);
+  const [benchmarks, setBenchmarks] = useState<BenchmarkRecord[]>([]);
   const [tab, setTab] = useState<"attributes" | "skills">("attributes");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -81,6 +108,7 @@ export default function Profile() {
     
     // Pega o benchmark mais recente
     const latest = benchmarks[0];
+    if (!latest) return undefined;
     
     // Calcula skillStageScore baseado nos skills
     const skillStageScore = skills.reduce((score, skill) => {
@@ -111,28 +139,18 @@ export default function Profile() {
   // Combina habilidades desbloqueadas com todas as disponíveis
   const getAllSkillsWithProgress = useCallback(() => {
     if (availableSkills.length === 0) return skills;
-    
-    // Mapeia habilidades desbloqueadas por ID
-    const skillsMap = new Map(skills.map(skill => [skill.id, skill]));
-    
-    // Combina todas as habilidades com progresso (se existir)
-    return availableSkills.map(availableSkill => {
-      const userSkill = skillsMap.get(availableSkill.id);
-      return userSkill || {
-        id: availableSkill.id,
-        skill_id: availableSkill.id,
-        user_id: user?.id || '',
-        created_at: '',
-        updated_at: '',
-        name: availableSkill.name,
-        description: availableSkill.description,
-        icon: availableSkill.icon,
+
+    const unlockedSkillIds = new Set(skills.map((skill) => skill.id));
+    const lockedAvailableSkills = availableSkills
+      .filter((availableSkill) => !unlockedSkillIds.has(availableSkill.id))
+      .map((availableSkill) => ({
+        ...availableSkill,
         total_reps: 0,
         best_reps: 0,
-        unlocked_at: null
-      };
-    });
-  }, [availableSkills, skills, user]);
+      }));
+
+    return [...skills, ...lockedAvailableSkills];
+  }, [availableSkills, skills]);
 
   // NOVO: Hook para calcular rank de treinamento (read-only, seguro)
   const { snapshot: trainingRank, isLoading: rankLoading, error: rankError } = useTrainingRank(
@@ -163,9 +181,10 @@ export default function Profile() {
     const cachedAttributes = readCachedJson<UserAttributes>("/api/attributes");
     const cachedProgression = readCachedJson<UserProgression>("/api/progression");
     const cachedSkills = readCachedJson<SkillWithProgress[]>("/api/skills");
-    const cachedAvailableSkills = readCachedJson<any[]>("/api/skills/available");
+    const cachedAvailableSkills = readCachedJson<Skill[]>("/api/skills/available");
     const cachedAchievements = readCachedJson<AchievementWithUnlock[]>("/api/achievements");
     const cachedTitles = readCachedJson<TitleWithUnlock[]>("/api/titles");
+    const cachedBenchmarks = readCachedJson<BenchmarksResponse>("/api/benchmarks");
 
     if (cachedProfile) syncProfileThemeState(cachedProfile.data);
     if (cachedAttributes) setAttributes(cachedAttributes.data);
@@ -180,6 +199,9 @@ export default function Profile() {
       );
     }
     if (cachedTitles) setTitles(Array.isArray(cachedTitles.data) ? cachedTitles.data : []);
+    if (cachedBenchmarks) {
+      setBenchmarks(Array.isArray(cachedBenchmarks.data.benchmarks) ? cachedBenchmarks.data.benchmarks : []);
+    }
 
     const hasCache = Boolean(cachedProfile && cachedAttributes && cachedProgression);
     if (hasCache) setLoading(false);
@@ -190,10 +212,12 @@ export default function Profile() {
         fetchAndCacheJson<UserAttributes>("/api/attributes"),
         fetchAndCacheJson<UserProgression>("/api/progression"),
         fetchAndCacheJson<SkillWithProgress[]>("/api/skills"),
-        fetchAndCacheJson<any[]>("/api/skills/available"),
+        fetchAndCacheJson<Skill[]>("/api/skills/available"),
         fetchAndCacheJson<AchievementWithUnlock[]>("/api/achievements"),
         fetchAndCacheJson<TitleWithUnlock[]>("/api/titles"),
-        fetchAndCacheJson<any[]>("/api/benchmarks").catch(() => ({ data: [] })) // Fallback para benchmarks
+        fetchAndCacheJson<BenchmarksResponse>("/api/benchmarks").catch(
+          () => ({ benchmarks: [] } satisfies BenchmarksResponse),
+        )
       ]);
 
       syncProfileThemeState(p);
@@ -203,7 +227,7 @@ export default function Profile() {
       setAvailableSkills(Array.isArray(as) ? as : []);
       setAchievements(Array.isArray(ach) ? sanitizeAchievementsForDisplay(ach) : []);
       setTitles(Array.isArray(t) ? t : []);
-      setBenchmarks(Array.isArray(b) ? b : Array.isArray(b?.data) ? b.data : []);
+      setBenchmarks(Array.isArray(b.benchmarks) ? b.benchmarks : []);
     } catch (loadError) {
       if (loadError instanceof ApiRequestError && (loadError.status === 401 || loadError.status === 403)) {
         navigate("/app", { replace: true });

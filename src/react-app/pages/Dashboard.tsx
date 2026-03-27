@@ -61,6 +61,8 @@ const DEFAULT_LOADING_STATE: DashboardLoadingState = {
   titles: true,
 };
 
+const EXPIRED_MISSION_AUTO_CLEANUP_MS = 2 * 60_000;
+
 /** Alinhado ao worker: XP na barra do nível atual ≥ meta ⇒ estado inconsistente; forçar refetch de /api/progression. */
 function progressionHasXpOverflow(p: Pick<UserProgression, "xp" | "level">): boolean {
   const level = Math.max(1, Math.floor(Number(p.level ?? 1)));
@@ -75,6 +77,26 @@ function normalizeMissionTextKey(value: string | null | undefined): string {
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
     .trim();
+}
+
+function parseMissionTimestampMs(value: string | null | undefined): number | null {
+  if (typeof value !== "string" || value.trim().length === 0) return null;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function resolveExpiredMissionRefreshDelay(missions: Mission[]): number | null {
+  if (missions.length === 0) return null;
+
+  const now = Date.now();
+  return missions.reduce((shortestDelay, mission) => {
+    const referenceTimestamp =
+      parseMissionTimestampMs(mission.updated_at) ??
+      parseMissionTimestampMs(mission.deadline) ??
+      now;
+    const delay = Math.max(0, referenceTimestamp + EXPIRED_MISSION_AUTO_CLEANUP_MS - now);
+    return Math.min(shortestDelay, delay);
+  }, EXPIRED_MISSION_AUTO_CLEANUP_MS);
 }
 
 function missionNeedsSynchronousRefresh(mission: Mission): boolean {
@@ -376,8 +398,13 @@ export default function Dashboard() {
   };
 
   const allDailyMissions = useMemo(
-    () => sortMissions(missions.filter((mission) => mission.type === "daily" && !isAiSpecialMission(mission))),
-    [isAiSpecialMission, missions],
+    () =>
+      sortMissions(
+        missions.filter(
+          (mission) => mission.type === "daily" && !isAiSpecialMission(mission) && !isExpiredMission(mission),
+        ),
+      ),
+    [isAiSpecialMission, isExpiredMission, missions],
   );
   const visibleDailyMissions = useMemo(() => allDailyMissions.slice(0, 3), [allDailyMissions]);
   const aiSpecialMissions = useMemo(
@@ -392,9 +419,13 @@ export default function Dashboard() {
     () => sortMissions(missions.filter((mission) => mission.type === "monthly" && mission.is_completed !== 1 && !isExpiredMission(mission) && !isAiSpecialMission(mission))),
     [isAiSpecialMission, isExpiredMission, missions],
   );
-  const failedMissions = useMemo(
+  const expiredMissions = useMemo(
     () => sortMissions(missions.filter((mission) => isExpiredMission(mission) && mission.is_completed !== 1 && !isAiSpecialMission(mission))),
     [isAiSpecialMission, isExpiredMission, missions],
+  );
+  const expiredMissionRefreshDelay = useMemo(
+    () => resolveExpiredMissionRefreshDelay(expiredMissions),
+    [expiredMissions],
   );
   const missionFeedSections = useMemo(
     () =>
@@ -403,10 +434,22 @@ export default function Dashboard() {
         { title: "Missões especiais da IA", missions: aiSpecialMissions },
         { title: "Missões semanais", missions: weeklyMissions },
         { title: "Missões mensais", missions: monthlyMissions },
-        { title: "Missões expiradas", missions: failedMissions },
+        { title: "Missões expiradas", missions: expiredMissions },
       ].filter((section) => section.missions.length > 0),
-    [aiSpecialMissions, allDailyMissions, failedMissions, monthlyMissions, weeklyMissions],
+    [aiSpecialMissions, allDailyMissions, expiredMissions, monthlyMissions, weeklyMissions],
   );
+
+  useEffect(() => {
+    if (expiredMissionRefreshDelay === null) return;
+
+    const timeoutId = window.setTimeout(() => {
+      void refreshData();
+    }, Math.max(5_000, expiredMissionRefreshDelay + 1_000));
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [expiredMissionRefreshDelay, refreshData]);
 
   const levelValue = progression?.level ?? 1;
   const xpForNextLevel = Math.max(100, levelValue * 100);

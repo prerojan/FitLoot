@@ -305,13 +305,29 @@ const PHRASE_REPLACEMENTS: ReadonlyArray<readonly [RegExp, string]> = [
 
 /** Instruções de execução (ExerciseDB / APIs em inglês) → PT-BR */
 const INSTRUCTION_PHRASE_REPLACEMENTS: ReadonlyArray<readonly [RegExp, string]> = [
-  [/\bStep\s*(\d+)\s*[:.)-]\s*/gi, "Passo $1: "],
+  [new RegExp(String.raw`\bStep\s*(\d+)\s*(?::|\.|\)|-)\s*`, "gi"), "Passo $1: "],
   [/\bStep\s+(\d+)\b/gi, "Passo $1"],
   [/\bStarting position\b/gi, "Posi\u00e7\u00e3o inicial"],
+  [/\bBack to the starting position\b/gi, "De volta \u00e0 posi\u00e7\u00e3o inicial"],
+  [/\bBack to the start\b/gi, "De volta ao in\u00edcio"],
   [/\bStart with\b/gi, "Comece com"],
   [/\bStart in\b/gi, "Comece em"],
   [/\bBegin with\b/gi, "Inicie com"],
   [/\bBegin in\b/gi, "Inicie em"],
+  [/\bOn your back\b/gi, "de costas"],
+  [/\bOn the floor\b/gi, "no ch\u00e3o"],
+  [/\bOn the ground\b/gi, "no ch\u00e3o"],
+  [/\bFlat on the floor\b/gi, "apoiados no ch\u00e3o"],
+  [/\bFlat on the ground\b/gi, "apoiados no ch\u00e3o"],
+  [/\bShoulder-width apart\b/gi, "na largura dos ombros"],
+  [/\bHip-width apart\b/gi, "na largura dos quadris"],
+  [/\bBehind your head\b/gi, "atr\u00e1s da cabe\u00e7a"],
+  [/\bNext to your body\b/gi, "ao lado do corpo"],
+  [/\bToward the ceiling\b/gi, "em dire\u00e7\u00e3o ao teto"],
+  [/\bToward the floor\b/gi, "em dire\u00e7\u00e3o ao ch\u00e3o"],
+  [/\bToward your chest\b/gi, "em dire\u00e7\u00e3o ao peito"],
+  [/\bWith your knees bent\b/gi, "com os joelhos flexionados"],
+  [/\bWith your feet flat\b/gi, "com os p\u00e9s apoiados"],
   [/\bStand with\b/gi, "Fique em p\u00e9 com"],
   [/\bStand up\b/gi, "Levante-se"],
   [/\bStand tall\b/gi, "Fique ereto"],
@@ -357,6 +373,15 @@ const INSTRUCTION_PHRASE_REPLACEMENTS: ReadonlyArray<readonly [RegExp, string]> 
   [/\bExhale as\b/gi, "Expire enquanto"],
   [/\bInhale on\b/gi, "Inspire ao"],
   [/\bInhale as\b/gi, "Inspire enquanto"],
+  [/\bLift your\b/gi, "Eleve os"],
+  [/\bLift both\b/gi, "Eleve ambos"],
+  [/\bRaise your\b/gi, "Eleve os"],
+  [/\bBring your\b/gi, "Leve os"],
+  [/\bBring both\b/gi, "Leve ambos"],
+  [/\bBend your\b/gi, "Flexione os"],
+  [/\bExtend your\b/gi, "Estenda os"],
+  [/\bStraighten your\b/gi, "Estenda os"],
+  [/\bSqueeze your\b/gi, "Contraia os"],
   [/\bDo not lock\b/gi, "N\u00e3o trave a articula\u00e7\u00e3o"],
   [/\bDo not hyperextend\b/gi, "N\u00e3o hiperextenda"],
   [/\bAvoid bouncing\b/gi, "Evite quicar"],
@@ -366,6 +391,27 @@ const INSTRUCTION_PHRASE_REPLACEMENTS: ReadonlyArray<readonly [RegExp, string]> 
   [/\bFull range of motion\b/gi, "amplitude completa de movimento"],
   [/\bControlled movement\b/gi, "movimento controlado"],
   [/\bControlled tempo\b/gi, "ritmo controlado"],
+  [/\bFeet\b/gi, "p\u00e9s"],
+  [/\bHands\b/gi, "m\u00e3os"],
+  [/\bArms\b/gi, "bra\u00e7os"],
+  [/\bLegs\b/gi, "pernas"],
+  [/\bHead\b/gi, "cabe\u00e7a"],
+  [/\bNeck\b/gi, "pesco\u00e7o"],
+  [/\bShoulders\b/gi, "ombros"],
+  [/\bElbows\b/gi, "cotovelos"],
+  [/\bKnees\b/gi, "joelhos"],
+  [/\bHips\b/gi, "quadris"],
+  [/\bGlutes\b/gi, "gl\u00fateos"],
+  [/\bChest\b/gi, "peito"],
+  [/\bFloor\b/gi, "ch\u00e3o"],
+  [/\bGround\b/gi, "ch\u00e3o"],
+  [/\bCeiling\b/gi, "teto"],
+  [/\bBody\b/gi, "corpo"],
+  [/\bSlowly\b/gi, "Devagar"],
+  [/\bGently\b/gi, "Suavemente"],
+  [/\bWhile\b/gi, "Enquanto"],
+  [/\bUntil\b/gi, "at\u00e9"],
+  [/\bThen\b/gi, "depois"],
   [/\b(\d+)\s*seconds?\b/gi, "$1 segundos"],
   [/\b(\d+)\s*minutes?\b/gi, "$1 minutos"],
   [/\brepetitions?\b/gi, "repeti\u00e7\u00f5es"],
@@ -432,9 +478,9 @@ function summarizeTaskLabel(label: string): string {
     .replace(/^Conclua\s+/i, "")
     .replace(/^Complete\s+/i, "")
     .replace(/^\d+\s+vezes\s+/i, "")
-    .replace(/^\d+\s+miss(?:\u00f5es|oes)\s+di[a\u00e1]rias\s+de\s+/i, "")
+    .replace(new RegExp(String.raw`^\d+\s+miss(?:\u00f5es|oes)\s+di(?:a|\u00e1)rias\s+de\s+`, "i"), "")
     .replace(/^\d+\s+miss(?:\u00f5es|oes)\s+de\s+/i, "")
-    .replace(/^miss(?:\u00e3o|ao)\s+di[a\u00e1]ria\s+/i, "")
+    .replace(new RegExp(String.raw`^miss(?:\u00e3o|ao)\s+di(?:a|\u00e1)ria\s+`, "i"), "")
     .trim();
 }
 

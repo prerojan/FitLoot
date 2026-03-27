@@ -86,6 +86,33 @@ type PlanId = PublicPlanId | "vip";
 type PlanStatus = "pending" | "active" | "cancelled" | "failed" | "expired";
 type CheckoutPaymentMethod = "card" | "pix";
 type UserPaymentMethod = CheckoutPaymentMethod | "none";
+type PhysicalBenchmarkRow = {
+  id: number;
+  user_id: string;
+  pushups_max: number | null;
+  squats_max: number | null;
+  situps_max: number | null;
+  plank_seconds: number | null;
+  pullups_max: number | null;
+  run_distance_km: number | null;
+  run_time_seconds: number | null;
+  notes: string | null;
+  test_date: string;
+  created_at: string;
+  updated_at: string;
+};
+type PhysicalBenchmarkDelta = {
+  pushups_delta: number;
+  squats_delta: number;
+  situps_delta: number;
+  plank_delta: number;
+  pullups_delta: number;
+  run_distance_delta: number;
+  run_time_delta: number;
+};
+type PhysicalBenchmarkWithDelta = PhysicalBenchmarkRow & {
+  delta: PhysicalBenchmarkDelta | null;
+};
 
 const CHECKOUT_PLAN_CATALOG: Record<
   PublicPlanId,
@@ -1419,10 +1446,18 @@ async function cleanupSettledMissions(db: D1Database, userId: string): Promise<v
   await db.prepare(
     `DELETE FROM missions
       WHERE user_id = ?
-        AND COALESCE(status, 'pending') IN ('completed', 'expired', 'failed')
         AND (
-          (type = 'daily' AND date(COALESCE(completed_at, updated_at)) < date('now'))
-          OR (type != 'daily' AND datetime(updated_at) < datetime('now', '${SETTLED_MISSION_MAX_AGE_SQL_MODIFIER}'))
+          (
+            COALESCE(status, 'pending') IN ('expired', 'failed')
+            AND datetime(updated_at) < datetime('now', '${SETTLED_MISSION_MAX_AGE_SQL_MODIFIER}')
+          )
+          OR (
+            COALESCE(status, 'pending') = 'completed'
+            AND (
+              (type = 'daily' AND date(COALESCE(completed_at, updated_at)) < date('now'))
+              OR (type != 'daily' AND datetime(updated_at) < datetime('now', '${SETTLED_MISSION_MAX_AGE_SQL_MODIFIER}'))
+            )
+          )
         )`
   ).bind(userId).run();
 }
@@ -1455,7 +1490,7 @@ async function expirePendingMissionsAndUpdateStreak(db: D1Database, userId: stri
   }
 
   for (const mission of expired.results) {
-    await db.prepare("UPDATE missions SET status = 'failed', updated_at = datetime('now') WHERE id = ?").bind(mission.id).run();
+    await db.prepare("UPDATE missions SET status = 'expired', updated_at = datetime('now') WHERE id = ?").bind(mission.id).run();
     await onMissionFailed(db, userId, mission.id);
   }
   const progression = await db.prepare("SELECT current_streak, best_streak, last_activity_date FROM user_progression WHERE user_id = ?").bind(userId).first<{ current_streak: number; best_streak: number; last_activity_date: string | null }>();
@@ -4210,7 +4245,7 @@ app.post("/api/progress/snapshot", authMiddleware, async (c) => {
     ).run();
 
     // Se o snapshot já existia, buscar o existente
-    if ((result as any).changes === 0) {
+    if (result.meta.changes === 0) {
       const existingSnapshot = await c.env.fitloot_db.prepare(
         "SELECT * FROM progress_snapshots WHERE user_id = ? AND snapshot_date = date('now')"
       ).bind(user.id).first();
@@ -4221,7 +4256,7 @@ app.post("/api/progress/snapshot", authMiddleware, async (c) => {
     // Buscar o snapshot recém-criado
     const newSnapshot = await c.env.fitloot_db.prepare(
       "SELECT * FROM progress_snapshots WHERE id = ?"
-    ).bind((result as any).meta.last_row_id).first();
+    ).bind(result.meta.last_row_id).first();
 
     return c.json({ snapshot: newSnapshot, status: "created" });
   } catch (error) {
@@ -4273,7 +4308,7 @@ app.post("/api/benchmarks", authMiddleware, async (c) => {
       WHERE user_id = ? 
       ORDER BY test_date DESC 
       LIMIT 1
-    `).bind(user.id).first();
+    `).bind(user.id).first<PhysicalBenchmarkRow>();
 
     // Inserir novo benchmark
     const result = await c.env.fitloot_db.prepare(`
@@ -4293,14 +4328,14 @@ app.post("/api/benchmarks", authMiddleware, async (c) => {
     ).run();
 
     // Calcular delta de evolução
-    const delta = previousBenchmark ? {
-      pushups_delta: (pushups_max || 0) - ((previousBenchmark as any).pushups_max || 0),
-      squats_delta: (squats_max || 0) - ((previousBenchmark as any).squats_max || 0),
-      situps_delta: (situps_max || 0) - ((previousBenchmark as any).situps_max || 0),
-      plank_delta: (plank_seconds || 0) - ((previousBenchmark as any).plank_seconds || 0),
-      pullups_delta: (pullups_max || 0) - ((previousBenchmark as any).pullups_max || 0),
-      run_distance_delta: (run_distance_km || 0) - ((previousBenchmark as any).run_distance_km || 0),
-      run_time_delta: (run_time_seconds || 0) - ((previousBenchmark as any).run_time_seconds || 0)
+    const delta: PhysicalBenchmarkDelta = previousBenchmark ? {
+      pushups_delta: (pushups_max || 0) - (previousBenchmark.pushups_max || 0),
+      squats_delta: (squats_max || 0) - (previousBenchmark.squats_max || 0),
+      situps_delta: (situps_max || 0) - (previousBenchmark.situps_max || 0),
+      plank_delta: (plank_seconds || 0) - (previousBenchmark.plank_seconds || 0),
+      pullups_delta: (pullups_max || 0) - (previousBenchmark.pullups_max || 0),
+      run_distance_delta: (run_distance_km || 0) - (previousBenchmark.run_distance_km || 0),
+      run_time_delta: (run_time_seconds || 0) - (previousBenchmark.run_time_seconds || 0)
     } : {
       pushups_delta: pushups_max || 0,
       squats_delta: squats_max || 0,
@@ -4353,7 +4388,7 @@ app.post("/api/benchmarks", authMiddleware, async (c) => {
     // Buscar o benchmark recém-criado
     const newBenchmark = await c.env.fitloot_db.prepare(
       "SELECT * FROM physical_benchmarks WHERE id = ?"
-    ).bind((result as any).meta.last_row_id).first();
+    ).bind(result.meta.last_row_id).first<PhysicalBenchmarkRow>();
 
     return c.json({ 
       benchmark: newBenchmark, 
@@ -4375,16 +4410,16 @@ app.get("/api/benchmarks", authMiddleware, async (c) => {
       SELECT * FROM physical_benchmarks 
       WHERE user_id = ? 
       ORDER BY test_date DESC
-    `).bind(user.id).all();
+    `).bind(user.id).all<PhysicalBenchmarkRow>();
 
     // Calcular delta entre registros consecutivos
-    const results = benchmarks.results.map((benchmark: any, index: number) => {
+    const results = benchmarks.results.map<PhysicalBenchmarkWithDelta>((benchmark, index) => {
       if (index === 0) {
         return { ...benchmark, delta: null };
       }
 
-      const previous: any = benchmarks.results[index - 1];
-      const delta = {
+      const previous = benchmarks.results[index - 1];
+      const delta: PhysicalBenchmarkDelta = {
         pushups_delta: (benchmark.pushups_max || 0) - (previous.pushups_max || 0),
         squats_delta: (benchmark.squats_max || 0) - (previous.squats_max || 0),
         situps_delta: (benchmark.situps_max || 0) - (previous.situps_max || 0),
@@ -11604,7 +11639,7 @@ async function ensurePeriodicMissions(env: Env, db: D1Database, userId: string) 
     const cycleStart = missionCycleStartIso(period);
     await db.prepare(
       `UPDATE missions
-         SET status = 'failed', updated_at = datetime('now')
+         SET status = 'expired', updated_at = datetime('now')
        WHERE user_id = ?
          AND type = ?
          AND is_completed = 0
@@ -13164,7 +13199,7 @@ async function recalculateUserAttributes(db: D1Database, userId: string): Promis
       WHERE user_id = ? 
       ORDER BY test_date DESC 
       LIMIT 1
-    `).bind(userId).first() as any;
+    `).bind(userId).first<PhysicalBenchmarkRow>();
 
     // Obter histórico de missões da última semana
     const oneWeekAgo = new Date();
@@ -13194,12 +13229,12 @@ async function recalculateUserAttributes(db: D1Database, userId: string): Promis
     let constitutionBonus = 0;
 
     if (latestBenchmark) {
-      const pushupsMax = latestBenchmark.pushups_max as number;
-      const squatsMax = latestBenchmark.squats_max as number;
-      const situpsMax = latestBenchmark.situps_max as number;
-      const plankSeconds = latestBenchmark.plank_seconds as number;
-      const pullupsMax = latestBenchmark.pullups_max as number;
-      const runDistanceKm = latestBenchmark.run_distance_km as number;
+      const pushupsMax = latestBenchmark.pushups_max ?? 0;
+      const squatsMax = latestBenchmark.squats_max ?? 0;
+      const situpsMax = latestBenchmark.situps_max ?? 0;
+      const plankSeconds = latestBenchmark.plank_seconds ?? 0;
+      const pullupsMax = latestBenchmark.pullups_max ?? 0;
+      const runDistanceKm = latestBenchmark.run_distance_km ?? 0;
 
       if (pushupsMax && pushupsMax > 0) {
         strengthBonus += Math.floor(pushupsMax / 5);

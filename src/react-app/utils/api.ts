@@ -46,7 +46,8 @@ function stripEphemeralProgressionFields(data: unknown): unknown {
   if (!data || typeof data !== "object" || Array.isArray(data)) return data;
   const record = data as Record<string, unknown>;
   if (record.celebrate_level === undefined) return data;
-  const { celebrate_level: _celebrate, ...rest } = record;
+  const rest = { ...record };
+  delete rest.celebrate_level;
   return rest;
 }
 
