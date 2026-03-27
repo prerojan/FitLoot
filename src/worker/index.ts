@@ -11981,6 +11981,14 @@ async function fetchJsonWithTimeout<T>(
         responseText.slice(0, 500),
       );
     }
+    if (response.status === 429) {
+      throw new ApiIntegrationError(
+        "RATE_LIMITED",
+        429,
+        "Servico externo em limite temporario. Tente novamente em instantes.",
+        responseText.slice(0, 500),
+      );
+    }
     if (!response.ok) {
       throw new ApiIntegrationError(
         "UPSTREAM_ERROR",
@@ -12008,6 +12016,22 @@ async function fetchJsonWithTimeout<T>(
   } finally {
     clearTimeout(timeout);
   }
+}
+
+function shouldRetryHuggingFaceError(error: unknown): boolean {
+  return error instanceof ApiIntegrationError
+    && (
+      error.code === "RATE_LIMITED"
+      || error.code === "TIMEOUT"
+      || error.code === "UPSTREAM_ERROR"
+      || error.code === "INVALID_RESPONSE"
+    );
+}
+
+function waitForRetry(delayMs: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, delayMs);
+  });
 }
 
 function buildJsonOnlyRouterMessages(messages: Array<{ role: string; content: string }>) {
@@ -12080,6 +12104,60 @@ async function requestHuggingFaceStructuredContent(
     : new ApiIntegrationError("UPSTREAM_ERROR", 502, "Falha ao consultar serviço externo.");
 }
 
+async function requestHuggingFaceChatCompletion(
+  apiKey: string,
+  messages: Array<{ role: string; content: string }>,
+  maxTokens: number,
+  timeoutMs: number,
+): Promise<OpenAIChatCompletionResponse> {
+  const attempts = [
+    { maxTokens, label: "chat-primary" },
+    { maxTokens: Math.min(maxTokens, 700), label: "chat-retry" },
+  ];
+
+  let lastError: unknown = null;
+  for (let index = 0; index < attempts.length; index += 1) {
+    const attempt = attempts[index];
+    try {
+      const completion = await fetchJsonWithTimeout<OpenAIChatCompletionResponse>(
+        "https://router.huggingface.co/v1/chat/completions",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({
+            model: HUGGING_FACE_CHAT_MODEL,
+            messages,
+            max_tokens: attempt.maxTokens,
+          }),
+        },
+        timeoutMs,
+      );
+      const rawContent = safeGet(completion.choices ?? [], 0)?.message?.content ?? "";
+      if (rawContent.trim().length > 0) {
+        return completion;
+      }
+      lastError = new ApiIntegrationError("INVALID_RESPONSE", 502, "Servico externo retornou conteudo vazio.");
+    } catch (error) {
+      lastError = error;
+      console.warn(`[huggingface:${attempt.label}]`, {
+        message: getErrorMessage(error),
+        details: error instanceof ApiIntegrationError ? error.details : undefined,
+      });
+      if (!shouldRetryHuggingFaceError(error) || index === attempts.length - 1) {
+        break;
+      }
+      await waitForRetry(450 * (index + 1));
+    }
+  }
+
+  throw lastError instanceof Error
+    ? lastError
+    : new ApiIntegrationError("UPSTREAM_ERROR", 502, "Falha ao consultar serviÃ§o externo.");
+}
+
 async function fetchResponseWithTimeout(
   url: string,
   init: RequestInit,
@@ -12123,21 +12201,11 @@ async function callOpenAIChat(
     };
     return structuredResponse;
   }
-  return fetchJsonWithTimeout<OpenAIChatCompletionResponse>(
-    "https://router.huggingface.co/v1/chat/completions",
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: HUGGING_FACE_CHAT_MODEL,
-        messages,
-        max_tokens: maxTokens,
-      }),
-    },
-    timeoutMsByService.huggingface
+  return requestHuggingFaceChatCompletion(
+    apiKey,
+    messages,
+    maxTokens,
+    timeoutMsByService.huggingface,
   );
 }
 
@@ -12160,12 +12228,33 @@ function shouldInspectTrainingPlanPreferenceRequest(message: string): boolean {
   const normalized = normalizeMatchText(message);
   if (normalized.length === 0) return false;
 
-  return [
+  const planContextKeywords = [
     "plano",
-    "treino",
     "rotina",
     "missao",
     "missoes",
+    "proxim",
+    "daqui pra frente",
+    "a partir de agora",
+  ];
+  const changeIntentKeywords = [
+    "adicion",
+    "inclu",
+    "apli",
+    "salv",
+    "ajust",
+    "muda",
+    "troca",
+    "substit",
+    "adapt",
+    "configur",
+    "quero",
+    "prefiro",
+    "deixa",
+    "usa",
+    "use",
+  ];
+  const focusKeywords = [
     "foco",
     "forca",
     "resistencia",
@@ -12178,8 +12267,15 @@ function shouldInspectTrainingPlanPreferenceRequest(message: string): boolean {
     "emagrec",
     "curta",
     "rapido",
-    "adapt",
-  ].some((keyword) => normalized.includes(keyword));
+  ];
+
+  const hasPlanContext = planContextKeywords.some((keyword) => normalized.includes(keyword));
+  const hasChangeIntent = changeIntentKeywords.some((keyword) => normalized.includes(keyword));
+  const hasFocusKeyword = focusKeywords.some((keyword) => normalized.includes(keyword));
+  const mentionsTraining = normalized.includes("treino");
+
+  return (hasPlanContext && hasChangeIntent)
+    || (hasFocusKeyword && hasChangeIntent && (hasPlanContext || mentionsTraining));
 }
 
 async function maybeApplyTrainingPlanPreferenceFromChat(
