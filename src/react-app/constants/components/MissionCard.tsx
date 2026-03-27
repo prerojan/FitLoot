@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import {
   CheckCircle2,
   Clock3,
@@ -139,9 +139,141 @@ function isPixelOrLineArtUrl(url: string | null | undefined): boolean {
   return /(pixel|lineart|sprite|icon|outline|vector)/i.test(url);
 }
 
-function formatProgressAmount(value: number): string {
-  if (value >= 1000) return `${(value / 1000).toFixed(1).replace(/\.0$/, "")} km`;
-  return String(Math.round(value));
+function normalizeLookupText(value: string | null | undefined): string {
+  return (value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
+
+function formatDistanceAmount(value: number): string {
+  if (value >= 1000) {
+    return `${(value / 1000).toLocaleString("pt-BR", {
+      minimumFractionDigits: value % 1000 === 0 ? 0 : 1,
+      maximumFractionDigits: 1,
+    })} km`;
+  }
+  return `${Math.round(value).toLocaleString("pt-BR")} m`;
+}
+
+function extractGoalCounterValue(value: string | null | undefined): number | null {
+  if (typeof value !== "string") return null;
+  const normalized = value
+    .replace(/\./g, "")
+    .replace(/,/g, ".")
+    .trim();
+  const match = normalized.match(/(\d+(?:\.\d+)?)/);
+  const rawValue = match?.[1];
+  if (!rawValue) return null;
+  const numeric = Number.parseFloat(rawValue);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function resolveProgressTarget(mission: Mission, metricType: MissionMetricType): number {
+  const metricTarget = Math.max(1, missionTotalGoal(mission, metricType));
+  const normalizedGoal = normalizeLookupText(mission.goal);
+  const explicitGoalValue = extractGoalCounterValue(mission.goal);
+
+  if (explicitGoalValue === null || explicitGoalValue <= 0) {
+    return metricTarget;
+  }
+
+  if (metricType === "steps" || normalizedGoal.includes("passos")) {
+    return Math.max(1, Math.round(explicitGoalValue));
+  }
+
+  if (
+    metricType === "distance_meters"
+    || normalizedGoal.includes(" km")
+    || normalizedGoal.endsWith("km")
+    || normalizedGoal.includes("metros")
+  ) {
+    const rawGoal = String(mission.goal ?? "").toLowerCase();
+    const asMeters = rawGoal.includes("km")
+      ? explicitGoalValue * 1000
+      : explicitGoalValue;
+    return Math.max(1, Math.round(asMeters));
+  }
+
+  if (
+    normalizedGoal.includes("missoes concluidas")
+    || normalizedGoal.includes("dias ativos")
+    || normalizedGoal.includes("circuitos semanais")
+  ) {
+    return Math.max(1, Math.round(explicitGoalValue));
+  }
+
+  return metricTarget;
+}
+
+function resolveProgressCounterParts(
+  mission: Mission,
+  metricType: MissionMetricType,
+  current: number,
+  target: number,
+): { current: string; target: string; unitLabel: string | null } {
+  const title = normalizeLookupText(mission.title);
+  const goal = normalizeLookupText(mission.goal);
+
+  if (title.includes("consistencia mensal") || title.includes("volume mensal") || goal.includes("missoes concluidas")) {
+    return {
+      current: Math.round(current).toLocaleString("pt-BR"),
+      target: Math.round(target).toLocaleString("pt-BR"),
+      unitLabel: "missões",
+    };
+  }
+
+  if (title.includes("dias ativos") || title.includes("pratica ativa") || goal.includes("dias ativos")) {
+    return {
+      current: Math.round(current).toLocaleString("pt-BR"),
+      target: Math.round(target).toLocaleString("pt-BR"),
+      unitLabel: "dias",
+    };
+  }
+
+  if (title.includes("circuitos semanais") || goal.includes("circuitos semanais")) {
+    return {
+      current: Math.round(current).toLocaleString("pt-BR"),
+      target: Math.round(target).toLocaleString("pt-BR"),
+      unitLabel: "circuitos",
+    };
+  }
+
+  if (metricType === "steps" || goal.includes("passos") || title.includes("passos")) {
+    return {
+      current: Math.round(current).toLocaleString("pt-BR"),
+      target: Math.round(target).toLocaleString("pt-BR"),
+      unitLabel: "passos",
+    };
+  }
+
+  if (metricType === "distance_meters") {
+    return {
+      current: formatDistanceAmount(current),
+      target: formatDistanceAmount(target),
+      unitLabel: null,
+    };
+  }
+
+  return {
+    current: Math.round(current).toLocaleString("pt-BR"),
+    target: Math.round(target).toLocaleString("pt-BR"),
+    unitLabel: null,
+  };
+}
+
+function formatProgressAmount(
+  mission: Mission,
+  metricType: MissionMetricType,
+  current: number,
+  target: number,
+): string {
+  const parts = resolveProgressCounterParts(mission, metricType, current, target);
+  if (parts.unitLabel) {
+    return `${parts.current}/${parts.target} ${parts.unitLabel}`;
+  }
+  return `${parts.current}/${parts.target}`;
 }
 
 function resolveMissionGoalText(mission: Mission, metricType: MissionMetricType): string {
@@ -149,6 +281,14 @@ function resolveMissionGoalText(mission: Mission, metricType: MissionMetricType)
     return (localizeMissionText(mission.goal) ?? mission.goal).trim();
   }
   return localizeMissionText(formatGoal(mission, metricType)) ?? formatGoal(mission, metricType);
+}
+
+const MISSION_TITLE_PREFIX_PATTERN = /^(?:miss(?:\u00e3o|ao)\s+(?:di[a\u00e1]ria|semanal|mensal)|daily mission|weekly mission|monthly mission|meta\s+(?:di[a\u00e1]ria|semanal|mensal)|daily goal|weekly goal|monthly goal)\s*:\s*/i;
+
+function resolveMissionDisplayTitle(value: string | null | undefined): string {
+  const localized = localizeMissionText(value ?? "") ?? "";
+  const stripped = localized.replace(MISSION_TITLE_PREFIX_PATTERN, "").trim();
+  return stripped.length > 0 ? stripped : localized.trim();
 }
 
 function formatDifficultyLabel(value: string | null | undefined): string {
@@ -210,12 +350,12 @@ function summarizeAutoProgressLabel(tasks: readonly CircuitTask[]): string {
 }
 
 function resolveMissionMediaUrl(mission: Mission): string | null {
-  const primaryImage = mission.image_url ?? null;
+  const primaryImage = normalizeMissionMediaUrl(mission.image_url);
   const ascendGif = isGifUrl(primaryImage) ? primaryImage : null;
-  const exerciseDbGif = mission.exercise_db_gif_url ?? null;
-  const exerciseDbImage = mission.exercise_db_image_url ?? null;
+  const exerciseDbGif = normalizeMissionMediaUrl(mission.exercise_db_gif_url);
+  const exerciseDbImage = normalizeMissionMediaUrl(mission.exercise_db_image_url);
   const videoUrl = normalizeMissionMediaUrl(mission.video_url);
-  const thumbnail = mission.thumbnail_url ?? null;
+  const thumbnail = normalizeMissionMediaUrl(mission.thumbnail_url);
 
   return ascendGif
     ?? exerciseDbGif
@@ -224,6 +364,21 @@ function resolveMissionMediaUrl(mission: Mission): string | null {
     ?? primaryImage
     ?? thumbnail
     ?? null;
+}
+
+function resolveMissionVideoUrl(mission: Mission): string | null {
+  return normalizeMissionMediaUrl(mission.video_url);
+}
+
+function resolveMissionMediaStyle(url: string | null | undefined): CSSProperties {
+  const pixelOrLineArt = isPixelOrLineArtUrl(url);
+
+  return {
+    imageRendering: pixelOrLineArt ? "crisp-edges" : "auto",
+    filter: pixelOrLineArt
+      ? "contrast(1.06) saturate(1.06) brightness(1.01)"
+      : "contrast(1.02) saturate(1.03) brightness(1.01)",
+  };
 }
 
 function MissionExecutionModal({
@@ -240,6 +395,8 @@ function MissionExecutionModal({
   onFinish: (value: number) => Promise<void>;
 }) {
   const [state, setState] = useState<MissionExecutionState>(DEFAULT_EXECUTION_STATE);
+  const [videoVisibleControls, setVideoVisibleControls] = useState(false);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
 
   const sets = Math.max(1, Number(mission.sets ?? 1));
   const restSecondsConfigured = Math.max(0, Number(mission.rest_seconds ?? 0));
@@ -257,6 +414,7 @@ function MissionExecutionModal({
       remainingSeconds: setDuration,
       running: metricType === "duration_seconds" || metricType === "duration_minutes",
     });
+    setVideoVisibleControls(false);
   }, [metricType, open, setDuration]);
 
   useEffect(() => {
@@ -375,6 +533,24 @@ function MissionExecutionModal({
   const canFinishCounterMission = isCounterMission && state.finished;
   const canFinishMission = isDistanceMission ? canFinishInputMission : isTimeMission ? state.finished : canFinishCounterMission;
 
+  const toggleVideoPlayback = useCallback(async () => {
+    const currentVideo = videoRef.current;
+    if (!currentVideo) return;
+
+    if (currentVideo.paused) {
+      try {
+        await currentVideo.play();
+        setVideoVisibleControls(false);
+      } catch {
+        setVideoVisibleControls(true);
+      }
+      return;
+    }
+
+    currentVideo.pause();
+    setVideoVisibleControls(true);
+  }, []);
+
   const advanceTimedSet = () => {
     setState((current) => {
       if (!isTimeMission) return current;
@@ -401,6 +577,7 @@ function MissionExecutionModal({
 
   const resetExecution = () => {
     setState(DEFAULT_EXECUTION_STATE);
+    setVideoVisibleControls(false);
   };
 
   const finishMission = async () => {
@@ -417,6 +594,7 @@ function MissionExecutionModal({
 
   const detailMissionMediaUrl = resolveMissionMediaUrl(mission);
   const missionVideoUrl = normalizeMissionMediaUrl(mission.video_url);
+  const executionTitle = resolveMissionDisplayTitle(mission.title);
   const displaySeconds = state.resting ? state.restSeconds : state.remainingSeconds;
   const m = Math.floor(displaySeconds / 60).toString().padStart(2, '0');
   const s = (displaySeconds % 60).toString().padStart(2, '0');
@@ -464,7 +642,7 @@ function MissionExecutionModal({
             <div className="flex justify-between items-end mb-2 sm:mb-3 gap-2">
               <div className="min-w-0 overflow-hidden">
                 <p className="text-[10px] sm:text-xs md:text-sm font-medium uppercase tracking-widest truncate" style={{ color: "var(--app-primary-color)" }}>Missão Ativa</p>
-                <h1 className="text-lg sm:text-xl md:text-2xl lg:text-3xl font-bold mt-0.5 sm:mt-1 truncate">{localizeMissionText(mission.title) ?? mission.title}</h1>
+                <h1 className="text-lg sm:text-xl md:text-2xl lg:text-3xl font-bold mt-0.5 sm:mt-1 truncate">{executionTitle}</h1>
               </div>
               <p className="text-base sm:text-lg md:text-xl font-bold shrink-0" style={{ color: "var(--app-primary-color)" }}>{Math.round(activeProgress)}%</p>
             </div>
@@ -520,49 +698,57 @@ function MissionExecutionModal({
             )}
 
             {/* Mission Media */}
-            <div className="relative w-full max-w-md aspect-video overflow-hidden rounded-2xl border shadow-2xl" style={{ borderColor: "var(--fl-border-soft)", boxShadow: "var(--fl-shadow-glass)" }}>
+            <div
+              className="relative w-full max-w-md aspect-video overflow-hidden rounded-2xl border shadow-2xl"
+              style={{
+                backgroundColor: "#ffffff",
+                borderColor: "var(--fl-border-soft)",
+                boxShadow: "var(--fl-shadow-glass)",
+              }}
+            >
               {missionVideoUrl ? (
                 <video
+                  ref={videoRef}
                   src={missionVideoUrl}
                   poster={detailMissionMediaUrl ?? undefined}
                   className="absolute inset-0 h-full w-full object-contain"
-                  style={{
-                    imageRendering: "pixelated" as React.CSSProperties["imageRendering"],
-                    filter: "contrast(1.08) saturate(1.1) brightness(1.02)",
-                  }}
+                  style={resolveMissionMediaStyle(missionVideoUrl)}
                   autoPlay loop muted playsInline
+                  onPause={() => setVideoVisibleControls(true)}
+                  onPlay={() => setVideoVisibleControls(false)}
+                  onClick={() => { void toggleVideoPlayback(); }}
                 />
               ) : detailMissionMediaUrl ? (
                 <img
                   src={detailMissionMediaUrl}
-                  alt={localizeMissionText(mission.title) ?? mission.title}
+                  alt={executionTitle}
                   className="absolute inset-0 h-full w-full object-contain"
-                  style={{
-                    imageRendering: (isPixelOrLineArtUrl(detailMissionMediaUrl) ? "crisp-edges" : "pixelated") as React.CSSProperties["imageRendering"],
-                    filter: isPixelOrLineArtUrl(detailMissionMediaUrl) || isGifUrl(detailMissionMediaUrl)
-                      ? "contrast(1.1) saturate(1.1) brightness(1.02)"
-                      : "contrast(1.1) saturate(1.2) brightness(1.02)",
-                  }}
+                  style={resolveMissionMediaStyle(detailMissionMediaUrl)}
                 />
               ) : (
                 <div className="absolute inset-0 flex items-center justify-center" style={{ backgroundColor: "color-mix(in srgb, var(--fl-surface-muted) 60%, transparent)" }}>
                   <Dumbbell className="w-16 h-16 opacity-20" />
                 </div>
               )}
-              <div className="absolute inset-0 flex items-center justify-center backdrop-blur-[2px]" style={{ backgroundColor: "rgba(0,0,0,0.32)" }}>
+              {missionVideoUrl ? (
                 <button
                   type="button"
-                  onClick={toggleRunning}
-                  disabled={isDistanceMission || state.finished}
-                  className="size-14 sm:size-16 rounded-full flex items-center justify-center active:scale-95 transition-all disabled:opacity-0"
-                  style={{ backgroundColor: "var(--app-primary-color)", color: "var(--app-bg-color, #000)" }}
+                  aria-label={videoVisibleControls ? "Reproduzir vídeo" : "Pausar vídeo"}
+                  onClick={() => { void toggleVideoPlayback(); }}
+                  className={`absolute inset-0 flex items-center justify-center transition-opacity duration-200 ${videoVisibleControls ? "opacity-100" : "pointer-events-none opacity-0"}`}
+                  style={{ backgroundColor: "rgba(0,0,0,0.18)" }}
                 >
-                  {state.running
-                    ? <Pause className="w-6 h-6 sm:w-7 sm:h-7 fill-current" strokeWidth={1} />
-                    : <Play className="w-6 h-6 sm:w-7 sm:h-7 fill-current ml-1" strokeWidth={1} />
-                  }
+                  <span
+                    className="flex size-14 items-center justify-center rounded-full shadow-lg"
+                    style={{ backgroundColor: "var(--app-primary-color)", color: "var(--app-bg-color, #000)" }}
+                  >
+                    {videoVisibleControls
+                      ? <Play className="w-6 h-6 fill-current ml-1" strokeWidth={1} />
+                      : <Pause className="w-6 h-6 fill-current" strokeWidth={1} />
+                    }
+                  </span>
                 </button>
-              </div>
+              ) : null}
               <div className="absolute bottom-2 sm:bottom-4 left-2 sm:left-4 right-2 sm:right-4 flex items-center justify-between gap-1">
                 <span className="rounded-full border px-2 py-1 sm:px-4 sm:py-1.5 text-[9px] sm:text-xs font-bold backdrop-blur-md truncate" style={{ backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 88%, transparent)", borderColor: "var(--fl-border-soft)" }}>
                   VERIFICAR FORMA
@@ -674,6 +860,7 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
   const isAutoProgressMission = isWeeklyMission || isMonthlyMission;
   const isAIMission = Number(mission.is_ai_special ?? 0) === 1 || mission.mission_origin === "ai";
   const isWalkingMission = metricType === "steps" || metricType === "distance_meters";
+  const isTrackableWalkingMission = isWalkingMission && mission.type === "daily";
   const circuitTasks = useMemo(() => resolveCircuitTasks(mission), [mission]);
   const hasTaskProgressMission = isWeeklyMission || (isMonthlyMission && circuitTasks.length > 0);
   const autoProgressRequiredTotal = circuitTasks.reduce((total, task) => total + Math.max(1, task.required_count), 0);
@@ -700,12 +887,13 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
         ? "Em progresso"
         : "Disponível";
   const missionTypeLabel = mission.type === "daily" ? "Diária" : mission.type === "weekly" ? "Semanal" : "Mensal";
-  const monthlyTarget = Math.max(1, missionTotalGoal(mission, metricType));
+  const monthlyTarget = resolveProgressTarget(mission, metricType);
   const monthlyProgressValue = Number((mission as Mission & { progress_value?: number | undefined }).progress_value ?? 0);
   const monthlyCurrent = circuitTasks.length > 0
     ? (isCompleted ? autoProgressRequiredTotal : autoProgressCurrentTotal)
     : (isCompleted ? monthlyTarget : Math.max(0, Math.min(monthlyTarget, monthlyProgressValue)));
   const monthlyProgress = Math.min(100, Math.round((monthlyCurrent / monthlyTarget) * 100));
+  const monthlyProgressParts = resolveProgressCounterParts(mission, metricType, monthlyCurrent, monthlyTarget);
   const hasInlineInstructions =
     (Array.isArray(mission.instructions) && mission.instructions.length > 0) ||
     (Array.isArray(mission.exercise_instructions_pt) && mission.exercise_instructions_pt.length > 0) ||
@@ -775,6 +963,7 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
   const detailCircuitTasks = resolveCircuitTasks(missionDetails);
   const detailIsWeeklyMission = missionDetails.type === "weekly";
   const detailIsMonthlyMission = missionDetails.type === "monthly";
+  const detailIsAutoProgressMission = detailIsWeeklyMission || detailIsMonthlyMission;
   const detailIsCompleted = missionDetails.is_completed === 1 || ((missionDetails as Mission & { status?: string | undefined }).status ?? "") === "completed";
   const detailHasTaskProgressMission = detailIsWeeklyMission || (detailIsMonthlyMission && detailCircuitTasks.length > 0);
   const detailAutoProgressRequiredTotal = detailCircuitTasks.reduce((total, task) => total + Math.max(1, task.required_count), 0);
@@ -785,16 +974,18 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
   const detailCircuitProgress = detailAutoProgressRequiredTotal > 0
     ? (detailAutoProgressCurrentTotal / detailAutoProgressRequiredTotal) * 100
     : 0;
-  const detailMonthlyTarget = Math.max(1, missionTotalGoal(missionDetails, detailMetricType));
+  const detailMonthlyTarget = resolveProgressTarget(missionDetails, detailMetricType);
   const detailMonthlyProgressValue = Number((missionDetails as Mission & { progress_value?: number | undefined }).progress_value ?? 0);
   const detailMonthlyCurrent = detailCircuitTasks.length > 0
     ? (detailIsCompleted ? detailAutoProgressRequiredTotal : detailAutoProgressCurrentTotal)
     : (detailIsCompleted ? detailMonthlyTarget : Math.max(0, Math.min(detailMonthlyTarget, detailMonthlyProgressValue)));
   const detailMonthlyProgress = Math.min(100, Math.round((detailMonthlyCurrent / detailMonthlyTarget) * 100));
-  const detailFocusLabels = isAutoProgressMission ? [] : resolveMissionFocusLabels(missionDetails);
+  const detailMonthlyProgressParts = resolveProgressCounterParts(missionDetails, detailMetricType, detailMonthlyCurrent, detailMonthlyTarget);
+  const detailFocusLabels = detailIsAutoProgressMission ? [] : resolveMissionFocusLabels(missionDetails);
   const detailMissionMediaUrl = resolveMissionMediaUrl(missionDetails);
-  const detailMissionVideoUrl = normalizeMissionMediaUrl(missionDetails.video_url);
-  const detailTitle = localizeMissionText(missionDetails.title) ?? missionDetails.title;
+  const missionVideoUrl = resolveMissionVideoUrl(mission);
+  const detailMissionVideoUrl = resolveMissionVideoUrl(missionDetails);
+  const detailTitle = resolveMissionDisplayTitle(missionDetails.title);
   const detailDescription = missionDetails.description
     ? (localizeMissionText(missionDetails.description) ?? missionDetails.description)
     : null;
@@ -811,8 +1002,10 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
           : detailDescription
             ? [detailDescription]
             : ["Siga o movimento com controle e respire durante cada repetição."]);
-  const pixelOrLineArt = isPixelOrLineArtUrl(detailMissionMediaUrl);
-  const gifLikeMedia = isGifUrl(detailMissionMediaUrl);
+  const missionMediaStyle = resolveMissionMediaStyle(missionMediaUrl);
+  const detailMissionMediaStyle = resolveMissionMediaStyle(detailMissionMediaUrl);
+  const detailIsTrackableWalkingMission = (detailMetricType === "steps" || detailMetricType === "distance_meters") && missionDetails.type === "daily";
+  const detailIsCircuitMission = detailMetricType === "circuit_tasks";
   const showMissionDuration = shouldShowMissionDuration(mission.type)
     && typeof mission.duration_estimate_minutes === "number"
     && mission.duration_estimate_minutes > 0;
@@ -821,16 +1014,17 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
     && missionDetails.duration_estimate_minutes > 0;
   const compactDurationLabel = showMissionDuration ? `${mission.duration_estimate_minutes} min` : null;
   const compactXpLabel = `+${mission.xp_reward} XP`;
+  const cardTitle = resolveMissionDisplayTitle(mission.title);
   const compactSummary = isWeeklyMission
     ? [`${autoProgressCurrentTotal}/${autoProgressRequiredTotal || 1} tarefas`, compactXpLabel].join(" | ")
     : isMonthlyMission && circuitTasks.length > 0
       ? [`${autoProgressCurrentTotal}/${autoProgressRequiredTotal || 1} tarefas`, compactXpLabel].join(" | ")
       : isMonthlyMission
-        ? [`${formatProgressAmount(monthlyCurrent)}/${formatProgressAmount(monthlyTarget)}`, compactXpLabel].join(" | ")
+        ? [formatProgressAmount(mission, metricType, monthlyCurrent, monthlyTarget), compactXpLabel].join(" | ")
         : isCircuitMission
           ? [compactDurationLabel, `${circuitTasks.length || monthlyTarget} tarefas`].filter(Boolean).join(" | ")
           : [compactDurationLabel, formatGoal(mission, metricType)].filter(Boolean).join(" | ");
-  const compactActionLabel = isAutoProgressMission ? "Ver progresso" : isCircuitMission ? "Ver detalhes" : "Iniciar Treino";
+  const compactActionLabel = isAutoProgressMission ? "Ver progresso" : isTrackableWalkingMission ? "Iniciar caminhada" : isCircuitMission ? "Ver detalhes" : "Iniciar treino";
   const triggerContent = layout === "compact" ? (
     <div className="flex items-center justify-between gap-4">
       <div className="flex min-w-0 items-center gap-4">
@@ -842,7 +1036,7 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
         </div>
         <div className="min-w-0">
           <h3 className="truncate text-base font-bold" style={{ color: "var(--fl-color-text)" }}>
-            {mission.title}
+            {cardTitle}
           </h3>
           <p className="truncate text-[11px] font-medium" style={{ color: "var(--fl-color-text-muted)" }}>
             {compactSummary}
@@ -860,7 +1054,7 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
         <button
           type="button"
           onClick={() => { 
-            if (isWalkingMission) {
+            if (isTrackableWalkingMission) {
               setShowWalkingExecution(true);
             } else {
               void openDetails();
@@ -921,21 +1115,38 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
         </Badge>
       </div>
 
-      {!isWeeklyMission && missionMediaUrl ? (
-        <div className="hidden sm:block w-full mb-3">
-          <img
-            src={missionMediaUrl}
-            alt={mission.title}
-            loading="lazy"
-            decoding="async"
-            className="w-full h-36 object-cover rounded-2xl border border-gray-200"
-          />
+      {!isAutoProgressMission && (missionMediaUrl || missionVideoUrl) ? (
+        <div
+          className="hidden sm:block relative w-full mb-3 aspect-video overflow-hidden rounded-2xl border"
+          style={{ background: "#ffffff", borderColor: "var(--fl-border-soft)" }}
+        >
+          {missionVideoUrl ? (
+            <video
+              src={missionVideoUrl}
+              poster={missionMediaUrl ?? undefined}
+              className="absolute inset-0 h-full w-full object-contain"
+              style={missionMediaStyle}
+              autoPlay
+              loop
+              muted
+              playsInline
+            />
+          ) : missionMediaUrl ? (
+              <img
+                src={missionMediaUrl}
+                alt={cardTitle}
+              loading="lazy"
+              decoding="async"
+              className="absolute inset-0 h-full w-full object-contain"
+              style={missionMediaStyle}
+            />
+          ) : null}
         </div>
       ) : null}
 
-      <h3 className="font-semibold text-gray-900 mb-1">{mission.title}</h3>
+      <h3 className="font-semibold text-gray-900 mb-1">{cardTitle}</h3>
       <p className="text-sm text-gray-500 mb-2">{primaryLabel}</p>
-      {mission.description ? <p className="text-sm text-gray-600 mb-3 line-clamp-2">{mission.description}</p> : null}
+      {!isAutoProgressMission && mission.description ? <p className="text-sm text-gray-600 mb-3 line-clamp-2">{mission.description}</p> : null}
 
       {isWeeklyMission ? (
         <div className="space-y-3 mb-3">
@@ -969,12 +1180,11 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
         <div className="space-y-2 mb-3">
           <div className="flex items-center justify-between text-xs text-gray-600">
             <span>Progresso mensal</span>
-            <span>{monthlyCurrent}/{monthlyTarget}</span>
+            <span>{monthlyProgressParts.current}/{monthlyProgressParts.target}{monthlyProgressParts.unitLabel ? ` ${monthlyProgressParts.unitLabel}` : ""}</span>
           </div>
           <div className="h-2 rounded-full bg-gray-100 overflow-hidden">
             <div className="h-full bg-cyan-500" style={{ width: `${monthlyProgress}%` }} />
           </div>
-          <p className="text-sm text-gray-600">Meta: {formatGoal(mission, metricType)}</p>
         </div>
       ) : (
         <div className="space-y-1 mb-3">
@@ -983,7 +1193,7 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
         </div>
       )}
 
-      <div className="grid grid-cols-3 gap-2 mb-3">
+      <div className={`grid gap-2 mb-3 ${showMissionDuration ? "grid-cols-3" : "grid-cols-2"}`}>
         <div className="rounded-xl border border-emerald-100 bg-emerald-50 p-2 text-center">
           <p className="text-[10px] text-emerald-700 uppercase tracking-wide">XP</p>
           <p className="text-sm font-bold text-emerald-700">+{mission.xp_reward}</p>
@@ -992,10 +1202,12 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
           <p className="text-[10px] text-teal-700 uppercase tracking-wide">Pontos</p>
           <p className="text-sm font-bold text-teal-700">+{mission.points_reward}</p>
         </div>
-        <div className="rounded-xl border border-cyan-100 bg-cyan-50 p-2 text-center">
-          <p className="text-[10px] text-cyan-700 uppercase tracking-wide">Tempo</p>
-          <p className="text-sm font-bold text-cyan-700">{mission.duration_estimate_minutes ?? 10} min</p>
-        </div>
+        {showMissionDuration ? (
+          <div className="rounded-xl border border-cyan-100 bg-cyan-50 p-2 text-center">
+            <p className="text-[10px] text-cyan-700 uppercase tracking-wide">Tempo</p>
+            <p className="text-sm font-bold text-cyan-700">{mission.duration_estimate_minutes ?? 10} min</p>
+          </div>
+        ) : null}
       </div>
 
       {mission.deadline ? (
@@ -1006,15 +1218,15 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
       ) : null}
 
       {isFailed ? (
-        <div className="w-full py-3 text-center rounded-xl bg-red-100 text-red-700 font-medium">Missao falhou por expiracao</div>
+        <div className="w-full py-3 text-center rounded-xl bg-red-100 text-red-700 font-medium">Missão falhou por expiração</div>
       ) : isCompleted ? (
         <div className="w-full py-3 text-center rounded-xl bg-emerald-100 text-emerald-700 font-medium">
-          Missao concluida (+{mission.xp_reward} XP)
+          Missão concluída (+{mission.xp_reward} XP)
         </div>
       ) : (
         <Button 
           onClick={() => { 
-            if (isWalkingMission && mission.type === "daily") {
+            if (isTrackableWalkingMission) {
               setShowWalkingExecution(true);
             } else {
               void openDetails();
@@ -1024,7 +1236,7 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
           className="w-full py-3 rounded-xl shadow-md hover:shadow-lg" 
           disabled={completing}
         >
-          {isWalkingMission && mission.type === "daily" ? "Iniciar Caminhada" : "Ver Detalhes"}
+          {isTrackableWalkingMission ? "Iniciar caminhada" : "Ver detalhes"}
         </Button>
       )}
     </Card>
@@ -1055,26 +1267,60 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
             </header>
 
             <div className="overflow-y-auto pb-32 min-h-[50vh] max-h-[75vh]">
-              {/* Hero Image Section */}
               <div className="px-6 py-4">
-                {detailMissionMediaUrl ? (
-                  <img 
-                    src={detailMissionMediaUrl} 
-                    alt={mission.title} 
-                    className="w-full h-48 object-cover rounded-2xl border border-gray-200" 
-                  />
-                ) : (
-                  <div className="w-full h-48 rounded-2xl border border-emerald-100 bg-gradient-to-br from-emerald-100 to-teal-100 flex items-center justify-center">
-                    <Dumbbell className="w-12 h-12 text-emerald-600" />
+                {!detailIsAutoProgressMission ? (
+                  <div
+                    className="relative w-full aspect-video rounded-xl overflow-hidden group border"
+                    style={{ background: "#ffffff", borderColor: "var(--fl-border-soft)" }}
+                  >
+                    {detailMissionVideoUrl ? (
+                      <video
+                        src={detailMissionVideoUrl}
+                        poster={detailMissionMediaUrl ?? undefined}
+                        className="absolute inset-0 h-full w-full object-contain transition-transform duration-500 group-hover:scale-105"
+                        style={detailMissionMediaStyle}
+                        autoPlay
+                        loop
+                        muted
+                        playsInline
+                      />
+                    ) : detailMissionMediaUrl ? (
+                      <img
+                        src={detailMissionMediaUrl}
+                        alt={detailTitle}
+                        className="absolute inset-0 h-full w-full object-contain transition-transform duration-500 group-hover:scale-105"
+                        style={detailMissionMediaStyle}
+                      />
+                    ) : (
+                      <div className="absolute inset-0 flex items-center justify-center">
+                        <Dumbbell className="w-16 h-16 opacity-50" style={{ color: "var(--app-primary-color)" }} />
+                      </div>
+                    )}
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/70 to-transparent" />
+                    <div className="absolute bottom-4 left-4">
+                      <span className="rounded-full px-2 py-1 text-[11px] font-bold uppercase tracking-[0.18em] text-black" style={{ background: "var(--app-primary-color)" }}>
+                        {stateLabel}
+                      </span>
+                    </div>
                   </div>
-                )}
+                ) : null}
               </div>
 
               {/* Title & Description */}
               <div className="px-6 py-2">
-                <h1 className="text-3xl font-black leading-tight" style={{ color: "var(--fl-color-text)" }}>{missionDetails.title}</h1>
-                <p className="text-base font-medium mt-1" style={{ color: "var(--app-primary-color)" }}>
+                <h1 className="text-3xl font-black leading-tight" style={{ color: "var(--fl-color-text)" }}>{detailTitle}</h1>
+                <p className="hidden text-base font-medium mt-1" style={{ color: "var(--app-primary-color)" }}>
                   Dificuldade: {missionDetails.difficulty_level ? missionDetails.difficulty_level.charAt(0).toUpperCase() + missionDetails.difficulty_level.slice(1) : "Iniciante"} • Est. {missionDetails.duration_estimate_minutes ?? 10} min
+                </p>
+                <p className="text-base font-medium mt-1" style={{ color: "var(--app-primary-color)" }}>
+                  {[
+                    `Dificuldade: ${formatDifficultyLabel(missionDetails.difficulty_level)}`,
+                    detailIsAutoProgressMission
+                      ? "Progresso automático"
+                      : showDetailDuration
+                        ? `Est. ${missionDetails.duration_estimate_minutes ?? 10} min`
+                        : null,
+                  ].filter(Boolean).join(" • ")}
                 </p>
                 {detailsLoading ? (
                   <div className="flex items-center gap-2 text-sm mt-3" style={{ color: "var(--fl-color-text-muted)" }}>
@@ -1087,38 +1333,177 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
                 ) : null}
               </div>
 
-              {/* Target Muscles */}
-              <div className="px-6 pt-6">
-                <h3 className="text-lg font-bold mb-3 flex items-center gap-2" style={{ color: "var(--fl-color-text)" }}>
-                  <Dumbbell className="w-5 h-5" style={{ color: "var(--app-primary-color)" }} />
-                  Músculos Alvo
-                </h3>
-                <div className="flex gap-2 flex-wrap">
-                  {(missionDetails.muscle_groups?.length ? missionDetails.muscle_groups : [bodyAreaLabel(missionDetails.body_area)]).map((muscle, idx) => (
-                    <div key={`${muscle}-${idx}`} className="flex items-center gap-2 rounded-full px-4 py-1.5 border" style={{ background: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)", borderColor: "color-mix(in srgb, var(--app-primary-color) 20%, transparent)" }}>
-                      <span className="font-semibold text-sm" style={{ color: "var(--app-primary-color)" }}>{muscle}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Safety Instructions */}
-              {safetyTips && safetyTips.length > 0 && (
-                <div className="px-6 pt-8">
-                  <h3 className="text-lg font-bold mb-3 flex items-center gap-2" style={{ color: "var(--fl-color-text)" }}>
-                    <Sparkles className="w-5 h-5" style={{ color: "var(--app-primary-color)" }} />
-                    Instruções de Segurança
-                  </h3>
-                  <div className="space-y-3">
-                    {safetyTips.map((tip, index) => (
-                      <div key={`${tip}-${index}`} className="flex gap-3 p-3 rounded-lg border" style={{ background: "color-mix(in srgb, var(--fl-surface-muted) 50%, transparent)", borderColor: "var(--fl-border-soft)" }}>
-                        <CheckCircle2 className="w-5 h-5 shrink-0" style={{ color: "var(--app-primary-color)" }} />
-                        <p className="text-sm" style={{ color: "var(--fl-color-text-muted)" }}>{tip}</p>
+              {detailIsAutoProgressMission ? (
+                <div className="px-6 pt-6">
+                  <div
+                    className="rounded-[28px] border p-5 space-y-4"
+                    style={{
+                      background: "linear-gradient(180deg, color-mix(in srgb, var(--app-primary-color) 14%, transparent), color-mix(in srgb, var(--fl-surface-muted) 72%, transparent))",
+                      borderColor: "color-mix(in srgb, var(--app-primary-color) 18%, transparent)",
+                    }}
+                  >
+                    <div className="flex items-center justify-between gap-4">
+                      <div>
+                        <p className="text-[11px] font-bold uppercase tracking-[0.28em]" style={{ color: "var(--app-primary-color)" }}>
+                          {detailIsWeeklyMission ? "Circuito semanal" : "Meta mensal"}
+                        </p>
                       </div>
-                    ))}
+                      <Badge className="shrink-0 border-0" style={{ background: "color-mix(in srgb, var(--app-primary-color) 14%, transparent)", color: "var(--app-primary-color)" }}>
+                        {Math.round(detailHasTaskProgressMission ? detailCircuitProgress : detailMonthlyProgress)}%
+                      </Badge>
+                    </div>
+
+                    {detailHasTaskProgressMission ? (
+                      <>
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between text-xs font-semibold" style={{ color: "var(--fl-color-text-muted)" }}>
+                            <span>{detailIsWeeklyMission ? "Progresso geral" : "Progresso mensal"}</span>
+                            <span>{detailAutoProgressCurrentTotal}/{detailAutoProgressRequiredTotal || 1}</span>
+                          </div>
+                          <div className="h-2.5 rounded-full overflow-hidden" style={{ background: "color-mix(in srgb, var(--fl-color-text) 10%, transparent)" }}>
+                            <div
+                              className="h-full rounded-full transition-all duration-500"
+                              style={{
+                                width: `${detailCircuitProgress}%`,
+                                background: detailIsWeeklyMission ? "linear-gradient(90deg, #10b981, #14b8a6)" : "linear-gradient(90deg, #06b6d4, #22d3ee)",
+                              }}
+                            />
+                          </div>
+                        </div>
+
+                        <div className="space-y-3">
+                          {detailCircuitTasks.map((task) => {
+                            const taskProgress = task.required_count > 0
+                              ? Math.min(100, Math.round((task.current_count / task.required_count) * 100))
+                              : 0;
+                            return (
+                              <div
+                                key={task.id}
+                                className="rounded-2xl border p-3"
+                                style={{
+                                  background: "color-mix(in srgb, var(--fl-surface-strong) 84%, transparent)",
+                                  borderColor: "var(--fl-border-soft)",
+                                }}
+                              >
+                                <div className="flex items-center justify-between gap-3 mb-2">
+                                  <div className="flex items-center gap-2 min-w-0">
+                                    <CheckCircle2
+                                      className="w-4 h-4 shrink-0"
+                                      style={{ color: task.completed ? "var(--app-primary-color)" : "var(--fl-color-text-muted)" }}
+                                    />
+                                    <span className="text-sm font-semibold line-clamp-2" style={{ color: "var(--fl-color-text)" }}>
+                                      {localizeMissionText(task.label) ?? task.label}
+                                    </span>
+                                  </div>
+                                  <span className="text-xs font-bold shrink-0" style={{ color: "var(--fl-color-text-muted)" }}>
+                                    {task.current_count}/{task.required_count}
+                                  </span>
+                                </div>
+                                <div className="h-2 rounded-full overflow-hidden" style={{ background: "color-mix(in srgb, var(--fl-color-text) 10%, transparent)" }}>
+                                  <div
+                                    className="h-full rounded-full transition-all duration-500"
+                                    style={{
+                                      width: `${taskProgress}%`,
+                                      background: task.completed ? "var(--app-primary-color)" : (detailIsWeeklyMission ? "#14b8a6" : "#22d3ee"),
+                                    }}
+                                  />
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </>
+                    ) : (
+                      <div className="space-y-3">
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between text-xs font-semibold" style={{ color: "var(--fl-color-text-muted)" }}>
+                            <span>Progresso mensal</span>
+                            <span>{detailMonthlyProgressParts.current}/{detailMonthlyProgressParts.target}{detailMonthlyProgressParts.unitLabel ? ` ${detailMonthlyProgressParts.unitLabel}` : ""}</span>
+                          </div>
+                          <div className="h-2.5 rounded-full overflow-hidden" style={{ background: "color-mix(in srgb, var(--fl-color-text) 10%, transparent)" }}>
+                            <div
+                              className="h-full rounded-full transition-all duration-500"
+                              style={{
+                                width: `${detailMonthlyProgress}%`,
+                                background: "linear-gradient(90deg, #06b6d4, #22d3ee)",
+                              }}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
-              )}
+              ) : null}
+
+              {!detailIsAutoProgressMission ? (
+                <>
+                  <div className="px-6 pt-6">
+                    <h3 className="text-lg font-bold mb-3 flex items-center gap-2" style={{ color: "var(--fl-color-text)" }}>
+                      <Dumbbell className="w-5 h-5" style={{ color: "var(--app-primary-color)" }} />
+                      Músculos Alvo
+                    </h3>
+                    <div className="flex gap-2 flex-wrap">
+                      {detailFocusLabels.map((label, idx) => (
+                        <div
+                          key={`${label}-${idx}`}
+                          className="flex items-center gap-2 rounded-full px-4 py-1.5 border"
+                          style={{ background: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)", borderColor: "color-mix(in srgb, var(--app-primary-color) 20%, transparent)" }}
+                        >
+                          <span className="font-semibold text-sm" style={{ color: "var(--app-primary-color)" }}>{label}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="px-6 pt-8">
+                    <h3 className="text-lg font-bold mb-3 flex items-center gap-2" style={{ color: "var(--fl-color-text)" }}>
+                      <Info className="w-5 h-5" style={{ color: "var(--app-primary-color)" }} />
+                      Execução
+                    </h3>
+                    <div className="space-y-3">
+                      {instructionList.map((step, index) => (
+                        <div
+                          key={`${step}-${index}`}
+                          className="flex gap-3 rounded-2xl border p-3"
+                          style={{ background: "color-mix(in srgb, var(--fl-surface-muted) 50%, transparent)", borderColor: "var(--fl-border-soft)" }}
+                        >
+                          <span
+                            className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-black"
+                            style={{ background: "color-mix(in srgb, var(--app-primary-color) 18%, transparent)", color: "var(--app-primary-color)" }}
+                          >
+                            {index + 1}
+                          </span>
+                          <p className="text-sm leading-relaxed" style={{ color: "var(--fl-color-text-muted)" }}>
+                            {step}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {safetyTips && safetyTips.length > 0 ? (
+                    <div className="px-6 pt-8">
+                      <h3 className="text-lg font-bold mb-3 flex items-center gap-2" style={{ color: "var(--fl-color-text)" }}>
+                        <Sparkles className="w-5 h-5" style={{ color: "var(--app-primary-color)" }} />
+                        Instruções de Segurança
+                      </h3>
+                      <div className="space-y-3">
+                        {safetyTips.map((tip, index) => (
+                          <div
+                            key={`${tip}-${index}`}
+                            className="flex gap-3 p-3 rounded-lg border"
+                            style={{ background: "color-mix(in srgb, var(--fl-surface-muted) 50%, transparent)", borderColor: "var(--fl-border-soft)" }}
+                          >
+                            <CheckCircle2 className="w-5 h-5 shrink-0" style={{ color: "var(--app-primary-color)" }} />
+                            <p className="text-sm" style={{ color: "var(--fl-color-text-muted)" }}>{tip}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                </>
+              ) : null}
 
               {/* Loot / Rewards */}
               <div className="px-6 pt-8 pb-4">
@@ -1126,7 +1511,7 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
                   <Trophy className="w-5 h-5" style={{ color: "var(--app-primary-color)" }} />
                   Recompensas
                 </h3>
-                <div className={`grid gap-4 ${isAutoProgressMission ? "grid-cols-1" : "grid-cols-2"}`}>
+                <div className={`grid gap-4 ${detailIsAutoProgressMission ? "grid-cols-1" : "grid-cols-2"}`}>
                   <div className="p-4 rounded-xl flex items-center gap-4 border" style={{ background: "color-mix(in srgb, var(--fl-surface-muted) 50%, transparent)", borderColor: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)" }}>
                     <div className="w-10 h-10 rounded-full flex items-center justify-center shrink-0" style={{ background: "color-mix(in srgb, var(--app-primary-color) 20%, transparent)" }}>
                       <Star className="w-5 h-5" style={{ color: "var(--app-primary-color)" }} />
@@ -1136,7 +1521,7 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
                       <p className="text-lg font-bold" style={{ color: "var(--fl-color-text)" }}>+{missionDetails.xp_reward} XP</p>
                     </div>
                   </div>
-                  {!isAutoProgressMission ? (
+                  {!detailIsAutoProgressMission ? (
                     <div className="p-4 rounded-xl flex items-center gap-4 border" style={{ background: "color-mix(in srgb, var(--fl-surface-muted) 50%, transparent)", borderColor: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)" }}>
                       <div className="w-10 h-10 rounded-full flex items-center justify-center shrink-0" style={{ background: "color-mix(in srgb, var(--app-primary-color) 20%, transparent)" }}>
                         <Trophy className="w-5 h-5" style={{ color: "var(--app-primary-color)" }} />
@@ -1155,11 +1540,11 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
             <div className="absolute bottom-0 left-0 right-0 p-6 backdrop-blur-md flex flex-col items-center" style={{ borderTop: "1px solid var(--fl-border-soft)", background: "color-mix(in srgb, var(--fl-surface-strong) 92%, transparent)" }}>
               <button 
                 onClick={() => {
-                  if (isAutoProgressMission || isCircuitMission || isCompleted || visualState === "failed") {
+                  if (detailIsAutoProgressMission || detailIsCircuitMission || detailIsCompleted || visualState === "failed") {
                     setShowDetails(false);
                   } else {
                     setShowDetails(false);
-                    if (isWalkingMission) {
+                    if (detailIsTrackableWalkingMission) {
                       setShowWalkingExecution(true);
                     } else {
                       setShowExecution(true);
@@ -1172,20 +1557,25 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
                   boxShadow: "0 0 20px color-mix(in srgb, var(--app-primary-color) 25%, transparent)" 
                 }}
               >
-                {!isCircuitMission && !isAutoProgressMission && !isCompleted && visualState !== "failed" && <Play className="w-6 h-6 fill-black text-black" strokeWidth={1.5} />}
-                {isCompleted ? "CONCLUÍDA" : visualState === "failed" ? "FECHAR" : isAutoProgressMission ? "FECHAR" : isCircuitMission ? "FECHAR" : isInProgress ? "CONTINUAR" : isWalkingMission ? "INICIAR CAMINHADA" : "INICIAR MISSÃO"}
+                {!detailIsCircuitMission && !detailIsAutoProgressMission && !detailIsCompleted && visualState !== "failed" ? <Play className="w-6 h-6 fill-black text-black" strokeWidth={1.5} /> : null}
+                {detailIsCompleted
+                  ? "CONCLUÍDA"
+                  : visualState === "failed"
+                    ? "FECHAR"
+                    : detailIsAutoProgressMission || detailIsCircuitMission
+                      ? "FECHAR"
+                      : isInProgress
+                        ? "CONTINUAR"
+                        : detailIsTrackableWalkingMission
+                          ? "INICIAR CAMINHADA"
+                          : "INICIAR MISSÃO"}
               </button>
-              {!isCircuitMission && !isAutoProgressMission && (
-                 <p className="text-center text-xs mt-3 font-medium uppercase tracking-widest relative z-10" style={{ color: "var(--fl-color-text-muted)" }}>
-                   {missionDetails.sets && missionDetails.sets > 0 ? `${missionDetails.sets} séries • ` : ""}{formatGoal(missionDetails, detailMetricType)}{missionDetails.rest_seconds && missionDetails.rest_seconds > 0 ? ` • ${missionDetails.rest_seconds}s descanso` : ""}
-                 </p>
-              )}
             </div>
           </div>
         </div>
       )}
       
-      {!isCircuitMission && !isWalkingMission && !isAutoProgressMission && (
+      {!detailIsCircuitMission && !detailIsTrackableWalkingMission && !detailIsAutoProgressMission && (
         <MissionExecutionModal
           mission={missionDetails}
           metricType={detailMetricType}
@@ -1196,9 +1586,9 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
       )}
 
       {/* Walking Mission Execution Modal */}
-      {showWalkingExecution && isWalkingMission && (
+      {showWalkingExecution && detailIsTrackableWalkingMission && (
         <WalkingMissionExecution
-          mission={mission}
+          mission={missionDetails}
           onComplete={async (id, value, verified) => {
             await onComplete(id, value, verified);
             setShowWalkingExecution(false);
@@ -1207,12 +1597,12 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
         />
       )}
 
-      {showDetails && !isAutoProgressMission && (
+      {showDetails && !detailIsAutoProgressMission && (
         <div className="fl-z-modal fixed bottom-6 left-1/2 -translate-x-1/2 text-xs text-gray-500 flex items-center gap-2">
           <MapPinned className="w-3 h-3" />
-          <span>{detailFocusLabels[0] ?? bodyAreaLabel(mission.body_area)}</span>
+          <span>{detailFocusLabels[0] ?? bodyAreaLabel(missionDetails.body_area)}</span>
           <Trophy className="w-3 h-3" />
-          <span>{mission.xp_reward} XP</span>
+          <span>{missionDetails.xp_reward} XP</span>
         </div>
       )}
     </>

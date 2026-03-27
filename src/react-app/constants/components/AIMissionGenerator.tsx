@@ -144,14 +144,26 @@ export default function AIMissionGenerator({ onMissionsGenerated }: AIMissionGen
   }, [readCurrentRegularMissionIds, triggerDashboardRefresh]);
 
   return (
-    <div className="bg-gradient-to-r from-purple-500 to-pink-500 rounded-2xl p-4 shadow-lg">
+    <div
+      className="rounded-2xl p-4 shadow-lg border"
+      style={{
+        background: "linear-gradient(135deg, color-mix(in srgb, var(--app-primary-color) 18%, white), color-mix(in srgb, var(--app-accent-color, #14b8a6) 22%, white))",
+        borderColor: "var(--fl-border-soft)",
+      }}
+    >
       <div className="flex items-start gap-3 mb-3">
-        <div className="bg-white/20 backdrop-blur-sm p-2 rounded-lg">
-          <Wand2 className="w-5 h-5 text-white" />
+        <div
+          className="backdrop-blur-sm p-2 rounded-lg border"
+          style={{
+            background: "color-mix(in srgb, white 80%, transparent)",
+            borderColor: "color-mix(in srgb, var(--app-primary-color) 22%, transparent)",
+          }}
+        >
+          <Wand2 className="w-5 h-5" style={{ color: "var(--app-primary-color)" }} />
         </div>
-        <div className="flex-1 text-white">
+        <div className="flex-1" style={{ color: "var(--fl-color-text)" }}>
           <h3 className="font-bold mb-1">Gerador de Missões IA</h3>
-          <p className="text-sm text-white/90">
+          <p className="text-sm" style={{ color: "var(--fl-color-text-muted)" }}>
             Gera um ciclo completo de missões personalizadas com base no seu perfil, histórico e progresso recente.
           </p>
         </div>
@@ -182,7 +194,8 @@ export default function AIMissionGenerator({ onMissionsGenerated }: AIMissionGen
       <button
         onClick={() => { void generateMissions(); }}
         disabled={loading}
-        className="w-full px-4 py-3 bg-white text-purple-600 rounded-xl font-medium shadow-lg hover:shadow-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+        className="w-full px-4 py-3 rounded-xl font-medium shadow-lg hover:shadow-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+        style={{ background: "var(--app-primary-color)", color: "var(--fl-nav-item-active-text)" }}
       >
         {loading ? (
           <div className="flex items-center justify-center gap-2">
@@ -197,7 +210,7 @@ export default function AIMissionGenerator({ onMissionsGenerated }: AIMissionGen
         )}
       </button>
 
-      <p className="text-xs text-white/75 text-center mt-2">
+      <p className="text-xs text-center mt-2" style={{ color: "var(--fl-color-text-muted)" }}>
         Gera até 5 diárias, 5 semanais e 5 mensais, com polling automático do dashboard a cada 2 segundos.
       </p>
     </div>

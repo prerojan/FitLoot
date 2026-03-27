@@ -5,6 +5,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { openStreetMapService, OSMConfig, OSMMarker } from '../services/openStreetMapService';
+import type { NominatimResult } from '../services/openStreetMapService';
 
 export interface MapState {
   center: [number, number];
@@ -66,10 +67,10 @@ export const useMapService = (options: UseMapServiceOptions = {}) => {
   }, [enableGeolocation]);
 
   // Get current user location
-  const getCurrentLocation = useCallback(async (): Promise<void> => {
+  const getCurrentLocation = useCallback(async (): Promise<[number, number] | null> => {
     if (!navigator.geolocation) {
       console.warn('Geolocalização não suportada pelo navegador');
-      return;
+      return null;
     }
 
     try {
@@ -92,9 +93,10 @@ export const useMapService = (options: UseMapServiceOptions = {}) => {
 
       setUserLocation(coordinates);
       setMapState(prev => ({ ...prev, center: coordinates }));
+      return coordinates;
     } catch (err) {
       console.warn('Falha ao obter localização:', err);
-      // Don't set error, just continue with default location
+      return null;
     }
   }, []);
 
@@ -109,7 +111,7 @@ export const useMapService = (options: UseMapServiceOptions = {}) => {
 
       const results = await openStreetMapService.geocode(query);
       
-      const searchResults: SearchResult[] = results.map((result: any) => ({
+      const searchResults: SearchResult[] = results.map((result) => ({
         id: result.place_id.toString(),
         placeName: result.display_name,
         coordinates: [parseFloat(result.lon), parseFloat(result.lat)],
@@ -220,7 +222,7 @@ export const useMapService = (options: UseMapServiceOptions = {}) => {
 
       const results = await openStreetMapService.searchNearby(center, query, radius);
       
-      const searchResults: SearchResult[] = results.map((result: any) => ({
+      const searchResults: SearchResult[] = results.map((result) => ({
         id: result.place_id.toString(),
         placeName: result.display_name,
         coordinates: [parseFloat(result.lon), parseFloat(result.lat)],
@@ -260,8 +262,9 @@ export const useMapService = (options: UseMapServiceOptions = {}) => {
   }, []);
 
   // Format address from Nominatim result
-  const formatAddress = (address: any): string => {
-    const parts = [];
+  const formatAddress = (address: NominatimResult["address"] | undefined): string => {
+    if (!address) return 'Endereço desconhecido';
+    const parts: string[] = [];
     
     if (address.house_number && address.road) {
       parts.push(`${address.house_number} ${address.road}`);

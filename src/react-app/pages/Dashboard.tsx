@@ -83,13 +83,36 @@ function missionNeedsSynchronousRefresh(mission: Mission): boolean {
 
   const title = normalizeMissionTextKey(mission.title);
   const goal = normalizeMissionTextKey(mission.goal);
+  const metricType = typeof mission.metric_type === "string" ? mission.metric_type : "";
+  const metricValue = typeof mission.metric_value === "number" ? mission.metric_value : 0;
 
-  if (title.includes("consistencia mensal")) return !goal.includes("missoes concluidas");
-  if (title.includes("distancia mensal")) return !goal.includes("passos acumulados");
-  if (title.includes("dias ativos") || title.includes("pratica ativa")) return !goal.includes("dias ativos");
-  if (title.includes("circuitos semanais")) return !goal.includes("circuitos semanais");
-  if (title.includes("volume mensal")) return !goal.includes("missoes concluidas");
-  if (title.includes("desafio cardio")) return !goal.includes("passos acumulados");
+  if (title.includes("consistencia mensal")) {
+    return !goal.includes("missoes concluidas") || metricValue < 20 || metricValue > 60;
+  }
+  if (title.includes("passos do mes")) {
+    return !goal.includes("passos acumulados") || metricType !== "steps" || metricValue < 80_000 || metricValue > 180_000;
+  }
+  if (title.includes("distancia mensal")) {
+    if (goal.includes("km")) {
+      return metricType !== "distance_meters" || metricValue < 18_000 || metricValue > 70_000;
+    }
+    return !goal.includes("passos acumulados") || metricType !== "steps" || metricValue < 80_000 || metricValue > 180_000;
+  }
+  if (title.includes("dias ativos") || title.includes("pratica ativa")) {
+    return !goal.includes("dias ativos") || metricValue < 12 || metricValue > 24;
+  }
+  if (title.includes("circuitos semanais")) {
+    return !goal.includes("circuitos semanais") || metricValue < 2 || metricValue > 4;
+  }
+  if (title.includes("volume mensal")) {
+    return !goal.includes("missoes concluidas") || metricValue < 20 || metricValue > 60;
+  }
+  if (title.includes("desafio cardio")) {
+    if (goal.includes("km")) {
+      return metricType !== "distance_meters" || metricValue < 20_000 || metricValue > 70_000;
+    }
+    return !goal.includes("passos acumulados") || metricType !== "steps" || metricValue < 100_000 || metricValue > 200_000;
+  }
 
   return false;
 }
@@ -322,8 +345,13 @@ export default function Dashboard() {
       }
 
       if (!response.ok) {
-        const payload = (await response.json().catch(() => null)) as { error?: string | undefined } | null;
-        setError(payload?.error ?? "Não foi possível concluir a missão.");
+        const payload = (await response.json().catch(() => null)) as {
+          error?: string | undefined;
+          phase?: string | undefined;
+          code?: string | undefined;
+        } | null;
+        const detail = payload?.phase ? ` (fase: ${payload.phase})` : "";
+        setError(`${payload?.error ?? "Não foi possível concluir a missão."}${detail}`);
         return;
       }
 

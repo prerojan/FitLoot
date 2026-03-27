@@ -4860,9 +4860,19 @@ function resolveExplicitMonthlyDisplayGoal(rawMission: Record<string, unknown>):
     return `${formatIntegerPtBr(target)} miss\u00f5es conclu\u00eddas`;
   }
 
+  if (normalizedTitle.includes("passos do mes")) {
+    return `${formatIntegerPtBr(target)} passos acumulados`;
+  }
+
   if (normalizedTitle.includes("distancia mensal")) {
-    const stepTarget = metricType === "steps" ? target : Math.max(1, Math.round(target / 0.75));
-    return `${formatIntegerPtBr(stepTarget)} passos acumulados`;
+    if (metricType === "distance_meters") {
+      const kilometers = target / 1000;
+      return `${kilometers.toLocaleString("pt-BR", {
+        minimumFractionDigits: kilometers % 1 === 0 ? 0 : 1,
+        maximumFractionDigits: 1,
+      })} km acumulados`;
+    }
+    return `${formatIntegerPtBr(target)} passos acumulados`;
   }
 
   if (normalizedTitle.includes("dias ativos") || normalizedTitle.includes("streak mensal") || normalizedTitle.includes("pratica ativa")) {
@@ -4878,6 +4888,13 @@ function resolveExplicitMonthlyDisplayGoal(rawMission: Record<string, unknown>):
   }
 
   if (normalizedTitle.includes("desafio cardio")) {
+    if (metricType === "distance_meters") {
+      const kilometers = target / 1000;
+      return `${kilometers.toLocaleString("pt-BR", {
+        minimumFractionDigits: kilometers % 1 === 0 ? 0 : 1,
+        maximumFractionDigits: 1,
+      })} km acumulados`;
+    }
     return `${formatIntegerPtBr(target)} passos acumulados`;
   }
 
@@ -5005,10 +5022,14 @@ function monthStartIso(reference = new Date()): string {
 
 function monthlyCounterValueByMission(mission: Record<string, unknown>, counters: MonthlyCounterSnapshot): number {
   const title = normalizeMatchText(String(mission.title ?? ""));
+  const goal = normalizeMatchText(String(mission.goal ?? ""));
   const metricType = normalizeMissionMetricType(mission.metric_type, mission.target_time);
   if (title.includes("circuitos semanais")) return counters.weekly_circuits_completed;
   if (title.includes("dias ativos") || title.includes("streak") || title.includes("pratica ativa")) return counters.streak_days;
-  if (metricType === "steps" || title.includes("passos") || title.includes("distancia") || title.includes("cardio")) {
+  if (metricType === "distance_meters" || goal.includes(" km") || goal.includes("metros acumulados")) {
+    return Math.max(0, Math.round(counters.distance_meters));
+  }
+  if (metricType === "steps" || title.includes("passos") || goal.includes("passos acumulados")) {
     return Math.max(0, Math.round(counters.distance_meters / 0.75));
   }
   return counters.missions_completed;
@@ -5106,6 +5127,7 @@ async function getMonthlyCounters(db: D1Database, userId: string): Promise<Month
 async function updateMonthlyMissionProgress(userId: string, db: D1Database): Promise<void> {
   const counters = await recomputeMonthlyCounters(db, userId);
   const missionsHaveStatus = await hasTableColumn(db, "missions", "status");
+  const hasProgressValueColumn = await hasTableColumn(db, "missions", "progress_value");
   const monthlyMissions = await db.prepare(
     `SELECT * FROM missions
      WHERE user_id = ?
@@ -5120,6 +5142,13 @@ async function updateMonthlyMissionProgress(userId: string, db: D1Database): Pro
   for (const mission of monthlyMissions.results) {
     const progress = monthlyMissionProgressValue(mission, counters);
     const target = Math.max(1, Number(mission.metric_value ?? mission.target_reps ?? 1));
+    if (hasProgressValueColumn) {
+      await db.prepare(
+        `UPDATE missions
+           SET progress_value = ?, updated_at = datetime('now')
+         WHERE id = ?`
+      ).bind(Math.min(target, progress), mission.id).run();
+    }
     if (progress < target) continue;
 
     if (missionsHaveStatus) {
@@ -5668,11 +5697,30 @@ function missionMetadataLooksMismatched(
   return false;
 }
 
+function legacyDailyMetricNeedsRepair(
+  exerciseName: string,
+  metricType: MissionMetricType,
+  metricValue: number,
+): boolean {
+  const expectedMetricType = getMissionMetricType(exerciseName);
+  if (metricType !== expectedMetricType) {
+    return true;
+  }
+
+  if (expectedMetricType === "steps") return metricValue < 2_000;
+  if (expectedMetricType === "distance_meters") return metricValue < 800;
+  if (expectedMetricType === "duration_minutes") return metricValue < 5;
+  if (expectedMetricType === "duration_seconds") return metricValue < 30;
+  return false;
+}
+
 async function repairLegacyDailyMissionMetadata(env: Env, db: D1Database, userId: string): Promise<void> {
   const rows = await db.prepare(
     `SELECT
         id,
         title,
+        description,
+        goal,
         exercise_name,
         exercise_equipment,
         exercise_body_part,
@@ -5683,9 +5731,14 @@ async function repairLegacyDailyMissionMetadata(env: Env, db: D1Database, userId
         video_url,
         thumbnail_url,
         metric_type,
+        metric_value,
+        metric_unit,
+        target_reps,
         target_time,
         sets,
         rest_seconds,
+        duration_estimate_minutes,
+        exercise_category,
         instructions_json,
         exercise_instructions_en_json,
         exercise_instructions_pt_json
@@ -5718,7 +5771,11 @@ async function repairLegacyDailyMissionMetadata(env: Env, db: D1Database, userId
       continue;
     }
 
-    if (hasMedia && hasExerciseMetadata && !missionMetadataLooksMismatched(exerciseName, row)) {
+    const currentMetricType = normalizeMissionMetricType(row.metric_type, row.target_time);
+    const currentMetricValue = Math.max(1, Number(row.metric_value ?? row.target_reps ?? row.target_time ?? 1));
+    const requiresMetricRepair = legacyDailyMetricNeedsRepair(exerciseName, currentMetricType, currentMetricValue);
+
+    if (hasMedia && hasExerciseMetadata && !missionMetadataLooksMismatched(exerciseName, row) && !requiresMetricRepair) {
       continue;
     }
 
@@ -5729,39 +5786,90 @@ async function repairLegacyDailyMissionMetadata(env: Env, db: D1Database, userId
 
     const apiInstructionsEn = normalizeInstructionList(enriched.instructions, 8);
     const resolvedExerciseName = enriched.name || exerciseName;
-    let instructionsPayload:
-      | {
-          exercise_instructions_en_json: string;
-          exercise_instructions_pt_json: string;
-          instructions_json: string;
-        }
-      | null = null;
+    const apiInstructionsPt = apiInstructionsEn.length > 0
+      ? await translateExerciseInstructionsToPt(apiInstructionsEn, resolvedExerciseName, env)
+      : parseMissionArrayField(row.exercise_instructions_pt_json);
+    const currentSets = row.sets === null || row.sets === undefined ? null : Number(row.sets);
+    const currentRestSeconds = row.rest_seconds === null || row.rest_seconds === undefined ? null : Number(row.rest_seconds);
+    const mergedSteps = apiInstructionsEn.length > 0
+      ? (apiInstructionsPt.length > 0 ? apiInstructionsPt : localizeInstructionListFallback(apiInstructionsEn))
+      : parseMissionArrayField(row.instructions_json);
+    const persistedInstructions = ensureInstructionSteps(
+      normalizeInstructionList(mergedSteps, 6),
+      resolvedExerciseName,
+      currentMetricType,
+      currentSets,
+      currentRestSeconds,
+    );
 
-    if (apiInstructionsEn.length > 0) {
-      const apiInstructionsPt = await translateExerciseInstructionsToPt(apiInstructionsEn, resolvedExerciseName, env);
-      const metricType = normalizeMissionMetricType(row.metric_type, row.target_time);
-      const sets = row.sets === null || row.sets === undefined ? null : Number(row.sets);
-      const restSeconds = row.rest_seconds === null || row.rest_seconds === undefined ? null : Number(row.rest_seconds);
-      const mergedSteps =
-        apiInstructionsPt.length > 0 ? apiInstructionsPt : localizeInstructionListFallback(apiInstructionsEn);
-      const newInstructions = ensureInstructionSteps(
-        normalizeInstructionList(mergedSteps, 6),
+    if (requiresMetricRepair) {
+      const resolvedTarget = enriched.target || String(row.exercise_target ?? "");
+      const resolvedCategory = normalizeExerciseCategory(resolvedExerciseName, resolvedTarget);
+      const repairedMetricPayload = applyMissionMetricContext(
+        {
+          title: typeof row.title === "string" && row.title.trim().length > 0
+            ? row.title
+            : `Missão Diária: ${resolvedExerciseName}`,
+          description: typeof row.description === "string" ? row.description : "",
+          goal: typeof row.goal === "string" ? row.goal : null,
+          metric_type: currentMetricType,
+          metric_value: currentMetricValue,
+          metric_unit: typeof row.metric_unit === "string" && row.metric_unit.trim().length > 0
+            ? row.metric_unit
+            : metricUnitByType(currentMetricType),
+          sets: currentSets,
+          rest_seconds: currentRestSeconds,
+          instructions: persistedInstructions,
+          exercise_instructions_en: apiInstructionsEn,
+          exercise_instructions_pt: apiInstructionsPt,
+          image_url: enriched.imageUrl,
+          exercise_db_gif_url: enriched.exerciseDbGifUrl,
+          exercise_db_image_url: enriched.exerciseDbImageUrl,
+          muscle_groups: resolveExerciseApiMuscleGroups(enriched),
+          exercise_secondary_muscles: Array.isArray(enriched.secondaryMuscles) ? enriched.secondaryMuscles : [],
+          exercise_name: resolvedExerciseName,
+          exercise_equipment: enriched.equipment || null,
+          exercise_body_part: enriched.bodyPart || null,
+          exercise_target: enriched.target || null,
+          exercise_type: inferExerciseType(resolvedCategory),
+          body_area: resolveExerciseApiBodyArea(enriched, exerciseName),
+          attributes_benefited: inferAttributes(resolvedCategory),
+          xp_reward: 0,
+          points_reward: 0,
+          duration_estimate_minutes: row.duration_estimate_minutes === null || row.duration_estimate_minutes === undefined
+            ? null
+            : Number(row.duration_estimate_minutes),
+          exercise_category: resolvedCategory,
+          mission_origin: "regular",
+          is_ai_special: 0,
+          circuit_tasks: [],
+          safety_tips: [],
+          difficulty_level: null,
+          video_url: enriched.videoUrl,
+          thumbnail_url: enriched.thumbnailUrl,
+          target_reps: row.target_reps === null || row.target_reps === undefined ? null : Number(row.target_reps),
+          target_time: row.target_time === null || row.target_time === undefined ? null : Number(row.target_time),
+        },
+        "daily",
         resolvedExerciseName,
-        metricType,
-        sets,
-        restSeconds,
+        getMissionMetricType(resolvedExerciseName),
+        metricValueByPeriod(getMissionMetricType(resolvedExerciseName), "daily"),
       );
-      instructionsPayload = {
-        exercise_instructions_en_json: JSON.stringify(apiInstructionsEn),
-        exercise_instructions_pt_json: JSON.stringify(apiInstructionsPt),
-        instructions_json: JSON.stringify(newInstructions),
-      };
-    }
 
-    if (instructionsPayload) {
       await db.prepare(
         `UPDATE missions
-         SET exercise_name = ?,
+         SET description = ?,
+             metric_type = ?,
+             metric_value = ?,
+             metric_unit = ?,
+             target_reps = ?,
+             target_time = ?,
+             sets = ?,
+             rest_seconds = ?,
+             duration_estimate_minutes = ?,
+             exercise_category = ?,
+             exercise_type = ?,
+             exercise_name = ?,
              exercise_equipment = ?,
              exercise_body_part = ?,
              exercise_target = ?,
@@ -5779,21 +5887,32 @@ async function repairLegacyDailyMissionMetadata(env: Env, db: D1Database, userId
              updated_at = datetime('now')
        WHERE id = ?`
       ).bind(
-        enriched.name,
-        enriched.equipment || null,
-        enriched.bodyPart || null,
-        enriched.target || null,
-        JSON.stringify(Array.isArray(enriched.secondaryMuscles) ? enriched.secondaryMuscles : []),
-        enriched.exerciseDbGifUrl,
-        enriched.exerciseDbImageUrl,
-        enriched.imageUrl,
-        enriched.videoUrl,
-        enriched.thumbnailUrl,
-        JSON.stringify(resolveExerciseApiMuscleGroups(enriched)),
-        resolveExerciseApiBodyArea(enriched, exerciseName),
-        instructionsPayload.exercise_instructions_en_json,
-        instructionsPayload.exercise_instructions_pt_json,
-        instructionsPayload.instructions_json,
+        repairedMetricPayload.description,
+        repairedMetricPayload.metric_type,
+        repairedMetricPayload.metric_value,
+        repairedMetricPayload.metric_unit,
+        repairedMetricPayload.target_reps,
+        repairedMetricPayload.target_time,
+        repairedMetricPayload.sets,
+        repairedMetricPayload.rest_seconds,
+        repairedMetricPayload.duration_estimate_minutes,
+        repairedMetricPayload.exercise_category,
+        repairedMetricPayload.exercise_type,
+        repairedMetricPayload.exercise_name,
+        repairedMetricPayload.exercise_equipment,
+        repairedMetricPayload.exercise_body_part,
+        repairedMetricPayload.exercise_target,
+        JSON.stringify(repairedMetricPayload.exercise_secondary_muscles),
+        repairedMetricPayload.exercise_db_gif_url,
+        repairedMetricPayload.exercise_db_image_url,
+        repairedMetricPayload.image_url,
+        repairedMetricPayload.video_url,
+        repairedMetricPayload.thumbnail_url,
+        JSON.stringify(repairedMetricPayload.muscle_groups),
+        repairedMetricPayload.body_area,
+        JSON.stringify(repairedMetricPayload.exercise_instructions_en),
+        JSON.stringify(repairedMetricPayload.exercise_instructions_pt),
+        JSON.stringify(repairedMetricPayload.instructions),
         row.id,
       ).run();
       continue;
@@ -5813,6 +5932,9 @@ async function repairLegacyDailyMissionMetadata(env: Env, db: D1Database, userId
              thumbnail_url = ?,
              muscle_groups_json = ?,
              body_area = ?,
+             exercise_instructions_en_json = ?,
+             exercise_instructions_pt_json = ?,
+             instructions_json = ?,
              updated_at = datetime('now')
        WHERE id = ?`
     ).bind(
@@ -5828,6 +5950,9 @@ async function repairLegacyDailyMissionMetadata(env: Env, db: D1Database, userId
       enriched.thumbnailUrl,
       JSON.stringify(resolveExerciseApiMuscleGroups(enriched)),
       resolveExerciseApiBodyArea(enriched, exerciseName),
+      JSON.stringify(apiInstructionsEn),
+      JSON.stringify(apiInstructionsPt),
+      JSON.stringify(persistedInstructions),
       row.id,
     ).run();
   }
@@ -8854,6 +8979,92 @@ async function mapWithConcurrency<TInput, TResult>(
   return results;
 }
 
+async function topUpStructuredDailyMissionsForUser(
+  env: Env,
+  db: D1Database,
+  userId: string,
+  requestedAmount: number,
+): Promise<void> {
+  const profile = await loadMissionGenerationProfile(db, userId);
+  if (!profile) return;
+
+  const boundedRequestedAmount = Math.max(1, Math.min(requestedAmount, MISSION_LIMITS.daily));
+  const generationOptions: StructuredGenerationOptions = {
+    isAiSpecial: false,
+    dailyTarget: MISSION_LIMITS.daily,
+    weeklyTarget: 0,
+    monthlyTarget: 0,
+  };
+
+  const existingDailyBlueprints = await listCurrentCycleRegularDailyBlueprints(db, userId, profile);
+  const existingKeys = new Set(
+    existingDailyBlueprints.map((blueprint) => `${blueprint.compatibilityKey}:${blueprint.metricType}`),
+  );
+
+  const fallbackPlan = buildFallbackStructuredPlan(profile, generationOptions);
+  let validation = validateStructuredMissionPlan(fallbackPlan, profile, generationOptions);
+  const apiKey = getHuggingFaceApiKey(env);
+  let retryReason = "";
+
+  if (apiKey) {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        const aiPlan = await requestStructuredMissionPlanFromAI(
+          env,
+          buildStructuredPlanPrompt(profile, generationOptions, retryReason || undefined),
+        );
+        const aiValidation = validateStructuredMissionPlan(aiPlan, profile, generationOptions);
+        const invalidRatio = aiValidation.totalCount > 0
+          ? aiValidation.invalidCount / aiValidation.totalCount
+          : 0;
+        if (invalidRatio > 0.3 && attempt === 0) {
+          retryReason = `Mais de 30% das missões diárias vieram inválidas (${Math.round(invalidRatio * 100)}%). Corrija nomes canônicos, métricas e volume.`;
+          continue;
+        }
+        if (invalidRatio <= 0.3) {
+          validation = aiValidation;
+        }
+        break;
+      } catch (error) {
+        if (attempt === 0) {
+          retryReason = `A resposta anterior falhou: ${getErrorMessage(error)}`;
+          continue;
+        }
+      }
+    }
+  }
+
+  const dailyCandidates = validation.blueprints.filter((blueprint) => blueprint.period === "daily");
+  const selected: MissionBlueprint[] = [];
+  const selectedKeys = new Set<string>();
+  const addCandidate = (candidate: MissionBlueprint, allowExistingDuplicate = false) => {
+    if (selected.length >= boundedRequestedAmount) return;
+    const key = `${candidate.compatibilityKey}:${candidate.metricType}`;
+    if (!allowExistingDuplicate && existingKeys.has(key)) return;
+    if (selectedKeys.has(key)) return;
+    selected.push(candidate);
+    selectedKeys.add(key);
+  };
+
+  for (const candidate of dailyCandidates) {
+    addCandidate(candidate);
+  }
+  for (const candidate of dailyCandidates) {
+    addCandidate(candidate, true);
+  }
+  while (selected.length < boundedRequestedAmount && dailyCandidates.length > 0) {
+    const fallbackCandidate = dailyCandidates[selected.length % dailyCandidates.length];
+    if (!fallbackCandidate) break;
+    selected.push(fallbackCandidate);
+  }
+
+  if (selected.length === 0) return;
+
+  const materialized = await materializeMissionBlueprints(env, profile, selected.slice(0, boundedRequestedAmount));
+  await persistMaterializedMissionEntries(db, profile, materialized);
+  invalidateMissionListCache(profile.userId);
+}
+
 async function createMissionsForPeriod(env: Env, db: D1Database, userId: string, period: MissionPeriod, requestedAmount?: number) {
   if (period !== "daily") {
     const boundedRequestedAmount = Math.max(1, Math.min(requestedAmount ?? MISSION_LIMITS[period], MISSION_LIMITS[period]));
@@ -8867,6 +9078,10 @@ async function createMissionsForPeriod(env: Env, db: D1Database, userId: string,
     });
     return;
   }
+
+  const boundedRequestedAmount = Math.max(1, Math.min(requestedAmount ?? MISSION_LIMITS.daily, MISSION_LIMITS.daily));
+  await topUpStructuredDailyMissionsForUser(env, db, userId, boundedRequestedAmount);
+  return;
 
   const [
     profile,
@@ -8909,29 +9124,44 @@ async function createMissionsForPeriod(env: Env, db: D1Database, userId: string,
       .first<{ weekly_plan_json: string | null; training_frequency: number | null }>(),
   ]);
 
-  const mainGoal = typeof profile?.main_goal === "string" ? profile.main_goal.trim() : "";
-  const conditioningSource = typeof profile?.initial_conditioning === "string" ? profile.initial_conditioning : "";
+  const profileMainGoal = profile?.main_goal;
+  const rawMainGoal = String(profileMainGoal ?? "");
+  const mainGoal = rawMainGoal.trim();
+  const profileConditioning = profile?.initial_conditioning;
+  const conditioningSource = String(profileConditioning ?? "");
   if (!mainGoal || !conditioningSource) {
     console.warn(`[missions] dados obrigatorios ausentes para ${userId}`);
     return;
   }
 
   const conditioning = normalizeConditioning(conditioningSource);
-  const injuries = typeof profile?.injuries === "string" ? profile.injuries : "";
-  const equipment = typeof profile?.equipment === "string" ? profile.equipment : "";
-  const activeSkillFocus = typeof profile?.active_skill_focus === "string" ? profile.active_skill_focus.trim() : "";
+  const profileInjuries = profile?.injuries;
+  const rawInjuries = String(profileInjuries ?? "");
+  const injuries = rawInjuries;
+  const profileEquipment = profile?.equipment;
+  const rawEquipment = String(profileEquipment ?? "");
+  const equipment = rawEquipment;
+  const profileActiveSkillFocus = profile?.active_skill_focus;
+  const rawActiveSkillFocus = String(profileActiveSkillFocus ?? "");
+  const activeSkillFocus = rawActiveSkillFocus.trim();
   const completedCount = Number(history?.completed_count ?? 0);
   const failedCount = Number(history?.failed_count ?? 0);
   const currentRate = completionRate(completedCount, failedCount);
   const weekKey = currentWeekKey();
   const profileHash = buildPlanProfileHash(mainGoal, conditioning, injuries, equipment);
 
-  const previousPlanRaw = typeof planRow?.weekly_plan_json === "string" && planRow.weekly_plan_json.trim().length > 0
-    ? JSON.parse(planRow.weekly_plan_json) as Record<string, unknown>
+  const rawPlanWeeklyJson = planRow?.weekly_plan_json;
+  const planWeeklyJson = String(rawPlanWeeklyJson ?? "");
+  const previousPlanRaw = planWeeklyJson.trim().length > 0
+    ? JSON.parse(planWeeklyJson) as Record<string, unknown>
     : null;
-  const previousWeekKey = typeof previousPlanRaw?.week_key === "string" ? previousPlanRaw.week_key : "";
-  const previousHash = typeof previousPlanRaw?.profile_hash === "string" ? previousPlanRaw.profile_hash : "";
-  const previousVolumeMultiplier = typeof previousPlanRaw?.volume_multiplier === "number" ? previousPlanRaw.volume_multiplier : 1;
+  const previousWeekKeyRaw = previousPlanRaw?.week_key;
+  const previousWeekKey = typeof previousWeekKeyRaw === "string" ? previousWeekKeyRaw : "";
+  const previousHashRaw = previousPlanRaw?.profile_hash;
+  const previousHash = typeof previousHashRaw === "string" ? previousHashRaw : "";
+  const previousVolumeMultiplierRaw = previousPlanRaw?.volume_multiplier;
+  const previousVolumeMultiplierValue = Number(previousVolumeMultiplierRaw ?? 1);
+  const previousVolumeMultiplier = Number.isFinite(previousVolumeMultiplierValue) ? previousVolumeMultiplierValue : 1;
   const trainingFrequency = normalizeTrainingFrequencyInput(planRow?.training_frequency);
   const volumeMultiplier = normalizeVolumeMultiplier(previousVolumeMultiplier, currentRate);
   const mustRegeneratePlan = !previousPlanRaw || previousWeekKey !== weekKey || previousHash !== profileHash;
@@ -8942,10 +9172,11 @@ async function createMissionsForPeriod(env: Env, db: D1Database, userId: string,
     : {};
   const normalizedWeeklyPlan = {} as Record<WeekdayPtBr, WeeklyPlanDay>;
   for (const day of WEEKDAY_ORDER) {
+    const previousWeekly = previousPlanRaw?.weekly;
     const daySource = mustRegeneratePlan
       ? fallbackWeekly[day]
-      : (typeof previousPlanRaw?.weekly === "object" && previousPlanRaw.weekly !== null
-        ? (previousPlanRaw.weekly as Record<string, unknown>)[day]
+      : (typeof previousWeekly === "object" && previousWeekly !== null
+        ? (previousWeekly as Record<string, unknown>)[day]
         : fallbackWeekly[day]);
     normalizedWeeklyPlan[day] = normalizeWeeklyPlanDay(daySource, day, ["full body"]);
   }
@@ -9383,7 +9614,12 @@ type MissionBlueprint = {
   subtasks: ResolvedMissionSubtask[];
 };
 
-type MonthlyCounterSource = "missions_completed" | "steps_equivalent" | "streak_days" | "weekly_circuits_completed";
+type MonthlyCounterSource =
+  | "missions_completed"
+  | "steps"
+  | "distance_meters"
+  | "streak_days"
+  | "weekly_circuits_completed";
 
 function roundToNearest(value: number, step: number): number {
   if (step <= 1) return Math.round(value);
@@ -9427,6 +9663,25 @@ function monthlyStepsEquivalentTarget(profile: MissionGenerationProfileSnapshot,
   return clampMonthlyTarget(estimated, 80_000, 180_000, 5_000);
 }
 
+function monthlyDistanceMetersTarget(profile: MissionGenerationProfileSnapshot, boost = 0): number {
+  const goal = normalizeGoalKeyword(profile.mainGoal);
+  let estimated = 18_000 + Math.max(0, profile.trainingFrequency - 3) * 3_500 + boost;
+  if (
+    goal.includes("perda") ||
+    goal.includes("emagrec") ||
+    goal.includes("condicion") ||
+    goal.includes("resist") ||
+    goal.includes("corrid") ||
+    goal.includes("caminha") ||
+    goal.includes("cardio")
+  ) {
+    estimated += 8_000;
+  }
+  if (profile.conditioning === "intermediario") estimated += 4_000;
+  if (profile.conditioning === "avancado") estimated += 8_000;
+  return clampMonthlyTarget(estimated, 18_000, 60_000, 1_000);
+}
+
 function monthlyActiveDaysTarget(profile: MissionGenerationProfileSnapshot, boost = 0): number {
   const conditioningBonus = profile.conditioning === "avancado"
     ? 2
@@ -9446,8 +9701,15 @@ function buildMonthlyCounterGoal(
   source: MonthlyCounterSource,
   metricValue: number,
 ): string {
-  if (source === "steps_equivalent") {
+  if (source === "steps") {
     return `${formatIntegerPtBr(metricValue)} passos acumulados`;
+  }
+  if (source === "distance_meters") {
+    const kilometers = metricValue / 1000;
+    return `${kilometers.toLocaleString("pt-BR", {
+      minimumFractionDigits: kilometers % 1 === 0 ? 0 : 1,
+      maximumFractionDigits: 1,
+    })} km acumulados`;
   }
   if (source === "streak_days") {
     return `${formatIntegerPtBr(metricValue)} dias ativos no mês`;
@@ -9470,8 +9732,8 @@ function buildMonthlyCounterMissionBlueprints(
 
   const missionTarget = monthlyMissionCompletionTarget(profile);
   const stepsTarget = monthlyStepsEquivalentTarget(profile);
+  const distanceTarget = monthlyDistanceMetersTarget(profile);
   const activeDaysTarget = monthlyActiveDaysTarget(profile);
-  const circuitsTarget = monthlyWeeklyCircuitTarget(profile);
   const mainGoal = normalizeGoalKeyword(profile.mainGoal);
 
   const goalBasedChallenge = mainGoal.includes("flex")
@@ -9495,13 +9757,25 @@ function buildMonthlyCounterMissionBlueprints(
         metricValue: clampMonthlyTarget(missionTarget + 5, 25, 50, 5),
         muscle: "full body",
       }
-      : {
-        name: "Desafio Cardio do Mês",
-        source: "steps_equivalent" as MonthlyCounterSource,
-        metricType: "steps" as MissionMetricType,
-        metricValue: monthlyStepsEquivalentTarget(profile, 20_000),
-        muscle: "legs",
-      };
+      : mainGoal.includes("cardio")
+        || mainGoal.includes("condicion")
+        || mainGoal.includes("perda")
+        || mainGoal.includes("corrid")
+        || mainGoal.includes("caminha")
+        ? {
+          name: "Desafio Cardio do Mês",
+          source: "distance_meters" as MonthlyCounterSource,
+          metricType: "distance_meters" as MissionMetricType,
+          metricValue: monthlyDistanceMetersTarget(profile, 8_000),
+          muscle: "legs",
+        }
+        : {
+          name: "Circuitos Semanais Concluídos",
+          source: "weekly_circuits_completed" as MonthlyCounterSource,
+          metricType: "repetitions" as MissionMetricType,
+          metricValue: monthlyWeeklyCircuitTarget(profile),
+          muscle: "full body",
+        };
 
   const definitions = [
     {
@@ -9512,10 +9786,17 @@ function buildMonthlyCounterMissionBlueprints(
       muscle: "full body",
     },
     {
-      name: "Distância Mensal Acumulada",
-      source: "steps_equivalent" as MonthlyCounterSource,
+      name: "Passos do Mês",
+      source: "steps" as MonthlyCounterSource,
       metricType: "steps" as MissionMetricType,
       metricValue: stepsTarget,
+      muscle: "legs",
+    },
+    {
+      name: "Distância Mensal Acumulada",
+      source: "distance_meters" as MonthlyCounterSource,
+      metricType: "distance_meters" as MissionMetricType,
+      metricValue: distanceTarget,
       muscle: "legs",
     },
     {
@@ -9523,13 +9804,6 @@ function buildMonthlyCounterMissionBlueprints(
       source: "streak_days" as MonthlyCounterSource,
       metricType: "repetitions" as MissionMetricType,
       metricValue: activeDaysTarget,
-      muscle: "full body",
-    },
-    {
-      name: "Circuitos Semanais Concluídos",
-      source: "weekly_circuits_completed" as MonthlyCounterSource,
-      metricType: "repetitions" as MissionMetricType,
-      metricValue: circuitsTarget,
       muscle: "full body",
     },
     goalBasedChallenge,
@@ -10413,14 +10687,44 @@ async function materializeMissionBlueprint(
   }
 
   if (blueprint.period === "monthly" && blueprint.subtasks.length === 0 && blueprint.metricType !== "circuit_tasks") {
-    const withMetric = applyMissionMetricContext(
-      baseMission,
-      "monthly",
-      resolvedName,
-      blueprint.metricType,
-      blueprint.metricValue,
-      { conditioning: profile.conditioning, volumeMultiplier: profile.volumeMultiplier },
-    );
+    const targetMetricValue = Math.max(1, Math.round(blueprint.metricValue));
+    const withMetric: MissionPayload = {
+      ...baseMission,
+      title: `${config.titlePrefix}: ${blueprint.name}`,
+      description: "",
+      goal: blueprint.goal,
+      metric_type: blueprint.metricType,
+      metric_value: targetMetricValue,
+      metric_unit: metricUnitByType(blueprint.metricType),
+      sets: null,
+      rest_seconds: null,
+      instructions: [],
+      exercise_instructions_en: [],
+      exercise_instructions_pt: [],
+      image_url: null,
+      exercise_db_gif_url: null,
+      exercise_db_image_url: null,
+      muscle_groups: [],
+      exercise_secondary_muscles: [],
+      exercise_name: null,
+      exercise_equipment: null,
+      exercise_body_part: null,
+      exercise_target: null,
+      exercise_type: blueprint.metricType === "steps" || blueprint.metricType === "distance_meters" ? "cardio" : "forca",
+      body_area: blueprint.metricType === "steps" || blueprint.metricType === "distance_meters" ? "lower" : "full_body",
+      attributes_benefited: [],
+      duration_estimate_minutes: null,
+      exercise_category: blueprint.metricType === "steps" || blueprint.metricType === "distance_meters" ? "walk" : "default",
+      mission_origin: blueprint.missionOrigin,
+      is_ai_special: blueprint.isAiSpecial ? 1 : 0,
+      circuit_tasks: [],
+      safety_tips: [],
+      difficulty_level: blueprint.difficultyLevel,
+      video_url: null,
+      thumbnail_url: null,
+      target_reps: null,
+      target_time: null,
+    };
     withMetric.title = `${config.titlePrefix}: ${blueprint.name}`;
     withMetric.description = "";
     withMetric.goal = blueprint.goal;
@@ -10447,9 +10751,7 @@ async function materializeMissionBlueprint(
     withMetric.sets = null;
     withMetric.rest_seconds = null;
     withMetric.target_time = null;
-    withMetric.target_reps = blueprint.metricType === "steps" || blueprint.metricType === "distance_meters"
-      ? null
-      : Math.max(1, blueprint.metricValue);
+    withMetric.target_reps = null;
     return withMetric;
   }
 
@@ -10876,8 +11178,14 @@ function isCurrentMonthlyCounterMissionRow(row: Record<string, unknown>): boolea
   if (title.includes("consistencia mensal")) {
     return goal.includes("missoes concluidas") && metricValue >= 20 && metricValue <= 50;
   }
+  if (title.includes("passos do mes")) {
+    return goal.includes("passos acumulados") && metricType === "steps" && metricValue >= 80_000 && metricValue <= 180_000;
+  }
   if (title.includes("distancia mensal")) {
-    return (goal.includes("passos acumulados") || metricType === "steps") && metricValue >= 80_000 && metricValue <= 180_000;
+    if (metricType === "distance_meters") {
+      return goal.includes("km acumulados") && metricValue >= 18_000 && metricValue <= 60_000;
+    }
+    return goal.includes("passos acumulados") && metricType === "steps" && metricValue >= 80_000 && metricValue <= 180_000;
   }
   if (title.includes("dias ativos") || title.includes("streak mensal") || title.includes("pratica ativa")) {
     return goal.includes("dias ativos") && metricValue >= 12 && metricValue <= 24;
@@ -10889,7 +11197,10 @@ function isCurrentMonthlyCounterMissionRow(row: Record<string, unknown>): boolea
     return goal.includes("missoes concluidas") && metricValue >= 20 && metricValue <= 50;
   }
   if (title.includes("desafio cardio")) {
-    return goal.includes("passos acumulados") && metricValue >= 100_000 && metricValue <= 200_000;
+    if (metricType === "distance_meters") {
+      return goal.includes("km acumulados") && metricValue >= 20_000 && metricValue <= 70_000;
+    }
+    return goal.includes("passos acumulados") && metricType === "steps" && metricValue >= 100_000 && metricValue <= 200_000;
   }
 
   return false;
@@ -13160,4 +13471,3 @@ export default {
     );
   },
 };
-

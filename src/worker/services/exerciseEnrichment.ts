@@ -407,6 +407,33 @@ async function fetchPublicExerciseDetail(exerciseId: string): Promise<ExerciseDb
   }
 }
 
+async function fetchRapidExerciseDetail(exerciseId: string, env: RapidApiEnv): Promise<ExerciseDbExercise | null> {
+  if (!exerciseId.trim() || resolveRapidApiKey(env) === null) return null;
+
+  const detailUrls = [
+    `https://exercisedb.p.rapidapi.com/exercises/exercise/${encodeURIComponent(exerciseId)}`,
+    `https://exercisedb.p.rapidapi.com/exercises/${encodeURIComponent(exerciseId)}`,
+  ];
+
+  for (const url of detailUrls) {
+    try {
+      const payload = await rapidGet<unknown>(url, "exercisedb.p.rapidapi.com", env);
+      const normalized = normalizeExerciseDbExercise(
+        Array.isArray(payload)
+          ? (payload[0] as PublicExerciseDbExercise | ExerciseDbExercise | undefined)
+          : (payload as PublicExerciseDbExercise | ExerciseDbExercise | null | undefined),
+      );
+      if (normalized) {
+        return normalized;
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return null;
+}
+
 async function getExerciseCatalog(env: RapidApiEnv): Promise<ExerciseDbExercise[]> {
   const cached = exerciseCatalogCache;
   if (cached && cached.expiresAt > Date.now()) {
@@ -735,12 +762,16 @@ export async function enrichExercise(exerciseName: string, env: RapidApiEnv): Pr
   }
 
   const baseExercise = exercises[0];
-  const [publicDetail, media, video] = await Promise.all([
+  const [publicDetail, rapidDetail, media, video] = await Promise.all([
     fetchPublicExerciseDetail(baseExercise.id),
+    fetchRapidExerciseDetail(baseExercise.id, env),
     fetchExerciseMedia(baseExercise.id, env),
     fetchExerciseVideo(baseExercise.id, env),
   ]);
-  const exercise = mergeExerciseDbExercise(baseExercise, publicDetail);
+  const exercise = mergeExerciseDbExercise(
+    mergeExerciseDbExercise(baseExercise, publicDetail),
+    rapidDetail,
+  );
   const ascendGifUrl = normalizeMissionMediaUrl(media?.gifUrl) ?? null;
   const ascendImageUrl = normalizeMissionMediaUrl(media?.imageUrl) ?? null;
   const exerciseDbGifUrl = normalizeMissionMediaUrl(exercise.gifUrl) ?? null;
