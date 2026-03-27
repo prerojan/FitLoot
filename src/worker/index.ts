@@ -1160,6 +1160,9 @@ app.onError((error, c) => {
     stack: error instanceof Error ? error.stack : undefined,
   });
 
+  const origin = resolveCorsOrigin(c.req.header("Origin") ?? undefined, c.env);
+  const allowHeaders = resolveCorsAllowHeaders(c.req.raw.headers);
+  applyCorsHeadersToContext(c, origin, allowHeaders);
   return c.json({ error: "Erro interno", code: "INTERNAL_ERROR" }, 500);
 });
 type SkillSeed = {
@@ -2321,32 +2324,51 @@ app.use("*", async (c, next) => {
   const requestOrigin = c.req.header("Origin");
   const origin = resolveCorsOrigin(requestOrigin, c.env);
   const allowHeaders = resolveCorsAllowHeaders(c.req.raw.headers);
+  const createCorsResponse = (
+    body: BodyInit | null,
+    init: ResponseInit,
+    responseOrigin: string | null = origin
+  ) => {
+    const headers = new Headers(init.headers);
+    applyCorsHeadersToResponseHeaders(headers, responseOrigin, allowHeaders);
+    return new Response(body, {
+      ...init,
+      headers,
+    });
+  };
 
   if (requestOrigin && !origin) {
     if (c.req.method === "OPTIONS") {
-      return c.newResponse("", {
+      return createCorsResponse("", {
         status: 403,
       });
     }
 
-    return c.json(
-      {
+    return createCorsResponse(
+      JSON.stringify({
         error: "Origin não permitida",
         code: "ORIGIN_NOT_ALLOWED",
+      }),
+      {
+        status: 403,
+        headers: {
+          "Content-Type": "application/json",
+        },
       },
-      403
+      null
     );
   }
 
   applyCorsHeadersToContext(c, origin, allowHeaders);
 
   if (c.req.method === "OPTIONS") {
-    return c.newResponse("", {
+    return createCorsResponse("", {
       status: 204,
     });
   }
 
   await next();
+  applyCorsHeadersToResponseHeaders(c.res.headers, origin, allowHeaders);
 });
 
 // Helper: Gera cookie com configurações corretas
