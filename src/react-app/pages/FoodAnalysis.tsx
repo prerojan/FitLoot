@@ -3,8 +3,9 @@ import { useNavigate } from "react-router";
 import { Camera, AlertTriangle, CheckCircle2, Bolt, ShieldCheck, ImageIcon, ArrowLeft } from "lucide-react";
 import AppPageShell from "@/react-app/components/AppPageShell";
 import LoadingBall from "@/react-app/components/LoadingBall";
+import { cameraService, type NormalizedCameraImage } from "@/react-app/services/native/cameraService";
 import { api } from "@/react-app/utils/api";
-import { assertString, safeGet } from "@/utils/typeHelpers";
+import { safeGet } from "@/utils/typeHelpers";
 
 type AnalysisItem = {
   food_name: string;
@@ -81,6 +82,7 @@ export default function FoodAnalysis() {
   const classifierRef = useRef<MediaPipeClassifier | null>(null);
   const classifierInitRef = useRef<Promise<void> | null>(null);
   const mountedRef = useRef(true);
+  const processNormalizedImageRef = useRef<(image: NormalizedCameraImage) => void>(() => undefined);
   const classifierClosingRef = useRef(false);
 
   const [streamActive, setStreamActive] = useState(false);
@@ -191,6 +193,23 @@ export default function FoodAnalysis() {
     };
   }, []);
 
+  useEffect(() => {
+    const unsubscribe = cameraService.subscribeToCameraCaptured(
+      (image) => {
+        processNormalizedImageRef.current(image);
+      },
+      (captureError) => {
+        if (!mountedRef.current) return;
+        setCameraError(captureError.message);
+        setLoading(false);
+      },
+    );
+
+    return () => {
+      unsubscribe();
+    };
+  }, []);
+
   const identifyFoodWithMediaPipe = async (image: HTMLImageElement) => {
     if (!classifierRef.current) {
       await initializeMediaPipe();
@@ -211,12 +230,13 @@ export default function FoodAnalysis() {
     return items;
   };
 
-  const startCamera = async () => {
+  const startWebCamera = async () => {
     try {
       setCameraError(null);
       
-      // Debug: Log para verificar se está sendo chamado
-      console.log('[Camera] Iniciando câmera...');
+      if (import.meta.env.DEV) {
+        console.log("[Camera] Iniciando camera...");
+      }
       
       // Configurações otimizadas para mobile
       const constraints = {
@@ -228,28 +248,36 @@ export default function FoodAnalysis() {
         audio: false
       };
       
-      console.log('[Camera] Requesting getUserMedia with constraints:', constraints);
+      if (import.meta.env.DEV) {
+        console.log("[Camera] Requesting getUserMedia with constraints:", constraints);
+      }
       
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
       
-      console.log('[Camera] Stream obtido:', stream);
-      console.log('[Camera] Video tracks:', stream.getVideoTracks());
+      if (import.meta.env.DEV) {
+        console.log("[Camera] Stream obtido:", stream);
+        console.log("[Camera] Video tracks:", stream.getVideoTracks());
+      }
       
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         
         // Adiciona eventos para debug
         videoRef.current.onloadedmetadata = () => {
-          console.log('[Camera] Video metadata loaded');
-          console.log('[Camera] Video dimensions:', {
-            videoWidth: videoRef.current?.videoWidth,
-            videoHeight: videoRef.current?.videoHeight,
-            readyState: videoRef.current?.readyState
-          });
+          if (import.meta.env.DEV) {
+            console.log("[Camera] Video metadata loaded");
+            console.log("[Camera] Video dimensions:", {
+              videoWidth: videoRef.current?.videoWidth,
+              videoHeight: videoRef.current?.videoHeight,
+              readyState: videoRef.current?.readyState,
+            });
+          }
         };
         
         videoRef.current.onplay = () => {
-          console.log('[Camera] Video started playing');
+          if (import.meta.env.DEV) {
+            console.log("[Camera] Video started playing");
+          }
         };
         
         videoRef.current.onerror = (e) => {
@@ -259,7 +287,9 @@ export default function FoodAnalysis() {
         // Tenta reproduzir o vídeo
         try {
           await videoRef.current.play();
-          console.log('[Camera] Video play() chamado com sucesso');
+          if (import.meta.env.DEV) {
+            console.log("[Camera] Video play() chamado com sucesso");
+          }
         } catch (playError) {
           console.error('[Camera] Erro ao reproduzir vídeo:', playError);
           throw playError;
@@ -267,7 +297,9 @@ export default function FoodAnalysis() {
       }
       
       setStreamActive(true);
-      console.log('[Camera] Stream ativo definido como true');
+      if (import.meta.env.DEV) {
+        console.log("[Camera] Stream ativo definido como true");
+      }
       
     } catch (error) {
       console.error('[Camera] Erro ao iniciar câmera:', error);
@@ -289,6 +321,14 @@ export default function FoodAnalysis() {
       
       setCameraError(errorMessage);
     }
+  };
+
+  const openCamera = async () => {
+    setCameraError(null);
+    setError(null);
+    setResult(null);
+    setPreview(null);
+    await cameraService.openCamera(startWebCamera);
   };
 
   const runAnalysis = async (base64: string) => {
@@ -338,6 +378,17 @@ export default function FoodAnalysis() {
     }
   };
 
+  const handleNormalizedImage = async (normalizedImage: NormalizedCameraImage) => {
+    setCameraError(null);
+    setPreview(normalizedImage.previewUrl);
+    stopCamera();
+    await runAnalysis(normalizedImage.base64);
+  };
+
+  processNormalizedImageRef.current = (normalizedImage) => {
+    void handleNormalizedImage(normalizedImage);
+  };
+
   const captureFromCamera = async () => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
@@ -349,34 +400,33 @@ export default function FoodAnalysis() {
     if (!context) return;
     context.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-    const image = canvas.toDataURL("image/jpeg", 0.85);
-    setPreview(image);
-    stopCamera();
-    const base64 = assertString(safeGet(image.split(","), 1));
-    if (!base64) {
-      setError("Falha ao processar a imagem capturada.");
-      return;
+    try {
+      const image = canvas.toDataURL("image/jpeg", 0.85);
+      const normalizedImage = await cameraService.handleCameraResult({
+        dataUrl: image,
+        source: "web-camera",
+      });
+      await handleNormalizedImage(normalizedImage);
+    } catch (captureError) {
+      setError(captureError instanceof Error ? captureError.message : "Falha ao processar a imagem capturada.");
     }
-    await runAnalysis(base64);
   };
 
   const onPickGallery: ChangeEventHandler<HTMLInputElement> = async (event) => {
     const file = safeGet(Array.from(event.target.files ?? []), 0);
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = async () => {
-      const value = String(reader.result || "");
-      if (!value.includes(",")) return;
-      setPreview(value);
-      const base64 = assertString(safeGet(value.split(","), 1));
-      if (!base64) {
-        setError("Falha ao processar a imagem selecionada.");
-        return;
-      }
-      await runAnalysis(base64);
-    };
-    reader.readAsDataURL(file);
+    try {
+      const normalizedImage = await cameraService.handleCameraResult({
+        file,
+        source: "web-file",
+      });
+      await handleNormalizedImage(normalizedImage);
+    } catch (imageError) {
+      setError(imageError instanceof Error ? imageError.message : "Falha ao processar a imagem selecionada.");
+    } finally {
+      event.currentTarget.value = "";
+    }
   };
 
   const saveMeal = async () => {
@@ -492,7 +542,7 @@ export default function FoodAnalysis() {
                 </p>
 
                 <button 
-                  onClick={startCamera}
+                  onClick={() => { void openCamera(); }}
                   className="neon-glow flex w-full items-center justify-center gap-2 sm:gap-3 rounded-2xl py-3.5 sm:py-4 text-[11px] sm:text-sm font-bold uppercase tracking-widest transition-all active:scale-95"
                   style={{ backgroundColor: 'var(--app-primary-color)', color: 'var(--fl-nav-item-active-text)' }}
                 >
@@ -608,7 +658,7 @@ export default function FoodAnalysis() {
           {/* Action Buttons (Fixed or scroll end) */}
           <div className="mt-auto grid grid-cols-2 gap-3 pt-4 sm:gap-4">
             <button 
-              onClick={() => { setPreview(null); setResult(null); setError(null); startCamera(); }}
+              onClick={() => { void openCamera(); }}
               className="fl-theme-input h-14 rounded-2xl border font-bold text-xs tracking-widest uppercase transition-opacity active:scale-95 hover:opacity-85"
               style={{ borderColor: "var(--fl-border-soft)", color: "var(--fl-color-text-muted)" }}
             >
@@ -674,7 +724,7 @@ export default function FoodAnalysis() {
                     setPreview(null);
                     setResult(null);
                     setError(null);
-                    void startCamera();
+                    void openCamera();
                     return;
                   }
                   stopCamera();

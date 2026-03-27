@@ -6,6 +6,7 @@
 import { useState } from 'react';
 import { useHealthData } from '../hooks/useHealthData';
 import { useMapService } from '../hooks/useMapService';
+import { formatStepsSourceLabel } from '../services/native/stepsService';
 
 export default function HealthTest() {
   const [stepsInput, setStepsInput] = useState('');
@@ -201,7 +202,7 @@ export default function HealthTest() {
 
             <div className="mt-4 p-3 bg-gray-100 rounded-lg">
               <p className="text-sm text-gray-600">
-                Fonte: {healthData.source === 'google-fit' ? 'Google Fit' : 'Dados Simulados'}
+                Fonte: {formatStepsSourceLabel(healthData.source)}
               </p>
             </div>
           </section>

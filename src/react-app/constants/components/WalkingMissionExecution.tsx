@@ -10,6 +10,7 @@ import { Button } from "@/react-app/components/ui/button";
 import { Badge } from "@/react-app/components/ui/badge";
 import { useHealthData } from "@/react-app/hooks/useHealthData";
 import { useMapService } from "@/react-app/hooks/useMapService";
+import { formatStepsSourceLabel } from "@/react-app/services/native/stepsService";
 import type { Mission, MissionMetricType } from "@/shared/types";
 
 type WalkingMissionExecutionProps = {
@@ -179,9 +180,8 @@ const WalkingMissionExecution = ({ mission, onComplete, onClose }: WalkingMissio
       // Gerar rota segura
       await generateSafeRoute();
 
-      // Se não estiver autenticado com Google Fit, usar dados simulados
-      if (!isAuthenticated) {
-        console.warn('Google Fit não autenticado. Usando dados simulados.');
+      if (import.meta.env.DEV && healthData?.source === "simulated") {
+        console.warn(`Fonte de passos em fallback: ${formatStepsSourceLabel(healthData.source)}.`);
       }
 
     } catch (error) {
@@ -192,7 +192,7 @@ const WalkingMissionExecution = ({ mission, onComplete, onClose }: WalkingMissio
         error: "Falha ao iniciar a missão. Tente novamente.",
       }));
     }
-  }, [generateSafeRoute, isAuthenticated]);
+  }, [generateSafeRoute, healthData?.source, isAuthenticated]);
 
   // Pausar/Retomar execução
   const togglePause = useCallback(() => {
@@ -357,7 +357,7 @@ const WalkingMissionExecution = ({ mission, onComplete, onClose }: WalkingMissio
             <div className="flex items-center justify-between text-sm">
               <span className="text-blue-700">Fonte de dados:</span>
               <Badge variant="neutral">
-                {healthData?.source === 'google-fit' ? 'Google Fit' : 'Dados Simulados'}
+                {formatStepsSourceLabel(healthData?.source)}
               </Badge>
             </div>
             {healthData?.lastUpdated && (
