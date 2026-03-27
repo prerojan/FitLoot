@@ -299,12 +299,15 @@ export default function AIChat() {
       ]);
     } catch (chatError) {
       console.error("Chat error:", chatError);
+      const fallbackMessage =
+        chatError instanceof Error && chatError.message.trim().length > 0
+          ? chatError.message
+          : "Desculpe, tive um problema ao processar sua mensagem. Tente novamente.";
       setMessages((current) => [
         ...current,
         {
           role: "assistant",
-          content:
-            "Desculpe, tive um problema ao processar sua mensagem. Tente novamente.",
+          content: fallbackMessage,
           timestamp: new Date().toISOString(),
         },
       ]);

@@ -5809,8 +5809,19 @@ async function repairLegacyDailyMissionMetadata(env: Env, db: D1Database, userId
     const currentMetricType = normalizeMissionMetricType(row.metric_type, row.target_time);
     const currentMetricValue = Math.max(1, Number(row.metric_value ?? row.target_reps ?? row.target_time ?? 1));
     const requiresMetricRepair = legacyDailyMetricNeedsRepair(exerciseName, currentMetricType, currentMetricValue);
+    const currentInstructionsEn = parseMissionArrayField(row.exercise_instructions_en_json);
+    const currentInstructionsPt = parseMissionArrayField(row.exercise_instructions_pt_json);
+    const requiresInstructionTranslationRepair =
+      Boolean(getHuggingFaceApiKey(env)) &&
+      exerciseInstructionPtNeedsAiTranslation(currentInstructionsEn, currentInstructionsPt);
 
-    if (hasMedia && hasExerciseMetadata && !missionMetadataLooksMismatched(exerciseName, row) && !requiresMetricRepair) {
+    if (
+      hasMedia &&
+      hasExerciseMetadata &&
+      !missionMetadataLooksMismatched(exerciseName, row) &&
+      !requiresMetricRepair &&
+      !requiresInstructionTranslationRepair
+    ) {
       continue;
     }
 
@@ -5821,13 +5832,14 @@ async function repairLegacyDailyMissionMetadata(env: Env, db: D1Database, userId
 
     const apiInstructionsEn = normalizeInstructionList(enriched.instructions, 8);
     const resolvedExerciseName = enriched.name || exerciseName;
-    const apiInstructionsPt = apiInstructionsEn.length > 0
-      ? await translateExerciseInstructionsToPt(apiInstructionsEn, resolvedExerciseName, env)
-      : parseMissionArrayField(row.exercise_instructions_pt_json);
+    const sourceInstructionsEn = apiInstructionsEn.length > 0 ? apiInstructionsEn : currentInstructionsEn;
+    const apiInstructionsPt = sourceInstructionsEn.length > 0
+      ? await translateExerciseInstructionsToPt(sourceInstructionsEn, resolvedExerciseName, env)
+      : currentInstructionsPt;
     const currentSets = row.sets === null || row.sets === undefined ? null : Number(row.sets);
     const currentRestSeconds = row.rest_seconds === null || row.rest_seconds === undefined ? null : Number(row.rest_seconds);
-    const mergedSteps = apiInstructionsEn.length > 0
-      ? (apiInstructionsPt.length > 0 ? apiInstructionsPt : localizeInstructionListFallback(apiInstructionsEn))
+    const mergedSteps = sourceInstructionsEn.length > 0
+      ? (apiInstructionsPt.length > 0 ? apiInstructionsPt : localizeInstructionListFallback(sourceInstructionsEn))
       : parseMissionArrayField(row.instructions_json);
     const persistedInstructions = ensureInstructionSteps(
       normalizeInstructionList(mergedSteps, 6),
@@ -6134,6 +6146,7 @@ app.get("/api/missions/:id", authMiddleware, async (c) => {
         const mainSteps = normalizeInstructionList(normalized.instructions, 8);
         const refreshMain =
           mainSteps.length === 0 ||
+          exerciseInstructionPtNeedsAiTranslation(enSteps, mainSteps) ||
           (mainSteps.length === enSteps.length &&
             mainSteps.every((line, i) => normalizeMatchText(line) === normalizeMatchText(enSteps[i] ?? "")));
         if (refreshMain) {
@@ -8768,18 +8781,108 @@ function stripModelJsonFence(raw: string): string {
   return t;
 }
 
-function parseInstructionsPtFromModelContent(rawContent: string): string[] | null {
-  const trimmed = stripModelJsonFence(rawContent);
-  try {
-    const parsed = JSON.parse(trimmed) as { instructions_pt?: unknown };
-    const translated = normalizeInstructionList(parsed.instructions_pt, 8);
-    return translated.length > 0 ? translated : null;
-  } catch {
-    return null;
+function extractFirstJsonObject(raw: string): string | null {
+  const source = stripModelJsonFence(raw).trim();
+  const start = source.indexOf("{");
+  if (start < 0) return null;
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = start; index < source.length; index += 1) {
+    const char = source[index];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (char === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (char === "\"") {
+      inString = !inString;
+      continue;
+    }
+    if (inString) continue;
+    if (char === "{") {
+      depth += 1;
+      continue;
+    }
+    if (char === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        return source.slice(start, index + 1);
+      }
+    }
   }
+
+  return null;
+}
+
+function parseJsonObjectFromModelContent<T>(rawContent: string): T | null {
+  const trimmed = stripModelJsonFence(rawContent).trim();
+  const candidates = [trimmed, extractFirstJsonObject(trimmed)].filter(
+    (candidate): candidate is string => typeof candidate === "string" && candidate.trim().length > 0,
+  );
+
+  for (const candidate of candidates) {
+    try {
+      return JSON.parse(candidate) as T;
+    } catch {
+      continue;
+    }
+  }
+
+  return null;
+}
+
+function parseInstructionListFromLooseModelContent(rawContent: string): string[] | null {
+  const instructionStepPrefixPattern = new RegExp(
+    String.raw`^\s*(?:step\s*\d+\s*[:.-]?|\d+\s*[.)-:]?\s*|[-*\u2022]\s+)`,
+    "i",
+  );
+  const parsed = parseJsonObjectFromModelContent<{
+    instructions_pt?: unknown;
+    instructions?: unknown;
+    steps?: unknown;
+  }>(rawContent);
+  const fromJson = normalizeInstructionList(
+    parsed?.instructions_pt ?? parsed?.instructions ?? parsed?.steps,
+    8,
+  );
+  if (fromJson.length > 0) {
+    return fromJson;
+  }
+
+  const lines = stripModelJsonFence(rawContent)
+    .split(/\r?\n/)
+    .map((line) =>
+      line
+        .replace(instructionStepPrefixPattern, "")
+        .trim(),
+    )
+    .filter((line) => line.length > 0);
+  const normalized = normalizeInstructionList(lines, 8);
+  return normalized.length > 0 ? normalized : null;
+}
+
+function parseInstructionsPtFromModelContent(rawContent: string): string[] | null {
+  const translated = parseInstructionListFromLooseModelContent(rawContent);
+  return translated && translated.length > 0 ? translated : null;
 }
 
 /** EN veio da API de exercício mas PT está vazio ou ainda é cópia 1:1 do inglês. */
+const ENGLISH_INSTRUCTION_TOKEN_REGEX =
+  /\b(with|your|feet|foot|hands?|arms?|body|core|floor|ground|starting|start|position|pause|moment|above|push|pull|straighten|repeat|desired|number|repetitions?|seconds?|hold|keep|slightly|together|bend|bending|lower|raise|return|towards?|while|shoulders?|chest|elbows?|back)\b/i;
+
+function instructionStillLooksEnglish(referenceEn: string, candidatePt: string): boolean {
+  const normalizedReference = normalizeMatchText(referenceEn);
+  const normalizedCandidate = normalizeMatchText(candidatePt);
+  if (!normalizedCandidate) return true;
+  if (normalizedCandidate === normalizedReference) return true;
+  return ENGLISH_INSTRUCTION_TOKEN_REGEX.test(candidatePt);
+}
+
 function exerciseInstructionPtNeedsAiTranslation(en: string[], pt: string[]): boolean {
   const normEn = normalizeInstructionList(en, 8);
   const normPt = normalizeInstructionList(pt, 8);
@@ -8787,11 +8890,11 @@ function exerciseInstructionPtNeedsAiTranslation(en: string[], pt: string[]): bo
   if (normPt.length === 0) return true;
   if (normEn.length !== normPt.length) return true;
   for (let i = 0; i < normEn.length; i++) {
-    if (normalizeMatchText(normEn[i] ?? "") !== normalizeMatchText(normPt[i] ?? "")) {
-      return false;
+    if (instructionStillLooksEnglish(normEn[i] ?? "", normPt[i] ?? "")) {
+      return true;
     }
   }
-  return true;
+  return false;
 }
 
 function localizeInstructionListFallback(instructionsEn: string[]): string[] {
@@ -8826,25 +8929,13 @@ async function translateExerciseInstructionsToPt(
   ].join("\n");
 
   try {
-    const completion = await fetchJsonWithTimeout<{ choices?: Array<{ message?: { content?: string | undefined } }> }>(
-      "https://router.huggingface.co/v1/chat/completions",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          model: "openai/gpt-oss-120b:groq",
-          messages: [{ role: "user", content: prompt }],
-          max_tokens: 900,
-          response_format: { type: "json_object" },
-        }),
-      },
+    const rawContent = await requestHuggingFaceStructuredContent(
+      apiKey,
+      [{ role: "user", content: prompt }],
+      900,
+      "translateExerciseInstructionsToPt",
       timeoutMsByService.huggingface,
     );
-
-    const rawContent = safeGet(completion.choices ?? [], 0)?.message?.content ?? "";
     const translated = parseInstructionsPtFromModelContent(rawContent);
     if (translated && translated.length === normalizedInstructions.length) {
       return translated;
@@ -8856,6 +8947,7 @@ async function translateExerciseInstructionsToPt(
     console.warn("[translateExerciseInstructionsToPt] model call failed", {
       exerciseName,
       message: getErrorMessage(err),
+      details: err instanceof ApiIntegrationError ? err.details : undefined,
     });
   }
   return localizeInstructionListFallback(normalizedInstructions);
@@ -8933,26 +9025,15 @@ async function getExerciseInstructionsFromAI(
   ].join("\n");
 
   try {
-    const completion = await fetchJsonWithTimeout<{ choices?: Array<{ message?: { content?: string | undefined } }> }>(
-      "https://router.huggingface.co/v1/chat/completions",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          model: "openai/gpt-oss-120b:groq",
-          messages: [{ role: "user", content: prompt }],
-          max_tokens: 500,
-          response_format: { type: "json_object" },
-        }),
-      },
-      timeoutMsByService.huggingface
+    const rawContent = await requestHuggingFaceStructuredContent(
+      apiKey,
+      [{ role: "user", content: prompt }],
+      500,
+      "getExerciseInstructionsFromAI",
+      timeoutMsByService.huggingface,
     );
-
-    const rawContent = safeGet(completion.choices ?? [], 0)?.message?.content ?? "";
-    const parsed = JSON.parse(rawContent) as Partial<ExerciseInstructionPayload>;
+    const parsed =
+      parseJsonObjectFromModelContent<Partial<ExerciseInstructionPayload>>(rawContent) ?? {};
     const parsedMetricType = isMissionMetricType(parsed.metricType) ? parsed.metricType : fallback.metricType;
     const parsedMetricValue = toPositiveInt(parsed.metricValue, fallback.metricValue);
     const parsedSets = inferSets(parsedMetricType, period);
@@ -8982,7 +9063,13 @@ async function getExerciseInstructionsFromAI(
       metricType: parsedMetricType,
       metricValue: parsedMetricValue,
     };
-  } catch {
+  } catch (error) {
+    console.warn("[getExerciseInstructionsFromAI] using fallback", {
+      exerciseName,
+      period,
+      message: getErrorMessage(error),
+      details: error instanceof ApiIntegrationError ? error.details : undefined,
+    });
     return fallback;
   }
 }
@@ -9216,8 +9303,8 @@ async function createMissionsForPeriod(env: Env, db: D1Database, userId: string,
     normalizedWeeklyPlan[day] = normalizeWeeklyPlanDay(daySource, day, ["full body"]);
   }
 
-  const weeklyPlanApiKey = getHuggingFaceApiKey(env);
-  if (mustRegeneratePlan && weeklyPlanApiKey) {
+  const weeklyPlanApiKeyValue = getHuggingFaceApiKey(env) ?? "";
+  if (mustRegeneratePlan && weeklyPlanApiKeyValue.length > 0) {
     const capacitySummary = buildCapacitySummary(capacityRows.results);
     const aiPlanPrompt = [
       "Gere um plano semanal de treino e responda APENAS JSON valido com chave weekly e progression_expected.",
@@ -9237,25 +9324,14 @@ async function createMissionsForPeriod(env: Env, db: D1Database, userId: string,
       .join("\n");
 
     try {
-      const completion = await fetchJsonWithTimeout<{ choices?: Array<{ message?: { content?: string | undefined } }> }>(
-        "https://router.huggingface.co/v1/chat/completions",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${weeklyPlanApiKey}`,
-          },
-          body: JSON.stringify({
-            model: "openai/gpt-oss-120b:groq",
-            messages: [{ role: "user", content: aiPlanPrompt }],
-            max_tokens: 1200,
-            response_format: { type: "json_object" },
-          }),
-        },
+      const content = await requestHuggingFaceStructuredContent(
+        weeklyPlanApiKeyValue,
+        [{ role: "user", content: aiPlanPrompt }],
+        1200,
+        "weeklyTrainingPlan",
         timeoutMsByService.huggingface,
       );
-      const content = safeGet(completion.choices ?? [], 0)?.message?.content ?? "{}";
-      const parsed = JSON.parse(content) as Record<string, unknown>;
+      const parsed = parseJsonObjectFromModelContent<Record<string, unknown>>(content) ?? {};
       const parsedWeekly = typeof parsed.weekly === "object" && parsed.weekly !== null
         ? parsed.weekly as Record<string, unknown>
         : {};
@@ -10197,26 +10273,18 @@ async function requestStructuredMissionPlanFromAI(
     throw new ApiIntegrationError("SERVICE_NOT_CONFIGURED", 503, "Hugging Face nao configurada.");
   }
 
-  const completion = await fetchJsonWithTimeout<OpenAIChatCompletionResponse>(
-    "https://router.huggingface.co/v1/chat/completions",
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: "openai/gpt-oss-120b:groq",
-        messages: [{ role: "user", content: prompt }],
-        max_tokens: 2200,
-        response_format: { type: "json_object" },
-      }),
-    },
+  const content = await requestHuggingFaceStructuredContent(
+    apiKey,
+    [{ role: "user", content: prompt }],
+    2200,
+    "requestStructuredMissionPlanFromAI",
     MISSION_GENERATION_AI_TIMEOUT_MS,
   );
-
-  const content = safeGet(completion.choices ?? [], 0)?.message?.content ?? "{}";
-  return JSON.parse(content) as StructuredMissionPlanDraft;
+  const parsed = parseJsonObjectFromModelContent<StructuredMissionPlanDraft>(content);
+  if (!parsed) {
+    throw new ApiIntegrationError("INVALID_RESPONSE", 502, "Plano estruturado invalido retornado pela IA.");
+  }
+  return parsed;
 }
 
 function buildFallbackStructuredPlan(
@@ -11689,11 +11757,13 @@ type ApiErrorCode =
 class ApiIntegrationError extends Error {
   code: ApiErrorCode;
   status: number;
+  details?: string | undefined;
 
-  constructor(code: ApiErrorCode, status: number, message: string) {
+  constructor(code: ApiErrorCode, status: number, message: string, details?: string | undefined) {
     super(message);
     this.code = code;
     this.status = status;
+    this.details = details;
   }
 }
 
@@ -11775,13 +11845,33 @@ async function fetchJsonWithTimeout<T>(
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch(url, { ...init, signal: controller.signal });
+    const responseText = await response.text();
     if (response.status === 401 || response.status === 403) {
-      throw new ApiIntegrationError("AUTH_FAILED", 502, "Falha de autenticação com serviço externo.");
+      throw new ApiIntegrationError(
+        "AUTH_FAILED",
+        502,
+        "Falha de autenticação com serviço externo.",
+        responseText.slice(0, 500),
+      );
     }
     if (!response.ok) {
-      throw new ApiIntegrationError("UPSTREAM_ERROR", 502, "Falha ao consultar serviço externo.");
+      throw new ApiIntegrationError(
+        "UPSTREAM_ERROR",
+        502,
+        "Falha ao consultar serviço externo.",
+        responseText.slice(0, 500),
+      );
     }
-    return (await response.json()) as T;
+    try {
+      return JSON.parse(responseText) as T;
+    } catch {
+      throw new ApiIntegrationError(
+        "INVALID_RESPONSE",
+        502,
+        "Servico externo retornou resposta invalida.",
+        responseText.slice(0, 500),
+      );
+    }
   } catch (error) {
     if (error instanceof ApiIntegrationError) throw error;
     if ((error as Error).name === "AbortError") {
@@ -11791,6 +11881,76 @@ async function fetchJsonWithTimeout<T>(
   } finally {
     clearTimeout(timeout);
   }
+}
+
+function buildJsonOnlyRouterMessages(messages: Array<{ role: string; content: string }>) {
+  const reminder = "Responda somente JSON valido, sem markdown, sem comentarios e sem texto extra.";
+  if (messages[0]?.role === "system") {
+    return [
+      { ...messages[0], content: `${messages[0].content}\n\n${reminder}` },
+      ...messages.slice(1),
+    ];
+  }
+  return [{ role: "system", content: reminder }, ...messages];
+}
+
+async function requestHuggingFaceStructuredContent(
+  apiKey: string,
+  messages: Array<{ role: string; content: string }>,
+  maxTokens: number,
+  logLabel: string,
+  timeoutMs: number,
+): Promise<string> {
+  const attempts = [
+    { responseFormat: true, requestMessages: messages, label: `${logLabel}:json-mode` },
+    {
+      responseFormat: false,
+      requestMessages: buildJsonOnlyRouterMessages(messages),
+      label: `${logLabel}:json-retry`,
+    },
+  ];
+
+  let lastError: unknown = null;
+  for (const attempt of attempts) {
+    try {
+      const completion = await fetchJsonWithTimeout<OpenAIChatCompletionResponse>(
+        "https://router.huggingface.co/v1/chat/completions",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({
+            model: "openai/gpt-oss-120b:groq",
+            messages: attempt.requestMessages,
+            max_tokens: maxTokens,
+            ...(attempt.responseFormat ? { response_format: { type: "json_object" } } : {}),
+          }),
+        },
+        timeoutMs,
+      );
+      const rawContent = safeGet(completion.choices ?? [], 0)?.message?.content ?? "";
+      if (rawContent.trim().length > 0) {
+        return rawContent;
+      }
+      lastError = new ApiIntegrationError(
+        "INVALID_RESPONSE",
+        502,
+        "Servico externo retornou conteudo vazio.",
+      );
+    } catch (error) {
+      lastError = error;
+      console.warn(`[${attempt.label}]`, {
+        message: getErrorMessage(error),
+        details: error instanceof ApiIntegrationError ? error.details : undefined,
+      });
+    }
+  }
+
+  throw lastError instanceof Error
+    ? lastError
+    : new ApiIntegrationError("UPSTREAM_ERROR", 502, "Falha ao consultar serviço externo.");
 }
 
 async function fetchResponseWithTimeout(
@@ -11823,6 +11983,19 @@ async function callOpenAIChat(
     throw new ApiIntegrationError("SERVICE_NOT_CONFIGURED", 503, "Hugging Face não configurada.");
   }
   enforceRateLimit(`huggingface:${c.get("user")?.id ?? "anon"}`);
+  if (jsonMode) {
+    const content = await requestHuggingFaceStructuredContent(
+      apiKey,
+      messages,
+      maxTokens,
+      "callOpenAIChat",
+      timeoutMsByService.huggingface,
+    );
+    const structuredResponse: OpenAIChatCompletionResponse = {
+      choices: [{ message: { content } }],
+    };
+    return structuredResponse;
+  }
   return fetchJsonWithTimeout<OpenAIChatCompletionResponse>(
     "https://router.huggingface.co/v1/chat/completions",
     {
@@ -11835,7 +12008,6 @@ async function callOpenAIChat(
         model: "openai/gpt-oss-120b:groq",
         messages,
         max_tokens: maxTokens,
-        ...(jsonMode ? { response_format: { type: "json_object" } } : {}),
       }),
     },
     timeoutMsByService.huggingface
@@ -12111,26 +12283,14 @@ async function generateAiMissionsForUser(
   const apiKey = getHuggingFaceApiKey(env);
   if (apiKey) {
     try {
-      const completion = await fetchJsonWithTimeout<{ choices?: Array<{ message?: { content?: string | undefined } }> }>(
-        "https://router.huggingface.co/v1/chat/completions",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${apiKey}`,
-          },
-          body: JSON.stringify({
-            model: "openai/gpt-oss-120b:groq",
-            messages: [{ role: "user", content: aiPrompt }],
-            max_tokens: 800,
-            response_format: { type: "json_object" },
-          }),
-        },
-        timeoutMsByService.huggingface
+      const content = await requestHuggingFaceStructuredContent(
+        apiKey,
+        [{ role: "user", content: aiPrompt }],
+        800,
+        "legacyDailyMissionGenerator",
+        timeoutMsByService.huggingface,
       );
-
-      const content = safeGet(completion.choices ?? [], 0)?.message?.content ?? "{}";
-      const parsed = JSON.parse(content) as { missions?: MissionDraft[] };
+      const parsed = parseJsonObjectFromModelContent<{ missions?: MissionDraft[] }>(content) ?? {};
       const parsedMissions = Array.isArray(parsed.missions) ? parsed.missions : [];
       aiMissions = parsedMissions.slice(0, 2).map((mission, index) =>
         sanitizeMissionDraft(mission, conditioning, index + 3)
@@ -12547,16 +12707,80 @@ Contexto do usuário:
 - Força: ${attributes?.strength}
 - Modo: ${mode}`;
 
-    const openaiData = await callOpenAIChat(c, [
+    const normalizedHistory = conversationHistory
+      .filter((msg) => {
+        const role = typeof msg?.role === "string" ? msg.role : "";
+        const content = typeof msg?.content === "string" ? msg.content : "";
+        return (
+          content.trim().length > 0 &&
+          (role === "assistant" || role === "user" || role === "system")
+        );
+      })
+      .map((msg) => ({
+        role: typeof msg.role === "string" ? msg.role : "user",
+        content: typeof msg.content === "string" ? msg.content : "",
+      }))
+      .slice(-16);
+    const dedupedHistory =
+      normalizedHistory.length > 0 &&
+      normalizedHistory[normalizedHistory.length - 1]?.role === "user" &&
+      normalizeMatchText(normalizedHistory[normalizedHistory.length - 1]?.content ?? "") ===
+        normalizeMatchText(userMessage)
+        ? normalizedHistory.slice(0, -1)
+        : normalizedHistory;
+    const compactSystemPrompt = `Você é o FitBot. Responda em português do Brasil, de forma útil, curta e direta, sem markdown. Se faltar contexto, peça só o necessário.
+
+Contexto do usuário:
+- Nome: ${profile?.full_name}
+- Objetivo: ${profile?.main_goal}
+- Condicionamento: ${profile?.initial_conditioning}
+- Modo: ${mode}`;
+
+    const primaryMessages = [
       { role: "system", content: systemPrompt },
-      ...conversationHistory.map((msg) => ({ role: msg.role, content: msg.content })),
+      ...dedupedHistory,
       { role: "user", content: userMessage },
-    ]);
+    ];
+
+    let openaiData: OpenAIChatCompletionResponse;
+    try {
+      openaiData = await callOpenAIChat(c, primaryMessages);
+    } catch (primaryError) {
+      console.warn("[ai-chat][primary]", {
+        userId: user.id,
+        message: getErrorMessage(primaryError),
+        details: primaryError instanceof ApiIntegrationError ? primaryError.details : undefined,
+      });
+
+      if (
+        !(primaryError instanceof ApiIntegrationError) ||
+        primaryError.code === "RATE_LIMITED" ||
+        primaryError.code === "SERVICE_NOT_CONFIGURED" ||
+        primaryError.code === "AUTH_FAILED"
+      ) {
+        throw primaryError;
+      }
+
+      openaiData = await callOpenAIChat(
+        c,
+        [
+          { role: "system", content: compactSystemPrompt },
+          ...dedupedHistory.slice(-8),
+          { role: "user", content: userMessage },
+        ],
+        700,
+      );
+    }
 
     const content = safeGet(openaiData.choices ?? [], 0)?.message?.content ?? "";
     return c.json({ message: content });
   } catch (error) {
-    console.error("[ai-chat]", error);
+    console.error("[ai-chat]", {
+      userId: user.id,
+      message: getErrorMessage(error),
+      details: error instanceof ApiIntegrationError ? error.details : undefined,
+      stack: error instanceof Error ? error.stack : undefined,
+    });
     const friendly = toFriendlyErrorResponse(error);
     return c.json(friendly.payload, toStatusCode(friendly.status));
   }
@@ -12825,7 +13049,10 @@ Skills: ${skillRows.slice(0, 5).map((skill) => `${skill.name}:${skill.total_reps
     try {
       const openaiData = await callOpenAIChat(c, [{ role: "user", content: prompt }], 1000, true);
       const content = safeGet(openaiData.choices ?? [], 0)?.message?.content ?? "{}";
-      recommendations = mergeRecommendationsWithFallback(JSON.parse(content), fallbackRecommendations);
+      recommendations = mergeRecommendationsWithFallback(
+        parseJsonObjectFromModelContent<Record<string, unknown>>(content) ?? {},
+        fallbackRecommendations,
+      );
     } catch (error) {
       degraded = true;
       console.error("[/api/ai/recommendations][upstream]", {
@@ -12888,7 +13115,7 @@ app.get("/api/ai/workout-suggestions", authMiddleware, async (c) => {
 
     const openaiData = await callOpenAIChat(c, [{ role: "user", content: prompt }], 900, true);
     const content = safeGet(openaiData.choices ?? [], 0)?.message?.content ?? "{}";
-    const workout = JSON.parse(content) as Record<string, unknown>;
+    const workout = parseJsonObjectFromModelContent<Record<string, unknown>>(content) ?? {};
 
     return c.json({
       success: true,
@@ -12933,7 +13160,7 @@ Contexto textual: ${food_description || "não informado"}
 Texto OCR do rótulo: ${ocr_text || "não identificado"}.`;
       const aiData = await callOpenAIChat(c, [{ role: "user", content: identifyPrompt }], 700, true);
       const aiContent = safeGet(aiData.choices ?? [], 0)?.message?.content ?? "{}";
-      const identified = JSON.parse(aiContent) as {
+      const identified = (parseJsonObjectFromModelContent(aiContent) ?? {}) as {
         items?: Array<{ food_name?: string | undefined; portion_description?: string | undefined; portion_multiplier?: number | undefined }>;
       };
       items = (identified.items ?? []).filter(isIdentifiedFoodItem);
@@ -13015,7 +13242,9 @@ Texto OCR do rótulo: ${ocr_text || "não identificado"}.`;
           console.warn(`[analyze-food][rapidapi-fallback] ${query}`, rapidError);
           const estimatePrompt = `Estime APENAS JSON com calories, protein, carbs, fats para ${query} (${item.portion_description || "porção média"}).`;
           const fallbackData = await callOpenAIChat(c, [{ role: "user", content: estimatePrompt }], 350, true);
-          const estimate = JSON.parse(safeGet(fallbackData.choices ?? [], 0)?.message?.content ?? "{}") as {
+          const estimate = (parseJsonObjectFromModelContent(
+            safeGet(fallbackData.choices ?? [], 0)?.message?.content ?? "{}",
+          ) ?? {}) as {
             calories?: number | undefined;
             protein?: number | undefined;
             carbs?: number | undefined;
