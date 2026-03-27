@@ -341,6 +341,31 @@ function resolveMissionFocusLabels(mission: Mission): string[] {
   return [bodyAreaLabel(mission.body_area)];
 }
 
+const UNILATERAL_EXECUTION_PATTERNS: ReadonlyArray<RegExp> = [
+  /\b(?:split squat|bulgarian split squat|agachamento bulgaro|agachamento dividido|agachamento unilateral)\b/,
+  /\b(?:single leg|single-leg|single arm|single-arm|one leg|one-leg|one arm|one-arm|unilateral)\b/,
+  /\b(?:step up|step-up|subida no banco|afundo alternado|avanco alternado|passada alternada)\b/,
+  /\b(?:cada lado|cada perna|cada braco|troque de lado|troque de perna|alterne os lados|alterne as pernas)\b/,
+];
+
+function isUnilateralExecutionMission(mission: Mission): boolean {
+  const sourceTexts = [
+    mission.title,
+    mission.description,
+    mission.goal,
+    ...(Array.isArray(mission.instructions) ? mission.instructions.slice(0, 6) : []),
+    ...(Array.isArray(mission.exercise_instructions_pt) ? mission.exercise_instructions_pt.slice(0, 6) : []),
+    ...(Array.isArray(mission.exercise_instructions_en) ? mission.exercise_instructions_en.slice(0, 6) : []),
+  ]
+    .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+    .map((value) => normalizeLookupText(value));
+
+  if (sourceTexts.length === 0) return false;
+
+  const combined = sourceTexts.join(" | ");
+  return UNILATERAL_EXECUTION_PATTERNS.some((pattern) => pattern.test(combined));
+}
+
 function summarizeAutoProgressLabel(tasks: readonly CircuitTask[]): string {
   const taskLabels = uniqueMissionLabels(tasks.map((task) => summarizeCircuitTaskLabel(task.label)));
   if (taskLabels.length === 0) return "Miss\u00f5es di\u00e1rias compat\u00edveis";
@@ -485,6 +510,7 @@ function MissionExecutionModal({
   const isTimeMission = metricType === "duration_seconds" || metricType === "duration_minutes";
   const isCounterMission = metricType === "repetitions" || metricType === "sets_reps";
   const isDistanceMission = metricType === "steps" || metricType === "distance_meters";
+  const usesPerSideExecutionLabel = isCounterMission && isUnilateralExecutionMission(mission);
 
   const incrementRep = () => {
     if (!isCounterMission) return;
@@ -780,14 +806,16 @@ function MissionExecutionModal({
             {/* Reps Counter */}
             {isCounterMission && !isTimeMission && (
               <div className="mt-4 sm:mt-6 w-full max-w-md flex flex-col items-center justify-center space-y-2 min-w-0">
-                <p className="text-[10px] sm:text-xs md:text-sm uppercase tracking-widest font-bold" style={{ color: "var(--app-primary-color)" }}>Repetições</p>
+                <p className="text-[10px] sm:text-xs md:text-sm uppercase tracking-widest font-bold" style={{ color: "var(--app-primary-color)" }}>
+                  {usesPerSideExecutionLabel ? "Repetições por lado" : "Repetições"}
+                </p>
                 <div className="flex items-center gap-4 sm:gap-6 min-w-0">
                   <button type="button" onClick={decrementRep} disabled={state.resting} className="size-10 sm:size-14 rounded-full border text-lg sm:text-2xl active:scale-95 disabled:opacity-50" style={{ borderColor: "var(--fl-border-soft)", backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 78%, transparent)" }}>-</button>
                   <span className="text-3xl sm:text-5xl font-bold w-16 sm:w-20 text-center">{state.repsDone}</span>
                   <button type="button" onClick={incrementRep} disabled={state.resting} className="size-10 sm:size-14 rounded-full border text-lg sm:text-2xl active:scale-95 disabled:opacity-50" style={{ borderColor: "var(--fl-border-soft)", backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 78%, transparent)" }}>+</button>
                 </div>
                 <p className="text-[10px] sm:text-xs text-center" style={{ color: "var(--fl-color-text-muted)" }}>
-                  Meta da série: {setGoal} | Progresso: {totalCounterProgress}/{totalGoal}
+                  Meta da série: {setGoal}{usesPerSideExecutionLabel ? " cada lado" : ""} | Progresso: {totalCounterProgress}/{totalGoal}
                 </p>
               </div>
             )}
@@ -1015,6 +1043,9 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
   const compactDurationLabel = showMissionDuration ? `${mission.duration_estimate_minutes} min` : null;
   const compactXpLabel = `+${mission.xp_reward} XP`;
   const cardTitle = resolveMissionDisplayTitle(mission.title);
+  const cardDescription = mission.description
+    ? (localizeMissionText(mission.description) ?? mission.description)
+    : null;
   const compactSummary = isWeeklyMission
     ? [`${autoProgressCurrentTotal}/${autoProgressRequiredTotal || 1} tarefas`, compactXpLabel].join(" | ")
     : isMonthlyMission && circuitTasks.length > 0
@@ -1146,7 +1177,7 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
 
       <h3 className="font-semibold text-gray-900 mb-1">{cardTitle}</h3>
       <p className="text-sm text-gray-500 mb-2">{primaryLabel}</p>
-      {!isAutoProgressMission && mission.description ? <p className="text-sm text-gray-600 mb-3 line-clamp-2">{mission.description}</p> : null}
+      {!isAutoProgressMission && cardDescription ? <p className="text-sm text-gray-600 mb-3 line-clamp-2">{cardDescription}</p> : null}
 
       {isWeeklyMission ? (
         <div className="space-y-3 mb-3">
@@ -1165,7 +1196,7 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
               return (
                 <div key={task.id} className="rounded-xl border border-gray-200 p-2">
                   <div className="flex items-center justify-between text-xs text-gray-700 mb-1">
-                    <span className="line-clamp-1">{task.label}</span>
+                    <span className="line-clamp-1">{localizeMissionText(task.label) ?? task.label}</span>
                     <span className="font-semibold">{task.current_count}/{task.required_count}</span>
                   </div>
                   <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden">

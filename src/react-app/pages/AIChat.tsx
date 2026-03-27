@@ -334,9 +334,15 @@ export default function AIChat() {
         .custom-scrollbar::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--app-primary-color) 20%, transparent); border-radius: 10px; }
       `}</style>
 
-      <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
-        <header className="fl-theme-topbar shrink-0 border-b px-3 py-3 backdrop-blur-md sm:px-4 lg:px-8">
-          <div className="mx-auto flex w-full max-w-5xl items-center justify-between gap-3">
+      <div
+        className="relative flex min-h-0 flex-1 flex-col overflow-hidden"
+        style={{ paddingTop: "calc(env(safe-area-inset-top, 0px) + 5.75rem)" }}
+      >
+        <div
+          className="pointer-events-none fixed inset-x-0 top-0 z-20 px-3 pb-2 sm:px-4 lg:px-8"
+          style={{ paddingTop: "calc(env(safe-area-inset-top, 0px) + 0.75rem)" }}
+        >
+          <header className="fl-theme-topbar pointer-events-auto mx-auto flex w-full max-w-5xl items-center justify-between gap-3 rounded-[1.75rem] border px-3 py-3 shadow-xl backdrop-blur-md">
             <button
               type="button"
               onClick={() => navigate(-1)}
@@ -378,8 +384,8 @@ export default function AIChat() {
             >
               <History className="h-5 w-5" />
             </button>
-          </div>
-        </header>
+          </header>
+        </div>
 
         <main className="custom-scrollbar mx-auto flex min-h-0 w-full max-w-5xl flex-1 flex-col gap-4 overflow-y-auto px-3 py-4 pb-4 sm:px-4 sm:pb-4 lg:px-8 lg:py-6 lg:pb-5 min-w-0">
           {messages.map((message, index) =>
