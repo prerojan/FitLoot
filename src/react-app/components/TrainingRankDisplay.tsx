@@ -1,6 +1,6 @@
-import React from 'react';
-import { Shield, TrendingUp, Target, Activity, AlertTriangle } from 'lucide-react';
-import type { TrainingRankSnapshot, UserProgression, UserSkill } from '@/shared/types';
+import React from "react";
+import { Shield, TrendingUp, Target, Activity, AlertTriangle } from "lucide-react";
+import type { TrainingRankSnapshot, UserProgression, UserSkill } from "@/shared/types";
 
 interface TrainingRankDisplayProps {
   snapshot: TrainingRankSnapshot | null;
@@ -12,48 +12,66 @@ interface TrainingRankDisplayProps {
 
 const rankConfig = {
   iniciante: {
-    color: 'text-gray-600',
-    bgColor: 'bg-gray-100',
-    borderColor: 'border-gray-300',
-    label: 'Iniciante',
-    description: 'Começando sua jornada fitness'
+    accent: "var(--fl-color-text-muted)",
+    surface: "color-mix(in srgb, var(--fl-surface-muted) 82%, var(--fl-surface-strong) 18%)",
+    border: "var(--fl-border-soft)",
+    accentSoft: "color-mix(in srgb, var(--fl-color-text-muted) 18%, transparent)",
+    label: "Iniciante",
+    description: "Começando sua jornada fitness",
   },
   intermediario: {
-    color: 'text-blue-600',
-    bgColor: 'bg-blue-100',
-    borderColor: 'border-blue-300',
-    label: 'Intermediário',
-    description: 'Em pleno desenvolvimento'
+    accent: "var(--app-secondary-color)",
+    surface: "color-mix(in srgb, var(--app-secondary-color) 14%, var(--fl-surface-strong) 86%)",
+    border: "color-mix(in srgb, var(--app-secondary-color) 24%, var(--fl-border-soft))",
+    accentSoft: "color-mix(in srgb, var(--app-secondary-color) 16%, transparent)",
+    label: "Intermediário",
+    description: "Em pleno desenvolvimento",
   },
   avancado: {
-    color: 'text-purple-600',
-    bgColor: 'bg-purple-100',
-    borderColor: 'border-purple-300',
-    label: 'Avançado',
-    description: 'Atleta experiente'
-  }
-};
+    accent: "var(--app-primary-color)",
+    surface: "color-mix(in srgb, var(--app-primary-color) 14%, var(--fl-surface-strong) 86%)",
+    border: "color-mix(in srgb, var(--app-primary-color) 24%, var(--fl-border-soft))",
+    accentSoft: "color-mix(in srgb, var(--app-primary-color) 16%, transparent)",
+    label: "Avançado",
+    description: "Atleta experiente",
+  },
+} as const;
 
-export function TrainingRankDisplay({ 
-  snapshot, 
-  isLoading = false, 
-  error = null, 
+export function TrainingRankDisplay({
+  snapshot,
+  isLoading = false,
+  error = null,
   showDetails = false,
-  compact = false 
+  compact = false,
 }: TrainingRankDisplayProps) {
   if (isLoading) {
     return (
       <div className="animate-pulse">
-        <div className="h-12 bg-gray-200 rounded-lg mb-2"></div>
-        {!compact && <div className="h-4 bg-gray-200 rounded w-3/4"></div>}
+        <div
+          className="mb-2 h-12 rounded-lg"
+          style={{ backgroundColor: "color-mix(in srgb, var(--fl-surface-muted) 80%, transparent)" }}
+        ></div>
+        {!compact ? (
+          <div
+            className="h-4 w-3/4 rounded"
+            style={{ backgroundColor: "color-mix(in srgb, var(--fl-surface-muted) 72%, transparent)" }}
+          ></div>
+        ) : null}
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="p-4 border border-red-200 bg-red-50 rounded-lg">
-        <div className="flex items-center gap-2 text-red-600">
+      <div
+        className="rounded-lg border p-4"
+        style={{
+          borderColor: "color-mix(in srgb, #ef4444 24%, var(--fl-border-soft))",
+          backgroundColor: "color-mix(in srgb, #ef4444 8%, var(--fl-surface-strong))",
+          color: "#ef4444",
+        }}
+      >
+        <div className="flex items-center gap-2">
           <AlertTriangle className="w-4 h-4" />
           <span className="text-sm">Erro ao carregar rank</span>
         </div>
@@ -63,8 +81,15 @@ export function TrainingRankDisplay({
 
   if (!snapshot) {
     return (
-      <div className="p-4 border border-gray-200 bg-gray-50 rounded-lg">
-        <div className="flex items-center gap-2 text-gray-500">
+      <div
+        className="rounded-lg border p-4"
+        style={{
+          borderColor: "var(--fl-border-soft)",
+          backgroundColor: "color-mix(in srgb, var(--fl-surface-muted) 72%, transparent)",
+          color: "var(--fl-color-text-muted)",
+        }}
+      >
+        <div className="flex items-center gap-2">
           <Activity className="w-4 h-4" />
           <span className="text-sm">Rank não disponível</span>
         </div>
@@ -76,108 +101,151 @@ export function TrainingRankDisplay({
 
   if (compact) {
     return (
-      <div className={`inline-flex items-center gap-2 px-3 py-1 rounded-full border ${config.bgColor} ${config.borderColor} ${config.color}`}>
+      <div
+        className="inline-flex items-center gap-2 rounded-full border px-3 py-1"
+        style={{
+          backgroundColor: config.surface,
+          borderColor: config.border,
+          color: config.accent,
+        }}
+      >
         <Shield className="w-3 h-3" />
         <span className="text-xs font-medium">{config.label}</span>
-        {snapshot.fallbackUsed && (
+        {snapshot.fallbackUsed ? (
           <div className="flex items-center gap-1">
             <AlertTriangle className="w-3 h-3 opacity-60" />
-            <span className="text-xs text-yellow-700">Dados incompletos</span>
+            <span className="text-xs" style={{ color: "var(--fl-color-text-muted)" }}>
+              Dados incompletos
+            </span>
           </div>
-        )}
+        ) : null}
       </div>
     );
   }
 
   return (
-    <div className={`p-4 rounded-lg border ${config.bgColor} ${config.borderColor}`}>
-      {/* Cabeçalho do Rank */}
-      <div className="flex items-center justify-between mb-3">
+    <div
+      className="rounded-lg border p-4"
+      style={{
+        backgroundColor: config.surface,
+        borderColor: config.border,
+      }}
+    >
+      <div className="mb-3 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className={`p-2 rounded-full ${config.bgColor}`}>
-            <Shield className={`w-5 h-5 ${config.color}`} />
+          <div className="rounded-full p-2" style={{ backgroundColor: config.accentSoft }}>
+            <Shield className="w-5 h-5" style={{ color: config.accent }} />
           </div>
           <div>
-            <h3 className={`font-semibold ${config.color}`}>{config.label}</h3>
-            <p className="text-xs text-gray-600">{config.description}</p>
+            <h3 className="font-semibold" style={{ color: config.accent }}>
+              {config.label}
+            </h3>
+            <p className="text-xs" style={{ color: "var(--fl-color-text-muted)" }}>
+              {config.description}
+            </p>
           </div>
         </div>
-        
+
         <div className="text-right">
-          <div className={`text-2xl font-bold ${config.color}`}>
+          <div className="text-2xl font-bold" style={{ color: config.accent }}>
             {snapshot.globalScore}
           </div>
-          <div className="text-xs text-gray-500">pontos</div>
+          <div className="text-xs" style={{ color: "var(--fl-color-text-muted)" }}>
+            pontos
+          </div>
         </div>
       </div>
 
-      {/* Alerta de Fallback */}
-      {snapshot.fallbackUsed && (
-        <div className="mb-3 p-2 bg-yellow-50 border border-yellow-200 rounded">
-          <div className="flex items-center gap-2 text-yellow-700 text-xs">
+      {snapshot.fallbackUsed ? (
+        <div
+          className="mb-3 rounded border p-2"
+          style={{
+            backgroundColor: "color-mix(in srgb, #f59e0b 10%, var(--fl-surface-strong))",
+            borderColor: "color-mix(in srgb, #f59e0b 22%, var(--fl-border-soft))",
+            color: "#d97706",
+          }}
+        >
+          <div className="flex items-center gap-2 text-xs">
             <AlertTriangle className="w-3 h-3" />
             <span>
-              {snapshot.hasBenchmarkData && snapshot.hasSkillData 
+              {snapshot.hasBenchmarkData && snapshot.hasSkillData
                 ? "Rank calculado com dados estimados - complete benchmarks para maior precisão"
-                : "Continue treinando para desbloquear ranking completo"
-              }
+                : "Continue treinando para desbloquear ranking completo"}
             </span>
           </div>
         </div>
-      )}
+      ) : null}
 
-      {/* Detalhes dos Fatores */}
-      {showDetails && (
+      {showDetails ? (
         <div className="space-y-2">
-          <h4 className="text-xs font-semibold text-gray-700 uppercase tracking-wide">Fatores de Avaliação</h4>
-          
+          <h4 className="text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--fl-color-text)" }}>
+            Fatores de Avaliação
+          </h4>
+
           <div className="grid grid-cols-2 gap-3">
             <div className="flex items-center gap-2">
-              <TrendingUp className="w-4 h-4 text-green-600" />
+              <TrendingUp className="w-4 h-4" style={{ color: "var(--app-primary-color)" }} />
               <div className="flex-1">
-                <div className="text-xs text-gray-600">Volume</div>
-                <div className="text-sm font-medium">{snapshot.factors.volumeScore}/25</div>
+                <div className="text-xs" style={{ color: "var(--fl-color-text-muted)" }}>
+                  Volume
+                </div>
+                <div className="text-sm font-medium" style={{ color: "var(--fl-color-text)" }}>
+                  {snapshot.factors.volumeScore}/25
+                </div>
               </div>
             </div>
-            
+
             <div className="flex items-center gap-2">
-              <Activity className="w-4 h-4 text-blue-600" />
+              <Activity className="w-4 h-4" style={{ color: "var(--app-secondary-color)" }} />
               <div className="flex-1">
-                <div className="text-xs text-gray-600">Consistência</div>
-                <div className="text-sm font-medium">{snapshot.factors.consistencyScore}/25</div>
+                <div className="text-xs" style={{ color: "var(--fl-color-text-muted)" }}>
+                  Consistência
+                </div>
+                <div className="text-sm font-medium" style={{ color: "var(--fl-color-text)" }}>
+                  {snapshot.factors.consistencyScore}/25
+                </div>
               </div>
             </div>
-            
+
             <div className="flex items-center gap-2">
-              <Target className="w-4 h-4 text-purple-600" />
+              <Target className="w-4 h-4" style={{ color: config.accent }} />
               <div className="flex-1">
-                <div className="text-xs text-gray-600">Benchmarks</div>
-                <div className="text-sm font-medium">{snapshot.factors.benchmarkScore}/30</div>
+                <div className="text-xs" style={{ color: "var(--fl-color-text-muted)" }}>
+                  Benchmarks
+                </div>
+                <div className="text-sm font-medium" style={{ color: "var(--fl-color-text)" }}>
+                  {snapshot.factors.benchmarkScore}/30
+                </div>
               </div>
             </div>
-            
+
             <div className="flex items-center gap-2">
-              <Shield className="w-4 h-4 text-orange-600" />
+              <Shield
+                className="w-4 h-4"
+                style={{ color: "color-mix(in srgb, var(--app-primary-color) 78%, #f59e0b)" }}
+              />
               <div className="flex-1">
-                <div className="text-xs text-gray-600">Skills</div>
-                <div className="text-sm font-medium">{snapshot.factors.skillMasteryScore}/20</div>
+                <div className="text-xs" style={{ color: "var(--fl-color-text-muted)" }}>
+                  Skills
+                </div>
+                <div className="text-sm font-medium" style={{ color: "var(--fl-color-text)" }}>
+                  {snapshot.factors.skillMasteryScore}/20
+                </div>
               </div>
             </div>
           </div>
         </div>
-      )}
+      ) : null}
 
-      {/* Metadata */}
-      <div className="mt-3 pt-2 border-t border-gray-200">
-        <div className="text-xs text-gray-500">
-          Atualizado: {new Date(snapshot.lastCalculatedAt).toLocaleDateString('pt-BR')}
+      <div className="mt-3 border-t pt-2" style={{ borderColor: "var(--fl-border-soft)" }}>
+        <div className="text-xs" style={{ color: "var(--fl-color-text-muted)" }}>
+          Atualizado: {new Date(snapshot.lastCalculatedAt).toLocaleDateString("pt-BR")}
         </div>
       </div>
     </div>
   );
 }
 
-// Hook para facilitar o uso do componente
 export function useTrainingRank(
   userProgression: UserProgression | null,
   userSkills: UserSkill[],
@@ -198,31 +266,32 @@ export function useTrainingRank(
       try {
         setIsLoading(true);
         setError(null);
-        
-        // Import dinâmico para evitar dependência circular
-        const { getOrCalculateRankSnapshot } = await import('@/shared/trainingLevels');
-        
+
+        const { getOrCalculateRankSnapshot } = await import("@/shared/trainingLevels");
+
         const rankSnapshot = getOrCalculateRankSnapshot(
-          userProgression ? {
-            xp: userProgression.xp,
-            level: userProgression.level,
-            current_streak: userProgression.current_streak,
-            best_streak: userProgression.best_streak,
-            training_rank_snapshot: userProgression.training_rank_snapshot || null
-          } : {
-            xp: 0,
-            level: 1,
-            current_streak: 0,
-            best_streak: 0,
-            training_rank_snapshot: null
-          },
+          userProgression
+            ? {
+                xp: userProgression.xp,
+                level: userProgression.level,
+                current_streak: userProgression.current_streak,
+                best_streak: userProgression.best_streak,
+                training_rank_snapshot: userProgression.training_rank_snapshot || null,
+              }
+            : {
+                xp: 0,
+                level: 1,
+                current_streak: 0,
+                best_streak: 0,
+                training_rank_snapshot: null,
+              },
           userSkills,
           benchmarkResults
         );
-        
+
         setSnapshot(rankSnapshot);
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Erro desconhecido');
+        setError(err instanceof Error ? err.message : "Erro desconhecido");
       } finally {
         setIsLoading(false);
       }

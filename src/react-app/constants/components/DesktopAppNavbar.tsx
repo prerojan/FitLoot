@@ -159,7 +159,7 @@ export default function DesktopAppNavbar({
         <div className="flex items-center gap-3 lg:gap-4">
           <button
             type="button"
-            onClick={() => navigate(ROUTE_PATHS.profile)}
+            onClick={() => navigate(ROUTE_PATHS.profile, { state: { openSettings: true } })}
             className="flex h-11 w-11 items-center justify-center rounded-full"
             style={{
               background:

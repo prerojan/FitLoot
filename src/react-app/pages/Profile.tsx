@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router";
+import { useLocation, useNavigate } from "react-router";
 import { 
   Settings, 
   LogOut, 
@@ -85,6 +85,7 @@ export default function Profile() {
   const { user, logout } = useAuth();
   const { themeMode, toggleThemeMode } = useTheme();
   const navigate = useNavigate();
+  const location = useLocation();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [attributes, setAttributes] = useState<UserAttributes | null>(null);
   const [progression, setProgression] = useState<UserProgression | null>(null);
@@ -246,6 +247,15 @@ export default function Profile() {
     }
     void loadData();
   }, [user, navigate, loadData]);
+
+  useEffect(() => {
+    if (!(location.state as { openSettings?: boolean } | null)?.openSettings) {
+      return;
+    }
+
+    setSettingsOpen(true);
+    navigate(location.pathname, { replace: true, state: null });
+  }, [location.pathname, location.state, navigate]);
 
   const activeTitle = useMemo(() => titles.find((item) => item.is_active === 1), [titles]);
   const showcasedAchievement = useMemo(
@@ -471,18 +481,11 @@ export default function Profile() {
           <div className="flex flex-col gap-3">
              <button 
                 onClick={() => setSettingsOpen(true)}
-                className="fl-theme-surface flex items-center justify-center gap-3 rounded-2xl py-4 text-[10px] font-bold fl-theme-text-muted uppercase tracking-widest transition-opacity hover:opacity-85"
+                className="fl-theme-surface flex items-center justify-center gap-3 rounded-2xl py-4 text-[10px] font-bold fl-theme-text-muted uppercase tracking-widest transition-opacity hover:opacity-85 md:hidden"
               >
                 <Settings className="size-4" /> Configurações
              </button>
-
-             <button 
-                onClick={handleLogout}
-                className="flex items-center justify-center gap-3 bg-red-500/5 border border-red-500/10 rounded-2xl py-4 text-[10px] font-bold text-red-400/60 uppercase tracking-widest hover:text-red-400 hover:bg-red-500/10 transition-all"
-             >
-                <LogOut className="size-4" /> Encerrar Sessão
-             </button>
-          </div>
+           </div>
         </aside>
 
         {/* Main Content Area */}
@@ -803,13 +806,26 @@ export default function Profile() {
             </div>
 
             <footer className="p-8 border-t shrink-0" style={{ borderColor: "var(--fl-border-soft)", backgroundColor: "color-mix(in srgb, var(--fl-surface-muted) 58%, transparent)" }}>
-               <button 
-                onClick={() => setSettingsOpen(false)}
-                className="w-full rounded-2xl bg-primary py-5 text-xs font-black uppercase tracking-[0.3em] shadow-lg shadow-primary/20 transition-all hover:scale-[1.02]"
-                style={{ backgroundColor: 'var(--app-primary-color)', color: 'var(--fl-nav-item-active-text)' }}
-               >
-                 Confirmar Alterações
-               </button>
+              <div className="flex flex-col gap-3 sm:flex-row">
+                <button
+                  onClick={handleLogout}
+                  className="flex w-full items-center justify-center gap-3 rounded-2xl border py-5 text-xs font-black uppercase tracking-[0.2em] transition-all hover:opacity-85 sm:flex-1"
+                  style={{
+                    borderColor: "color-mix(in srgb, #ef4444 24%, var(--fl-border-soft))",
+                    backgroundColor: "color-mix(in srgb, #ef4444 8%, var(--fl-surface-strong))",
+                    color: "#ef4444",
+                  }}
+                >
+                  <LogOut className="size-4" /> Encerrar Sessão
+                </button>
+                <button 
+                  onClick={() => setSettingsOpen(false)}
+                  className="w-full rounded-2xl bg-primary py-5 text-xs font-black uppercase tracking-[0.3em] shadow-lg shadow-primary/20 transition-all hover:scale-[1.02] sm:flex-1"
+                  style={{ backgroundColor: 'var(--app-primary-color)', color: 'var(--fl-nav-item-active-text)' }}
+                >
+                  Confirmar Alterações
+                </button>
+              </div>
             </footer>
           </div>
         </div>
