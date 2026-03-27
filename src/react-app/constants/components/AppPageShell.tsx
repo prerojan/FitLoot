@@ -20,6 +20,7 @@ const CHROMELESS_ROUTES = new Set<string>([
   ROUTE_PATHS.aiChat,
   ROUTE_PATHS.achievements,
   ROUTE_PATHS.foodAnalysis,
+  ROUTE_PATHS.titles,
 ]);
 
 export default function AppPageShell({
