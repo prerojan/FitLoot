@@ -1139,6 +1139,8 @@ export interface Env {
 }
 // --------------------------------
 
+const HUGGING_FACE_CHAT_MODEL = "openai/gpt-oss-120b";
+
 function getHuggingFaceApiKey(env: Pick<Env, "HF_TOKEN" | "HUGGING_FACE_API_KEY">): string | null {
   const direct = typeof env.HUGGING_FACE_API_KEY === "string" ? env.HUGGING_FACE_API_KEY.trim() : "";
   if (direct.length > 0) return direct;
@@ -1930,6 +1932,99 @@ async function buildInitialTrainingPlan(mainGoal: string | null | undefined, con
   };
 }
 
+type TrainingPlanChatPreferences = {
+  planFocus: string | null;
+  routineStyle: string | null;
+  summary: string | null;
+  constraints: string[];
+  userRequest: string | null;
+  updatedAt: string;
+};
+
+function parseStoredPlanRecord(rawValue: unknown): Record<string, unknown> | null {
+  if (typeof rawValue !== "string" || rawValue.trim().length === 0) return null;
+  try {
+    const parsed = JSON.parse(rawValue);
+    return typeof parsed === "object" && parsed !== null ? parsed as Record<string, unknown> : null;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeOptionalPlanText(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function normalizePlanConstraintList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((entry) => (typeof entry === "string" ? entry.trim() : ""))
+    .filter((entry) => entry.length > 0)
+    .slice(0, 6);
+}
+
+function normalizeTrainingPlanChatPreferences(value: unknown): TrainingPlanChatPreferences | null {
+  const source = typeof value === "object" && value !== null ? value as Record<string, unknown> : null;
+  if (!source) return null;
+
+  const planFocus = normalizeOptionalPlanText(source.plan_focus ?? source.planFocus);
+  const routineStyle = normalizeOptionalPlanText(source.routine_style ?? source.routineStyle);
+  const summary = normalizeOptionalPlanText(source.summary ?? source.adjustment_summary ?? source.adjustmentSummary);
+  const constraints = normalizePlanConstraintList(source.constraints);
+  const userRequest = normalizeOptionalPlanText(source.user_request ?? source.userRequest);
+  const updatedAt = normalizeOptionalPlanText(source.updated_at ?? source.updatedAt) ?? new Date().toISOString();
+
+  if (!planFocus && !routineStyle && !summary && constraints.length === 0 && !userRequest) {
+    return null;
+  }
+
+  return {
+    planFocus,
+    routineStyle,
+    summary,
+    constraints,
+    userRequest,
+    updatedAt,
+  };
+}
+
+function serializeTrainingPlanChatPreferences(preferences: TrainingPlanChatPreferences | null): Record<string, unknown> | null {
+  if (!preferences) return null;
+  return {
+    plan_focus: preferences.planFocus,
+    routine_style: preferences.routineStyle,
+    summary: preferences.summary,
+    constraints: preferences.constraints,
+    user_request: preferences.userRequest,
+    updated_at: preferences.updatedAt,
+  };
+}
+
+function summarizeTrainingPlanChatPreferences(preferences: TrainingPlanChatPreferences | null): string {
+  if (!preferences) return "";
+
+  const parts = [
+    preferences.summary,
+    preferences.planFocus ? `foco: ${preferences.planFocus}` : "",
+    preferences.routineStyle ? `estilo: ${preferences.routineStyle}` : "",
+    preferences.constraints.length > 0 ? `diretrizes: ${preferences.constraints.join(", ")}` : "",
+  ]
+    .map((item) => item?.trim() ?? "")
+    .filter((item, index, array) => item.length > 0 && array.indexOf(item) === index);
+
+  return parts.join(" | ");
+}
+
+function trainingPlanChatPreferencesHash(preferences: TrainingPlanChatPreferences | null): string {
+  return summarizeTrainingPlanChatPreferences(preferences)
+    .split("|")
+    .map((item) => item.trim().toLowerCase())
+    .filter((item) => item.length > 0)
+    .join("|");
+}
+
 function normalizeTrainingFrequencyInput(value: unknown): number {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return 4;
@@ -1947,6 +2042,25 @@ async function upsertTrainingPlan(
   trainingFrequency: number | null | undefined,
 ) {
   const normalizedTrainingFrequency = normalizeTrainingFrequencyInput(trainingFrequency);
+  const existingRow = await db.prepare("SELECT weekly_plan_json FROM user_training_plans WHERE user_id = ?")
+    .bind(userId)
+    .first<{ weekly_plan_json: string | null }>();
+  const existingPlan = parseStoredPlanRecord(existingRow?.weekly_plan_json);
+  const existingPreferences = normalizeTrainingPlanChatPreferences(existingPlan?.chat_preferences);
+  const hasIncomingPreferences = Object.prototype.hasOwnProperty.call(plan, "chat_preferences");
+  const incomingPreferences = normalizeTrainingPlanChatPreferences(plan.chat_preferences);
+  const planToStore: Record<string, unknown> = { ...plan };
+
+  if (hasIncomingPreferences) {
+    if (incomingPreferences) {
+      planToStore.chat_preferences = serializeTrainingPlanChatPreferences(incomingPreferences);
+    } else {
+      delete planToStore.chat_preferences;
+    }
+  } else if (existingPreferences) {
+    planToStore.chat_preferences = serializeTrainingPlanChatPreferences(existingPreferences);
+  }
+
   await db.prepare(`INSERT INTO user_training_plans (user_id, main_goal, conditioning, training_frequency, equipment, injuries, weekly_plan_json, progression_notes, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
     ON CONFLICT(user_id) DO UPDATE SET
@@ -1965,7 +2079,7 @@ async function upsertTrainingPlan(
       normalizedTrainingFrequency,
       equipment ?? "",
       injuries ?? "",
-      JSON.stringify(plan),
+      JSON.stringify(planToStore),
       "progressao de base",
     )
     .run();
@@ -7788,8 +7902,14 @@ function currentWeekKey(reference = new Date()): string {
   return missionCycleStartIso("weekly", reference).split("T")[0] ?? "";
 }
 
-function buildPlanProfileHash(mainGoal: string, conditioning: ConditioningLevel, injuries: string, equipment: string): string {
-  return [mainGoal, conditioning, injuries, equipment]
+function buildPlanProfileHash(
+  mainGoal: string,
+  conditioning: ConditioningLevel,
+  injuries: string,
+  equipment: string,
+  chatPreferences: TrainingPlanChatPreferences | null = null,
+): string {
+  return [mainGoal, conditioning, injuries, equipment, trainingPlanChatPreferencesHash(chatPreferences)]
     .map((item) => item.trim().toLowerCase())
     .join("|");
 }
@@ -9270,13 +9390,9 @@ async function createMissionsForPeriod(env: Env, db: D1Database, userId: string,
   const failedCount = Number(history?.failed_count ?? 0);
   const currentRate = completionRate(completedCount, failedCount);
   const weekKey = currentWeekKey();
-  const profileHash = buildPlanProfileHash(mainGoal, conditioning, injuries, equipment);
-
-  const rawPlanWeeklyJson = planRow?.weekly_plan_json;
-  const planWeeklyJson = String(rawPlanWeeklyJson ?? "");
-  const previousPlanRaw = planWeeklyJson.trim().length > 0
-    ? JSON.parse(planWeeklyJson) as Record<string, unknown>
-    : null;
+  const previousPlanRaw = parseStoredPlanRecord(planRow?.weekly_plan_json);
+  const chatPlanPreferences = normalizeTrainingPlanChatPreferences(previousPlanRaw?.chat_preferences);
+  const profileHash = buildPlanProfileHash(mainGoal, conditioning, injuries, equipment, chatPlanPreferences);
   const previousWeekKeyRaw = previousPlanRaw?.week_key;
   const previousWeekKey = typeof previousWeekKeyRaw === "string" ? previousWeekKeyRaw : "";
   const previousHashRaw = previousPlanRaw?.profile_hash;
@@ -9317,6 +9433,7 @@ async function createMissionsForPeriod(env: Env, db: D1Database, userId: string,
       `Taxa de conclusao da semana anterior: ${(currentRate * 100).toFixed(1)}%`,
       `Habilidades e desempenho do usuario (priorizar nomes alinhados a estas skills nos exercicios): ${capacitySummary}`,
       activeSkillFocus ? `Foco ativo de habilidade no perfil (prioridade nos exercicios diarios): ${activeSkillFocus}` : "",
+      chatPlanPreferences ? `Preferencia ativa do usuario vinda do chat para as proximas geracoes: ${summarizeTrainingPlanChatPreferences(chatPlanPreferences)}. Essa preferencia substitui instrucoes anteriores conflitantes.` : "",
       `Ajuste de volume obrigatorio: ${Math.round(volumeMultiplier * 100)}% do baseline, variando no maximo 10%.`,
       MISSION_METRIC_RULES_PROMPT,
     ]
@@ -9347,12 +9464,14 @@ async function createMissionsForPeriod(env: Env, db: D1Database, userId: string,
     }
   }
 
+  const serializedChatPlanPreferences = serializeTrainingPlanChatPreferences(chatPlanPreferences);
   const planToStore = {
     week_key: weekKey,
     profile_hash: profileHash,
     volume_multiplier: volumeMultiplier,
     progression_expected: "Progressao semanal ajustada em no maximo 10% conforme taxa de conclusao.",
     weekly: normalizedWeeklyPlan,
+    ...(serializedChatPlanPreferences ? { chat_preferences: serializedChatPlanPreferences } : {}),
   };
 
   if (mustRegeneratePlan) {
@@ -9697,6 +9816,7 @@ type MissionGenerationProfileSnapshot = {
     situps: number;
     squats: number;
   };
+  chatPlanPreferences: TrainingPlanChatPreferences | null;
 };
 
 type ResolvedMissionSubtask = {
@@ -10166,10 +10286,9 @@ async function loadMissionGenerationProfile(
   const failedCount = Number(historySummary?.failed_count ?? 0);
   const completionRateValue = completionRate(completedCount, failedCount);
   const weekKey = currentWeekKey();
-  const profileHash = buildPlanProfileHash(mainGoal, conditioning, injuries, equipment);
-  const previousPlanRaw = typeof planRow?.weekly_plan_json === "string" && planRow.weekly_plan_json.trim().length > 0
-    ? JSON.parse(planRow.weekly_plan_json) as Record<string, unknown>
-    : null;
+  const previousPlanRaw = parseStoredPlanRecord(planRow?.weekly_plan_json);
+  const chatPlanPreferences = normalizeTrainingPlanChatPreferences(previousPlanRaw?.chat_preferences);
+  const profileHash = buildPlanProfileHash(mainGoal, conditioning, injuries, equipment, chatPlanPreferences);
   const previousWeekKey = typeof previousPlanRaw?.week_key === "string" ? previousPlanRaw.week_key : "";
   const previousHash = typeof previousPlanRaw?.profile_hash === "string" ? previousPlanRaw.profile_hash : "";
   const previousVolumeMultiplier = typeof previousPlanRaw?.volume_multiplier === "number" ? previousPlanRaw.volume_multiplier : 1;
@@ -10214,6 +10333,7 @@ async function loadMissionGenerationProfile(
     },
     capacitySummary: buildCapacitySummary(capacityRowsArray),
     initialCapacities: resolveInitialCapacities(profile, capacityRowsArray),
+    chatPlanPreferences,
   };
 }
 
@@ -10226,6 +10346,7 @@ function buildStructuredPlanPrompt(
   const specialRule = options.isAiSpecial
     ? "Gere apenas missoes especiais em daily_missions. weekly_missions e monthly_missions devem ser arrays vazios."
     : "Gere um plano completo com daily_missions, weekly_missions e monthly_missions respeitando os limites informados.";
+  const activeChatPreferenceSummary = summarizeTrainingPlanChatPreferences(profile.chatPlanPreferences);
 
   return [
     "Voce esta gerando um plano de missoes fitness para o app FitLoot.",
@@ -10250,6 +10371,9 @@ function buildStructuredPlanPrompt(
     `Objetivos adicionais: ${profile.goals.join(", ")}`,
     `Condicionamento: ${profile.conditioning}`,
     `Treinos por semana: ${profile.trainingFrequency}`,
+    activeChatPreferenceSummary.length > 0
+      ? `Preferencia ativa do usuario vinda do chat: ${activeChatPreferenceSummary}. Essa preferencia substitui qualquer foco anterior conflitante e deve orientar as proximas geracoes.`
+      : "",
     `Capacidade declarada: flexao ${profile.initialCapacities.pushups}, abdominal ${profile.initialCapacities.situps}, agachamento ${profile.initialCapacities.squats}`,
     `Resumo de capacidade/historico: ${profile.capacitySummary}`,
     `Lesoes/restricoes: ${profile.injuries || "nenhuma"}`,
@@ -11165,6 +11289,9 @@ async function persistMaterializedMissionEntries(
           volume_multiplier: profile.volumeMultiplier,
           progression_expected: "Progressao semanal ajustada em no maximo 10% conforme taxa de conclusao.",
           weekly: profile.weeklyPlan,
+          ...(profile.chatPlanPreferences
+            ? { chat_preferences: serializeTrainingPlanChatPreferences(profile.chatPlanPreferences) }
+            : {}),
         },
         profile.mainGoal,
         profile.conditioning,
@@ -11922,7 +12049,7 @@ async function requestHuggingFaceStructuredContent(
             Authorization: `Bearer ${apiKey}`,
           },
           body: JSON.stringify({
-            model: "openai/gpt-oss-120b:groq",
+            model: HUGGING_FACE_CHAT_MODEL,
             messages: attempt.requestMessages,
             max_tokens: maxTokens,
             ...(attempt.responseFormat ? { response_format: { type: "json_object" } } : {}),
@@ -12005,7 +12132,7 @@ async function callOpenAIChat(
         "Authorization": `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: "openai/gpt-oss-120b:groq",
+        model: HUGGING_FACE_CHAT_MODEL,
         messages,
         max_tokens: maxTokens,
       }),
@@ -12028,6 +12155,138 @@ type RapidApiNutritionResponse = Array<{
   carbohydrates_total_g?: number | undefined;
   fat_total_g?: number | undefined;
 }>;
+
+function shouldInspectTrainingPlanPreferenceRequest(message: string): boolean {
+  const normalized = normalizeMatchText(message);
+  if (normalized.length === 0) return false;
+
+  return [
+    "plano",
+    "treino",
+    "rotina",
+    "missao",
+    "missoes",
+    "foco",
+    "forca",
+    "resistencia",
+    "resist",
+    "condicion",
+    "mobilidade",
+    "flexibilidade",
+    "hipertrof",
+    "massa",
+    "emagrec",
+    "curta",
+    "rapido",
+    "adapt",
+  ].some((keyword) => normalized.includes(keyword));
+}
+
+async function maybeApplyTrainingPlanPreferenceFromChat(
+  c: import("hono").Context<AppContext>,
+  params: {
+    userId: string;
+    userMessage: string;
+    mainGoal: string;
+    conditioning: ConditioningLevel;
+    equipment: string;
+    injuries: string;
+    trainingFrequency: number;
+    existingPlanJson: string | null;
+    activePreferences: TrainingPlanChatPreferences | null;
+  },
+): Promise<TrainingPlanChatPreferences | null> {
+  if (!shouldInspectTrainingPlanPreferenceRequest(params.userMessage)) {
+    return null;
+  }
+
+  const currentPreferenceSummary = summarizeTrainingPlanChatPreferences(params.activePreferences);
+  const classificationPrompt = [
+    "Analise se a mensagem do usuario pede para alterar a abordagem do plano de treino futuro que orienta a geracao das proximas missoes.",
+    "Considere como alteracao valida pedidos como foco em forca, resistencia, hipertrofia, condicionamento, emagrecimento, mobilidade, flexibilidade, rotina curta, treinos rapidos ou adaptacao da rotina.",
+    "Nao marque alteracao quando o usuario estiver apenas tirando uma duvida geral, pedindo explicacao de exercicio, falando de dor sem pedir mudanca de plano, ou comentando desempenho sem pedir ajuste futuro.",
+    "Se houver nova preferencia, ela substitui a anterior.",
+    "Responda APENAS JSON valido neste formato:",
+    '{"should_update_training_plan":false,"plan_focus":null,"routine_style":null,"summary":null,"constraints":[]}',
+  ].join("\n");
+
+  const classificationUserMessage = [
+    `Mensagem do usuario: ${params.userMessage}`,
+    `Objetivo atual: ${params.mainGoal}`,
+    `Condicionamento atual: ${params.conditioning}`,
+    `Treinos por semana: ${params.trainingFrequency}`,
+    currentPreferenceSummary.length > 0 ? `Preferencia ativa atual: ${currentPreferenceSummary}` : "Preferencia ativa atual: nenhuma",
+  ].join("\n");
+
+  try {
+    const classificationResponse = await callOpenAIChat(
+      c,
+      [
+        { role: "system", content: classificationPrompt },
+        { role: "user", content: classificationUserMessage },
+      ],
+      220,
+      true,
+    );
+    const rawContent = safeGet(classificationResponse.choices ?? [], 0)?.message?.content ?? "";
+    const parsed = parseJsonObjectFromModelContent<Record<string, unknown>>(rawContent);
+    const shouldUpdateTrainingPlan = parsed
+      ? parsed.should_update_training_plan === true || parsed.should_update_training_plan === "true"
+      : false;
+    if (!shouldUpdateTrainingPlan) {
+      return null;
+    }
+    if (!parsed) {
+      return null;
+    }
+
+    const normalizedPreferences = normalizeTrainingPlanChatPreferences({
+      plan_focus: parsed.plan_focus,
+      routine_style: parsed.routine_style,
+      summary: parsed.summary,
+      constraints: parsed.constraints,
+      user_request: params.userMessage,
+      updated_at: new Date().toISOString(),
+    });
+    if (!normalizedPreferences) {
+      return null;
+    }
+
+    const existingPlan = parseStoredPlanRecord(params.existingPlanJson)
+      ?? (await buildInitialTrainingPlan(
+        params.mainGoal,
+        params.conditioning,
+        params.equipment,
+        params.injuries,
+      )) as Record<string, unknown>;
+    const nextPlan: Record<string, unknown> = {
+      ...existingPlan,
+      chat_preferences: serializeTrainingPlanChatPreferences(normalizedPreferences),
+      profile_hash: "",
+      week_key: currentWeekKey(),
+    };
+
+    await upsertTrainingPlan(
+      c.env.fitloot_db,
+      params.userId,
+      nextPlan,
+      params.mainGoal,
+      params.conditioning,
+      params.equipment,
+      params.injuries,
+      params.trainingFrequency,
+    );
+
+    return normalizedPreferences;
+  } catch (error) {
+    console.warn("[ai-chat][plan-preference]", {
+      userId: params.userId,
+      message: getErrorMessage(error),
+      details: error instanceof ApiIntegrationError ? error.details : undefined,
+    });
+    return null;
+  }
+}
 
 async function searchFoodOnUSDA(c: import("hono").Context<AppContext>, query: string) {
   if (!c.env.USDA_API_KEY) {
@@ -12618,11 +12877,22 @@ app.post("/api/ai/chat", authMiddleware, async (c) => {
       await unlockAchievementIfNeeded(c.env.fitloot_db, user.id, "Conversa de Louco", Number(session_count), 100);
     }
 
-    const [profile, progression, attributes] = await Promise.all([
+    const [profile, progression, attributes, trainingPlanRow] = await Promise.all([
       c.env.fitloot_db.prepare("SELECT * FROM user_profiles WHERE user_id = ?").bind(user.id).first(),
       c.env.fitloot_db.prepare("SELECT * FROM user_progression WHERE user_id = ?").bind(user.id).first(),
       c.env.fitloot_db.prepare("SELECT * FROM user_attributes WHERE user_id = ?").bind(user.id).first(),
+      c.env.fitloot_db.prepare("SELECT weekly_plan_json, training_frequency FROM user_training_plans WHERE user_id = ?")
+        .bind(user.id)
+        .first<{ weekly_plan_json: string | null; training_frequency: number | null }>(),
     ]);
+    const activeTrainingPlan = parseStoredPlanRecord(trainingPlanRow?.weekly_plan_json);
+    const activeChatPlanPreferences = normalizeTrainingPlanChatPreferences(activeTrainingPlan?.chat_preferences);
+    const activeChatPlanSummary = summarizeTrainingPlanChatPreferences(activeChatPlanPreferences);
+    const profileMainGoal = typeof profile?.main_goal === "string" ? profile.main_goal : "";
+    const profileConditioning = normalizeConditioning(profile?.initial_conditioning);
+    const profileEquipment = typeof profile?.equipment === "string" ? profile.equipment : "";
+    const profileInjuries = typeof profile?.injuries === "string" ? profile.injuries : "";
+    const trainingFrequency = normalizeTrainingFrequencyInput(trainingPlanRow?.training_frequency);
 
     const systemPrompt = `Você é o assistente oficial do app FitBot.
 Sua função é responder de forma útil, natural, objetiva e agradável, ajudando o usuário com treino, evolução física, hábitos, alimentação e uso do app.
@@ -12702,8 +12972,9 @@ Contexto do usuário:
 - Nível: ${progression?.level}
 - XP: ${progression?.xp}
 - Streak: ${progression?.current_streak} dias
-- Objetivo: ${profile?.main_goal}
-- Condicionamento: ${profile?.initial_conditioning}
+- Objetivo: ${profileMainGoal}
+- Condicionamento: ${profileConditioning}
+- Preferencia ativa para proximas geracoes: ${activeChatPlanSummary || "nenhuma"}
 - Força: ${attributes?.strength}
 - Modo: ${mode}`;
 
@@ -12732,8 +13003,9 @@ Contexto do usuário:
 
 Contexto do usuário:
 - Nome: ${profile?.full_name}
-- Objetivo: ${profile?.main_goal}
-- Condicionamento: ${profile?.initial_conditioning}
+- Objetivo: ${profileMainGoal}
+- Condicionamento: ${profileConditioning}
+- Preferencia ativa: ${activeChatPlanSummary || "nenhuma"}
 - Modo: ${mode}`;
 
     const primaryMessages = [
@@ -12773,7 +13045,22 @@ Contexto do usuário:
     }
 
     const content = safeGet(openaiData.choices ?? [], 0)?.message?.content ?? "";
-    return c.json({ message: content });
+    const appliedPlanPreference = await maybeApplyTrainingPlanPreferenceFromChat(c, {
+      userId: user.id,
+      userMessage,
+      mainGoal: profileMainGoal,
+      conditioning: profileConditioning,
+      equipment: profileEquipment,
+      injuries: profileInjuries,
+      trainingFrequency,
+      existingPlanJson: trainingPlanRow?.weekly_plan_json ?? null,
+      activePreferences: activeChatPlanPreferences,
+    });
+    const planPreferenceNotice = appliedPlanPreference
+      ? `\n\nAjuste salvo para as proximas missoes: ${summarizeTrainingPlanChatPreferences(appliedPlanPreference)}.`
+      : "";
+
+    return c.json({ message: `${content}${planPreferenceNotice}`.trim() });
   } catch (error) {
     console.error("[ai-chat]", {
       userId: user.id,
