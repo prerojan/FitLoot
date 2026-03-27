@@ -6,6 +6,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useHealthData } from './useHealthData';
 import { useMapService } from './useMapService';
+import { formatStepsSourceLabel } from '@/react-app/services/native/stepsService';
 import type { Mission, MissionMetricType } from '@/shared/types';
 
 export interface WalkingMissionState {
@@ -204,9 +205,8 @@ export const useWalkingMission = ({ mission, onComplete, autoRefresh = true }: U
       // Gerar rota segura
       await generateSafeRoute();
 
-      // Se não estiver autenticado com Google Fit, usar dados simulados
-      if (!isAuthenticated) {
-        console.warn('Google Fit não autenticado. Usando dados simulados.');
+      if (import.meta.env.DEV && healthData?.source === 'simulated') {
+        console.warn(`Fonte de passos em fallback: ${formatStepsSourceLabel(healthData.source)}.`);
       }
 
     } catch (error) {
@@ -217,7 +217,7 @@ export const useWalkingMission = ({ mission, onComplete, autoRefresh = true }: U
         error: "Falha ao iniciar a missão. Tente novamente.",
       }));
     }
-  }, [generateSafeRoute, isAuthenticated]);
+  }, [generateSafeRoute, healthData?.source, isAuthenticated]);
 
   // Pausar/Retomar execução
   const togglePause = useCallback(() => {
