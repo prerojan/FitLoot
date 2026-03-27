@@ -8,8 +8,6 @@ import {
   Gift,
   History,
   LineChart,
-  Mic,
-  Paperclip,
   Utensils,
   X,
 } from "lucide-react";
@@ -348,9 +346,9 @@ export default function AIChat() {
           <header
             className="fl-theme-topbar pointer-events-auto mx-auto flex w-full max-w-5xl items-center justify-between gap-3 rounded-[1.75rem] border px-3 py-3 shadow-xl backdrop-blur-md"
             style={{
-              backgroundColor: "rgba(255, 255, 255, 0.96)",
-              borderColor: "rgba(15, 23, 42, 0.08)",
-              boxShadow: "0 18px 36px rgba(15, 23, 42, 0.12)",
+              backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 94%, var(--app-bg-color) 6%)",
+              borderColor: "var(--fl-border-soft)",
+              boxShadow: "var(--fl-shadow-glass)",
             }}
           >
             <button
@@ -519,9 +517,9 @@ export default function AIChat() {
           <div
             className="fl-theme-topbar pointer-events-auto mx-auto w-full max-w-5xl rounded-[1.75rem] border px-3 py-3 shadow-xl backdrop-blur-xl"
             style={{
-              backgroundColor: "rgba(255, 255, 255, 0.96)",
-              borderColor: "rgba(15, 23, 42, 0.08)",
-              boxShadow: "0 -12px 30px rgba(15, 23, 42, 0.12)",
+              backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 94%, var(--app-bg-color) 6%)",
+              borderColor: "var(--fl-border-soft)",
+              boxShadow: "var(--fl-shadow-glass)",
             }}
           >
             {messages.length <= 1 && !loading ? (
@@ -554,30 +552,14 @@ export default function AIChat() {
                   value={input}
                   onChange={(event) => setInput(event.target.value)}
                   disabled={loading}
-                  className="fl-theme-input min-h-[3.5rem] w-full rounded-2xl px-4 py-3.5 pr-24 text-sm outline-none sm:text-base"
+                  className="fl-theme-input min-h-[3.5rem] w-full rounded-2xl px-4 py-3.5 text-sm outline-none sm:text-base"
                   placeholder="Mensagem para o FitBot..."
                   style={{
-                    backgroundColor: "#ffffff",
-                    borderColor: "rgba(15, 23, 42, 0.08)",
-                    boxShadow: "0 8px 24px rgba(15, 23, 42, 0.08)",
+                    backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 96%, var(--app-bg-color) 4%)",
+                    borderColor: "var(--fl-border-soft)",
+                    boxShadow: "0 8px 24px color-mix(in srgb, var(--fl-color-text) 8%, transparent)",
                   }}
                 />
-                <div className="absolute right-4 top-1/2 flex -translate-y-1/2 items-center gap-2">
-                  <button
-                    type="button"
-                    className="fl-theme-text-muted transition-colors hover:opacity-80"
-                    aria-label="Usar microfone"
-                  >
-                    <Mic className="h-5 w-5" />
-                  </button>
-                  <button
-                    type="button"
-                    className="fl-theme-text-muted transition-colors hover:opacity-80"
-                    aria-label="Anexar arquivo"
-                  >
-                    <Paperclip className="h-5 w-5" />
-                  </button>
-                </div>
               </div>
               <button
                 type="submit"
