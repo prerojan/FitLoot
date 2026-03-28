@@ -1,14 +1,39 @@
 export type AndroidBridgeApi = {
   checkNativeLayer?: () => string;
+  isNativeAvailable?: () => boolean;
   requestPermissions?: () => void;
   startStepCounter?: () => void;
   stopStepCounter?: () => void;
   getStepCount?: () => number;
+  startStepTracking?: () => void;
+  stopStepTracking?: () => void;
+  getStepMetrics?: () => void;
   openCamera?: () => void;
+  openGallery?: () => void;
 };
 
 export type AndroidCameraCapturedDetail = {
   path?: string;
+};
+
+export type AndroidGallerySelectedDetail = {
+  uri?: string;
+  path?: string;
+  dataUrl?: string;
+  base64?: string;
+  mimeType?: string;
+};
+
+export type AndroidNativeMetricsDetail = {
+  stepsToday?: number | null;
+  sessionSteps?: number | null;
+  distanceMeters?: number | null;
+  calories?: number | null;
+  activeCalories?: number | null;
+  source?: string | null;
+  confidence?: string | null;
+  error?: string | null;
+  timestamp?: string | null;
 };
 
 declare global {
@@ -18,6 +43,8 @@ declare global {
 
   interface WindowEventMap {
     camera_captured: CustomEvent<AndroidCameraCapturedDetail>;
+    gallery_image_selected: CustomEvent<AndroidGallerySelectedDetail>;
+    native_metrics_updated: CustomEvent<AndroidNativeMetricsDetail>;
   }
 }
 
@@ -54,7 +81,13 @@ export function isAndroidNativeAvailable(): boolean {
   const bridge = getAndroidBridge();
   let available = Boolean(bridge);
 
-  if (bridge?.checkNativeLayer) {
+  if (bridge?.isNativeAvailable) {
+    try {
+      available = bridge.isNativeAvailable() === true;
+    } catch {
+      available = true;
+    }
+  } else if (bridge?.checkNativeLayer) {
     try {
       available = bridge.checkNativeLayer() === "available";
     } catch {

@@ -205,7 +205,7 @@ export const useWalkingMission = ({ mission, onComplete, autoRefresh = true }: U
       // Gerar rota segura
       await generateSafeRoute();
 
-      if (import.meta.env.DEV && healthData?.source === 'simulated') {
+      if (import.meta.env.DEV && healthData && healthData.confidence !== "official") {
         console.warn(`Fonte de passos em fallback: ${formatStepsSourceLabel(healthData.source)}.`);
       }
 
@@ -239,7 +239,10 @@ export const useWalkingMission = ({ mission, onComplete, autoRefresh = true }: U
       }));
 
       // Completar missão com valor verificado
-      await onComplete(mission.id, finalValue, true);
+      const verified = healthData
+        ? healthData.source !== "api" && healthData.source !== "unavailable"
+        : false;
+      await onComplete(mission.id, finalValue, verified);
 
     } catch (error) {
       console.error('Erro ao completar missão:', error);

@@ -1,6 +1,12 @@
-import { debugNativeOnce, getAndroidBridge, isAndroidNativeAvailable, type AndroidCameraCapturedDetail } from "./androidBridge";
+import {
+  debugNativeOnce,
+  getAndroidBridge,
+  isAndroidNativeAvailable,
+  type AndroidCameraCapturedDetail,
+  type AndroidGallerySelectedDetail,
+} from "./androidBridge";
 
-export type CameraInputSource = "android-native" | "web-camera" | "web-file";
+export type CameraInputSource = "android-native" | "android-gallery" | "web-camera" | "web-file";
 
 export type NormalizedCameraImage = {
   source: CameraInputSource;
@@ -21,6 +27,7 @@ export type CameraResultInput =
 type CameraCapturedHandler = (image: NormalizedCameraImage) => void | Promise<void>;
 
 function toFileUri(path: string): string {
+  if (/^(content|data):/i.test(path)) return path;
   if (/^file:\/\//i.test(path)) return path;
   const normalizedPath = path.replace(/\\/g, "/");
   return normalizedPath.startsWith("/")
@@ -106,6 +113,23 @@ class CameraService {
     return "web-fallback";
   }
 
+  async openGallery(fallback?: () => Promise<void> | void): Promise<"android-native" | "web-fallback"> {
+    if (isAndroidNativeAvailable()) {
+      const bridge = getAndroidBridge();
+      if (bridge?.openGallery) {
+        debugNativeOnce("gallery-open-native", "Opening gallery through AndroidBridge.");
+        bridge.openGallery();
+        return "android-native";
+      }
+    }
+
+    debugNativeOnce("gallery-open-fallback", "Android gallery unavailable. Using web file picker fallback.");
+    if (fallback) {
+      await fallback();
+    }
+    return "web-fallback";
+  }
+
   async handleCameraResult(input: CameraResultInput): Promise<NormalizedCameraImage> {
     if ("path" in input) {
       return this.handleAndroidPath(input.path, input.source ?? "android-native");
@@ -157,6 +181,48 @@ class CameraService {
 
     return () => {
       window.removeEventListener("camera_captured", handleEvent);
+    };
+  }
+
+  subscribeToGallerySelected(
+    onSelected: CameraCapturedHandler,
+    onError?: (error: Error) => void,
+  ): () => void {
+    if (typeof window === "undefined") {
+      return () => undefined;
+    }
+
+    const handleEvent = (event: CustomEvent<AndroidGallerySelectedDetail>) => {
+      const detail = event.detail ?? {};
+      const input = detail.path
+        ? { path: detail.path, source: "android-gallery" as const }
+        : detail.dataUrl
+          ? { dataUrl: detail.dataUrl, source: "android-gallery" as const }
+          : detail.base64
+            ? {
+                base64: detail.base64,
+                mimeType: detail.mimeType ?? "image/jpeg",
+                source: "android-gallery" as const,
+              }
+            : detail.uri
+              ? { path: detail.uri, source: "android-gallery" as const }
+              : null;
+
+      if (!input) {
+        return;
+      }
+
+      void this.handleCameraResult(input)
+        .then((image) => onSelected(image))
+        .catch((error) => {
+          onError?.(error instanceof Error ? error : new Error("Falha ao processar a imagem da galeria nativa."));
+        });
+    };
+
+    window.addEventListener("gallery_image_selected", handleEvent as EventListener);
+
+    return () => {
+      window.removeEventListener("gallery_image_selected", handleEvent as EventListener);
     };
   }
 

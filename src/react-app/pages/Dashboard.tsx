@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { useAuth } from "@/react-app/contexts/auth";
+import { useDailyMetrics } from "@/react-app/hooks/useDailyMetrics";
 import AppPageShell from "@/react-app/components/AppPageShell";
 import MissionCard from "@/react-app/components/MissionCard";
 import LevelUpModal from "@/react-app/components/LevelUpModal";
@@ -11,7 +12,6 @@ import { Award, Bot, CalendarDays, Camera, Cloud, Flame, Zap } from "lucide-reac
 import { ROUTE_PATHS } from "@/react-app/constants/auth";
 import type {
   AchievementWithUnlock,
-  DailyMetrics,
   Mission,
   Title,
   UserProfile,
@@ -162,7 +162,6 @@ export default function Dashboard() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [progression, setProgression] = useState<UserProgression | null>(null);
   const [missions, setMissions] = useState<Mission[]>([]);
-  const [metrics, setMetrics] = useState<DailyMetrics | null>(null);
   const [achievements, setAchievements] = useState<AchievementWithUnlock[]>([]);
   const [activeTitle, setActiveTitle] = useState<Title | null>(null);
   const [loadingState, setLoadingState] = useState<DashboardLoadingState>(DEFAULT_LOADING_STATE);
@@ -171,6 +170,7 @@ export default function Dashboard() {
   const [newLevel, setNewLevel] = useState(0);
   const [quickActionsOpen, setQuickActionsOpen] = useState(false);
   const quickActionsRef = useRef<HTMLDivElement | null>(null);
+  const { metrics: consolidatedMetrics, loading: metricsLoading, refreshMetrics } = useDailyMetrics({ syncRemote: true });
 
   const setSectionLoading = useCallback((section: keyof DashboardLoadingState, value: boolean) => {
     setLoadingState((current) => ({ ...current, [section]: value }));
@@ -183,7 +183,6 @@ export default function Dashboard() {
     const cacheProfile = readCachedJson<UserProfile>("/api/profile");
     const cacheProgression = readCachedJson<UserProgression>("/api/progression");
     const cacheMissions = readCachedJson<Mission[]>("/api/missions");
-    const cacheMetrics = readCachedJson<DailyMetrics>("/api/metrics/today");
     const cacheAchievements = readCachedJson<AchievementWithUnlock[]>("/api/achievements");
     const cacheTitles = readCachedJson<Array<Title & { is_active?: number | undefined }>>("/api/titles");
     const cachedMissionList = Array.isArray(cacheMissions?.data) ? cacheMissions.data : null;
@@ -196,7 +195,6 @@ export default function Dashboard() {
     if (cacheProfile) setProfile(cacheProfile.data);
     if (cacheProgression) setProgression(cacheProgression.data);
     if (cacheMissions) setMissions(Array.isArray(cacheMissions.data) ? cacheMissions.data : []);
-    if (cacheMetrics) setMetrics(cacheMetrics.data);
     if (cacheAchievements) setAchievements(Array.isArray(cacheAchievements.data) ? cacheAchievements.data : []);
     if (cacheTitles) {
       setActiveTitle(cacheTitles.data.find((title) => title.is_active === 1) ?? null);
@@ -206,7 +204,7 @@ export default function Dashboard() {
       profile: forceRefresh || !cacheProfile,
       progression: forceRefresh || !cacheProgression || progressionNeedsReconcile,
       missions: shouldForceMissionRefresh || !cacheMissions,
-      metrics: forceRefresh || !cacheMetrics,
+      metrics: false,
       titles: forceRefresh || !cacheTitles,
     });
 
@@ -271,7 +269,6 @@ export default function Dashboard() {
       runRequest<Mission[]>("missions", missionsApiPath, Boolean(cacheMissions), shouldForceMissionRefresh || Boolean(cacheMissions?.stale), (payload) => {
         setMissions(Array.isArray(payload) ? payload : []);
       }),
-      runRequest<DailyMetrics>("metrics", "/api/metrics/today", Boolean(cacheMetrics), Boolean(cacheMetrics?.stale), setMetrics),
       (async () => {
         try {
           const payload = await fetchAndCacheJson<AchievementWithUnlock[]>("/api/achievements");
@@ -345,8 +342,11 @@ export default function Dashboard() {
     clearJsonCache("/api/missions?refresh=1");
     clearJsonCache("/api/metrics/today");
     clearJsonCache("/api/titles");
-    await loadData({ forceRefresh: true });
-  }, [loadData]);
+    await Promise.all([
+      loadData({ forceRefresh: true }),
+      refreshMetrics({ forceApi: true, syncRemote: true }),
+    ]);
+  }, [loadData, refreshMetrics]);
 
   const handleMissionComplete = async (missionId: number, metricValue: number, verified: boolean) => {
     try {
@@ -454,8 +454,8 @@ export default function Dashboard() {
   const levelValue = progression?.level ?? 1;
   const xpForNextLevel = Math.max(100, levelValue * 100);
   const xpProgress = clamp((Math.max(0, progression?.xp ?? 0) / xpForNextLevel) * 100, 0, 100);
-  const stepsValue = metrics?.steps ?? 0;
-  const caloriesValue = metrics?.calories_burned ?? 0;
+  const stepsValue = consolidatedMetrics?.steps ?? 0;
+  const caloriesValue = consolidatedMetrics?.caloriesBurned ?? 0;
   const stepsProgress = clamp((stepsValue / STEPS_TARGET) * 100, 0, 100);
   const todayKey = useMemo(() => formatDateKey(new Date()), []);
   const calendarDates = useMemo(() => buildCenteredDates(new Date(), 2), []);
@@ -654,7 +654,7 @@ export default function Dashboard() {
                 label="Passos"
                 value={formatNumber(stepsValue)}
                 icon="directions_walk"
-                loading={loadingState.metrics}
+                loading={metricsLoading}
                 footer={
                   <div className="mt-2 sm:mt-3 flex h-7 sm:h-9 items-end gap-1">
                     {stepBars.map((bar, index) => (
@@ -672,7 +672,7 @@ export default function Dashboard() {
                 />
               </div>
               <div className="min-w-0">
-                <MetricCard label="Calorias" value={`${formatNumber(caloriesValue)} kcal`} icon="local_fire_department" sublabel="Queimadas hoje" loading={loadingState.metrics} />
+                <MetricCard label="Calorias" value={`${formatNumber(caloriesValue)} kcal`} icon="local_fire_department" sublabel="Queimadas hoje" loading={metricsLoading} />
               </div>
             </div>
           </section>
@@ -735,7 +735,7 @@ export default function Dashboard() {
             <SectionHeader title="Passos" actionLabel="Ver todos" onAction={() => scrollToSection("assistant-tools")} />
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
               <div className="shrink-0 whitespace-nowrap">
-                <span className="text-xl font-black md:text-[1.8rem]" style={{ color: "var(--fl-color-text)" }}>{loadingState.metrics ? <LoadingBall size="sm" /> : formatNumber(stepsValue)}</span>
+                <span className="text-xl font-black md:text-[1.8rem]" style={{ color: "var(--fl-color-text)" }}>{metricsLoading ? <LoadingBall size="sm" /> : formatNumber(stepsValue)}</span>
                 <span className="ml-2 text-sm font-bold" style={{ color: "var(--fl-color-text-muted)" }}>/ {formatNumber(STEPS_TARGET)}</span>
               </div>
               <div className="relative h-3 flex-1 overflow-hidden rounded-full" style={{ background: "color-mix(in srgb, var(--fl-color-text) 6%, transparent)" }}>

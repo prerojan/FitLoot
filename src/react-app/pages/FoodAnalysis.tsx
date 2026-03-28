@@ -79,6 +79,7 @@ export default function FoodAnalysis() {
   const navigate = useNavigate();
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const galleryInputRef = useRef<HTMLInputElement | null>(null);
   const classifierRef = useRef<MediaPipeClassifier | null>(null);
   const classifierInitRef = useRef<Promise<void> | null>(null);
   const mountedRef = useRef(true);
@@ -194,19 +195,28 @@ export default function FoodAnalysis() {
   }, []);
 
   useEffect(() => {
-    const unsubscribe = cameraService.subscribeToCameraCaptured(
+    const handleCaptureError = (captureError: Error) => {
+      if (!mountedRef.current) return;
+      setCameraError(captureError.message);
+      setLoading(false);
+    };
+
+    const unsubscribeCamera = cameraService.subscribeToCameraCaptured(
       (image) => {
         processNormalizedImageRef.current(image);
       },
-      (captureError) => {
-        if (!mountedRef.current) return;
-        setCameraError(captureError.message);
-        setLoading(false);
+      handleCaptureError,
+    );
+    const unsubscribeGallery = cameraService.subscribeToGallerySelected(
+      (image) => {
+        processNormalizedImageRef.current(image);
       },
+      handleCaptureError,
     );
 
     return () => {
-      unsubscribe();
+      unsubscribeCamera();
+      unsubscribeGallery();
     };
   }, []);
 
@@ -329,6 +339,16 @@ export default function FoodAnalysis() {
     setResult(null);
     setPreview(null);
     await cameraService.openCamera(startWebCamera);
+  };
+
+  const openGallery = async () => {
+    setCameraError(null);
+    setError(null);
+    setResult(null);
+    setPreview(null);
+    await cameraService.openGallery(() => {
+      galleryInputRef.current?.click();
+    });
   };
 
   const runAnalysis = async (base64: string) => {
@@ -554,10 +574,7 @@ export default function FoodAnalysis() {
 
             {/* Secondary Card - Gallery */}
             <button 
-              onClick={() => {
-                const input = document.getElementById('gallery-input');
-                if (input) input.click();
-              }}
+              onClick={() => { void openGallery(); }}
               className="fl-theme-surface-soft group relative flex w-full items-center justify-between overflow-hidden rounded-3xl border-l-4 p-4 transition-all sm:p-6"
               style={{ borderLeftColor: 'color-mix(in srgb, var(--app-primary-color) 40%, transparent)' }}
             >
@@ -568,7 +585,7 @@ export default function FoodAnalysis() {
               <div className="fl-theme-surface-soft flex h-12 w-12 items-center justify-center rounded-2xl transition-transform group-hover:scale-110">
                 <ImageIcon className="w-6 h-6" style={{ color: 'var(--app-primary-color)' }} />
               </div>
-              <input type="file" id="gallery-input" accept="image/*" className="hidden" onChange={onPickGallery} />
+              <input ref={galleryInputRef} type="file" id="gallery-input" accept="image/*" className="hidden" onChange={onPickGallery} />
             </button>
           </div>
 

@@ -15,9 +15,9 @@ import {
   Zap,
 } from "lucide-react";
 import LoadingBall from "@/react-app/components/LoadingBall";
+import { useDailyMetrics } from "@/react-app/hooks/useDailyMetrics";
 import { fetchAndCacheJson, readCachedJson } from "@/react-app/utils/api";
 import type {
-  DailyMetrics,
   SkillWithProgress,
   TitleWithUnlock,
   UserAttributes,
@@ -96,9 +96,6 @@ export default function LevelUpModal({ level, onClose }: LevelUpModalProps) {
   const [progression, setProgression] = useState<UserProgression | null>(
     () => readCachedJson<UserProgression>("/api/progression")?.data ?? null,
   );
-  const [metrics, setMetrics] = useState<DailyMetrics | null>(
-    () => readCachedJson<DailyMetrics>("/api/metrics/today")?.data ?? null,
-  );
   const [attributes, setAttributes] = useState<UserAttributes | null>(
     () => readCachedJson<UserAttributes>("/api/attributes")?.data ?? null,
   );
@@ -110,15 +107,15 @@ export default function LevelUpModal({ level, onClose }: LevelUpModalProps) {
   );
   const [loading, setLoading] = useState(true);
   const [shareStatus, setShareStatus] = useState<string | null>(null);
+  const { metrics } = useDailyMetrics({ syncRemote: true });
 
   useEffect(() => {
     let cancelled = false;
 
     const hydrate = async () => {
       try {
-        const [nextProgression, nextMetrics, nextAttributes, nextSkills, nextTitles] = await Promise.all([
+        const [nextProgression, nextAttributes, nextSkills, nextTitles] = await Promise.all([
           fetchAndCacheJson<UserProgression>("/api/progression"),
-          fetchAndCacheJson<DailyMetrics>("/api/metrics/today"),
           fetchAndCacheJson<UserAttributes>("/api/attributes"),
           fetchAndCacheJson<LevelUpSkill[]>("/api/skills"),
           fetchAndCacheJson<LevelUpTitle[]>("/api/titles"),
@@ -127,7 +124,6 @@ export default function LevelUpModal({ level, onClose }: LevelUpModalProps) {
         if (cancelled) return;
 
         setProgression(nextProgression);
-        setMetrics(nextMetrics);
         setAttributes(nextAttributes);
         setSkills(Array.isArray(nextSkills) ? nextSkills : []);
         setTitles(Array.isArray(nextTitles) ? nextTitles : []);
@@ -175,7 +171,7 @@ export default function LevelUpModal({ level, onClose }: LevelUpModalProps) {
       },
       {
         label: "Calorias Hoje",
-        value: `${formatCompactNumber(metrics?.calories_burned)} kcal`,
+        value: `${formatCompactNumber(metrics?.caloriesBurned)} kcal`,
         accent: "var(--fl-color-text)",
       },
       {
@@ -184,7 +180,7 @@ export default function LevelUpModal({ level, onClose }: LevelUpModalProps) {
         accent: "var(--fl-color-text)",
       },
     ],
-    [metrics?.calories_burned, metrics?.steps, progression?.best_streak, progression?.current_streak],
+    [metrics?.caloriesBurned, metrics?.steps, progression?.best_streak, progression?.current_streak],
   );
 
   const unlockedContent = useMemo(() => {
