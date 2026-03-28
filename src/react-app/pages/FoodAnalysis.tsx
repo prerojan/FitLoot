@@ -1,6 +1,6 @@
-import { useMemo, useRef, useState, useEffect, type ChangeEventHandler } from "react";
+import { useCallback, useMemo, useRef, useState, useEffect, type ChangeEventHandler } from "react";
 import { useNavigate } from "react-router";
-import { Camera, AlertTriangle, CheckCircle2, Bolt, ShieldCheck, ImageIcon, ArrowLeft } from "lucide-react";
+import { Camera, AlertTriangle, CheckCircle2, Bolt, ShieldCheck, ImageIcon, ArrowLeft, BookOpen, Clock3 } from "lucide-react";
 import AppPageShell from "@/react-app/components/AppPageShell";
 import LoadingBall from "@/react-app/components/LoadingBall";
 import { cameraService, type NormalizedCameraImage } from "@/react-app/services/native/cameraService";
@@ -69,6 +69,16 @@ type FoodClassificationResult = {
 };
 
 type PreviewSource = "camera" | "gallery";
+type WebCameraStartResult = "started" | "unsupported" | "blocked";
+
+type SavedFoodEntry = {
+  id: number;
+  food_name: string;
+  calories: number | null;
+  meal_type?: string | null;
+  scanned_at?: string | null;
+  created_at?: string | null;
+};
 
 const STRICT_CLASSIFICATION_SCORE = 0.12;
 const RELAXED_CLASSIFICATION_SCORE = 0.04;
@@ -150,6 +160,36 @@ function toPreviewSource(source: NormalizedCameraImage["source"]): PreviewSource
   return source === "android-gallery" || source === "web-file" ? "gallery" : "camera";
 }
 
+function formatMealType(mealType?: string | null): string {
+  const normalizedMealType = String(mealType || "lanche").trim().toLowerCase();
+  const mealTypeMap: Record<string, string> = {
+    cafe_da_manha: "Cafe da manha",
+    cafe: "Cafe",
+    almoco: "Almoco",
+    almoço: "Almoco",
+    lanche: "Lanche",
+    jantar: "Jantar",
+    ceia: "Ceia",
+  };
+
+  return mealTypeMap[normalizedMealType] ?? normalizedMealType.replace(/[_-]+/g, " ");
+}
+
+function formatSavedFoodTime(entry: SavedFoodEntry): string {
+  const timestamp = entry.scanned_at ?? entry.created_at;
+  if (!timestamp) return "agora";
+
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) {
+    return "agora";
+  }
+
+  return new Intl.DateTimeFormat("pt-BR", {
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+}
+
 export default function FoodAnalysis() {
   const navigate = useNavigate();
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -171,6 +211,10 @@ export default function FoodAnalysis() {
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [savedFoods, setSavedFoods] = useState<SavedFoodEntry[]>([]);
+  const [savedFoodsLoading, setSavedFoodsLoading] = useState(false);
+  const [savedFoodsError, setSavedFoodsError] = useState<string | null>(null);
+  const [libraryOpen, setLibraryOpen] = useState(false);
 
   const [mediaPipeReady, setMediaPipeReady] = useState(false);
   const [mediaPipeLoading, setMediaPipeLoading] = useState(true);
@@ -204,6 +248,29 @@ export default function FoodAnalysis() {
     }
     classifierClosingRef.current = false;
   };
+
+  const loadSavedFoods = useCallback(async () => {
+    setSavedFoodsLoading(true);
+    setSavedFoodsError(null);
+
+    try {
+      const foods = await fetchJson<SavedFoodEntry[]>("/api/food/today?limit=8");
+      if (!mountedRef.current) return;
+      setSavedFoods(Array.isArray(foods) ? foods : []);
+    } catch (foodsError) {
+      if (foodsError instanceof ApiRequestError && (foodsError.status === 401 || foodsError.status === 403)) {
+        navigate("/app");
+        return;
+      }
+
+      if (!mountedRef.current) return;
+      setSavedFoodsError("Nao foi possivel carregar a biblioteca agora.");
+    } finally {
+      if (mountedRef.current) {
+        setSavedFoodsLoading(false);
+      }
+    }
+  }, [navigate]);
 
   const initializeMediaPipe = async () => {
     if (classifierRef.current) {
@@ -263,6 +330,7 @@ export default function FoodAnalysis() {
   useEffect(() => {
     mountedRef.current = true;
     void initializeMediaPipe();
+    void loadSavedFoods();
 
     return () => {
       mountedRef.current = false;
@@ -270,7 +338,7 @@ export default function FoodAnalysis() {
       destroyMediaPipe();
       classifierInitRef.current = null;
     };
-  }, []);
+  }, [loadSavedFoods]);
 
   useEffect(() => {
     const handleCaptureError = (captureError: Error) => {
@@ -377,9 +445,15 @@ export default function FoodAnalysis() {
     setPreviewSource(null);
     setLoading(false);
     setSaveSuccess(false);
+    setLibraryOpen(false);
   };
 
-  const startWebCamera = async () => {
+  const startWebCamera = async (): Promise<WebCameraStartResult> => {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setCameraError("A camera inline nao esta disponivel neste ambiente.");
+      return "unsupported";
+    }
+
     try {
       setCameraError(null);
       
@@ -449,7 +523,8 @@ export default function FoodAnalysis() {
       if (import.meta.env.DEV) {
         console.log("[Camera] Stream ativo definido como true");
       }
-      
+
+      return "started";
     } catch (error) {
       console.error('[Camera] Erro ao iniciar câmera:', error);
       let errorMessage = "Permissão de câmera negada ou indisponível neste dispositivo.";
@@ -469,6 +544,7 @@ export default function FoodAnalysis() {
       }
       
       setCameraError(errorMessage);
+      return error instanceof Error && error.name === "NotSupportedError" ? "unsupported" : "blocked";
     }
   };
 
@@ -481,7 +557,12 @@ export default function FoodAnalysis() {
     setPreview(null);
     setPreviewSource(null);
     setSaveSuccess(false);
-    await cameraService.openCamera(startWebCamera);
+    setLibraryOpen(false);
+
+    const startResult = await startWebCamera();
+    if (startResult === "unsupported") {
+      await cameraService.openCamera();
+    }
   };
 
   const openGallery = async () => {
@@ -493,6 +574,7 @@ export default function FoodAnalysis() {
     setPreview(null);
     setPreviewSource(null);
     setSaveSuccess(false);
+    setLibraryOpen(false);
     await cameraService.openGallery(() => {
       galleryInputRef.current?.click();
     });
@@ -611,6 +693,7 @@ export default function FoodAnalysis() {
       });
 
       clearJsonCache("/api/food/today");
+      void loadSavedFoods();
       setSaveSuccess(true);
       setError(null);
     } catch (saveError) {
@@ -943,11 +1026,12 @@ export default function FoodAnalysis() {
               <div className="absolute inset-0 bg-black/20"></div>
 
               {/* Scanner Frame Corners */}
-              <div className="absolute inset-10 border-2 border-transparent pointer-events-none" style={{ animation: "pulse-border 2s infinite" }}>
-                <div className="absolute top-0 left-0 w-8 h-8 border-t-4 border-l-4 rounded-tl-xl" style={{ borderColor: 'var(--app-primary-color)' }}></div>
-                <div className="absolute top-0 right-0 w-8 h-8 border-t-4 border-r-4 rounded-tr-xl" style={{ borderColor: 'var(--app-primary-color)' }}></div>
-                <div className="absolute bottom-0 left-0 w-8 h-8 border-b-4 border-l-4 rounded-bl-xl" style={{ borderColor: 'var(--app-primary-color)' }}></div>
-                <div className="absolute bottom-0 right-0 w-8 h-8 border-b-4 border-r-4 rounded-br-xl" style={{ borderColor: 'var(--app-primary-color)' }}></div>
+              <div className="absolute left-6 right-6 top-24 bottom-8 pointer-events-none" style={{ animation: "pulse-border 2s infinite" }}>
+                <div className="absolute inset-0 rounded-[2.5rem] border border-white/10 bg-white/[0.02]"></div>
+                <div className="absolute top-0 left-0 w-9 h-9 border-t-4 border-l-4 rounded-tl-[1.5rem]" style={{ borderColor: 'var(--app-primary-color)' }}></div>
+                <div className="absolute top-0 right-0 w-9 h-9 border-t-4 border-r-4 rounded-tr-[1.5rem]" style={{ borderColor: 'var(--app-primary-color)' }}></div>
+                <div className="absolute bottom-0 left-0 w-9 h-9 border-b-4 border-l-4 rounded-bl-[1.5rem]" style={{ borderColor: 'var(--app-primary-color)' }}></div>
+                <div className="absolute bottom-0 right-0 w-9 h-9 border-b-4 border-r-4 rounded-br-[1.5rem]" style={{ borderColor: 'var(--app-primary-color)' }}></div>
                 <div className="scanner-line"></div>
               </div>
             </div>
@@ -965,6 +1049,7 @@ export default function FoodAnalysis() {
                   }
                   stopCamera();
                   setStreamActive(false);
+                  setLibraryOpen(false);
                   handleBack();
                 }}
                 className="w-10 h-10 rounded-full bg-white/10 backdrop-blur-md flex items-center justify-center border border-white/20 transition-all hover:bg-white/20"
@@ -973,11 +1058,23 @@ export default function FoodAnalysis() {
                 <ArrowLeft className="w-5 h-5 text-white" />
               </button>
               <h1 className="text-sm font-bold tracking-widest uppercase text-white/90">AI Vision ACTIVE</h1>
-              <div className="w-10 h-10" />
+              <button
+                type="button"
+                onClick={() => setLibraryOpen((current) => !current)}
+                className="flex h-10 min-w-10 items-center justify-center rounded-full bg-white/10 px-3 backdrop-blur-md border border-white/20 transition-all hover:bg-white/20"
+                aria-label="Abrir biblioteca de alimentos"
+              >
+                <BookOpen className="h-4 w-4 text-white" />
+                <span className="ml-2 text-[10px] font-bold uppercase tracking-[0.18em] text-white/80">
+                  {savedFoods.length}
+                </span>
+              </button>
             </header>
 
+            <div className="absolute inset-x-0 bottom-0 z-10 h-52 bg-gradient-to-t from-black/85 via-black/40 to-transparent pointer-events-none"></div>
+
             {/* Status Messages */}
-            <div className="absolute bottom-32 left-0 right-0 px-6 z-10 text-center pointer-events-none">
+            <div className="absolute bottom-32 left-0 right-0 px-6 z-20 text-center pointer-events-none">
               {cameraError && (
                 <div className="inline-flex items-center gap-3 bg-red-950/60 backdrop-blur-md px-4 py-2 rounded-full border border-red-500/30">
                     <AlertTriangle className="w-4 h-4 text-red-500" />
@@ -998,14 +1095,75 @@ export default function FoodAnalysis() {
               )}
             </div>
 
+            {!preview && streamActive && (
+              <div className={`absolute left-4 right-4 z-30 transition-all duration-300 ${libraryOpen ? "bottom-28 opacity-100 translate-y-0" : "bottom-24 pointer-events-none opacity-0 translate-y-6"}`}>
+                <div className="overflow-hidden rounded-[1.75rem] border border-white/10 bg-black/45 backdrop-blur-xl">
+                  <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
+                    <div>
+                      <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-white/55">Biblioteca salva</p>
+                      <h3 className="mt-1 text-sm font-bold text-white">Alimentos registrados hoje</h3>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => { void loadSavedFoods(); }}
+                      className="rounded-full border border-white/10 px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-white/75 transition-opacity hover:opacity-80"
+                    >
+                      Atualizar
+                    </button>
+                  </div>
+
+                  <div className="custom-scrollbar max-h-56 space-y-2 overflow-y-auto px-3 py-3">
+                    {savedFoodsLoading ? (
+                      <div className="flex items-center justify-center gap-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-5">
+                        <LoadingBall size="sm" />
+                        <span className="text-xs font-bold uppercase tracking-widest text-white/70">Carregando biblioteca</span>
+                      </div>
+                    ) : savedFoodsError ? (
+                      <div className="rounded-2xl border border-red-500/25 bg-red-950/35 px-4 py-4 text-center text-xs font-bold uppercase tracking-widest text-red-300">
+                        {savedFoodsError}
+                      </div>
+                    ) : savedFoods.length === 0 ? (
+                      <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-5 text-center">
+                        <p className="text-xs font-bold uppercase tracking-widest text-white/75">Nenhum alimento salvo hoje</p>
+                        <p className="mt-2 text-[11px] text-white/55">Quando voce confirmar uma analise, ela aparece aqui.</p>
+                      </div>
+                    ) : (
+                      savedFoods.map((food) => (
+                        <div key={food.id} className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3">
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-bold text-white">{food.food_name}</p>
+                            <div className="mt-1 flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.16em] text-white/50">
+                              <span>{formatMealType(food.meal_type)}</span>
+                              <span className="h-1 w-1 rounded-full bg-white/35"></span>
+                              <span className="inline-flex items-center gap-1">
+                                <Clock3 className="h-3 w-3" />
+                                {formatSavedFoodTime(food)}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="ml-4 rounded-full border border-white/10 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-white/80">
+                            {food.calories ?? 0} kcal
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Capture Control (Visible when in scanner but no result) */}
             {!preview && streamActive && !loading && (
-               <div className="absolute bottom-10 left-0 right-0 flex justify-center z-20">
+               <div className="absolute bottom-8 left-0 right-0 flex flex-col items-center justify-center gap-3 z-30">
+                 <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-white/65">
+                   Centralize o alimento no quadro
+                 </p>
                  <button 
                   onClick={captureFromCamera}
-                  className="w-20 h-20 rounded-full border-4 border-white/20 flex items-center justify-center bg-white/10 active:scale-95 transition-all p-1"
+                  className="relative flex h-20 w-20 items-center justify-center rounded-full border-4 border-white/20 bg-white/10 p-1 transition-all active:scale-95"
                 >
-                  <div className="w-full h-full rounded-full bg-white opacity-80 shadow-lg"></div>
+                  <div className="absolute inset-0 rounded-full bg-white/10 blur-md"></div>
+                  <div className="relative h-full w-full rounded-full bg-white opacity-85 shadow-lg"></div>
                 </button>
                </div>
             )}
