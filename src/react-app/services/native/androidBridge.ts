@@ -27,6 +27,11 @@ export type AndroidGallerySelectedDetail = {
   mimeType?: string;
 };
 
+export type AndroidNativeMediaErrorDetail = {
+  message?: string;
+  source?: string;
+};
+
 export type AndroidNativeMetricsDetail = {
   stepsToday?: number | null;
   sessionSteps?: number | null;
@@ -46,6 +51,7 @@ declare global {
 
   interface WindowEventMap {
     camera_captured: CustomEvent<AndroidCameraCapturedDetail>;
+    camera_capture_error: CustomEvent<AndroidNativeMediaErrorDetail>;
     gallery_image_selected: CustomEvent<AndroidGallerySelectedDetail>;
     native_metrics_updated: CustomEvent<AndroidNativeMetricsDetail>;
   }

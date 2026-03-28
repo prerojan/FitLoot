@@ -4,6 +4,7 @@ import {
   isAndroidNativeAvailable,
   type AndroidCameraCapturedDetail,
   type AndroidGallerySelectedDetail,
+  type AndroidNativeMediaErrorDetail,
 } from "./androidBridge";
 
 export type CameraInputSource = "android-native" | "android-gallery" | "web-camera" | "web-file";
@@ -235,6 +236,23 @@ class CameraService {
 
     return () => {
       window.removeEventListener("gallery_image_selected", handleEvent as EventListener);
+    };
+  }
+
+  subscribeToNativeCameraErrors(onError: (error: Error) => void): () => void {
+    if (typeof window === "undefined") {
+      return () => undefined;
+    }
+
+    const handleEvent = (event: CustomEvent<AndroidNativeMediaErrorDetail>) => {
+      const message = event.detail?.message?.trim() || "Falha ao abrir a camera nativa.";
+      onError(new Error(message));
+    };
+
+    window.addEventListener("camera_capture_error", handleEvent as EventListener);
+
+    return () => {
+      window.removeEventListener("camera_capture_error", handleEvent as EventListener);
     };
   }
 

@@ -21,6 +21,7 @@ import com.fitloot.health.HealthConnectPermissionCoordinator
 import com.fitloot.media.NativeMediaPayloadFactory
 import com.fitloot.databinding.ActivityMainBinding
 import kotlinx.coroutines.launch
+import org.json.JSONObject
 
 class MainActivity : AppCompatActivity() {
 
@@ -42,6 +43,18 @@ class MainActivity : AppCompatActivity() {
                     NativeMediaPayloadFactory.fromCameraPath(imagePath),
                 )
             }
+            return@registerForActivityResult
+        }
+
+        val errorMessage = result.data?.getStringExtra("camera_error")
+        if (!errorMessage.isNullOrBlank()) {
+            webAppInterface.sendEventToWebApp(
+                NativeBridgeContract.EVENT_CAMERA_CAPTURE_ERROR,
+                JSONObject().apply {
+                    put("message", errorMessage)
+                    put("source", "camera")
+                },
+            )
         }
     }
 

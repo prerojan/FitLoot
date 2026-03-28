@@ -58,6 +58,23 @@ type MediaPipeVisionModule = {
   };
 };
 
+type ClassificationCandidate = {
+  label: string;
+  score: number;
+};
+
+type FoodClassificationResult = {
+  identifiedItems: IdentifiedItem[];
+  foodDescription?: string | undefined;
+};
+
+type PreviewSource = "camera" | "gallery";
+
+const STRICT_CLASSIFICATION_SCORE = 0.12;
+const RELAXED_CLASSIFICATION_SCORE = 0.04;
+const MAX_IDENTIFIED_ITEMS = 3;
+const MAX_DESCRIPTION_LABELS = 6;
+
 async function loadVisionModule(): Promise<MediaPipeVisionModule> {
   const moduleUrl = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/+esm";
   return (await import(/* @vite-ignore */ moduleUrl)) as MediaPipeVisionModule;
@@ -75,6 +92,64 @@ function toIdentifiedItems(result: { classifications?: Array<{ categories?: Arra
     }));
 }
 
+function normalizeCategoryLabel(rawLabel?: string | undefined): string {
+  return String(rawLabel || "")
+    .trim()
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ");
+}
+
+function extractClassificationCandidates(
+  result: { classifications?: Array<{ categories?: Array<{ categoryName?: string | undefined; score?: number | undefined }> }> },
+): ClassificationCandidate[] {
+  const seen = new Set<string>();
+
+  return (result.classifications ?? [])
+    .flatMap((classification) => classification.categories ?? [])
+    .map((category) => ({
+      label: normalizeCategoryLabel(category.categoryName),
+      score: Number(category.score ?? 0),
+    }))
+    .filter((category) => category.label.length > 0 && Number.isFinite(category.score) && category.score > 0)
+    .sort((left, right) => right.score - left.score)
+    .filter((category) => {
+      const key = category.label.toLowerCase();
+      if (seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
+    });
+}
+
+function toIdentifiedItemsFromCandidates(candidates: ClassificationCandidate[]): IdentifiedItem[] {
+  return candidates
+    .filter((candidate) => candidate.score >= STRICT_CLASSIFICATION_SCORE)
+    .slice(0, MAX_IDENTIFIED_ITEMS)
+    .map((candidate) => ({
+      food_name: candidate.label,
+      portion_description: "porcao media",
+      portion_multiplier: 1,
+    }));
+}
+
+function toFoodDescription(candidates: ClassificationCandidate[]): string | undefined {
+  const preferredLabels = candidates
+    .filter((candidate) => candidate.score >= RELAXED_CLASSIFICATION_SCORE)
+    .slice(0, MAX_DESCRIPTION_LABELS)
+    .map((candidate) => candidate.label);
+
+  const fallbackLabels = preferredLabels.length > 0
+    ? preferredLabels
+    : candidates.slice(0, Math.min(3, candidates.length)).map((candidate) => candidate.label);
+
+  return fallbackLabels.length > 0 ? fallbackLabels.join(", ") : undefined;
+}
+
+function toPreviewSource(source: NormalizedCameraImage["source"]): PreviewSource {
+  return source === "android-gallery" || source === "web-file" ? "gallery" : "camera";
+}
+
 export default function FoodAnalysis() {
   const navigate = useNavigate();
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -85,10 +160,12 @@ export default function FoodAnalysis() {
   const mountedRef = useRef(true);
   const processNormalizedImageRef = useRef<(image: NormalizedCameraImage) => void>(() => undefined);
   const classifierClosingRef = useRef(false);
+  const lastNormalizedImageRef = useRef<NormalizedCameraImage | null>(null);
 
   const [streamActive, setStreamActive] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
+  const [previewSource, setPreviewSource] = useState<PreviewSource | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<AnalysisResult | null>(null);
@@ -213,14 +290,16 @@ export default function FoodAnalysis() {
       },
       handleCaptureError,
     );
+    const unsubscribeNativeErrors = cameraService.subscribeToNativeCameraErrors(handleCaptureError);
 
     return () => {
       unsubscribeCamera();
       unsubscribeGallery();
+      unsubscribeNativeErrors();
     };
   }, []);
 
-  const identifyFoodWithMediaPipe = async (image: HTMLImageElement) => {
+  const identifyFoodWithMediaPipe = async (image: HTMLImageElement): Promise<IdentifiedItem[]> => {
     if (!classifierRef.current) {
       await initializeMediaPipe();
     }
@@ -238,6 +317,48 @@ export default function FoodAnalysis() {
     }
 
     return items;
+  };
+
+  const classifyFoodWithMediaPipe = async (image: HTMLImageElement): Promise<FoodClassificationResult> => {
+    if (!classifierRef.current) {
+      await initializeMediaPipe();
+    }
+
+    const classifier = classifierRef.current;
+    if (!classifier) {
+      throw new Error("MediaPipe nÃ£o estÃ¡ disponÃ­vel para anÃ¡lise no momento.");
+    }
+
+    const prediction = classifier.classify(image);
+    const candidates = extractClassificationCandidates(prediction);
+    const identifiedItems = toIdentifiedItemsFromCandidates(candidates);
+    const foodDescription = toFoodDescription(candidates);
+
+    if (identifiedItems.length === 0 && !foodDescription) {
+      const fallbackItems = await identifyFoodWithMediaPipe(image);
+      return {
+        identifiedItems: fallbackItems,
+        foodDescription: fallbackItems.map((item) => item.food_name).join(", ") || undefined,
+      };
+    }
+
+    const fallbackFoodDescription = identifiedItems.map((item) => item.food_name).join(", ");
+    return {
+      identifiedItems,
+      foodDescription: foodDescription ?? (fallbackFoodDescription || undefined),
+    };
+  };
+
+  const resetCaptureState = () => {
+    stopCamera();
+    lastNormalizedImageRef.current = null;
+    setStreamActive(false);
+    setCameraError(null);
+    setError(null);
+    setResult(null);
+    setPreview(null);
+    setPreviewSource(null);
+    setLoading(false);
   };
 
   const startWebCamera = async () => {
@@ -334,24 +455,30 @@ export default function FoodAnalysis() {
   };
 
   const openCamera = async () => {
+    stopCamera();
+    lastNormalizedImageRef.current = null;
     setCameraError(null);
     setError(null);
     setResult(null);
     setPreview(null);
+    setPreviewSource(null);
     await cameraService.openCamera(startWebCamera);
   };
 
   const openGallery = async () => {
+    stopCamera();
+    lastNormalizedImageRef.current = null;
     setCameraError(null);
     setError(null);
     setResult(null);
     setPreview(null);
+    setPreviewSource(null);
     await cameraService.openGallery(() => {
       galleryInputRef.current?.click();
     });
   };
 
-  const runAnalysis = async (base64: string) => {
+  const runAnalysis = async (normalizedImage: NormalizedCameraImage) => {
     setLoading(true);
     setError(null);
     setResult(null);
@@ -369,15 +496,18 @@ export default function FoodAnalysis() {
         const img = new Image();
         img.onload = () => resolve(img);
         img.onerror = () => reject(new Error("Falha ao carregar imagem para análise local."));
-        img.src = `data:image/jpeg;base64,${base64}`;
+        img.src = normalizedImage.dataUrl;
       });
 
-      const identifiedItems = await identifyFoodWithMediaPipe(image);
+      const classification = await classifyFoodWithMediaPipe(image);
+      const fallbackFoodDescription = classification.identifiedItems.map((item) => item.food_name).join(", ");
+      const foodDescription = classification.foodDescription ?? (fallbackFoodDescription || undefined);
       const response = await api("/api/ai/analyze-food", {
         method: "POST",
         body: JSON.stringify({
-          identified_items: identifiedItems,
-          food_description: identifiedItems.map((item) => item.food_name).join(", "),
+          identified_items: classification.identifiedItems,
+          food_description: foodDescription,
+          image_base64: normalizedImage.base64,
         }),
       });
 
@@ -399,14 +529,22 @@ export default function FoodAnalysis() {
   };
 
   const handleNormalizedImage = async (normalizedImage: NormalizedCameraImage) => {
+    lastNormalizedImageRef.current = normalizedImage;
     setCameraError(null);
     setPreview(normalizedImage.previewUrl);
+    setPreviewSource(toPreviewSource(normalizedImage.source));
     stopCamera();
-    await runAnalysis(normalizedImage.base64);
+    await runAnalysis(normalizedImage);
   };
 
   processNormalizedImageRef.current = (normalizedImage) => {
     void handleNormalizedImage(normalizedImage);
+  };
+
+  const retryAnalysis = async () => {
+    const image = lastNormalizedImageRef.current;
+    if (!image) return;
+    await runAnalysis(image);
   };
 
   const captureFromCamera = async () => {
@@ -688,6 +826,66 @@ export default function FoodAnalysis() {
               style={{ backgroundColor: 'var(--app-primary-color)', color: 'var(--fl-nav-item-active-text)' }}
             >
               {saving ? "Registrando..." : "Confirmar e Salvar"}
+            </button>
+          </div>
+        </div>
+      ) : preview ? (
+        <div className="custom-scrollbar flex flex-1 flex-col overflow-y-auto p-3 pb-4 sm:p-4 sm:pb-5 lg:p-6 animate-in fade-in slide-in-from-bottom-5 duration-500 min-w-0" style={{ backgroundColor: "var(--app-bg-color)" }}>
+          <div className="flex items-center justify-between mb-8">
+            <button
+              onClick={resetCaptureState}
+              className="fl-theme-surface-soft flex h-10 w-10 items-center justify-center rounded-full transition-opacity hover:opacity-85"
+              aria-label="Voltar"
+            >
+              <ArrowLeft className="h-5 w-5" style={{ color: "var(--fl-color-text-muted)" }} />
+            </button>
+            <h2 className="text-[0.68rem] font-bold uppercase tracking-[0.2em] sm:text-xs" style={{ color: "var(--fl-color-text-muted)" }}>
+              {previewSource === "gallery" ? "Imagem Importada" : "Captura Pronta"}
+            </h2>
+            <div className="w-10 h-10" />
+          </div>
+
+          <div className="fl-theme-surface overflow-hidden rounded-[2rem] border mb-6" style={{ borderColor: "var(--fl-border-soft)" }}>
+            <img src={preview} alt="Previa do alimento" className="aspect-[4/5] w-full object-cover" />
+          </div>
+
+          <div className="mb-6 flex justify-center">
+            {loading ? (
+              <div className="inline-flex items-center gap-3 rounded-full border px-4 py-2" style={{ borderColor: "var(--fl-border-soft)", backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 80%, transparent)" }}>
+                <LoadingBall size="sm" />
+                <span className="text-xs font-bold uppercase tracking-widest" style={{ color: "var(--fl-color-text-muted)" }}>
+                  Analisando imagem
+                </span>
+              </div>
+            ) : error ? (
+              <div className="inline-flex items-center gap-3 rounded-full border border-red-500/30 bg-red-950/40 px-4 py-2">
+                <AlertTriangle className="w-4 h-4 text-red-500" />
+                <span className="text-xs font-bold uppercase tracking-widest text-red-400">{error}</span>
+              </div>
+            ) : null}
+          </div>
+
+          <div className="mt-auto grid grid-cols-2 gap-3 pt-4 sm:gap-4">
+            <button
+              onClick={() => {
+                if (previewSource === "gallery") {
+                  void openGallery();
+                  return;
+                }
+                void openCamera();
+              }}
+              className="fl-theme-input h-14 rounded-2xl border font-bold text-xs tracking-widest uppercase transition-opacity active:scale-95 hover:opacity-85"
+              style={{ borderColor: "var(--fl-border-soft)", color: "var(--fl-color-text-muted)" }}
+            >
+              {previewSource === "gallery" ? "Outra Imagem" : "Novo Scan"}
+            </button>
+            <button
+              onClick={() => { void retryAnalysis(); }}
+              disabled={loading}
+              className="neon-glow h-14 rounded-2xl text-xs font-bold uppercase tracking-widest transition-all active:scale-95 disabled:opacity-50"
+              style={{ backgroundColor: 'var(--app-primary-color)', color: 'var(--fl-nav-item-active-text)' }}
+            >
+              {loading ? "Analisando..." : "Tentar Novamente"}
             </button>
           </div>
         </div>
