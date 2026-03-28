@@ -1,10 +1,11 @@
-const DEFAULT_PROD_API_URL = "https://fitloot-worker.suportefitloot.workers.dev";
 const DEFAULT_DEV_API_URL = "http://localhost:8787";
 const DEFAULT_CACHE_TTL_MS = 60_000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 20_000;
 
 const rawApiUrl = import.meta.env.VITE_API_URL?.trim() ?? "";
-const resolvedApiUrl = rawApiUrl || (import.meta.env.PROD ? DEFAULT_PROD_API_URL : DEFAULT_DEV_API_URL);
+// In production we prefer same-origin `/api` calls so previews and custom domains
+// do not depend on cross-origin cookies/CORS to reach the worker.
+const resolvedApiUrl = rawApiUrl || (import.meta.env.PROD ? "" : DEFAULT_DEV_API_URL);
 
 export const API_URL = resolvedApiUrl.endsWith("/") ? resolvedApiUrl.slice(0, -1) : resolvedApiUrl;
 
