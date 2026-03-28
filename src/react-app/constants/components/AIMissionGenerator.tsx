@@ -145,24 +145,26 @@ export default function AIMissionGenerator({ onMissionsGenerated }: AIMissionGen
 
   return (
     <div
-      className="rounded-2xl p-4 shadow-lg border"
+      className="fl-theme-surface rounded-[1.5rem] border p-4 sm:rounded-[2rem] sm:p-5"
       style={{
-        background: "linear-gradient(135deg, color-mix(in srgb, var(--app-primary-color) 18%, white), color-mix(in srgb, var(--app-accent-color, #14b8a6) 22%, white))",
-        borderColor: "var(--fl-border-soft)",
+        background:
+          "radial-gradient(circle at top right, color-mix(in srgb, var(--app-primary-color) 18%, transparent), transparent 42%), linear-gradient(135deg, color-mix(in srgb, var(--fl-surface-gradient-top) 96%, transparent), color-mix(in srgb, var(--fl-surface-gradient-bottom) 100%, transparent))",
+        borderColor: "color-mix(in srgb, var(--app-primary-color) 16%, var(--fl-border-soft))",
+        boxShadow: "var(--fl-shadow-glass)",
       }}
     >
-      <div className="flex items-start gap-3 mb-3">
+      <div className="mb-3 flex items-start gap-3">
         <div
-          className="backdrop-blur-sm p-2 rounded-lg border"
+          className="rounded-2xl border p-2"
           style={{
-            background: "color-mix(in srgb, white 80%, transparent)",
+            background: "color-mix(in srgb, var(--app-primary-color) 12%, transparent)",
             borderColor: "color-mix(in srgb, var(--app-primary-color) 22%, transparent)",
           }}
         >
-          <Wand2 className="w-5 h-5" style={{ color: "var(--app-primary-color)" }} />
+          <Wand2 className="h-5 w-5" style={{ color: "var(--app-primary-color)" }} />
         </div>
         <div className="flex-1" style={{ color: "var(--fl-color-text)" }}>
-          <h3 className="font-bold mb-1">Gerador de Missões IA</h3>
+          <h3 className="mb-1 font-bold">Gerador de Missões IA</h3>
           <p className="text-sm" style={{ color: "var(--fl-color-text-muted)" }}>
             Gera um ciclo completo de missões personalizadas com base no seu perfil, histórico e progresso recente.
           </p>
@@ -170,11 +172,22 @@ export default function AIMissionGenerator({ onMissionsGenerated }: AIMissionGen
       </div>
 
       {notice ? (
-        <div className={`mb-3 rounded-xl border px-3 py-2 text-sm ${
-          notice.tone === "success"
-            ? "border-emerald-200 bg-white/95 text-emerald-700"
-            : "border-sky-200 bg-white/95 text-sky-700"
-        }`}>
+        <div
+          className="mb-3 rounded-xl border px-3 py-2 text-sm"
+          style={
+            notice.tone === "success"
+              ? {
+                borderColor: "color-mix(in srgb, #10b981 26%, transparent)",
+                background: "color-mix(in srgb, #10b981 10%, var(--fl-surface-strong))",
+                color: "#047857",
+              }
+              : {
+                borderColor: "color-mix(in srgb, #0ea5e9 26%, transparent)",
+                background: "color-mix(in srgb, #0ea5e9 10%, var(--fl-surface-strong))",
+                color: "#0369a1",
+              }
+          }
+        >
           <div className="flex items-center gap-2">
             <CheckCircle className="h-4 w-4 shrink-0" />
             <span>{notice.message}</span>
@@ -183,7 +196,14 @@ export default function AIMissionGenerator({ onMissionsGenerated }: AIMissionGen
       ) : null}
 
       {error ? (
-        <div className="mb-3 rounded-xl border border-red-200 bg-white/95 px-3 py-2 text-sm text-red-700">
+        <div
+          className="mb-3 rounded-xl border px-3 py-2 text-sm"
+          style={{
+            borderColor: "color-mix(in srgb, #ef4444 26%, transparent)",
+            background: "color-mix(in srgb, #ef4444 10%, var(--fl-surface-strong))",
+            color: "#b91c1c",
+          }}
+        >
           <div className="flex items-center gap-2">
             <XCircle className="h-4 w-4 shrink-0" />
             <span>{error}</span>
@@ -194,8 +214,12 @@ export default function AIMissionGenerator({ onMissionsGenerated }: AIMissionGen
       <button
         onClick={() => { void generateMissions(); }}
         disabled={loading}
-        className="w-full px-4 py-3 rounded-xl font-medium shadow-lg hover:shadow-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-        style={{ background: "var(--app-primary-color)", color: "var(--fl-nav-item-active-text)" }}
+        className="w-full rounded-xl px-4 py-3 font-medium shadow-lg transition-all hover:shadow-xl disabled:cursor-not-allowed disabled:opacity-50"
+        style={{
+          background: "var(--app-primary-color)",
+          color: "var(--fl-nav-item-active-text)",
+          boxShadow: "0 0 20px color-mix(in srgb, var(--app-primary-color) 20%, transparent)",
+        }}
       >
         {loading ? (
           <div className="flex items-center justify-center gap-2">
@@ -204,14 +228,14 @@ export default function AIMissionGenerator({ onMissionsGenerated }: AIMissionGen
           </div>
         ) : (
           <div className="flex items-center justify-center gap-2">
-            <Wand2 className="w-4 h-4" />
+            <Wand2 className="h-4 w-4" />
             <span>Gerar Missões Personalizadas</span>
           </div>
         )}
       </button>
 
-      <p className="text-xs text-center mt-2" style={{ color: "var(--fl-color-text-muted)" }}>
-        Gera até 5 diárias, 5 semanais e 5 mensais, com polling automático do dashboard a cada 2 segundos.
+      <p className="mt-2 text-center text-xs" style={{ color: "var(--fl-color-text-muted)" }}>
+        Gera até 8 diárias, 5 semanais e 5 mensais, com polling automático do dashboard a cada 2 segundos.
       </p>
     </div>
   );

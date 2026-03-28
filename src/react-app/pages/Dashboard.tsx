@@ -769,8 +769,8 @@ export default function Dashboard() {
 
           <section id="assistant-tools" className="space-y-2 sm:space-y-4 min-w-0">
             <SectionHeader title="Ferramentas de IA" />
-            <AIMissionGenerator onMissionsGenerated={() => { void refreshData(); }} />
             <AIRecommendations />
+            <AIMissionGenerator onMissionsGenerated={() => { void refreshData(); }} />
           </section>
         </div>
       </main>

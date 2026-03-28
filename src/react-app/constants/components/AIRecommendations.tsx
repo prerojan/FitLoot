@@ -19,15 +19,8 @@ type Recommendations = {
   motivation_message: string;
 };
 
-type RecommendationStats = {
-  level: number;
-  total_missions: number;
-  streak: number;
-};
-
 type RecommendationApiPayload = {
   recommendations?: unknown;
-  user_stats?: unknown;
   degraded?: boolean;
 };
 
@@ -74,39 +67,6 @@ function parseRecommendations(raw: unknown): Recommendations | null {
   };
 }
 
-function parseStats(raw: unknown): RecommendationStats {
-  if (!raw || typeof raw !== "object") {
-    return { level: 0, total_missions: 0, streak: 0 };
-  }
-
-  const data = raw as Record<string, unknown>;
-  return {
-    level: Number(data.level ?? 0) || 0,
-    total_missions: Number(data.total_missions ?? 0) || 0,
-    streak: Number(data.streak ?? 0) || 0,
-  };
-}
-
-function StatPill({ label, value }: { label: string; value: string }) {
-  return (
-    <div
-      className="rounded-2xl border px-4 py-3"
-      style={{
-        background:
-          "linear-gradient(180deg, color-mix(in srgb, var(--fl-surface-gradient-top) 96%, transparent), color-mix(in srgb, var(--fl-surface-gradient-bottom) 100%, transparent))",
-        borderColor: "var(--fl-border-soft)",
-      }}
-    >
-      <p className="text-[10px] font-black uppercase tracking-[0.24em]" style={{ color: "var(--fl-color-text-muted)" }}>
-        {label}
-      </p>
-      <p className="mt-2 text-lg font-black" style={{ color: "var(--fl-color-text)" }}>
-        {value}
-      </p>
-    </div>
-  );
-}
-
 function InsightCard({
   icon,
   eyebrow,
@@ -120,7 +80,7 @@ function InsightCard({
 }) {
   return (
     <article
-      className="fl-theme-surface rounded-[1.75rem] p-5"
+      className="fl-theme-surface min-w-0 rounded-[1.5rem] p-4 sm:rounded-[1.75rem] sm:p-5"
       style={{ boxShadow: "var(--fl-shadow-glass)" }}
     >
       <div className="flex items-start gap-4">
@@ -151,7 +111,6 @@ function InsightCard({
 
 export default function AIRecommendations() {
   const [recommendations, setRecommendations] = useState<Recommendations | null>(null);
-  const [stats, setStats] = useState<RecommendationStats>({ level: 0, total_missions: 0, streak: 0 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [degraded, setDegraded] = useState(false);
@@ -173,7 +132,6 @@ export default function AIRecommendations() {
       }
 
       setRecommendations(parsed);
-      setStats(parseStats(data.user_stats));
       setDegraded(Boolean(data.degraded));
     } catch {
       setError("Nao foi possivel carregar as recomendacoes agora.");
@@ -188,7 +146,7 @@ export default function AIRecommendations() {
 
   if (loading) {
     return (
-      <div className="fl-theme-surface rounded-[2rem] p-6">
+      <div className="fl-theme-surface rounded-[1.5rem] p-4 sm:rounded-[2rem] sm:p-6">
         <div className="flex items-center justify-center gap-3" style={{ color: "var(--app-primary-color)" }}>
           <LoadingBall size="md" />
           <span className="text-sm font-bold uppercase tracking-[0.18em]">Analisando seu progresso</span>
@@ -199,7 +157,7 @@ export default function AIRecommendations() {
 
   if (error) {
     return (
-      <div className="fl-theme-surface rounded-[2rem] p-5">
+      <div className="fl-theme-surface rounded-[1.5rem] p-4 sm:rounded-[2rem] sm:p-5">
         <p className="text-sm text-center" style={{ color: "#dc2626" }}>{error}</p>
         <button
           type="button"
@@ -216,11 +174,11 @@ export default function AIRecommendations() {
   if (!recommendations) return null;
 
   return (
-    <section className="space-y-4">
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
+    <section className="space-y-3 sm:space-y-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex min-w-0 items-center gap-3">
           <div
-            className="flex h-11 w-11 items-center justify-center rounded-2xl"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl"
             style={{
               background: "color-mix(in srgb, var(--app-primary-color) 16%, transparent)",
               color: "var(--app-primary-color)",
@@ -228,7 +186,7 @@ export default function AIRecommendations() {
           >
             <Sparkles className="h-5 w-5" />
           </div>
-          <div>
+          <div className="min-w-0">
             <p className="text-[10px] font-black uppercase tracking-[0.24em]" style={{ color: "var(--app-primary-color)" }}>
               Painel IA
             </p>
@@ -237,7 +195,7 @@ export default function AIRecommendations() {
         </div>
         {degraded ? (
           <span
-            className="rounded-full border px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em]"
+            className="w-fit rounded-full border px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em]"
             style={{
               borderColor: "color-mix(in srgb, #f59e0b 30%, transparent)",
               background: "color-mix(in srgb, #f59e0b 12%, transparent)",
@@ -250,7 +208,7 @@ export default function AIRecommendations() {
       </div>
 
       <div
-        className="rounded-[2rem] p-6"
+        className="rounded-[1.5rem] p-4 sm:rounded-[2rem] sm:p-6"
         style={{
           background:
             "radial-gradient(circle at top right, color-mix(in srgb, var(--app-primary-color) 22%, transparent), transparent 44%), linear-gradient(135deg, color-mix(in srgb, var(--fl-surface-gradient-top) 96%, transparent), color-mix(in srgb, var(--fl-surface-gradient-bottom) 100%, transparent))",
@@ -277,15 +235,9 @@ export default function AIRecommendations() {
             </p>
           </div>
         </div>
-
-        <div className="mt-5 grid grid-cols-3 gap-3">
-          <StatPill label="Nivel" value={stats.level.toLocaleString("pt-BR")} />
-          <StatPill label="Streak" value={`${stats.streak.toLocaleString("pt-BR")} dias`} />
-          <StatPill label="Missoes" value={stats.total_missions.toLocaleString("pt-BR")} />
-        </div>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-3">
+      <div className="grid gap-3 sm:gap-4 md:grid-cols-2 xl:grid-cols-3">
         <InsightCard
           icon={<Target className="h-5 w-5" />}
           eyebrow="Proxima skill"
