@@ -24,6 +24,13 @@ type RecommendationApiPayload = {
   degraded?: boolean;
 };
 
+function msUntilNextLocalMidnight(): number {
+  const now = new Date();
+  const nextMidnight = new Date(now);
+  nextMidnight.setHours(24, 0, 0, 0);
+  return Math.max(60_000, nextMidnight.getTime() - now.getTime());
+}
+
 function parseRecommendations(raw: unknown): Recommendations | null {
   if (!raw || typeof raw !== "object") return null;
   const data = raw as Record<string, unknown>;
@@ -144,6 +151,29 @@ export default function AIRecommendations() {
     void loadRecommendations();
   }, [loadRecommendations]);
 
+  useEffect(() => {
+    let cancelled = false;
+    let timeoutId = 0;
+
+    const scheduleRefresh = () => {
+      timeoutId = window.setTimeout(() => {
+        void (async () => {
+          await loadRecommendations();
+          if (!cancelled) {
+            scheduleRefresh();
+          }
+        })();
+      }, msUntilNextLocalMidnight());
+    };
+
+    scheduleRefresh();
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeoutId);
+    };
+  }, [loadRecommendations]);
+
   if (loading) {
     return (
       <div className="fl-theme-surface rounded-[1.5rem] p-4 sm:rounded-[2rem] sm:p-6">
@@ -257,19 +287,6 @@ export default function AIRecommendations() {
           description={recommendations.training_focus.reason}
         />
       </div>
-
-      <button
-        type="button"
-        onClick={() => { void loadRecommendations(); }}
-        className="w-full rounded-[1.4rem] py-4 text-sm font-black uppercase tracking-[0.2em]"
-        style={{
-          background: "var(--app-primary-color)",
-          color: "var(--fl-nav-item-active-text)",
-          boxShadow: "0 0 20px color-mix(in srgb, var(--app-primary-color) 22%, transparent)",
-        }}
-      >
-        Atualizar recomendacoes
-      </button>
     </section>
   );
 }
