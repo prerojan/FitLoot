@@ -71,14 +71,6 @@ function progressionHasXpOverflow(p: Pick<UserProgression, "xp" | "level">): boo
   return xp >= cap;
 }
 
-function normalizeMissionTextKey(value: string | null | undefined): string {
-  return (value ?? "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .trim();
-}
-
 function parseMissionTimestampMs(value: string | null | undefined): number | null {
   if (typeof value !== "string" || value.trim().length === 0) return null;
   const parsed = Date.parse(value);
@@ -99,51 +91,9 @@ function resolveExpiredMissionRefreshDelay(missions: Mission[]): number | null {
   }, EXPIRED_MISSION_AUTO_CLEANUP_MS);
 }
 
-function missionNeedsSynchronousRefresh(mission: Mission): boolean {
-  if (mission.type !== "monthly") return false;
-  if (Array.isArray(mission.circuit_tasks) && mission.circuit_tasks.length > 0) return false;
-
-  const title = normalizeMissionTextKey(mission.title);
-  const goal = normalizeMissionTextKey(mission.goal);
-  const metricType = typeof mission.metric_type === "string" ? mission.metric_type : "";
-  const metricValue = typeof mission.metric_value === "number" ? mission.metric_value : 0;
-
-  if (title.includes("consistencia mensal")) {
-    return !goal.includes("missoes concluidas") || metricValue < 20 || metricValue > 60;
-  }
-  if (title.includes("passos do mes")) {
-    return !goal.includes("passos acumulados") || metricType !== "steps" || metricValue < 80_000 || metricValue > 180_000;
-  }
-  if (title.includes("distancia mensal")) {
-    if (goal.includes("km")) {
-      return metricType !== "distance_meters" || metricValue < 18_000 || metricValue > 70_000;
-    }
-    return !goal.includes("passos acumulados") || metricType !== "steps" || metricValue < 80_000 || metricValue > 180_000;
-  }
-  if (title.includes("dias ativos") || title.includes("pratica ativa")) {
-    return !goal.includes("dias ativos") || metricValue < 12 || metricValue > 24;
-  }
-  if (title.includes("circuitos semanais")) {
-    return !goal.includes("circuitos semanais") || metricValue < 2 || metricValue > 4;
-  }
-  if (title.includes("volume mensal")) {
-    return !goal.includes("missoes concluidas") || metricValue < 20 || metricValue > 60;
-  }
-  if (title.includes("desafio cardio")) {
-    if (goal.includes("km")) {
-      return metricType !== "distance_meters" || metricValue < 20_000 || metricValue > 70_000;
-    }
-    return !goal.includes("passos acumulados") || metricType !== "steps" || metricValue < 100_000 || metricValue > 200_000;
-  }
-
-  return false;
-}
-
 function resolveMissionsApiPath(forceRefresh: boolean, cachedMissions: Mission[] | null): string {
   if (forceRefresh) return "/api/missions?refresh=1";
-  if (Array.isArray(cachedMissions) && cachedMissions.some(missionNeedsSynchronousRefresh)) {
-    return "/api/missions?refresh=1";
-  }
+  void cachedMissions;
   return "/api/missions";
 }
 

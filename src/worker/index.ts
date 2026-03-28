@@ -5484,7 +5484,14 @@ async function runMissionRefreshStepSafely(
   }
 }
 
-function createMissionRefreshPromise(env: Env, db: D1Database, userId: string): Promise<void> {
+type MissionRefreshMode = "safe" | "full";
+
+function createMissionRefreshPromise(
+  env: Env,
+  db: D1Database,
+  userId: string,
+  mode: MissionRefreshMode = "safe",
+): Promise<void> {
   const inflight = missionRefreshLocks.get(userId);
   if (inflight) {
     return inflight;
@@ -5495,12 +5502,14 @@ function createMissionRefreshPromise(env: Env, db: D1Database, userId: string): 
       await runMissionRefreshStepSafely(userId, "repair_legacy_periodic", () =>
         repairLegacyPeriodicMissions(env, db, userId),
       );
-      await runMissionRefreshStepSafely(userId, "ensure_periodic", () =>
-        ensurePeriodicMissions(env, db, userId),
-      );
-      await runMissionRefreshStepSafely(userId, "repair_legacy_daily_metadata", () =>
-        repairLegacyDailyMissionMetadata(env, db, userId),
-      );
+      if (mode === "full") {
+        await runMissionRefreshStepSafely(userId, "ensure_periodic", () =>
+          ensurePeriodicMissions(env, db, userId),
+        );
+        await runMissionRefreshStepSafely(userId, "repair_legacy_daily_metadata", () =>
+          repairLegacyDailyMissionMetadata(env, db, userId),
+        );
+      }
       await runMissionRefreshStepSafely(userId, "update_monthly_progress", () =>
         updateMonthlyMissionProgress(userId, db),
       );
@@ -5519,10 +5528,11 @@ async function ensurePeriodicMissionsWithGuard(
   env: Env,
   db: D1Database,
   userId: string,
-  options?: { force?: boolean | undefined },
+  options?: { force?: boolean | undefined; mode?: MissionRefreshMode | undefined },
 ): Promise<void> {
+  const mode = options?.mode ?? "safe";
   if (options?.force === true) {
-    await createMissionRefreshPromise(env, db, userId);
+    await createMissionRefreshPromise(env, db, userId, mode);
     return;
   }
 
@@ -5532,7 +5542,7 @@ async function ensurePeriodicMissionsWithGuard(
     return;
   }
 
-  await createMissionRefreshPromise(env, db, userId);
+  await createMissionRefreshPromise(env, db, userId, mode);
 }
 
 function schedulePeriodicMissionsRefreshWithGuard(
@@ -5540,6 +5550,7 @@ function schedulePeriodicMissionsRefreshWithGuard(
   db: D1Database,
   userId: string,
   executionCtx: ExecutionContext,
+  mode: MissionRefreshMode = "safe",
 ): boolean {
   const now = Date.now();
   cleanupMissionRefreshTracking(now);
@@ -5547,7 +5558,7 @@ function schedulePeriodicMissionsRefreshWithGuard(
     return false;
   }
 
-  const refreshPromise = createMissionRefreshPromise(env, db, userId);
+  const refreshPromise = createMissionRefreshPromise(env, db, userId, mode);
   executionCtx.waitUntil(
     refreshPromise.catch((error) => {
       console.error("[missions][background-refresh]", {
@@ -6443,9 +6454,12 @@ app.get("/api/missions", authMiddleware, async (c) => {
   try {
     const forceRefresh = c.req.query("refresh") === "1";
     if (forceRefresh) {
-      await ensurePeriodicMissionsWithGuard(c.env, c.env.fitloot_db, user.id, { force: true });
+      await ensurePeriodicMissionsWithGuard(c.env, c.env.fitloot_db, user.id, {
+        force: true,
+        mode: "safe",
+      });
     } else {
-      schedulePeriodicMissionsRefreshWithGuard(c.env, c.env.fitloot_db, user.id, c.executionCtx);
+      schedulePeriodicMissionsRefreshWithGuard(c.env, c.env.fitloot_db, user.id, c.executionCtx, "safe");
     }
 
     const cached = !forceRefresh ? readMissionListCache(user.id) : null;
@@ -6943,7 +6957,10 @@ app.post("/api/missions/complete", authMiddleware, zValidator("json", CompleteMi
     }
 
     c.executionCtx.waitUntil(
-      ensurePeriodicMissionsWithGuard(c.env, c.env.fitloot_db, user.id, { force: true }).catch((refreshError) => {
+      ensurePeriodicMissionsWithGuard(c.env, c.env.fitloot_db, user.id, {
+        force: true,
+        mode: "safe",
+      }).catch((refreshError) => {
         console.error("[/api/missions/complete][refresh]", {
           userId: user.id,
           missionId: data.mission_id,
