@@ -53,7 +53,21 @@ function stripEphemeralProgressionFields(data: unknown): unknown {
 }
 
 async function parseJsonResponse<T>(response: Response): Promise<T> {
-  const payload = (await response.json().catch(() => null)) as { error?: string | undefined } | T | null;
+  if (response.status === 204) {
+    return null as T;
+  }
+
+  const contentType = response.headers.get("content-type") ?? "";
+  const rawPayload = await response.text();
+  let payload: { error?: string | undefined } | T | null = null;
+
+  if (rawPayload.trim().length > 0) {
+    try {
+      payload = JSON.parse(rawPayload) as { error?: string | undefined } | T;
+    } catch {
+      throw new ApiRequestError(502, "A API retornou uma resposta inválida. Verifique o deploy e os rewrites de /api.");
+    }
+  }
 
   if (!response.ok) {
     const message =
@@ -61,6 +75,11 @@ async function parseJsonResponse<T>(response: Response): Promise<T> {
         ? payload.error
         : "Falha na requisição.";
     throw new ApiRequestError(response.status, message);
+  }
+
+  const isJsonResponse = contentType.includes("application/json") || contentType.includes("+json");
+  if (!isJsonResponse || payload === null) {
+    throw new ApiRequestError(502, "A API retornou uma resposta inválida. Verifique o deploy e os rewrites de /api.");
   }
 
   return payload as T;

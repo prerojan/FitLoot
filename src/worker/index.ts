@@ -1146,10 +1146,12 @@ export interface Env {
   CAKTO_CLIENT_ID?: string | undefined;
   CAKTO_CLIENT_SECRET?: string | undefined;
   CAKTO_WEBHOOK_SECRET?: string | undefined;
+  HUGGING_FACE_VISION_MODEL?: string | undefined;
 }
 // --------------------------------
 
 const HUGGING_FACE_CHAT_MODEL = "openai/gpt-oss-120b";
+const DEFAULT_HUGGING_FACE_VISION_MODEL = "Qwen/Qwen3.5-9B:together";
 
 function getHuggingFaceApiKey(env: Pick<Env, "HF_TOKEN" | "HUGGING_FACE_API_KEY">): string | null {
   const direct = typeof env.HUGGING_FACE_API_KEY === "string" ? env.HUGGING_FACE_API_KEY.trim() : "";
@@ -1157,6 +1159,11 @@ function getHuggingFaceApiKey(env: Pick<Env, "HF_TOKEN" | "HUGGING_FACE_API_KEY"
 
   const legacy = typeof env.HF_TOKEN === "string" ? env.HF_TOKEN.trim() : "";
   return legacy.length > 0 ? legacy : null;
+}
+
+function getHuggingFaceVisionModel(env: Pick<Env, "HUGGING_FACE_VISION_MODEL">): string {
+  const configured = typeof env.HUGGING_FACE_VISION_MODEL === "string" ? env.HUGGING_FACE_VISION_MODEL.trim() : "";
+  return configured.length > 0 ? configured : DEFAULT_HUGGING_FACE_VISION_MODEL;
 }
 
 
@@ -12877,6 +12884,56 @@ async function requestHuggingFaceChatCompletion(
     : new ApiIntegrationError("UPSTREAM_ERROR", 502, "Falha ao consultar serviÃ§o externo.");
 }
 
+async function requestHuggingFaceVisionStructuredContent(
+  apiKey: string,
+  model: string,
+  prompt: string,
+  imageDataUrl: string,
+  maxTokens: number,
+  timeoutMs: number,
+): Promise<string> {
+  const completion = await fetchJsonWithTimeout<OpenAIChatCompletionResponse>(
+    "https://router.huggingface.co/v1/chat/completions",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text: `${prompt}\nResponda somente JSON valido, sem markdown e sem texto extra.`,
+              },
+              {
+                type: "image_url",
+                image_url: {
+                  url: imageDataUrl,
+                },
+              },
+            ],
+          },
+        ],
+        max_tokens: maxTokens,
+        response_format: { type: "json_object" },
+      }),
+    },
+    timeoutMs,
+  );
+
+  const rawContent = safeGet(completion.choices ?? [], 0)?.message?.content ?? "";
+  if (rawContent.trim().length === 0) {
+    throw new ApiIntegrationError("INVALID_RESPONSE", 502, "Servico externo retornou conteudo vazio.");
+  }
+
+  return rawContent;
+}
+
 async function fetchResponseWithTimeout(
   url: string,
   init: RequestInit,
@@ -14254,6 +14311,60 @@ function isIdentifiedFoodItem(item: unknown): item is IdentifiedFoodItem {
   return typeof value.food_name === "string" && value.food_name.trim().length > 0;
 }
 
+async function identifyFoodItemsFromImage(
+  c: import("hono").Context<AppContext>,
+  params: {
+    imageBase64: string;
+    imageMimeType?: string | undefined;
+    foodDescription?: string | undefined;
+    ocrText?: string | undefined;
+  },
+): Promise<{ items: IdentifiedFoodItem[]; foodDescription?: string | undefined }> {
+  const apiKey = getHuggingFaceApiKey(c.env);
+  if (!apiKey) {
+    throw new ApiIntegrationError("SERVICE_NOT_CONFIGURED", 503, "Hugging Face não configurada.");
+  }
+
+  const normalizedImageBase64 = params.imageBase64.trim();
+  if (normalizedImageBase64.length === 0) {
+    return { items: [], foodDescription: params.foodDescription };
+  }
+
+  const prompt = [
+    "Analise a foto de uma refeição e responda APENAS JSON com o formato {\"food_description\":\"\",\"items\":[{\"food_name\":\"\",\"portion_description\":\"\",\"portion_multiplier\":1}]}.",
+    "Liste somente alimentos visivelmente presentes.",
+    "Use nomes simples e porções curtas, como porcao media, 1 unidade, 1 concha ou 1 colher.",
+    params.foodDescription ? `Contexto textual informado pelo app: ${params.foodDescription}` : "",
+    params.ocrText ? `Texto OCR disponível: ${params.ocrText}` : "",
+  ]
+    .filter((line) => line.length > 0)
+    .join("\n");
+
+  const content = await requestHuggingFaceVisionStructuredContent(
+    apiKey,
+    getHuggingFaceVisionModel(c.env),
+    prompt,
+    `data:${params.imageMimeType?.trim() || "image/jpeg"};base64,${normalizedImageBase64}`,
+    700,
+    timeoutMsByService.huggingface,
+  );
+
+  const parsed = (parseJsonObjectFromModelContent(content) ?? {}) as {
+    items?: unknown[];
+    food_description?: unknown;
+  };
+
+  const items = Array.isArray(parsed.items) ? parsed.items.filter(isIdentifiedFoodItem) : [];
+  const foodDescription = typeof parsed.food_description === "string" && parsed.food_description.trim().length > 0
+    ? parsed.food_description.trim()
+    : params.foodDescription;
+
+  return {
+    items,
+    foodDescription,
+  };
+}
+
 // 5. Food analysis pipeline (MediaPipe client detection + USDA + RapidAPI fallback + AI estimate)
 app.post("/api/ai/analyze-food", authMiddleware, async (c) => {
   const user = c.get("user");
@@ -14266,12 +14377,36 @@ app.post("/api/ai/analyze-food", authMiddleware, async (c) => {
       return c.json({ error: "Invalid input", details: parsed.error.flatten() }, 400);
     }
 
-    const { food_description, identified_items = [], ocr_text } = parsed.data;
+    const { food_description, identified_items = [], image_base64, image_mime_type, ocr_text } = parsed.data;
     let items: IdentifiedFoodItem[] = identified_items.filter(isIdentifiedFoodItem);
+    let resolvedFoodDescription = typeof food_description === "string" && food_description.trim().length > 0
+      ? food_description.trim()
+      : undefined;
 
-    if (items.length === 0 && food_description) {
+    if (items.length === 0 && image_base64) {
+      try {
+        const imageIdentification = await identifyFoodItemsFromImage(c, {
+          imageBase64: image_base64,
+          imageMimeType: image_mime_type,
+          foodDescription: resolvedFoodDescription,
+          ocrText: ocr_text,
+        });
+        if (imageIdentification.items.length > 0) {
+          items = imageIdentification.items;
+        }
+        if (imageIdentification.foodDescription) {
+          resolvedFoodDescription = imageIdentification.foodDescription;
+        }
+      } catch (imageError) {
+        console.warn("[analyze-food][vision-fallback]", {
+          message: getErrorMessage(imageError),
+        });
+      }
+    }
+
+    if (items.length === 0 && resolvedFoodDescription) {
       const identifyPrompt = `Analise a refeição e responda APENAS em JSON no formato {"items":[{"food_name":"","portion_description":"","portion_multiplier":1}]}.
-Contexto textual: ${food_description || "não informado"}
+Contexto textual: ${resolvedFoodDescription || "não informado"}
 Texto OCR do rótulo: ${ocr_text || "não identificado"}.`;
       const aiData = await callOpenAIChat(c, [{ role: "user", content: identifyPrompt }], 700, true);
       const aiContent = safeGet(aiData.choices ?? [], 0)?.message?.content ?? "{}";
@@ -14416,6 +14551,7 @@ Texto OCR do rótulo: ${ocr_text || "não identificado"}.`;
     return c.json({
       success: true,
       ocr_text: ocr_text || undefined,
+      food_description: resolvedFoodDescription,
       items: analyzedItems,
       totals: {
         calories: Math.round(totals.calories),
@@ -14699,6 +14835,7 @@ app.get("/api/health/external", authMiddleware, async (c) => {
     usda: Boolean(c.env.USDA_API_KEY),
     rapidapi: Boolean(c.env.RAPID_API_KEY),
     google_vision: false,
+    huggingface_vision: Boolean(getHuggingFaceApiKey(c.env)),
     anthropic: Boolean(c.env.ANTHROPIC_API_KEY),
   });
 });
@@ -14707,7 +14844,11 @@ app.get("/api/health/openai", authMiddleware, async (c) => c.json({ ok: false, d
 app.get("/api/health/huggingface", authMiddleware, async (c) => c.json({ ok: Boolean(getHuggingFaceApiKey(c.env)) }));
 app.get("/api/health/usda", authMiddleware, async (c) => c.json({ ok: Boolean(c.env.USDA_API_KEY) }));
 app.get("/api/health/rapidapi", authMiddleware, async (c) => c.json({ ok: Boolean(c.env.RAPID_API_KEY) }));
-app.get("/api/health/vision", authMiddleware, async (c) => c.json({ ok: false, deprecated: true }));
+app.get("/api/health/vision", authMiddleware, async (c) => c.json({
+  ok: Boolean(getHuggingFaceApiKey(c.env)),
+  provider: "huggingface_router",
+  model: getHuggingFaceVisionModel(c.env),
+}));
 
 // -----------------------------
 // SPA fallback (APENAS após todas as rotas /api/* definidas)

@@ -9,7 +9,11 @@ export async function fetchCurrentUser(): Promise<User | null> {
     return null;
   }
   if (!response.ok) return null;
-  return (await response.json()) as User;
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!contentType.includes("application/json") && !contentType.includes("+json")) {
+    return null;
+  }
+  return ((await response.json().catch(() => null)) as User | null) ?? null;
 }
 
 export async function notifyAppOpen(): Promise<void> {

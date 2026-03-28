@@ -4,7 +4,7 @@ import { Camera, AlertTriangle, CheckCircle2, Bolt, ShieldCheck, ImageIcon, Arro
 import AppPageShell from "@/react-app/components/AppPageShell";
 import LoadingBall from "@/react-app/components/LoadingBall";
 import { cameraService, type NormalizedCameraImage } from "@/react-app/services/native/cameraService";
-import { api } from "@/react-app/utils/api";
+import { ApiRequestError, clearJsonCache, fetchJson } from "@/react-app/utils/api";
 import { safeGet } from "@/utils/typeHelpers";
 
 type AnalysisItem = {
@@ -170,6 +170,7 @@ export default function FoodAnalysis() {
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [saving, setSaving] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
 
   const [mediaPipeReady, setMediaPipeReady] = useState(false);
   const [mediaPipeLoading, setMediaPipeLoading] = useState(true);
@@ -321,7 +322,7 @@ export default function FoodAnalysis() {
 
   const classifyFoodWithMediaPipe = async (image: HTMLImageElement): Promise<FoodClassificationResult> => {
     if (!classifierRef.current) {
-      await initializeMediaPipe();
+      await initializeMediaPipe().catch(() => undefined);
     }
 
     const classifier = classifierRef.current;
@@ -349,6 +350,22 @@ export default function FoodAnalysis() {
     };
   };
 
+  const buildAnalysisHints = async (image: HTMLImageElement): Promise<FoodClassificationResult> => {
+    if (mediaPipeLoading) {
+      return {
+        identifiedItems: [],
+      };
+    }
+
+    try {
+      return await classifyFoodWithMediaPipe(image);
+    } catch {
+      return {
+        identifiedItems: [],
+      };
+    }
+  };
+
   const resetCaptureState = () => {
     stopCamera();
     lastNormalizedImageRef.current = null;
@@ -359,6 +376,7 @@ export default function FoodAnalysis() {
     setPreview(null);
     setPreviewSource(null);
     setLoading(false);
+    setSaveSuccess(false);
   };
 
   const startWebCamera = async () => {
@@ -462,6 +480,7 @@ export default function FoodAnalysis() {
     setResult(null);
     setPreview(null);
     setPreviewSource(null);
+    setSaveSuccess(false);
     await cameraService.openCamera(startWebCamera);
   };
 
@@ -473,6 +492,7 @@ export default function FoodAnalysis() {
     setResult(null);
     setPreview(null);
     setPreviewSource(null);
+    setSaveSuccess(false);
     await cameraService.openGallery(() => {
       galleryInputRef.current?.click();
     });
@@ -482,16 +502,9 @@ export default function FoodAnalysis() {
     setLoading(true);
     setError(null);
     setResult(null);
+    setSaveSuccess(false);
 
     try {
-      if (mediaPipeLoading) {
-        throw new Error("Aguarde, inicializando análise de imagem...");
-      }
-
-      if (!mediaPipeReady) {
-        throw new Error(mediaPipeError || "MediaPipe não está pronto para análise.");
-      }
-
       const image = await new Promise<HTMLImageElement>((resolve, reject) => {
         const img = new Image();
         img.onload = () => resolve(img);
@@ -499,30 +512,29 @@ export default function FoodAnalysis() {
         img.src = normalizedImage.dataUrl;
       });
 
-      const classification = await classifyFoodWithMediaPipe(image);
+      const classification = await buildAnalysisHints(image);
       const fallbackFoodDescription = classification.identifiedItems.map((item) => item.food_name).join(", ");
       const foodDescription = classification.foodDescription ?? (fallbackFoodDescription || undefined);
-      const response = await api("/api/ai/analyze-food", {
+      const data = await fetchJson<AnalysisResult>("/api/ai/analyze-food", {
         method: "POST",
         body: JSON.stringify({
           identified_items: classification.identifiedItems,
           food_description: foodDescription,
           image_base64: normalizedImage.base64,
+          image_mime_type: normalizedImage.mimeType,
         }),
       });
 
-      if (response.status === 401 || response.status === 403) {
+      setResult(data);
+    } catch (analysisError) {
+      if (analysisError instanceof ApiRequestError && (analysisError.status === 401 || analysisError.status === 403)) {
         navigate("/app");
         return;
       }
 
-      const data = (await response.json().catch(() => null)) as { error?: string | undefined } | AnalysisResult | null;
-      if (!response.ok) {
-        throw new Error((data as { error?: string | undefined } | null)?.error || "Falha ao analisar alimento");
-      }
-      setResult(data as AnalysisResult);
-    } catch (analysisError) {
-      setError(analysisError instanceof Error ? analysisError.message : "Não foi possível analisar a foto.");
+      const baseMessage = analysisError instanceof Error ? analysisError.message : "Não foi possível analisar a foto.";
+      const shouldAppendMediaPipeContext = Boolean(mediaPipeError) && !mediaPipeReady;
+      setError(shouldAppendMediaPipeContext ? `${baseMessage} ${mediaPipeError}` : baseMessage);
     } finally {
       setLoading(false);
     }
@@ -571,6 +583,7 @@ export default function FoodAnalysis() {
   };
 
   const onPickGallery: ChangeEventHandler<HTMLInputElement> = async (event) => {
+    const input = event.currentTarget;
     const file = safeGet(Array.from(event.target.files ?? []), 0);
     if (!file) return;
 
@@ -583,7 +596,7 @@ export default function FoodAnalysis() {
     } catch (imageError) {
       setError(imageError instanceof Error ? imageError.message : "Falha ao processar a imagem selecionada.");
     } finally {
-      event.currentTarget.value = "";
+      input.value = "";
     }
   };
 
@@ -592,20 +605,21 @@ export default function FoodAnalysis() {
     setSaving(true);
     try {
       const foodName = result.items.map((item) => item.food_name).slice(0, 2).join(" + ") || "Refeição analisada";
-      const response = await api("/api/food/scan", {
+      await fetchJson<{ success: boolean }>("/api/food/scan", {
         method: "POST",
         body: JSON.stringify({ food_name: foodName, calories: result.totals.calories, meal_type: "lanche" }),
       });
 
-      if (response.status === 401 || response.status === 403) {
+      clearJsonCache("/api/food/today");
+      setSaveSuccess(true);
+      setError(null);
+    } catch (saveError) {
+      if (saveError instanceof ApiRequestError && (saveError.status === 401 || saveError.status === 403)) {
         navigate("/app");
         return;
       }
 
-      if (!response.ok) throw new Error("Não foi possível salvar o registro");
-      navigate("/dashboard");
-    } catch {
-      setError("Não foi possível salvar a refeição no histórico agora.");
+      setError(saveError instanceof Error ? saveError.message : "Não foi possível salvar a refeição no histórico agora.");
     } finally {
       setSaving(false);
     }
@@ -810,6 +824,13 @@ export default function FoodAnalysis() {
             </div>
           </div>
 
+          {saveSuccess ? (
+            <div className="mb-6 inline-flex items-center gap-3 rounded-full border px-4 py-2" style={{ borderColor: "color-mix(in srgb, var(--app-primary-color) 24%, transparent)", backgroundColor: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)", color: "var(--app-primary-color)" }}>
+              <CheckCircle2 className="w-4 h-4" />
+              <span className="text-[11px] font-bold uppercase tracking-widest">Refeição salva no histórico</span>
+            </div>
+          ) : null}
+
           {/* Action Buttons (Fixed or scroll end) */}
           <div className="mt-auto grid grid-cols-2 gap-3 pt-4 sm:gap-4">
             <button 
@@ -821,11 +842,11 @@ export default function FoodAnalysis() {
             </button>
             <button 
               onClick={saveMeal}
-              disabled={saving}
+              disabled={saving || saveSuccess}
               className="neon-glow h-14 rounded-2xl text-xs font-bold uppercase tracking-widest transition-all active:scale-95 disabled:opacity-50"
               style={{ backgroundColor: 'var(--app-primary-color)', color: 'var(--fl-nav-item-active-text)' }}
             >
-              {saving ? "Registrando..." : "Confirmar e Salvar"}
+              {saving ? "Registrando..." : saveSuccess ? "Salvo" : "Confirmar e Salvar"}
             </button>
           </div>
         </div>

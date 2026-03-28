@@ -6,6 +6,9 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Bundle
+import android.util.Log
+import android.view.View
+import android.view.ViewGroup
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
@@ -15,6 +18,7 @@ import androidx.lifecycle.lifecycleScope
 import android.webkit.PermissionRequest
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
+import android.webkit.WebView
 import com.fitloot.bridge.FitLootWebViewConfigurator
 import com.fitloot.bridge.NativeBridgeContract
 import com.fitloot.health.HealthConnectPermissionCoordinator
@@ -27,10 +31,12 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val RUNTIME_PERMISSIONS_REQUEST_CODE = 100
+        private const val TAG = "MainActivity"
     }
 
     private lateinit var binding: ActivityMainBinding
     private lateinit var webAppInterface: WebAppInterface
+    private var webView: WebView? = null
     private var fileChooserCallback: ValueCallback<Array<Uri>>? = null
     private var pendingWebPermissionRequest: PermissionRequest? = null
 
@@ -93,22 +99,40 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        setupWebView()
-        checkPermissions()
+        if (setupWebView()) {
+            checkPermissions()
+        }
     }
 
-    private fun setupWebView() {
-        val webView = binding.webView
+    private fun setupWebView(): Boolean {
+        val createdWebView = runCatching { WebView(this) }.getOrElse { error ->
+            Log.e(TAG, "Failed to instantiate WebView", error)
+            showWebViewUnavailable(error)
+            return false
+        }
+
+        webView = createdWebView
+        binding.webViewContainer.visibility = View.VISIBLE
+        binding.webViewFallback.visibility = View.GONE
+        binding.webViewContainer.removeAllViews()
+        binding.webViewContainer.addView(
+            createdWebView,
+            ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT,
+            ),
+        )
+
         webAppInterface = WebAppInterface(
             this,
-            webView,
+            createdWebView,
             onCameraRequest = { intent -> cameraResultLauncher.launch(intent) },
             onGalleryRequest = { intent -> galleryResultLauncher.launch(intent) },
             onPermissionsRequest = { checkPermissions() }
         )
 
         FitLootWebViewConfigurator.configure(
-            webView = webView,
+            webView = createdWebView,
             openExternalUrl = { intent ->
                 startActivity(intent)
             },
@@ -131,8 +155,20 @@ class MainActivity : AppCompatActivity() {
                 handleWebPermissionRequest(request)
             },
         )
-        webView.addJavascriptInterface(webAppInterface, NativeBridgeContract.BRIDGE_NAME)
-        FitLootWebViewConfigurator.loadHome(webView)
+        createdWebView.addJavascriptInterface(webAppInterface, NativeBridgeContract.BRIDGE_NAME)
+        FitLootWebViewConfigurator.loadHome(createdWebView)
+        return true
+    }
+
+    private fun showWebViewUnavailable(error: Throwable? = null) {
+        binding.webViewContainer.visibility = View.GONE
+        binding.webViewFallback.visibility = View.VISIBLE
+        binding.webViewFallbackMessage.text =
+            if (error?.message?.contains("com.google.android.webview") == true) {
+                "O provedor do Android System WebView nao esta disponivel neste aparelho. Atualize ou reative o Android System WebView ou o Google Chrome e tente novamente."
+            } else {
+                "Nao foi possivel iniciar a camada web do FitLoot neste aparelho. Atualize o Android System WebView ou o Google Chrome e tente novamente."
+            }
     }
 
     private fun checkPermissions() {
@@ -210,10 +246,17 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onBackPressed() {
-        if (binding.webView.canGoBack()) {
-            binding.webView.goBack()
+        val currentWebView = webView
+        if (currentWebView?.canGoBack() == true) {
+            currentWebView.goBack()
         } else {
             super.onBackPressed()
         }
+    }
+
+    override fun onDestroy() {
+        webView?.destroy()
+        webView = null
+        super.onDestroy()
     }
 }

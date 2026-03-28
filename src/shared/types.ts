@@ -410,6 +410,7 @@ export type AiChatRequest = z.infer<typeof AiChatRequestSchema>;
 export const AiAnalyzeFoodRequestSchema = z.object({
   food_description: z.string().optional(),
   image_base64: z.string().optional(),
+  image_mime_type: z.string().optional(),
   identified_items: z.array(z.object({
     food_name: z.string().min(1),
     portion_description: z.string().optional(),
