@@ -19,6 +19,7 @@ import { Button } from "@/react-app/components/ui/button";
 import { Badge } from "@/react-app/components/ui/badge";
 import LoadingBall from "@/react-app/components/LoadingBall";
 import { formatMissionGoal, shouldShowMissionDuration } from "@/constants/missionMetrics";
+import { resolveExerciseMediaFallbackUrl } from "@/shared/exerciseCatalog";
 import type { CircuitTask, Mission, MissionMetricType } from "@/shared/types";
 import { localizeMissionText, localizeMissionTextArray, normalizeMissionMediaUrl } from "@/shared/missionLocalization";
 import { api } from "@/react-app/utils/api";
@@ -374,6 +375,27 @@ function summarizeAutoProgressLabel(tasks: readonly CircuitTask[]): string {
   return `${taskLabels[0]}, ${taskLabels[1]} e mais ${taskLabels.length - 2}`;
 }
 
+function resolveCatalogMissionMediaFallbackUrl(mission: Mission): string | null {
+  if (mission.type !== "daily") {
+    return null;
+  }
+
+  const candidates = [
+    mission.exercise_name,
+    resolveMissionDisplayTitle(mission.title),
+    mission.description,
+  ];
+
+  for (const candidate of candidates) {
+    const fallbackUrl = resolveExerciseMediaFallbackUrl(candidate);
+    if (fallbackUrl) {
+      return normalizeMissionMediaUrl(fallbackUrl);
+    }
+  }
+
+  return null;
+}
+
 function resolveMissionMediaUrl(mission: Mission): string | null {
   const primaryImage = normalizeMissionMediaUrl(mission.image_url);
   const ascendGif = isGifUrl(primaryImage) ? primaryImage : null;
@@ -381,6 +403,7 @@ function resolveMissionMediaUrl(mission: Mission): string | null {
   const exerciseDbImage = normalizeMissionMediaUrl(mission.exercise_db_image_url);
   const videoUrl = normalizeMissionMediaUrl(mission.video_url);
   const thumbnail = normalizeMissionMediaUrl(mission.thumbnail_url);
+  const catalogFallback = resolveCatalogMissionMediaFallbackUrl(mission);
 
   return ascendGif
     ?? exerciseDbGif
@@ -388,6 +411,7 @@ function resolveMissionMediaUrl(mission: Mission): string | null {
     ?? exerciseDbImage
     ?? primaryImage
     ?? thumbnail
+    ?? catalogFallback
     ?? null;
 }
 
@@ -1611,24 +1635,24 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
                   <Trophy className="w-5 h-5" style={{ color: "var(--app-primary-color)" }} />
                   Recompensas
                 </h3>
-                <div className={`grid gap-4 ${detailIsAutoProgressMission ? "grid-cols-1" : "grid-cols-2"}`}>
-                  <div className="p-4 rounded-xl flex items-center gap-4 border" style={{ background: "color-mix(in srgb, var(--fl-surface-muted) 50%, transparent)", borderColor: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)" }}>
+                <div className={`grid gap-4 ${detailIsAutoProgressMission ? "grid-cols-1" : "grid-cols-1 sm:grid-cols-2"}`}>
+                  <div className="min-w-0 p-4 rounded-xl flex items-center gap-4 border" style={{ background: "color-mix(in srgb, var(--fl-surface-muted) 50%, transparent)", borderColor: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)" }}>
                     <div className="w-10 h-10 rounded-full flex items-center justify-center shrink-0" style={{ background: "color-mix(in srgb, var(--app-primary-color) 20%, transparent)" }}>
                       <Star className="w-5 h-5" style={{ color: "var(--app-primary-color)" }} />
                     </div>
-                    <div>
-                      <p className="text-xs font-bold uppercase" style={{ color: "color-mix(in srgb, var(--app-primary-color) 60%, var(--fl-color-text))" }}>Experiência</p>
-                      <p className="text-lg font-bold" style={{ color: "var(--fl-color-text)" }}>+{missionDetails.xp_reward} XP</p>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[11px] sm:text-xs font-bold uppercase leading-tight break-words" style={{ color: "color-mix(in srgb, var(--app-primary-color) 60%, var(--fl-color-text))" }}>Experiência</p>
+                      <p className="text-[clamp(0.95rem,4vw,1.125rem)] font-bold leading-tight break-words tabular-nums" style={{ color: "var(--fl-color-text)" }}>+{missionDetails.xp_reward} XP</p>
                     </div>
                   </div>
                   {!detailIsAutoProgressMission ? (
-                    <div className="p-4 rounded-xl flex items-center gap-4 border" style={{ background: "color-mix(in srgb, var(--fl-surface-muted) 50%, transparent)", borderColor: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)" }}>
+                    <div className="min-w-0 p-4 rounded-xl flex items-center gap-4 border" style={{ background: "color-mix(in srgb, var(--fl-surface-muted) 50%, transparent)", borderColor: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)" }}>
                       <div className="w-10 h-10 rounded-full flex items-center justify-center shrink-0" style={{ background: "color-mix(in srgb, var(--app-primary-color) 20%, transparent)" }}>
                         <Trophy className="w-5 h-5" style={{ color: "var(--app-primary-color)" }} />
                       </div>
-                      <div>
-                        <p className="text-xs font-bold uppercase" style={{ color: "color-mix(in srgb, var(--app-primary-color) 60%, var(--fl-color-text))" }}>FitCoins</p>
-                        <p className="text-lg font-bold" style={{ color: "var(--fl-color-text)" }}>{missionDetails.points_reward}</p>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[11px] sm:text-xs font-bold uppercase leading-tight break-words" style={{ color: "color-mix(in srgb, var(--app-primary-color) 60%, var(--fl-color-text))" }}>FitCoins</p>
+                        <p className="text-[clamp(0.95rem,4vw,1.125rem)] font-bold leading-tight break-words tabular-nums" style={{ color: "var(--fl-color-text)" }}>{missionDetails.points_reward}</p>
                       </div>
                     </div>
                   ) : null}

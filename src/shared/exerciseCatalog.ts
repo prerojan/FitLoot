@@ -8,6 +8,7 @@ type SupplementalExerciseCatalogEntry = {
   searchTerms: string[];
   aliases: string[];
   exerciseDbId?: string | undefined;
+  visualFallbackExerciseDbId?: string | undefined;
   muscles: string[];
   supportedForMission: boolean;
   replacementSlug?: string | undefined;
@@ -92,6 +93,7 @@ const supplementalExerciseCatalog: SupplementalExerciseCatalogEntry[] = [
     slug: "plank-front",
     namePt: "Prancha frontal",
     searchTerms: ["front plank", "plank"],
+    visualFallbackExerciseDbId: "VBAWRPG",
     aliases: ["plank", "high plank", "front plank", "prancha", "prancha frontal", "prancha isometrica"],
     muscles: ["core", "waist"],
     supportedForMission: true,
@@ -427,6 +429,18 @@ export function resolvePreferredExerciseDbId(value: string | null | undefined): 
     return supportedSupplemental.exerciseDbId;
   }
   return null;
+}
+
+export function resolveExerciseMediaFallbackUrl(value: string | null | undefined): string | null {
+  const supplemental = resolveSupplementalExerciseCatalogEntry(value);
+  const supportedSupplemental = resolveReplacementEntry(supplemental);
+  const exerciseDbId = supportedSupplemental?.visualFallbackExerciseDbId
+    ?? supportedSupplemental?.exerciseDbId
+    ?? null;
+  if (!exerciseDbId) {
+    return null;
+  }
+  return `https://static.exercisedb.dev/media/${exerciseDbId}.gif`;
 }
 
 export function listSupportedMissionExerciseNamesByMuscle(muscle: string | null | undefined): string[] {
