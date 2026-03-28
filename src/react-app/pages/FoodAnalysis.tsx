@@ -3,6 +3,7 @@ import { useNavigate } from "react-router";
 import { Camera, AlertTriangle, CheckCircle2, Bolt, ShieldCheck, ImageIcon, ArrowLeft, BookOpen, Clock3 } from "lucide-react";
 import AppPageShell from "@/react-app/components/AppPageShell";
 import LoadingBall from "@/react-app/components/LoadingBall";
+import { isAndroidNativeAvailable } from "@/react-app/services/native/androidBridge";
 import { cameraService, type NormalizedCameraImage } from "@/react-app/services/native/cameraService";
 import { ApiRequestError, clearJsonCache, fetchJson } from "@/react-app/utils/api";
 import { safeGet } from "@/utils/typeHelpers";
@@ -69,7 +70,7 @@ type FoodClassificationResult = {
 };
 
 type PreviewSource = "camera" | "gallery";
-type WebCameraStartResult = "started" | "unsupported" | "blocked";
+type WebCameraStartResult = "started" | "unsupported" | "blocked" | "fallback-native";
 
 type SavedFoodEntry = {
   id: number;
@@ -201,6 +202,7 @@ export default function FoodAnalysis() {
   const processNormalizedImageRef = useRef<(image: NormalizedCameraImage) => void>(() => undefined);
   const classifierClosingRef = useRef(false);
   const lastNormalizedImageRef = useRef<NormalizedCameraImage | null>(null);
+  const previewWatchdogRef = useRef<number | null>(null);
 
   const [streamActive, setStreamActive] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
@@ -219,8 +221,18 @@ export default function FoodAnalysis() {
   const [mediaPipeReady, setMediaPipeReady] = useState(false);
   const [mediaPipeLoading, setMediaPipeLoading] = useState(true);
   const [mediaPipeError, setMediaPipeError] = useState<string | null>(null);
+  const androidNativeAvailable = isAndroidNativeAvailable();
+  const reduceInlineCameraEffects = androidNativeAvailable && streamActive && !preview;
+
+  const clearPreviewWatchdog = () => {
+    if (previewWatchdogRef.current !== null) {
+      window.clearTimeout(previewWatchdogRef.current);
+      previewWatchdogRef.current = null;
+    }
+  };
 
   const stopCamera = (updateState = true) => {
+    clearPreviewWatchdog();
     const stream = videoRef.current?.srcObject as MediaStream | null;
     stream?.getTracks().forEach((track) => track.stop());
     if (videoRef.current) {
@@ -334,6 +346,7 @@ export default function FoodAnalysis() {
 
     return () => {
       mountedRef.current = false;
+      clearPreviewWatchdog();
       stopCamera(false);
       destroyMediaPipe();
       classifierInitRef.current = null;
@@ -448,6 +461,79 @@ export default function FoodAnalysis() {
     setLibraryOpen(false);
   };
 
+  const waitForInlinePreview = (video: HTMLVideoElement): Promise<boolean> => {
+    return new Promise((resolve) => {
+      let settled = false;
+      let intervalId: number | null = null;
+      let frameRequestId: number | null = null;
+
+      const isReady = () =>
+        video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA &&
+        video.videoWidth > 0 &&
+        video.videoHeight > 0;
+
+      const cleanup = () => {
+        video.removeEventListener("loadeddata", handleReadyCheck);
+        video.removeEventListener("canplay", handleReadyCheck);
+        if (intervalId !== null) {
+          window.clearInterval(intervalId);
+        }
+        if (frameRequestId !== null && "cancelVideoFrameCallback" in video) {
+          (video as HTMLVideoElement & { cancelVideoFrameCallback: (handle: number) => void }).cancelVideoFrameCallback(frameRequestId);
+        }
+        clearPreviewWatchdog();
+      };
+
+      const finish = (ready: boolean) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve(ready);
+      };
+
+      const handleReadyCheck = () => {
+        if (isReady()) {
+          finish(true);
+        }
+      };
+
+      const scheduleFrameProbe = () => {
+        if (!("requestVideoFrameCallback" in video)) {
+          return;
+        }
+
+        frameRequestId = (
+          video as HTMLVideoElement & {
+            requestVideoFrameCallback: (callback: () => void) => number;
+          }
+        ).requestVideoFrameCallback(() => {
+          if (isReady()) {
+            finish(true);
+            return;
+          }
+
+          if (!settled) {
+            scheduleFrameProbe();
+          }
+        });
+      };
+
+      if (isReady()) {
+        finish(true);
+        return;
+      }
+
+      video.addEventListener("loadeddata", handleReadyCheck);
+      video.addEventListener("canplay", handleReadyCheck);
+      intervalId = window.setInterval(handleReadyCheck, 120);
+      scheduleFrameProbe();
+
+      previewWatchdogRef.current = window.setTimeout(() => {
+        finish(isReady());
+      }, androidNativeAvailable ? 1400 : 2200);
+    });
+  };
+
   const startWebCamera = async (): Promise<WebCameraStartResult> => {
     if (!navigator.mediaDevices?.getUserMedia) {
       setCameraError("A camera inline nao esta disponivel neste ambiente.");
@@ -483,39 +569,57 @@ export default function FoodAnalysis() {
       }
       
       if (videoRef.current) {
-        videoRef.current.srcObject = stream;
+        const currentVideo = videoRef.current;
+        currentVideo.srcObject = stream;
         
         // Adiciona eventos para debug
-        videoRef.current.onloadedmetadata = () => {
+        currentVideo.onloadedmetadata = () => {
           if (import.meta.env.DEV) {
             console.log("[Camera] Video metadata loaded");
             console.log("[Camera] Video dimensions:", {
-              videoWidth: videoRef.current?.videoWidth,
-              videoHeight: videoRef.current?.videoHeight,
-              readyState: videoRef.current?.readyState,
+              videoWidth: currentVideo.videoWidth,
+              videoHeight: currentVideo.videoHeight,
+              readyState: currentVideo.readyState,
             });
           }
         };
         
-        videoRef.current.onplay = () => {
+        currentVideo.onplay = () => {
           if (import.meta.env.DEV) {
             console.log("[Camera] Video started playing");
           }
         };
         
-        videoRef.current.onerror = (e) => {
-          console.error('[Camera] Video error:', e);
+        currentVideo.onerror = (event) => {
+          console.error("[Camera] Video error:", event);
         };
         
         // Tenta reproduzir o vídeo
         try {
-          await videoRef.current.play();
+          await currentVideo.play();
           if (import.meta.env.DEV) {
             console.log("[Camera] Video play() chamado com sucesso");
           }
         } catch (playError) {
           console.error('[Camera] Erro ao reproduzir vídeo:', playError);
           throw playError;
+        }
+
+        const previewReady = await waitForInlinePreview(currentVideo);
+        if (!previewReady) {
+          stream.getTracks().forEach((track) => track.stop());
+          currentVideo.srcObject = null;
+          setStreamActive(false);
+
+          if (androidNativeAvailable) {
+            if (import.meta.env.DEV) {
+              console.warn("[Camera] Preview inline indisponivel no Android WebView. Abrindo camera nativa.");
+            }
+            return "fallback-native";
+          }
+
+          setCameraError("Nao foi possivel renderizar o preview da camera neste dispositivo.");
+          return "blocked";
         }
       }
       
@@ -560,7 +664,13 @@ export default function FoodAnalysis() {
     setLibraryOpen(false);
 
     const startResult = await startWebCamera();
-    if (startResult === "unsupported") {
+    if (startResult === "fallback-native") {
+      setCameraError(null);
+      await cameraService.openCamera();
+      return;
+    }
+
+    if (startResult === "unsupported" && androidNativeAvailable) {
       await cameraService.openCamera();
     }
   };
@@ -710,6 +820,18 @@ export default function FoodAnalysis() {
 
   const macroBars = useMemo(() => result?.totals.macro_percentages ?? { protein: 0, carbs: 0, fats: 0 }, [result]);
   const handleBack = () => navigate(-1);
+  const scannerControlSurfaceClass = reduceInlineCameraEffects
+    ? "bg-black/70"
+    : "bg-white/10 backdrop-blur-md";
+  const scannerStatusSurfaceClass = reduceInlineCameraEffects
+    ? "bg-black/82"
+    : "bg-black/60 backdrop-blur-md";
+  const scannerLibrarySurfaceClass = reduceInlineCameraEffects
+    ? "bg-black/88"
+    : "bg-black/45 backdrop-blur-xl";
+  const scannerCaptureButtonSurfaceClass = reduceInlineCameraEffects
+    ? "bg-black/70"
+    : "bg-white/10";
 
   return (
     <AppPageShell bottomNavActive="missions" className="fl-theme-page overflow-hidden w-full flex flex-col font-display antialiased">
@@ -1114,7 +1236,7 @@ export default function FoodAnalysis() {
                   setLibraryOpen(false);
                   handleBack();
                 }}
-                className="w-10 h-10 rounded-full bg-white/10 backdrop-blur-md flex items-center justify-center border border-white/20 transition-all hover:bg-white/20"
+                className={`w-10 h-10 rounded-full flex items-center justify-center border border-white/20 transition-all hover:bg-white/20 ${scannerControlSurfaceClass}`}
                 aria-label="Voltar"
               >
                 <ArrowLeft className="w-5 h-5 text-white" />
@@ -1123,7 +1245,7 @@ export default function FoodAnalysis() {
               <button
                 type="button"
                 onClick={() => setLibraryOpen((current) => !current)}
-                className="flex h-10 min-w-10 items-center justify-center rounded-full bg-white/10 px-3 backdrop-blur-md border border-white/20 transition-all hover:bg-white/20"
+                className={`flex h-10 min-w-10 items-center justify-center rounded-full px-3 border border-white/20 transition-all hover:bg-white/20 ${scannerControlSurfaceClass}`}
                 aria-label="Abrir biblioteca de alimentos"
               >
                 <BookOpen className="h-4 w-4 text-white" />
@@ -1138,19 +1260,19 @@ export default function FoodAnalysis() {
             {/* Status Messages */}
             <div className="absolute bottom-32 left-0 right-0 px-6 z-20 text-center pointer-events-none">
               {cameraError && (
-                <div className="inline-flex items-center gap-3 bg-red-950/60 backdrop-blur-md px-4 py-2 rounded-full border border-red-500/30">
+                <div className={`inline-flex items-center gap-3 px-4 py-2 rounded-full border border-red-500/30 ${reduceInlineCameraEffects ? "bg-red-950/90" : "bg-red-950/60 backdrop-blur-md"}`}>
                     <AlertTriangle className="w-4 h-4 text-red-500" />
                     <span className="text-xs font-bold uppercase tracking-widest text-red-400">{cameraError}</span>
                 </div>
               )}
               {loading && (
-                <div className="inline-flex items-center gap-3 bg-black/60 backdrop-blur-md px-4 py-2 rounded-full border border-white/10">
+                <div className={`inline-flex items-center gap-3 px-4 py-2 rounded-full border border-white/10 ${scannerStatusSurfaceClass}`}>
                     <LoadingBall size="sm" />
                     <span className="text-xs font-bold uppercase tracking-widest text-white/80">Sincronizando Macros...</span>
                 </div>
               )}
               {error && (
-                <div className="inline-flex items-center gap-3 bg-red-950/60 backdrop-blur-md px-4 py-2 rounded-full border border-red-500/30">
+                <div className={`inline-flex items-center gap-3 px-4 py-2 rounded-full border border-red-500/30 ${reduceInlineCameraEffects ? "bg-red-950/90" : "bg-red-950/60 backdrop-blur-md"}`}>
                     <AlertTriangle className="w-4 h-4 text-red-500" />
                     <span className="text-xs font-bold uppercase tracking-widest text-red-400">{error}</span>
                 </div>
@@ -1159,7 +1281,7 @@ export default function FoodAnalysis() {
 
             {!preview && streamActive && (
               <div className={`absolute left-4 right-4 z-30 transition-all duration-300 ${libraryOpen ? "bottom-28 opacity-100 translate-y-0" : "bottom-24 pointer-events-none opacity-0 translate-y-6"}`}>
-                <div className="overflow-hidden rounded-[1.75rem] border border-white/10 bg-black/45 backdrop-blur-xl">
+                <div className={`overflow-hidden rounded-[1.75rem] border border-white/10 ${scannerLibrarySurfaceClass}`}>
                   <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
                     <div>
                       <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-white/55">Biblioteca salva</p>
@@ -1222,9 +1344,11 @@ export default function FoodAnalysis() {
                  </p>
                  <button 
                   onClick={captureFromCamera}
-                  className="relative flex h-20 w-20 items-center justify-center rounded-full border-4 border-white/20 bg-white/10 p-1 transition-all active:scale-95"
+                  className={`relative flex h-20 w-20 items-center justify-center rounded-full border-4 border-white/20 p-1 transition-all active:scale-95 ${scannerCaptureButtonSurfaceClass}`}
                 >
-                  <div className="absolute inset-0 rounded-full bg-white/10 blur-md"></div>
+                  {!reduceInlineCameraEffects ? (
+                    <div className="absolute inset-0 rounded-full bg-white/10 blur-md"></div>
+                  ) : null}
                   <div className="relative h-full w-full rounded-full bg-white opacity-85 shadow-lg"></div>
                 </button>
                </div>
