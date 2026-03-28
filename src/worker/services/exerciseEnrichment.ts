@@ -1,4 +1,4 @@
-import { resolveExerciseSearchTerms } from "../../shared/exerciseCatalog";
+import { resolveExerciseSearchTerms, resolvePreferredExerciseDbId } from "../../shared/exerciseCatalog";
 import { normalizeMissionMediaUrl } from "../../shared/missionLocalization";
 
 type RapidApiEnv = {
@@ -33,13 +33,14 @@ type PublicExerciseDbExercise = {
   instructions?: string[] | undefined;
 };
 
-type PublicExerciseDbListResponse = {
-  data?: PublicExerciseDbExercise[] | undefined;
+type PublicExerciseDbApiEnvelope<T> = {
+  success?: boolean | undefined;
+  data?: T | undefined;
 };
 
-type PublicExerciseDbSingleResponse = {
-  data?: PublicExerciseDbExercise | undefined;
-};
+type PublicExerciseDbListResponse = PublicExerciseDbApiEnvelope<PublicExerciseDbExercise[]>;
+
+type PublicExerciseDbSingleResponse = PublicExerciseDbApiEnvelope<PublicExerciseDbExercise>;
 
 type AscendExercise = {
   id?: string | undefined;
@@ -141,6 +142,7 @@ type ExerciseSearchHint = {
   preferredBodyParts: readonly string[];
   preferredEquipments: readonly string[];
   penalizedNameTokens: readonly string[];
+  allowStartsWithExactName?: boolean | undefined;
 };
 
 const EXERCISE_SEARCH_HINTS = new Map<string, ExerciseSearchHint>([
@@ -171,6 +173,7 @@ const EXERCISE_SEARCH_HINTS = new Map<string, ExerciseSearchHint>([
     preferredBodyParts: ["waist"],
     preferredEquipments: ["body weight"],
     penalizedNameTokens: ["weighted", "power point", "twist"],
+    allowStartsWithExactName: false,
   }],
   ["plank", {
     exactNames: ["front plank", "plank"],
@@ -178,6 +181,7 @@ const EXERCISE_SEARCH_HINTS = new Map<string, ExerciseSearchHint>([
     preferredBodyParts: ["waist"],
     preferredEquipments: ["body weight"],
     penalizedNameTokens: ["weighted", "power point", "twist"],
+    allowStartsWithExactName: false,
   }],
   ["walking lunge", {
     exactNames: ["walking lunge", "lunge"],
@@ -241,6 +245,7 @@ const EXERCISE_SEARCH_HINTS = new Map<string, ExerciseSearchHint>([
     preferredBodyParts: ["waist", "upper legs"],
     preferredEquipments: ["body weight"],
     penalizedNameTokens: ["weighted", "machine"],
+    allowStartsWithExactName: false,
   }],
   ["hollow body hold", {
     exactNames: ["hollow body hold", "hollow body"],
@@ -248,6 +253,7 @@ const EXERCISE_SEARCH_HINTS = new Map<string, ExerciseSearchHint>([
     preferredBodyParts: ["waist"],
     preferredEquipments: ["body weight"],
     penalizedNameTokens: ["weighted", "machine"],
+    allowStartsWithExactName: false,
   }],
   ["dead bug", {
     exactNames: ["dead bug"],
@@ -255,6 +261,7 @@ const EXERCISE_SEARCH_HINTS = new Map<string, ExerciseSearchHint>([
     preferredBodyParts: ["waist"],
     preferredEquipments: ["body weight"],
     penalizedNameTokens: ["weighted", "machine"],
+    allowStartsWithExactName: false,
   }],]);
 
 let exerciseCatalogCache: CacheEntry<ExerciseDbExercise[]> | null = null;
@@ -508,6 +515,49 @@ function resolveExerciseSearchHint(query: string): ExerciseSearchHint | null {
   return EXERCISE_SEARCH_HINTS.get(normalizedQuery) ?? null;
 }
 
+function stripExerciseNameSuffix(normalizedValue: string): string {
+  return normalizedValue
+    .replace(/\s*\((?:male|female)\)\s*$/iu, "")
+    .trim();
+}
+
+function hasExactExerciseNameMatch(
+  normalizedName: string,
+  exactNames: readonly string[],
+  allowStartsWithExactName: boolean,
+): boolean {
+  const strippedName = stripExerciseNameSuffix(normalizedName);
+  return exactNames.some((candidate) => {
+    if (strippedName === candidate) {
+      return true;
+    }
+
+    return allowStartsWithExactName && strippedName.startsWith(`${candidate} `);
+  });
+}
+
+function isSafeExerciseNameForQuery(exercise: ExerciseDbExercise, query: string): boolean {
+  const hint = resolveExerciseSearchHint(query);
+  if (!hint) return true;
+
+  const normalizedName = normalizeExerciseNameToken(exercise.name);
+  if (!normalizedName) return false;
+
+  const exactNames = normalizeExerciseTextList(hint.exactNames);
+  const penalizedTokens = normalizeExerciseTextList(hint.penalizedNameTokens);
+  const hasExactNameMatch = hasExactExerciseNameMatch(
+    normalizedName,
+    exactNames,
+    hint.allowStartsWithExactName !== false,
+  );
+
+  if (exactNames.length > 0) {
+    return hasExactNameMatch;
+  }
+
+  return !penalizedTokens.some((token) => token.length > 0 && normalizedName.includes(token));
+}
+
 function stripMissionPrefix(value: string): string {
   const normalized = value.trim();
   const lower = normalizeExerciseNameToken(normalized);
@@ -728,6 +778,12 @@ export async function searchExerciseDB(exerciseName: string, env: RapidApiEnv): 
       ? await runRapidSearch(query)
       : [];
     let results = mergeExerciseResults(query, publicResults, rapidResults);
+    const safeResults = results.filter((exercise) => isSafeExerciseNameForQuery(exercise, query));
+    if (safeResults.length > 0) {
+      results = safeResults;
+    } else if (resolveExerciseSearchHint(query)) {
+      results = [];
+    }
 
     if (results.length === 0 && hasRapidApiKey) {
       try {
@@ -736,6 +792,12 @@ export async function searchExerciseDB(exerciseName: string, env: RapidApiEnv): 
           normalizeExerciseNameToken(exercise.name).includes(query),
         );
         results = rankExercisesByName(fallbackMatches, query);
+        const safeFallbackResults = results.filter((exercise) => isSafeExerciseNameForQuery(exercise, query));
+        if (safeFallbackResults.length > 0) {
+          results = safeFallbackResults;
+        } else if (resolveExerciseSearchHint(query)) {
+          results = [];
+        }
       } catch {
         results = [];
       }
@@ -887,7 +949,8 @@ export async function enrichExercise(
   env: RapidApiEnv,
   options?: EnrichExerciseOptions,
 ): Promise<EnrichedExercise | null> {
-  const preferredExerciseDbId = typeof options?.exerciseDbId === "string" ? options.exerciseDbId.trim() : "";
+  const preferredExerciseDbId = resolvePreferredExerciseDbId(exerciseName)
+    ?? (typeof options?.exerciseDbId === "string" ? options.exerciseDbId.trim() : "");
   if (preferredExerciseDbId) {
     const enrichedById = await enrichExerciseById(preferredExerciseDbId, env).catch(() => null);
     if (enrichedById) {
@@ -911,6 +974,15 @@ export async function enrichExercise(
   );
 
   const bestCandidate = resolvedCandidates
+    .filter((candidate) =>
+      isSafeExerciseNameForQuery(
+        {
+          id: candidate.value.id,
+          name: candidate.value.name,
+        },
+        exerciseName,
+      ),
+    )
     .slice()
     .sort((left, right) => right.score - left.score)[0];
 

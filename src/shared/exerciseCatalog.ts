@@ -7,6 +7,7 @@ type SupplementalExerciseCatalogEntry = {
   namePt: string;
   searchTerms: string[];
   aliases: string[];
+  exerciseDbId?: string | undefined;
   muscles: string[];
   supportedForMission: boolean;
   replacementSlug?: string | undefined;
@@ -17,6 +18,7 @@ const supplementalExerciseCatalog: SupplementalExerciseCatalogEntry[] = [
     slug: "push-up-traditional",
     namePt: "Flexão tradicional",
     searchTerms: ["push-up"],
+    exerciseDbId: "I4hDWkc",
     aliases: ["push-up", "push up", "flexão", "flexao", "flexão tradicional"],
     muscles: ["upper", "chest", "push", "full body"],
     supportedForMission: true,
@@ -57,6 +59,7 @@ const supplementalExerciseCatalog: SupplementalExerciseCatalogEntry[] = [
     slug: "walking-lunge",
     namePt: "Avanço caminhando",
     searchTerms: ["walking lunge", "lunge"],
+    exerciseDbId: "IZVHb27",
     aliases: ["walking lunge", "lunge", "avanço", "avanco", "avanço caminhando", "avanco caminhando"],
     muscles: ["lower", "legs", "glutes", "quads"],
     supportedForMission: true,
@@ -88,7 +91,7 @@ const supplementalExerciseCatalog: SupplementalExerciseCatalogEntry[] = [
   {
     slug: "plank-front",
     namePt: "Prancha frontal",
-    searchTerms: ["high plank", "front plank"],
+    searchTerms: ["front plank", "plank"],
     aliases: ["plank", "high plank", "front plank", "prancha", "prancha frontal", "prancha isometrica"],
     muscles: ["core", "waist"],
     supportedForMission: true,
@@ -96,8 +99,9 @@ const supplementalExerciseCatalog: SupplementalExerciseCatalogEntry[] = [
   {
     slug: "sit-up-traditional",
     namePt: "Abdominal tradicional",
-    searchTerms: ["quarter sit-up", "assisted sit-up", "sit-up"],
-    aliases: ["sit-up", "sit up", "abdominal", "abdominal tradicional", "abdominal controlado"],
+    searchTerms: ["3/4 sit-up", "quarter sit-up", "sit-up"],
+    exerciseDbId: "2gPfomN",
+    aliases: ["3/4 sit-up", "sit-up", "sit up", "abdominal", "abdominal tradicional", "abdominal controlado"],
     muscles: ["core", "waist", "abs"],
     supportedForMission: true,
   },
@@ -105,6 +109,7 @@ const supplementalExerciseCatalog: SupplementalExerciseCatalogEntry[] = [
     slug: "crunch-floor",
     namePt: "Abdominal crunch",
     searchTerms: ["crunch floor", "crunch"],
+    exerciseDbId: "TFqbd8t",
     aliases: ["crunch floor", "crunch", "abdominal crunch"],
     muscles: ["core", "waist", "abs"],
     supportedForMission: true,
@@ -121,6 +126,7 @@ const supplementalExerciseCatalog: SupplementalExerciseCatalogEntry[] = [
     slug: "dead-bug",
     namePt: "Dead Bug",
     searchTerms: ["dead bug"],
+    exerciseDbId: "iny3m5y",
     aliases: ["dead bug"],
     muscles: ["core", "waist", "abs"],
     supportedForMission: true,
@@ -129,6 +135,7 @@ const supplementalExerciseCatalog: SupplementalExerciseCatalogEntry[] = [
     slug: "mountain-climber",
     namePt: "Escalador",
     searchTerms: ["mountain climber"],
+    exerciseDbId: "RJgzwny",
     aliases: ["mountain climber", "escalador"],
     muscles: ["core", "waist", "cardio", "full body"],
     supportedForMission: true,
@@ -137,6 +144,7 @@ const supplementalExerciseCatalog: SupplementalExerciseCatalogEntry[] = [
     slug: "burpee",
     namePt: "Burpee",
     searchTerms: ["burpee"],
+    exerciseDbId: "dK9394r",
     aliases: ["burpee"],
     muscles: ["full body", "cardio", "legs", "upper"],
     supportedForMission: true,
@@ -412,6 +420,15 @@ export function resolveSupportedMissionExerciseName(value: string | null | undef
   return seed.exerciseDbTerms[0] ?? seed.slug.replace(/-/g, " ");
 }
 
+export function resolvePreferredExerciseDbId(value: string | null | undefined): string | null {
+  const supplemental = resolveSupplementalExerciseCatalogEntry(value);
+  const supportedSupplemental = resolveReplacementEntry(supplemental);
+  if (supportedSupplemental?.exerciseDbId) {
+    return supportedSupplemental.exerciseDbId;
+  }
+  return null;
+}
+
 export function listSupportedMissionExerciseNamesByMuscle(muscle: string | null | undefined): string[] {
   const normalizedMuscle = normalizeExerciseSeedLookup(String(muscle ?? ""));
   const targetGroup =
@@ -460,7 +477,7 @@ export function resolveExerciseSearchTerms(value: string | null | undefined): st
   if (supportedSupplemental) {
     return Array.from(
       new Set(
-        getSupplementalCatalogTerms(supportedSupplemental)
+        supportedSupplemental.searchTerms
           .map((term) => term.trim())
           .filter((term) => term.length > 0),
       ),
@@ -472,7 +489,7 @@ export function resolveExerciseSearchTerms(value: string | null | undefined): st
 
   return Array.from(
     new Set(
-      getExerciseSeedTerms(seed)
+      seed.exerciseDbTerms
         .map((term) => term.trim())
         .filter((term) => term.length > 0),
     ),
