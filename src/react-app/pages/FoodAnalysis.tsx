@@ -832,7 +832,7 @@ export default function FoodAnalysis() {
             </div>
           </div>
         </div>
-      ) : result ? (
+      ) : result && !preview ? (
         /* Results Screen (Full screen, no black void) */
         <div className="custom-scrollbar flex flex-1 flex-col overflow-y-auto p-3 pb-4 sm:p-4 sm:pb-5 lg:p-6 animate-in fade-in slide-in-from-bottom-5 duration-500 min-w-0" style={{ backgroundColor: "var(--app-bg-color)" }}>
           {/* Header */}
@@ -953,7 +953,7 @@ export default function FoodAnalysis() {
             <img src={preview} alt="Previa do alimento" className="aspect-[4/5] w-full object-cover" />
           </div>
 
-          <div className="mb-6 flex justify-center">
+          <div className="mb-6">
             {loading ? (
               <div className="inline-flex items-center gap-3 rounded-full border px-4 py-2" style={{ borderColor: "var(--fl-border-soft)", backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 80%, transparent)" }}>
                 <LoadingBall size="sm" />
@@ -965,6 +965,57 @@ export default function FoodAnalysis() {
               <div className="inline-flex items-center gap-3 rounded-full border border-red-500/30 bg-red-950/40 px-4 py-2">
                 <AlertTriangle className="w-4 h-4 text-red-500" />
                 <span className="text-xs font-bold uppercase tracking-widest text-red-400">{error}</span>
+              </div>
+            ) : result ? (
+              <div className="space-y-4">
+                <div className="fl-theme-surface rounded-[1.75rem] border p-4" style={{ borderColor: "var(--fl-border-soft)" }}>
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <p className="text-[10px] font-bold uppercase tracking-[0.22em]" style={{ color: "var(--fl-color-text-muted)" }}>
+                        Resultado da Busca
+                      </p>
+                      <h3 className="mt-2 text-3xl font-bold tracking-tight" style={{ color: "var(--app-primary-color)" }}>
+                        {result.totals.calories} <span className="text-base font-medium" style={{ color: "var(--fl-color-text-soft)" }}>kcal</span>
+                      </h3>
+                    </div>
+                    <div className="rounded-full border px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.18em]" style={{ borderColor: "color-mix(in srgb, var(--app-primary-color) 24%, transparent)", backgroundColor: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)", color: "var(--app-primary-color)" }}>
+                      {result.has_estimates ? "Com estimativa" : "Dados detectados"}
+                    </div>
+                  </div>
+
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    {result.items.map((item) => (
+                      <span
+                        key={`${item.food_name}-${item.portion_description}`}
+                        className="rounded-full border px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.18em]"
+                        style={{ borderColor: "color-mix(in srgb, var(--app-primary-color) 24%, transparent)", backgroundColor: "color-mix(in srgb, var(--app-primary-color) 8%, transparent)", color: "var(--app-primary-color)" }}
+                      >
+                        {item.food_name}
+                      </span>
+                    ))}
+                  </div>
+
+                  <div className="mt-4 space-y-2">
+                    {result.items.slice(0, 3).map((item) => (
+                      <div key={`${item.food_name}-${item.portion_description}-summary`} className="flex items-center justify-between rounded-2xl border px-3 py-2.5" style={{ borderColor: "var(--fl-border-soft)", backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 65%, transparent)" }}>
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-bold" style={{ color: "var(--fl-color-text)" }}>{item.food_name}</p>
+                          <p className="text-[10px] uppercase tracking-[0.16em]" style={{ color: "var(--fl-color-text-muted)" }}>{item.portion_description}</p>
+                        </div>
+                        <span className="ml-3 text-xs font-bold uppercase tracking-[0.18em]" style={{ color: "var(--app-primary-color)" }}>
+                          {item.calories ?? 0} kcal
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {saveSuccess ? (
+                  <div className="inline-flex items-center gap-3 rounded-full border px-4 py-2" style={{ borderColor: "color-mix(in srgb, var(--app-primary-color) 24%, transparent)", backgroundColor: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)", color: "var(--app-primary-color)" }}>
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span className="text-[11px] font-bold uppercase tracking-widest">Refeicao salva no historico</span>
+                  </div>
+                ) : null}
               </div>
             ) : null}
           </div>
@@ -983,14 +1034,25 @@ export default function FoodAnalysis() {
             >
               {previewSource === "gallery" ? "Outra Imagem" : "Novo Scan"}
             </button>
-            <button
-              onClick={() => { void retryAnalysis(); }}
-              disabled={loading}
-              className="neon-glow h-14 rounded-2xl text-xs font-bold uppercase tracking-widest transition-all active:scale-95 disabled:opacity-50"
-              style={{ backgroundColor: 'var(--app-primary-color)', color: 'var(--fl-nav-item-active-text)' }}
-            >
-              {loading ? "Analisando..." : "Tentar Novamente"}
-            </button>
+            {result ? (
+              <button
+                onClick={saveMeal}
+                disabled={saving || saveSuccess}
+                className="neon-glow h-14 rounded-2xl text-xs font-bold uppercase tracking-widest transition-all active:scale-95 disabled:opacity-50"
+                style={{ backgroundColor: 'var(--app-primary-color)', color: 'var(--fl-nav-item-active-text)' }}
+              >
+                {saving ? "Registrando..." : saveSuccess ? "Salvo" : "Confirmar e Salvar"}
+              </button>
+            ) : (
+              <button
+                onClick={() => { void retryAnalysis(); }}
+                disabled={loading}
+                className="neon-glow h-14 rounded-2xl text-xs font-bold uppercase tracking-widest transition-all active:scale-95 disabled:opacity-50"
+                style={{ backgroundColor: 'var(--app-primary-color)', color: 'var(--fl-nav-item-active-text)' }}
+              >
+                {loading ? "Analisando..." : "Tentar Novamente"}
+              </button>
+            )}
           </div>
         </div>
       ) : (
