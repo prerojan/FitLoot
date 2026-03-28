@@ -663,6 +663,11 @@ export default function FoodAnalysis() {
     setSaveSuccess(false);
     setLibraryOpen(false);
 
+    if (androidNativeAvailable) {
+      await cameraService.openCamera();
+      return;
+    }
+
     const startResult = await startWebCamera();
     if (startResult === "fallback-native") {
       setCameraError(null);

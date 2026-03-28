@@ -7,17 +7,120 @@
 
     <androidx.camera.view.PreviewView
         android:id="@+id/viewFinder"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent" />
-
-    <Button
-        android:id="@+id/image_capture_button"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="50dp"
-        android:text="Capturar Foto"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
+
+    <View
+        android:id="@+id/previewDimmer"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:background="#22000000"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
+
+    <TextView
+        android:id="@+id/closeButton"
+        android:layout_width="wrap_content"
+        android:layout_height="40dp"
+        android:layout_marginStart="20dp"
+        android:layout_marginTop="20dp"
+        android:background="@drawable/scanner_chip_background"
+        android:gravity="center"
+        android:minWidth="40dp"
+        android:paddingStart="14dp"
+        android:paddingEnd="14dp"
+        android:text="Voltar"
+        android:textAllCaps="true"
+        android:textColor="@android:color/white"
+        android:textSize="12sp"
+        android:textStyle="bold"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
+
+    <TextView
+        android:id="@+id/scannerTitle"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="32dp"
+        android:fontFamily="sans-serif-medium"
+        android:letterSpacing="0.22"
+        android:text="AI VISION ACTIVE"
+        android:textAllCaps="true"
+        android:textColor="#E6FFFFFF"
+        android:textSize="13sp"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
+
+    <FrameLayout
+        android:id="@+id/scannerFrameContainer"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:layout_marginStart="24dp"
+        android:layout_marginTop="96dp"
+        android:layout_marginEnd="24dp"
+        android:layout_marginBottom="164dp"
+        app:layout_constraintBottom_toTopOf="@+id/captureHint"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent">
+
+        <View
+            android:id="@+id/scannerFrame"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="@drawable/scanner_frame_background" />
+
+        <View
+            android:id="@+id/scannerLine"
+            android:layout_width="match_parent"
+            android:layout_height="2dp"
+            android:layout_gravity="top"
+            android:layout_marginStart="28dp"
+            android:layout_marginEnd="28dp"
+            android:background="@drawable/scanner_line_background" />
+    </FrameLayout>
+
+    <TextView
+        android:id="@+id/captureHint"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="24dp"
+        android:letterSpacing="0.18"
+        android:text="Centralize o alimento no quadro"
+        android:textAllCaps="true"
+        android:textColor="#B3FFFFFF"
+        android:textSize="11sp"
+        android:textStyle="bold"
+        app:layout_constraintBottom_toTopOf="@+id/captureButtonContainer"
+        app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent" />
+
+    <FrameLayout
+        android:id="@+id/captureButtonContainer"
+        android:layout_width="88dp"
+        android:layout_height="88dp"
+        android:layout_marginBottom="36dp"
+        android:background="@drawable/scanner_capture_outer"
+        android:clickable="true"
+        android:focusable="true"
+        android:foreground="?attr/selectableItemBackgroundBorderless"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent">
+
+        <View
+            android:id="@+id/captureButtonInner"
+            android:layout_width="64dp"
+            android:layout_height="64dp"
+            android:layout_gravity="center"
+            android:background="@drawable/scanner_capture_inner" />
+    </FrameLayout>
 
 </androidx.constraintlayout.widget.ConstraintLayout>
