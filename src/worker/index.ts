@@ -1079,23 +1079,27 @@ async function authMiddleware(
       payment_method: userRecord.payment_method,
     });
 
-    try {
-      await cleanupSettledMissionsWithGuard(c.env.fitloot_db, userRecord.id);
-    } catch (cleanupError) {
-      console.error("[authMiddleware][cleanupSettledMissions]", {
-        message: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
-        userId: userRecord.id,
-      });
-    }
+    c.executionCtx.waitUntil(
+      (async () => {
+        try {
+          await cleanupSettledMissionsWithGuard(c.env.fitloot_db, userRecord.id);
+        } catch (cleanupError) {
+          console.error("[authMiddleware][cleanupSettledMissions]", {
+            message: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
+            userId: userRecord.id,
+          });
+        }
 
-    try {
-      await refreshMissionExpiryWithGuard(c.env.fitloot_db, userRecord.id);
-    } catch (streakError) {
-      console.error("[authMiddleware][refreshMissionExpiryWithGuard]", {
-        message: streakError instanceof Error ? streakError.message : String(streakError),
-        userId: userRecord.id,
-      });
-    }
+        try {
+          await refreshMissionExpiryWithGuard(c.env.fitloot_db, userRecord.id);
+        } catch (streakError) {
+          console.error("[authMiddleware][refreshMissionExpiryWithGuard]", {
+            message: streakError instanceof Error ? streakError.message : String(streakError),
+            userId: userRecord.id,
+          });
+        }
+      })(),
+    );
 
     c.executionCtx.waitUntil(
       (async () => {
@@ -5370,6 +5374,7 @@ type MissionListCacheEntry = {
 const MISSION_LIST_CACHE_TTL_MS = 20_000;
 const MISSION_LIST_CACHE_MAX_ENTRIES = 400;
 const MISSION_REFRESH_DEBOUNCE_MS = 15_000;
+const PERIODIC_PROGRESS_RECOMPUTE_DEBOUNCE_MS = 15_000;
 const MISSION_REFRESH_TRACK_TTL_MS = 24 * 60 * 60 * 1000;
 const MISSION_REFRESH_TRACK_MAX_KEYS = 3_000;
 const MISSION_REFRESH_CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
@@ -5378,6 +5383,8 @@ const DAILY_METADATA_REPAIR_DEBOUNCE_MS = 60_000;
 const missionListCache = new Map<string, MissionListCacheEntry>();
 const missionRefreshLocks = new Map<string, Promise<void>>();
 const missionRefreshLastRun = new Map<string, number>();
+const periodicProgressRecomputeLocks = new Map<string, Promise<void>>();
+const periodicProgressRecomputeLastRun = new Map<string, number>();
 const dailyMetadataRepairLocks = new Map<string, Promise<void>>();
 const dailyMetadataRepairLastRun = new Map<string, number>();
 let missionRefreshLastCleanupAt = 0;
@@ -5466,9 +5473,90 @@ function cleanupMissionRefreshTracking(now: number): void {
   missionRefreshLastCleanupAt = now;
 }
 
+function cleanupPeriodicProgressTracking(now: number): void {
+  for (const [trackedUserId, lastRun] of periodicProgressRecomputeLastRun.entries()) {
+    if (now - lastRun > MISSION_REFRESH_TRACK_TTL_MS) {
+      periodicProgressRecomputeLastRun.delete(trackedUserId);
+    }
+  }
+
+  if (periodicProgressRecomputeLastRun.size > MISSION_REFRESH_TRACK_MAX_KEYS) {
+    const overflow = periodicProgressRecomputeLastRun.size - MISSION_REFRESH_TRACK_MAX_KEYS;
+    const iterator = periodicProgressRecomputeLastRun.keys();
+    for (let index = 0; index < overflow; index += 1) {
+      const nextKey = iterator.next().value;
+      if (typeof nextKey === "string") {
+        periodicProgressRecomputeLastRun.delete(nextKey);
+      }
+    }
+  }
+}
+
 function shouldDebounceMissionRefresh(userId: string, now: number): boolean {
   const lastRun = missionRefreshLastRun.get(userId) ?? 0;
   return now - lastRun < MISSION_REFRESH_DEBOUNCE_MS;
+}
+
+function shouldDebouncePeriodicProgressRecompute(userId: string, now: number): boolean {
+  const lastRun = periodicProgressRecomputeLastRun.get(userId) ?? 0;
+  return now - lastRun < PERIODIC_PROGRESS_RECOMPUTE_DEBOUNCE_MS;
+}
+
+function createPeriodicProgressRecomputePromise(userId: string, db: D1Database): Promise<void> {
+  const inflight = periodicProgressRecomputeLocks.get(userId);
+  if (inflight) {
+    return inflight;
+  }
+
+  const recomputePromise = (async () => {
+    try {
+      await recomputeActivePeriodicMissionProgress(userId, db);
+      clearMissionListCache(userId);
+      periodicProgressRecomputeLastRun.set(userId, Date.now());
+    } finally {
+      periodicProgressRecomputeLocks.delete(userId);
+    }
+  })();
+
+  periodicProgressRecomputeLocks.set(userId, recomputePromise);
+  return recomputePromise;
+}
+
+async function recomputePeriodicProgressWithGuard(
+  userId: string,
+  db: D1Database,
+  options?: { force?: boolean | undefined },
+): Promise<void> {
+  const now = Date.now();
+  cleanupPeriodicProgressTracking(now);
+  if (options?.force !== true && shouldDebouncePeriodicProgressRecompute(userId, now)) {
+    return;
+  }
+
+  await createPeriodicProgressRecomputePromise(userId, db);
+}
+
+function schedulePeriodicProgressRecomputeWithGuard(
+  userId: string,
+  db: D1Database,
+  executionCtx: ExecutionContext,
+): boolean {
+  const now = Date.now();
+  cleanupPeriodicProgressTracking(now);
+  if (shouldDebouncePeriodicProgressRecompute(userId, now) || periodicProgressRecomputeLocks.has(userId)) {
+    return false;
+  }
+
+  const recomputePromise = createPeriodicProgressRecomputePromise(userId, db);
+  executionCtx.waitUntil(
+    recomputePromise.catch((error) => {
+      console.error("[missions][background-periodic-progress]", {
+        userId,
+        message: getErrorMessage(error),
+      });
+    }),
+  );
+  return true;
 }
 
 async function runMissionRefreshStepSafely(
@@ -6634,18 +6722,17 @@ app.get("/api/missions", authMiddleware, async (c) => {
       });
       await repairLegacyDailyMissionMetadata(c.env, c.env.fitloot_db, user.id, { limit: 12 });
       dailyMetadataRepairLastRun.set(user.id, Date.now());
+      await recomputePeriodicProgressWithGuard(user.id, c.env.fitloot_db, { force: true });
     } else {
       schedulePeriodicMissionsRefreshWithGuard(c.env, c.env.fitloot_db, user.id, c.executionCtx, "safe");
       scheduleLegacyDailyMetadataRepairWithGuard(c.env, c.env.fitloot_db, user.id, c.executionCtx);
+      schedulePeriodicProgressRecomputeWithGuard(user.id, c.env.fitloot_db, c.executionCtx);
     }
 
     const cached = !forceRefresh ? readMissionListCache(user.id) : null;
     if (!forceRefresh && cached) {
       return streamJsonArrayResponse(cached);
     }
-
-    await recomputeActivePeriodicMissionProgress(user.id, c.env.fitloot_db);
-    invalidateMissionListCache(user.id);
 
     if (!forceRefresh) {
       const refreshedCache = readMissionListCache(user.id);
