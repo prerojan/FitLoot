@@ -10,8 +10,8 @@ class StepCounter(context: Context) {
     private val sensorStepTracker = SensorStepTracker(context)
     private val healthConnectMetricsProvider = HealthConnectMetricsProvider(context)
 
-    fun start() {
-        sensorStepTracker.start()
+    fun start(): Boolean {
+        return sensorStepTracker.start()
     }
 
     fun stop() {
@@ -20,6 +20,10 @@ class StepCounter(context: Context) {
 
     fun getSessionSteps(): Int {
         return sensorStepTracker.getSessionSteps()
+    }
+
+    fun hasActivityRecognitionPermission(): Boolean {
+        return sensorStepTracker.hasActivityRecognitionPermission()
     }
 
     suspend fun getDailyMetrics(): JSONObject {

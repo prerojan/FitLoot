@@ -237,6 +237,8 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
+        webAppInterface.onRuntimePermissionsChanged()
+
         val request = pendingWebPermissionRequest ?: return
         pendingWebPermissionRequest = null
 
@@ -245,6 +247,13 @@ class MainActivity : AppCompatActivity() {
             handleWebPermissionRequest(request)
         } else {
             request.deny()
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (::webAppInterface.isInitialized) {
+            webAppInterface.onRuntimePermissionsChanged()
         }
     }
 
