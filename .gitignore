@@ -12,6 +12,8 @@ node_modules/
 dist/
 .wrangler/
 .output/
+android/app/build/
+*.apk
 
 # Logs
 *.log

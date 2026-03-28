@@ -1135,6 +1135,7 @@ export interface Env {
   RAPID_API_KEY?: string | undefined;
   RAPID_API_HOST?: string | undefined;
   ANTHROPIC_API_KEY?: string | undefined;
+  ANTHROPIC_CHAT_MODEL?: string | undefined;
   API_NINJAS_KEY?: string | undefined;
   GYMFIT_API_KEY?: string | undefined;
   FRONTEND_ORIGIN?: string | undefined;
@@ -1152,6 +1153,7 @@ export interface Env {
 
 const HUGGING_FACE_CHAT_MODEL = "openai/gpt-oss-120b";
 const DEFAULT_HUGGING_FACE_VISION_MODEL = "Qwen/Qwen3.5-9B:together";
+const DEFAULT_ANTHROPIC_CHAT_MODEL = "claude-sonnet-4-20250514";
 
 function getHuggingFaceApiKey(env: Pick<Env, "HF_TOKEN" | "HUGGING_FACE_API_KEY">): string | null {
   const direct = typeof env.HUGGING_FACE_API_KEY === "string" ? env.HUGGING_FACE_API_KEY.trim() : "";
@@ -1164,6 +1166,16 @@ function getHuggingFaceApiKey(env: Pick<Env, "HF_TOKEN" | "HUGGING_FACE_API_KEY"
 function getHuggingFaceVisionModel(env: Pick<Env, "HUGGING_FACE_VISION_MODEL">): string {
   const configured = typeof env.HUGGING_FACE_VISION_MODEL === "string" ? env.HUGGING_FACE_VISION_MODEL.trim() : "";
   return configured.length > 0 ? configured : DEFAULT_HUGGING_FACE_VISION_MODEL;
+}
+
+function getAnthropicApiKey(env: Pick<Env, "ANTHROPIC_API_KEY">): string | null {
+  const configured = typeof env.ANTHROPIC_API_KEY === "string" ? env.ANTHROPIC_API_KEY.trim() : "";
+  return configured.length > 0 ? configured : null;
+}
+
+function getAnthropicChatModel(env: Pick<Env, "ANTHROPIC_CHAT_MODEL">): string {
+  const configured = typeof env.ANTHROPIC_CHAT_MODEL === "string" ? env.ANTHROPIC_CHAT_MODEL.trim() : "";
+  return configured.length > 0 ? configured : DEFAULT_ANTHROPIC_CHAT_MODEL;
 }
 
 
@@ -5244,18 +5256,24 @@ async function recomputeMonthlyCounters(db: D1Database, userId: string, referenc
   await ensureMonthlyCounterSchema(db);
   const monthKey = currentMonthKey(reference);
   const monthStart = monthStartIso(reference);
+  const [hasMetricTypeColumn, hasMetricValueColumn] = await Promise.all([
+    hasTableColumn(db, "missions", "metric_type"),
+    hasTableColumn(db, "missions", "metric_value"),
+  ]);
+  const metricTypeSql = hasMetricTypeColumn ? "metric_type" : "NULL";
+  const metricValueSql = hasMetricValueColumn ? "metric_value" : "NULL";
   const aggregate = await db.prepare(
     `SELECT
        COALESCE(SUM(CASE WHEN is_completed = 1 AND type = 'daily' THEN 1 ELSE 0 END), 0) as missions_completed,
        COALESCE(SUM(
          CASE
-           WHEN is_completed = 1 AND type = 'daily' AND metric_type = 'distance_meters' THEN COALESCE(metric_value, 0)
-           WHEN is_completed = 1 AND type = 'daily' AND metric_type = 'steps' THEN CAST(COALESCE(metric_value, 0) * 0.75 AS INTEGER)
+           WHEN is_completed = 1 AND type = 'daily' AND ${metricTypeSql} = 'distance_meters' THEN COALESCE(${metricValueSql}, target_reps, target_time, 0)
+           WHEN is_completed = 1 AND type = 'daily' AND ${metricTypeSql} = 'steps' THEN CAST(COALESCE(${metricValueSql}, target_reps, 0) * 0.75 AS INTEGER)
            ELSE 0
          END
        ), 0) as distance_meters,
        COALESCE(COUNT(DISTINCT CASE WHEN is_completed = 1 AND type = 'daily' THEN date(completed_at) END), 0) as streak_days,
-       COALESCE(SUM(CASE WHEN is_completed = 1 AND type = 'weekly' AND metric_type = 'circuit_tasks' THEN 1 ELSE 0 END), 0) as weekly_circuits_completed
+       COALESCE(SUM(CASE WHEN is_completed = 1 AND type = 'weekly' AND ${metricTypeSql} = 'circuit_tasks' THEN 1 ELSE 0 END), 0) as weekly_circuits_completed
      FROM missions
      WHERE user_id = ?
        AND completed_at IS NOT NULL
@@ -12625,6 +12643,7 @@ const RATE_LIMIT_MAX_CALLS = 20;
 const RATE_LIMIT_MAX_KEYS = 2_000;
 const timeoutMsByService = {
   huggingface: 12000,
+  anthropic: 12000,
   usda: 8000,
   rapidapi: 8000,
 } as const;
@@ -12934,6 +12953,128 @@ async function requestHuggingFaceVisionStructuredContent(
   return rawContent;
 }
 
+type AnthropicMessageContentBlock = {
+  type?: string | undefined;
+  text?: string | undefined;
+};
+
+type AnthropicMessagesResponse = {
+  content?: AnthropicMessageContentBlock[] | undefined;
+};
+
+function extractAnthropicTextContent(response: AnthropicMessagesResponse): string {
+  return (Array.isArray(response.content) ? response.content : [])
+    .filter((block) => block?.type === "text" && typeof block.text === "string")
+    .map((block) => block.text?.trim() ?? "")
+    .filter((value) => value.length > 0)
+    .join("\n\n");
+}
+
+function buildAnthropicMessages(
+  messages: Array<{ role: string; content: string }>,
+  jsonMode: boolean,
+): {
+  system?: string | undefined;
+  messages: Array<{ role: "user" | "assistant"; content: string }>;
+} {
+  const systemParts: string[] = [];
+  const normalizedMessages: Array<{ role: "user" | "assistant"; content: string }> = [];
+
+  for (const message of messages) {
+    const content = typeof message.content === "string" ? message.content.trim() : "";
+    if (content.length === 0) continue;
+
+    if (message.role === "system") {
+      systemParts.push(content);
+      continue;
+    }
+
+    normalizedMessages.push({
+      role: message.role === "assistant" ? "assistant" : "user",
+      content,
+    });
+  }
+
+  if (jsonMode) {
+    systemParts.push("Responda somente JSON valido, sem markdown, sem comentarios e sem texto extra.");
+  }
+
+  return {
+    system: systemParts.length > 0 ? systemParts.join("\n\n") : undefined,
+    messages: normalizedMessages,
+  };
+}
+
+async function requestAnthropicCompletion(
+  apiKey: string,
+  model: string,
+  messages: Array<{ role: string; content: string }>,
+  maxTokens: number,
+  timeoutMs: number,
+  jsonMode: boolean,
+): Promise<OpenAIChatCompletionResponse> {
+  const attempts = [
+    { maxTokens, label: "anthropic-primary" },
+    { maxTokens: Math.min(maxTokens, 700), label: "anthropic-retry" },
+  ];
+
+  let lastError: unknown = null;
+  for (let index = 0; index < attempts.length; index += 1) {
+    const attempt = attempts[index];
+    try {
+      const payload = buildAnthropicMessages(messages, jsonMode);
+      const completion = await fetchJsonWithTimeout<AnthropicMessagesResponse>(
+        "https://api.anthropic.com/v1/messages",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-api-key": apiKey,
+            "anthropic-version": "2023-06-01",
+          },
+          body: JSON.stringify({
+            model,
+            max_tokens: attempt.maxTokens,
+            ...(payload.system ? { system: payload.system } : {}),
+            messages: payload.messages,
+          }),
+        },
+        timeoutMs,
+      );
+      const rawContent = extractAnthropicTextContent(completion);
+      if (rawContent.trim().length > 0) {
+        return {
+          choices: [{ message: { content: rawContent } }],
+        };
+      }
+      lastError = new ApiIntegrationError("INVALID_RESPONSE", 502, "Servico externo retornou conteudo vazio.");
+    } catch (error) {
+      lastError = error;
+      console.warn(`[anthropic:${attempt.label}]`, {
+        message: getErrorMessage(error),
+        details: error instanceof ApiIntegrationError ? error.details : undefined,
+      });
+      if (!(error instanceof ApiIntegrationError) || index === attempts.length - 1) {
+        break;
+      }
+      if (
+        error.code !== "RATE_LIMITED" &&
+        error.code !== "TIMEOUT" &&
+        error.code !== "UPSTREAM_ERROR" &&
+        error.code !== "INVALID_RESPONSE" &&
+        error.code !== "AUTH_FAILED"
+      ) {
+        break;
+      }
+      await waitForRetry(450 * (index + 1));
+    }
+  }
+
+  throw lastError instanceof Error
+    ? lastError
+    : new ApiIntegrationError("UPSTREAM_ERROR", 502, "Falha ao consultar servico externo.");
+}
+
 async function fetchResponseWithTimeout(
   url: string,
   init: RequestInit,
@@ -12953,7 +13094,7 @@ async function fetchResponseWithTimeout(
   }
 }
 
-async function callOpenAIChat(
+async function callHuggingFaceChat(
   c: import("hono").Context<AppContext>,
   messages: Array<{ role: string; content: string }>,
   maxTokens = 1000,
@@ -12983,6 +13124,88 @@ async function callOpenAIChat(
     maxTokens,
     timeoutMsByService.huggingface,
   );
+}
+
+function shouldFallbackToNextChatProvider(error: unknown): boolean {
+  if (!(error instanceof ApiIntegrationError)) {
+    return true;
+  }
+
+  return (
+    error.code === "AUTH_FAILED" ||
+    error.code === "RATE_LIMITED" ||
+    error.code === "TIMEOUT" ||
+    error.code === "UPSTREAM_ERROR" ||
+    error.code === "INVALID_RESPONSE" ||
+    error.code === "SERVICE_NOT_CONFIGURED"
+  );
+}
+
+async function callOpenAIChatWithFallback(
+  c: import("hono").Context<AppContext>,
+  messages: Array<{ role: string; content: string }>,
+  maxTokens = 1000,
+  jsonMode = false,
+) {
+  const providers: Array<{
+    name: "huggingface" | "anthropic";
+    execute: () => Promise<OpenAIChatCompletionResponse>;
+  }> = [];
+
+  const huggingFaceApiKey = getHuggingFaceApiKey(c.env);
+  if (huggingFaceApiKey) {
+    providers.push({
+      name: "huggingface",
+      execute: () => callHuggingFaceChat(c, messages, maxTokens, jsonMode),
+    });
+  }
+
+  const anthropicApiKey = getAnthropicApiKey(c.env);
+  if (anthropicApiKey) {
+    providers.push({
+      name: "anthropic",
+      execute: () => requestAnthropicCompletion(
+        anthropicApiKey,
+        getAnthropicChatModel(c.env),
+        messages,
+        maxTokens,
+        timeoutMsByService.anthropic,
+        jsonMode,
+      ),
+    });
+  }
+
+  if (providers.length === 0) {
+    throw new ApiIntegrationError("SERVICE_NOT_CONFIGURED", 503, "Nenhum provedor de IA configurado.");
+  }
+
+  const userId = c.get("user")?.id ?? "anon";
+  let lastError: unknown = null;
+
+  for (let index = 0; index < providers.length; index += 1) {
+    const provider = providers[index];
+    try {
+      if (provider.name === "anthropic") {
+        enforceRateLimit(`anthropic:${userId}`);
+      }
+      return await provider.execute();
+    } catch (error) {
+      lastError = error;
+      console.warn(`[callOpenAIChat:${provider.name}]`, {
+        userId,
+        message: getErrorMessage(error),
+        details: error instanceof ApiIntegrationError ? error.details : undefined,
+      });
+
+      if (!shouldFallbackToNextChatProvider(error) || index === providers.length - 1) {
+        throw error;
+      }
+    }
+  }
+
+  throw lastError instanceof Error
+    ? lastError
+    : new ApiIntegrationError("UPSTREAM_ERROR", 502, "Falha ao consultar servico externo.");
 }
 
 type USDAResponse = {
@@ -13091,7 +13314,7 @@ async function maybeApplyTrainingPlanPreferenceFromChat(
   ].join("\n");
 
   try {
-    const classificationResponse = await callOpenAIChat(
+    const classificationResponse = await callOpenAIChatWithFallback(
       c,
       [
         { role: "system", content: classificationPrompt },
@@ -13901,7 +14124,7 @@ Contexto do usuário:
 
     let openaiData: OpenAIChatCompletionResponse;
     try {
-      openaiData = await callOpenAIChat(c, primaryMessages);
+      openaiData = await callOpenAIChatWithFallback(c, primaryMessages);
     } catch (primaryError) {
       console.warn("[ai-chat][primary]", {
         userId: user.id,
@@ -13918,7 +14141,7 @@ Contexto do usuário:
         throw primaryError;
       }
 
-      openaiData = await callOpenAIChat(
+      openaiData = await callOpenAIChatWithFallback(
         c,
         [
           { role: "system", content: compactSystemPrompt },
@@ -14219,7 +14442,7 @@ Skills: ${skillRows.slice(0, 5).map((skill) => `${skill.name}:${skill.total_reps
     let degraded = false;
 
     try {
-      const openaiData = await callOpenAIChat(c, [{ role: "user", content: prompt }], 1000, true);
+      const openaiData = await callOpenAIChatWithFallback(c, [{ role: "user", content: prompt }], 1000, true);
       const content = safeGet(openaiData.choices ?? [], 0)?.message?.content ?? "{}";
       recommendations = mergeRecommendationsWithFallback(
         parseJsonObjectFromModelContent<Record<string, unknown>>(content) ?? {},
@@ -14285,7 +14508,7 @@ app.get("/api/ai/workout-suggestions", authMiddleware, async (c) => {
 
     const prompt = `Sugira treino em JSON com workout_type, duration_minutes, intensity, exercises e motivation. Contexto: nível ${progression?.level}, objetivo ${profile?.main_goal}, passos ${metrics?.steps || 0}, calorias ${metrics?.calories_burned || 0}.`;
 
-    const openaiData = await callOpenAIChat(c, [{ role: "user", content: prompt }], 900, true);
+    const openaiData = await callOpenAIChatWithFallback(c, [{ role: "user", content: prompt }], 900, true);
     const content = safeGet(openaiData.choices ?? [], 0)?.message?.content ?? "{}";
     const workout = parseJsonObjectFromModelContent<Record<string, unknown>>(content) ?? {};
 
@@ -14408,7 +14631,7 @@ app.post("/api/ai/analyze-food", authMiddleware, async (c) => {
       const identifyPrompt = `Analise a refeição e responda APENAS em JSON no formato {"items":[{"food_name":"","portion_description":"","portion_multiplier":1}]}.
 Contexto textual: ${resolvedFoodDescription || "não informado"}
 Texto OCR do rótulo: ${ocr_text || "não identificado"}.`;
-      const aiData = await callOpenAIChat(c, [{ role: "user", content: identifyPrompt }], 700, true);
+      const aiData = await callOpenAIChatWithFallback(c, [{ role: "user", content: identifyPrompt }], 700, true);
       const aiContent = safeGet(aiData.choices ?? [], 0)?.message?.content ?? "{}";
       const identified = (parseJsonObjectFromModelContent(aiContent) ?? {}) as {
         items?: Array<{ food_name?: string | undefined; portion_description?: string | undefined; portion_multiplier?: number | undefined }>;
@@ -14491,7 +14714,7 @@ Texto OCR do rótulo: ${ocr_text || "não identificado"}.`;
         } catch (rapidError) {
           console.warn(`[analyze-food][rapidapi-fallback] ${query}`, rapidError);
           const estimatePrompt = `Estime APENAS JSON com calories, protein, carbs, fats para ${query} (${item.portion_description || "porção média"}).`;
-          const fallbackData = await callOpenAIChat(c, [{ role: "user", content: estimatePrompt }], 350, true);
+          const fallbackData = await callOpenAIChatWithFallback(c, [{ role: "user", content: estimatePrompt }], 350, true);
           const estimate = (parseJsonObjectFromModelContent(
             safeGet(fallbackData.choices ?? [], 0)?.message?.content ?? "{}",
           ) ?? {}) as {
