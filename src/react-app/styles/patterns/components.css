@@ -1,0 +1,83 @@
+/* Component patterns: reusable visual surfaces, cards and button primitives. */
+@layer components {
+  .fl-title-page {
+    font-size: clamp(1.85rem, 4vw, 2.6rem);
+    line-height: 1.05;
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    color: var(--fl-color-text);
+  }
+
+  .fl-title-section {
+    font-size: clamp(1.45rem, 3vw, 2.15rem);
+    line-height: 1.08;
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    color: var(--fl-color-text);
+  }
+
+  .fl-title-card {
+    font-size: clamp(1.1rem, 2.2vw, 1.45rem);
+    line-height: 1.12;
+    font-weight: 700;
+    color: var(--fl-color-text);
+  }
+
+  .fl-card {
+    @apply relative rounded-2xl bg-white shadow-lg;
+    z-index: 10;
+    background-image:
+      radial-gradient(circle at top right, color-mix(in srgb, var(--app-primary-color) 10%, transparent), transparent 42%),
+      linear-gradient(
+        180deg,
+        color-mix(in srgb, var(--fl-surface-gradient-top) 100%, transparent),
+        color-mix(in srgb, var(--fl-surface-gradient-bottom) 100%, transparent)
+      );
+    box-shadow:
+      0 10px 25px rgba(0, 0, 0, 0.15),
+      inset 0 1px 0 rgba(255, 255, 255, 0.15);
+  }
+
+  .fl-card-soft {
+    @apply relative rounded-2xl bg-white/60 backdrop-blur-sm border;
+    z-index: 10;
+    border-color: rgba(var(--app-primary-color-rgb), 0.12);
+    background-image:
+      radial-gradient(circle at top right, color-mix(in srgb, var(--app-primary-color) 8%, transparent), transparent 42%),
+      linear-gradient(
+        135deg,
+        color-mix(in srgb, var(--fl-surface-soft-gradient-top) 100%, transparent) 0%,
+        color-mix(in srgb, var(--fl-surface-soft-gradient-bottom) 100%, transparent) 100%
+      );
+    box-shadow:
+      0 10px 25px rgba(0, 0, 0, 0.12),
+      inset 0 1px 0 rgba(255, 255, 255, 0.15);
+  }
+
+  .fl-btn-primary {
+    @apply text-white font-semibold transition-all;
+    background-image: linear-gradient(135deg, var(--app-primary-color), var(--app-secondary-color));
+    box-shadow:
+      0 8px 18px rgba(var(--app-primary-color-rgb), 0.28),
+      inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  }
+
+  .fl-btn-primary:hover {
+    filter: brightness(0.96);
+    transform: translateY(-1px);
+  }
+
+  .fl-btn-secondary {
+    @apply font-medium transition-colors;
+    background: var(--fl-surface-strong);
+    border: 1px solid var(--fl-border-soft);
+    color: var(--fl-color-text);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  }
+
+  .fl-btn-secondary:hover {
+    background: var(--fl-surface-glass);
+    border-color: var(--fl-border-strong);
+  }
+}
+

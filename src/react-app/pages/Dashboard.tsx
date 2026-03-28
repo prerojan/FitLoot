@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
-import { useAuth } from "@/react-app/contexts/auth";
+import { useAuth } from "@/react-app/auth/context";
 import { useDailyMetrics } from "@/react-app/hooks/useDailyMetrics";
 import AppPageShell from "@/react-app/components/AppPageShell";
 import MissionCard from "@/react-app/components/MissionCard";
@@ -9,7 +9,7 @@ import AIRecommendations from "@/react-app/components/AIRecommendations";
 import AIMissionGenerator from "@/react-app/components/AIMissionGenerator";
 import LoadingBall from "@/react-app/components/LoadingBall";
 import { Award, Bot, CalendarDays, Camera, Cloud, Flame, Zap } from "lucide-react";
-import { ROUTE_PATHS } from "@/react-app/constants/auth";
+import { ROUTE_PATHS } from "@/react-app/auth/constants";
 import type {
   AchievementWithUnlock,
   Mission,

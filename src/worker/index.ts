@@ -1,25 +1,14 @@
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import {
-  OnboardingRequestSchema,
-  CheckoutStartRequestSchema,
-  CompleteMissionRequestSchema,
-  FoodScanRequestSchema,
-  UpdateDailyMetricsRequestSchema,
   MiniGameChallengeRequestSchema,
   MiniGameCompleteRequestSchema,
-  AiChatRequestSchema,
-  AiAnalyzeFoodRequestSchema,
   AuthRegisterRequestSchema,
   LoginRequestSchema,
-  PromoCodeRequestSchema,
-  UserPlanRequestSchema,
-  UpdateMeRequestSchema,
   ConditioningLevel,
   MissionMetricType,
   CircuitTask,
   type PromoCodeEffect,
-  type UserProgression,
 } from "../shared/types";
 import {
   repairKnownMojibake,
@@ -53,206 +42,193 @@ import {
   metricUnitByType,
   shouldShowMissionDuration,
 } from "../constants/missionMetrics";
-import { assertString, safeGet } from "../utils/typeHelpers";
-import { toStatusCode } from "./httpHelpers";
-import { processDailyResetForAllUsers } from "./services/dailyReset";
+import { safeGet } from "../utils/typeHelpers";
+import {
+  ApiIntegrationError,
+  callOpenAIChatWithFallback,
+  enforceRateLimit,
+  fetchJsonWithTimeout,
+  fetchResponseWithTimeout,
+  requestHuggingFaceStructuredContent,
+  requestHuggingFaceVisionStructuredContent,
+  timeoutMsByService,
+  toFriendlyErrorResponse,
+} from "./services/aiTransport";
 import {
   buildTrackedCheckoutUrl,
   fetchCaktoOrderById,
   fetchLatestCaktoOrderByCustomer,
   parseCaktoWebhookPayload,
-  resolveWebhookSecret,
   type CaktoOrderSnapshot,
-  type CaktoPlanCatalog,
 } from "./services/cakto";
 import { enrichExercise, type EnrichedExercise } from "./services/exerciseEnrichment";
-
-// Tipo do usuário autenticado
-interface AuthUser {
-  id: string;
-  email: string;
-  name: string;
-  avatar_url?: string | undefined;
-  onboarding_completed: number;
-  plan_id: PlanId;
-  plan_status: PlanStatus;
-  payment_method: UserPaymentMethod;
-}
-
-// Context type para Hono
-type AppContext = {
-  Bindings: Env;
-  Variables: {
-    user: AuthUser;
-  };
-};
-
-type PublicPlanId = "basic" | "pro" | "annual";
-type PlanId = PublicPlanId | "vip";
-type PlanStatus = "pending" | "active" | "cancelled" | "failed" | "expired";
-type CheckoutPaymentMethod = "card" | "pix";
-type UserPaymentMethod = CheckoutPaymentMethod | "none";
-type PhysicalBenchmarkRow = {
-  id: number;
-  user_id: string;
-  pushups_max: number | null;
-  squats_max: number | null;
-  situps_max: number | null;
-  plank_seconds: number | null;
-  pullups_max: number | null;
-  run_distance_km: number | null;
-  run_time_seconds: number | null;
-  notes: string | null;
-  test_date: string;
-  created_at: string;
-  updated_at: string;
-};
-type PhysicalBenchmarkDelta = {
-  pushups_delta: number;
-  squats_delta: number;
-  situps_delta: number;
-  plank_delta: number;
-  pullups_delta: number;
-  run_distance_delta: number;
-  run_time_delta: number;
-};
-type PhysicalBenchmarkWithDelta = PhysicalBenchmarkRow & {
-  delta: PhysicalBenchmarkDelta | null;
-};
-
-const CHECKOUT_PLAN_CATALOG: Record<
+import {
+  CAKTO_PLAN_CATALOG,
+  CHECKOUT_PLAN_CATALOG,
+  PLAN_GUARD_EXEMPT_PATHS,
+  WEBHOOK_SUPPORTED_EVENTS,
+} from "./core/constants";
+import {
+  databaseNotInitializedResponse,
+  hasCoreSchema,
+  hasTableColumn,
+} from "./core/database";
+import {
+  createInvalidPromoCodeError,
+  getErrorMessage,
+} from "./core/errors";
+import {
+  getHuggingFaceApiKey,
+} from "./core/providerConfig";
+import type {
+  AppContext,
+  AuthUser,
+  CaktoWebhookEventStatus,
+  CheckoutPaymentMethod,
+  CheckoutStartResult,
+  Env,
+  PlanId,
+  PlanStatus,
+  PromoApplyResult,
+  PromoCodeRecord,
+  PromoCodeUsageRecord,
+  PromoValidationSuccess,
   PublicPlanId,
-  {
-    name: "basic" | "premium" | "elite";
-    amount: number;
-    checkout_url: string;
-    product_id: string;
-  }
-> = {
-  basic: {
-    name: "basic",
-    amount: 4900,
-    checkout_url: "https://pay.cakto.com.br/gwr6dcu",
-    product_id: "800215",
-  },
-  pro: {
-    name: "premium",
-    amount: 9900,
-    checkout_url: "https://pay.cakto.com.br/m955o3f",
-    product_id: "800252",
-  },
-  annual: {
-    name: "elite",
-    amount: 14900,
-    checkout_url: "https://pay.cakto.com.br/k9c5935",
-    product_id: "800255",
-  },
-};
+  SkillSeed,
+  SkillStageSeed,
+  SubscriptionEventLogEntry,
+  SubscriptionMetadata,
+  SubscriptionRecord,
+  UserAuthRecord,
+  UserPaymentMethod,
+} from "./core/types";
+import { registerFriendsRoutes } from "./routes/friends";
+import { registerHealthRoutes } from "./routes/health";
+import { registerMetricsRoutes } from "./routes/metrics";
+import { registerProgressionRoutes } from "./routes/progression";
+import { registerShopRoutes } from "./routes/shop";
+import { registerAchievementRoutes } from "./routes/achievements";
+import { registerAccountRoutes } from "./routes/account";
+import { registerBillingRoutes } from "./routes/billing";
+import { registerProfileRoutes } from "./routes/profile";
+import { registerMissionRoutes } from "./routes/missions";
+import { registerAiRoutes } from "./routes/ai";
+import { createMissionGenerationService } from "./services/missionGeneration";
+import { createBackgroundProcessingService } from "./services/backgroundProcessing";
+import { createMissionPlanPersistenceService } from "./services/missionPlanPersistence";
 
-const CAKTO_PLAN_CATALOG: CaktoPlanCatalog = {
-  basic: {
-    productId: CHECKOUT_PLAN_CATALOG.basic.product_id,
-    checkoutUrl: CHECKOUT_PLAN_CATALOG.basic.checkout_url,
-  },
-  pro: {
-    productId: CHECKOUT_PLAN_CATALOG.pro.product_id,
-    checkoutUrl: CHECKOUT_PLAN_CATALOG.pro.checkout_url,
-  },
-  annual: {
-    productId: CHECKOUT_PLAN_CATALOG.annual.product_id,
-    checkoutUrl: CHECKOUT_PLAN_CATALOG.annual.checkout_url,
-  },
-};
-
-const USER_PURGE_TARGETS: ReadonlyArray<{ table: string; columns: ReadonlyArray<string> }> = [
-  { table: "sessions", columns: ["user_id"] },
-  { table: "subscriptions", columns: ["user_id"] },
-  { table: "cakto_webhook_events", columns: ["identified_user_id"] },
-  { table: "user_profiles", columns: ["user_id"] },
-  { table: "user_attributes", columns: ["user_id"] },
-  { table: "user_progression", columns: ["user_id"] },
-  { table: "user_skills", columns: ["user_id"] },
-  { table: "missions", columns: ["user_id"] },
-  { table: "user_achievements", columns: ["user_id"] },
-  { table: "user_titles", columns: ["user_id"] },
-  { table: "friendships", columns: ["user_id", "friend_user_id", "friend_id"] },
-  { table: "friend_requests", columns: ["from_user_id", "to_user_id"] },
-  { table: "coupon_orders", columns: ["user_id"] },
-  { table: "food_diary", columns: ["user_id"] },
-  { table: "daily_metrics", columns: ["user_id"] },
-  { table: "mini_games", columns: ["challenger_user_id", "challenged_user_id", "winner_user_id"] },
-  { table: "user_training_plans", columns: ["user_id"] },
-  { table: "user_event_counters", columns: ["user_id"] },
-  { table: "user_event_log", columns: ["user_id"] },
-  { table: "user_goal_stats", columns: ["user_id"] },
-  { table: "user_monthly_counters", columns: ["user_id"] },
-  { table: "users", columns: ["id"] },
-];
-
-const PLAN_GUARD_EXEMPT_PATHS = new Set<string>([
-  "/api/users/me",
-  "/api/app/open",
-  "/api/events/route-not-found",
-  "/api/onboarding",
-  "/api/checkout/start",
-  "/api/promo/apply",
-  "/api/subscription/status",
-]);
-
-const WEBHOOK_SUPPORTED_EVENTS = new Set<string>([
-  "purchase_approved",
-  "purchase_refused",
-  "subscription_created",
-  "subscription_renewed",
-  "subscription_canceled",
-  "checkout_abandonment",
-]);
-
-
-let cachedSchemaState: { ready: boolean; checkedAt: number } | null = null;
 let catalogInitCheckedAt = 0;
 let catalogInitPromise: Promise<void> | null = null;
 const STREAK_REFRESH_DEBOUNCE_MS = 60_000;
 const STREAK_REFRESH_MAX_KEYS = 4_000;
-/** Missões não-diárias com status terminal: remoção após este intervalo. Diárias concluídas ficam até o próximo dia (UTC). */
+/** Missoes nao-diarias com status terminal: remocao apos este intervalo. Diarias concluidas ficam ate o proximo dia (UTC). */
 const SETTLED_MISSION_MAX_AGE_SQL_MODIFIER = "-2 minutes";
 const streakRefreshLocks = new Map<string, Promise<void>>();
 const streakRefreshLastRun = new Map<string, number>();
-const SCHEMA_CACHE_TTL_MS = 10_000;
 const CATALOG_CACHE_TTL_MS = 60_000;
-const TABLE_COLUMN_CACHE_TTL_MS = 60_000;
-const tableColumnCache = new Map<string, { checkedAt: number; columns: Set<string> }>();
 
-async function hasCoreSchema(db: D1Database) {
-  const now = Date.now();
-  if (cachedSchemaState && now - cachedSchemaState.checkedAt < SCHEMA_CACHE_TTL_MS) {
-    return cachedSchemaState.ready;
-  }
+const missionPlanPersistenceService = createMissionPlanPersistenceService({
+  buildMissionCompatibilityTerms,
+  buildMonthlyCounterMissionBlueprints: (profile, targetCount, options) =>
+    buildMonthlyCounterMissionBlueprints(
+      profile as MissionGenerationProfileSnapshot,
+      targetCount,
+      options,
+    ),
+  createMissionSubtasks,
+  extractExerciseName,
+  futureIsoForPeriod,
+  getMonthlyCounters,
+  hasTableColumn,
+  invalidateMissionListCache,
+  insertMission: (db, userId, period, deadline, mission, skillId) =>
+    insertMission(db, userId, period, deadline, mission as unknown as MissionPayload, skillId),
+  listCurrentCycleMissions,
+  loadMissionGenerationProfile,
+  loadMissionSubtasksByParentIds,
+  mapWithConcurrency,
+  materializeMissionBlueprint: (env, profile, blueprint) =>
+    materializeMissionBlueprint(
+      env,
+      profile as MissionGenerationProfileSnapshot,
+      blueprint as MissionBlueprint,
+    ),
+  materializationConcurrency: 3,
+  mergeUniqueStrings: (values, maxLength) => mergeUniqueStrings(values, maxLength),
+  metricUnitByType,
+  missionConfigByPeriod,
+  missionCycleStartIso,
+  monthlyMissionProgressValue: (mission, monthlyCounters) =>
+    monthlyMissionProgressValue(mission, monthlyCounters as MonthlyCounterSnapshot),
+  normalizeDifficultyLabel: (value, fallback) =>
+    normalizeDifficultyLabel(value, fallback as ConditioningLevel),
+  normalizeMatchText,
+  normalizeMissionMetricType,
+  replaceMissionSubtasks,
+  resolvePeriodicMissionBlueprints: (params) =>
+    resolvePeriodicMissionBlueprints({
+      ...params,
+      drafts: params.drafts as readonly StructuredPeriodicMissionDraft[],
+      fallbackDrafts: params.fallbackDrafts as readonly StructuredPeriodicMissionDraft[],
+      dailyBlueprints: params.dailyBlueprints as readonly MissionBlueprint[],
+      profile: params.profile as MissionGenerationProfileSnapshot,
+    }),
+  resolveSkillIdForExerciseMission,
+  serializeTrainingPlanChatPreferences: (preferences) =>
+    serializeTrainingPlanChatPreferences(
+      preferences as TrainingPlanChatPreferences | null,
+    ),
+  stripMissionDisplayTitlePrefix,
+  upsertTrainingPlan: (
+    db,
+    userId,
+    plan,
+    mainGoal,
+    conditioning,
+    equipment,
+    injuries,
+    trainingFrequency,
+  ) =>
+    upsertTrainingPlan(
+      db,
+      userId,
+      plan,
+      mainGoal,
+      conditioning as ConditioningLevel,
+      equipment,
+      injuries,
+      trainingFrequency,
+    ),
+  withTransaction,
+});
 
-  try {
-    const result = await db.prepare(
-      `SELECT COUNT(*) as count FROM sqlite_master WHERE type='table' AND name IN ('users', 'sessions')`
-    ).first<{ count: number }>();
+const {
+  generateStructuredMissionPlanForUser,
+  ensurePeriodicMissions,
+} = createMissionGenerationService({
+  buildFallbackStructuredPlan,
+  buildStructuredPlanPrompt,
+  createMissionsForPeriod,
+  ensureStructuredPeriodicMissionsFromExistingDailyBlueprints:
+    missionPlanPersistenceService.ensureStructuredPeriodicMissionsFromExistingDailyBlueprints,
+  getActiveCycleMissionCounts,
+  listCurrentCycleMissions,
+  loadMissionGenerationProfile,
+  missionCycleStartIso,
+  persistGeneratedMissionPlan: missionPlanPersistenceService.persistGeneratedMissionPlan,
+  repairLegacyPeriodicMissions: missionPlanPersistenceService.repairLegacyPeriodicMissions,
+  requestStructuredMissionPlanFromAI,
+  validateStructuredMissionPlan,
+});
 
-    const ready = Number(result?.count ?? 0) >= 2;
-    cachedSchemaState = { ready, checkedAt: now };
-    return ready;
-  } catch (error) {
-    console.error('[schema-check]', error);
-    cachedSchemaState = { ready: false, checkedAt: now };
-    return false;
-  }
-}
-
-function databaseNotInitializedResponse(c: import("hono").Context<AppContext>) {
-  return c.json(
-    {
-      error: 'Banco local não inicializado. Execute as migrations D1 antes de usar a API.',
-      code: 'DB_NOT_INITIALIZED',
-    },
-    503
-  );
-}
+const {
+  runScheduledWithGuard,
+} = createBackgroundProcessingService({
+  cleanupSettledMissionsWithGuard,
+  ensurePeriodicMissions,
+  ensureUserCounterRow,
+  expirePendingMissionsAndUpdateStreak,
+});
 
 async function ensureCatalogReady(db: D1Database) {
   const now = Date.now();
@@ -313,7 +289,7 @@ async function refreshMissionExpiryWithGuard(db: D1Database, userId: string): Pr
   await refreshPromise;
 }
 
-// Middleware de autenticação próprio
+// Middleware de autenticaÃ§Ã£o prÃ³prio
 function parseCookieHeader(cookieHeader: string | undefined) {
   if (!cookieHeader) return new Map<string, string>();
 
@@ -344,121 +320,6 @@ function getSessionIdFromCookieHeader(cookieHeader: string | undefined) {
     return sessionCookie;
   }
 }
-
-type UserAuthRecord = {
-  id: string;
-  email: string;
-  name: string;
-  avatar_url: string | null;
-  onboarding_completed: number;
-  plan_id: PlanId;
-  plan_status: PlanStatus;
-  payment_method: UserPaymentMethod;
-};
-
-type SubscriptionRecord = {
-  id: string;
-  user_id: string;
-  plan_id: string;
-  status: string;
-  payment_method: string;
-  amount: number;
-  external_order_id: string | null;
-  external_subscription_id: string | null;
-  customer_email: string | null;
-  checkout_url: string | null;
-  product_id: string | null;
-  started_at: string | null;
-  expires_at: string | null;
-  metadata_json: string | null;
-  webhook_event_log: string | null;
-  created_at: string;
-  updated_at: string;
-};
-
-type SubscriptionEventLogEntry = {
-  type: string;
-  received_at: string;
-  source: "checkout" | "webhook";
-  status: PlanStatus;
-};
-
-type SubscriptionMetadata = {
-  customer_name?: string | undefined;
-  external_status?: string | undefined;
-  failure_reason?: string | undefined;
-  last_event_id?: string | undefined;
-  last_event_type?: string | undefined;
-  checkout_tracking_id?: string | undefined;
-  checkout_tracking_user_id?: string | undefined;
-  checkout_tracking_plan_id?: PublicPlanId | undefined;
-  promo_code?: string | undefined;
-  promo_description?: string | undefined;
-  promo_effect?: PromoCodeEffect | undefined;
-  promo_effect_value?: string | undefined;
-};
-
-type PromoCodeRecord = {
-  id: number;
-  code: string;
-  description: string;
-  effect: string;
-  effect_value: string | null;
-  max_uses: number | null;
-  uses_count: number;
-  active: number;
-  expires_at: string | null;
-  created_at: string;
-};
-
-type PromoCodeUsageRecord = {
-  id: number;
-  promo_code_id: number;
-  user_id: string;
-  subscription_id: string | null;
-  applied_effect: string;
-  applied_value: string | null;
-  created_at: string;
-  updated_at: string;
-};
-
-type PromoValidationSuccess = {
-  promoCodeId: number;
-  code: string;
-  description: string;
-  effect: PromoCodeEffect;
-  effectValue: string | null;
-};
-
-type PromoApplyResult = {
-  applied: boolean;
-  already_used: boolean;
-  promo_code_id: number;
-  code: string;
-  description: string;
-  effect: PromoCodeEffect;
-  effect_value: string | null;
-  vip_activated: boolean;
-  message: string;
-  subscription_id?: string | undefined;
-  plan_id?: PlanId | undefined;
-  plan_status?: PlanStatus | undefined;
-  payment_method?: UserPaymentMethod | undefined;
-};
-
-type CaktoWebhookEventStatus = "received" | "processing" | "processed" | "ignored" | "failed";
-
-type CheckoutStartResult = {
-  checkout_status: "pending" | "vip_active";
-  plan_id: PlanId;
-  plan_status: PlanStatus;
-  payment_method: UserPaymentMethod;
-  amount: number;
-  checkout_url: string | null;
-  product_id: string | null;
-  subscription_id: string;
-  message: string;
-};
 
 function isPublicPlanId(value: string): value is PublicPlanId {
   return value === "basic" || value === "pro" || value === "annual";
@@ -797,7 +658,7 @@ async function applyPromoCodeForUser(
     effect: promoValidation.effect,
     effect_value: promoValidation.effectValue,
     vip_activated: false,
-    message: "Código promocional aplicado ao checkout.",
+    message: "CÃ³digo promocional aplicado ao checkout.",
   };
 }
 
@@ -824,94 +685,6 @@ function normalizePublicPlanIdFromValue(value: string | null | undefined): Publi
   if (normalized === "pro" || normalized === "premium") return "pro";
   if (normalized === "annual" || normalized === "elite") return "annual";
   return null;
-}
-
-async function getTableColumns(db: D1Database, tableName: string): Promise<Set<string>> {
-  const cacheKey = tableName.trim().toLowerCase();
-  const now = Date.now();
-  const cached = tableColumnCache.get(cacheKey);
-  if (cached && now - cached.checkedAt < TABLE_COLUMN_CACHE_TTL_MS) {
-    return cached.columns;
-  }
-
-  const info = await db.prepare(`PRAGMA table_info('${cacheKey}')`).all<{
-    name: string | null;
-  }>();
-  const columns = new Set(
-    (Array.isArray(info.results) ? info.results : [])
-      .map((row) => (typeof row.name === "string" ? row.name.toLowerCase() : ""))
-      .filter((value) => value.length > 0),
-  );
-
-  tableColumnCache.set(cacheKey, { checkedAt: now, columns });
-  return columns;
-}
-
-async function hasTableColumn(db: D1Database, tableName: string, columnName: string): Promise<boolean> {
-  const columns = await getTableColumns(db, tableName);
-  return columns.has(columnName.trim().toLowerCase());
-}
-
-async function deleteUserDataByColumns(
-  db: D1Database,
-  table: string,
-  columns: ReadonlyArray<string>,
-  userId: string,
-): Promise<void> {
-  const availableColumns: string[] = [];
-
-  for (const column of columns) {
-    if (await hasTableColumn(db, table, column)) {
-      availableColumns.push(column);
-    }
-  }
-
-  if (availableColumns.length === 0) {
-    return;
-  }
-
-  const clause = availableColumns.map((column) => `${column} = ?`).join(" OR ");
-  const params = availableColumns.map(() => userId);
-  await db.prepare(`DELETE FROM ${table} WHERE ${clause}`).bind(...params).run();
-}
-
-async function purgeUserAccountData(db: D1Database, userId: string): Promise<void> {
-  for (const target of USER_PURGE_TARGETS) {
-    await deleteUserDataByColumns(db, target.table, target.columns, userId);
-  }
-}
-
-function getErrorMessage(error: unknown) {
-  return error instanceof Error ? error.message : String(error);
-}
-
-const INVALID_PROMO_CODE_ERROR = "PROMO_CODE_INVALID";
-
-function createInvalidPromoCodeError(): Error {
-  return new Error(INVALID_PROMO_CODE_ERROR);
-}
-
-function isInvalidPromoCodeError(error: unknown): boolean {
-  return getErrorMessage(error) === INVALID_PROMO_CODE_ERROR;
-}
-
-function isMissingSchemaError(error: unknown) {
-  const message = getErrorMessage(error).toLowerCase();
-  return message.includes("no such table") || message.includes("no such column");
-}
-
-function schemaMismatchResponse(c: import("hono").Context<AppContext>) {
-  return c.json(
-    {
-      error: "Banco local desatualizado para esta funcionalidade.",
-      code: "DB_SCHEMA_MISMATCH",
-    },
-    503
-  );
-}
-
-function internalErrorResponse(c: import("hono").Context<AppContext>) {
-  return c.json({ error: "Erro interno", code: "INTERNAL_ERROR" }, 500);
 }
 
 async function getUserAuthRecordById(db: D1Database, userId: string): Promise<UserAuthRecord | null> {
@@ -1044,7 +817,7 @@ async function authMiddleware(
     const userRecord = await getUserAuthRecordById(c.env.fitloot_db, session.user_id);
 
     if (!userRecord) {
-      return c.json({ error: "Usuário não encontrado", code: "USER_NOT_FOUND" }, 404);
+      return c.json({ error: "UsuÃ¡rio nÃ£o encontrado", code: "USER_NOT_FOUND" }, 404);
     }
 
     const hasUnlockedAccess =
@@ -1056,8 +829,8 @@ async function authMiddleware(
       return c.json(
         {
           error: isPending
-            ? "Pagamento em processamento. Aguarde a confirmação para liberar o acesso."
-            : "Pagamento não aprovado. Atualize seu plano para liberar o acesso.",
+            ? "Pagamento em processamento. Aguarde a confirmaÃ§Ã£o para liberar o acesso."
+            : "Pagamento nÃ£o aprovado. Atualize seu plano para liberar o acesso.",
           code: "PLAN_ACCESS_REQUIRED",
           plan_id: userRecord.plan_id,
           plan_status: userRecord.plan_status,
@@ -1125,60 +898,6 @@ async function authMiddleware(
   }
 }
 
-// ---------- ENV TYPES ----------
-export interface Env {
-  fitloot_db: D1Database;
-  ASSETS: Fetcher;
-  HF_TOKEN?: string | undefined;
-  HUGGING_FACE_API_KEY?: string | undefined;
-  USDA_API_KEY: string;
-  RAPID_API_KEY?: string | undefined;
-  RAPID_API_HOST?: string | undefined;
-  ANTHROPIC_API_KEY?: string | undefined;
-  ANTHROPIC_CHAT_MODEL?: string | undefined;
-  API_NINJAS_KEY?: string | undefined;
-  GYMFIT_API_KEY?: string | undefined;
-  FRONTEND_ORIGIN?: string | undefined;
-  FRONTEND_ORIGINS?: string | undefined;
-  RESEND_API_KEY?: string | undefined;
-  FEEDBACK_FROM_EMAIL?: string | undefined;
-  VIP_ACTIVATION_CODE?: string | undefined;
-  WEBHOOK_SECRET?: string | undefined;
-  CAKTO_CLIENT_ID?: string | undefined;
-  CAKTO_CLIENT_SECRET?: string | undefined;
-  CAKTO_WEBHOOK_SECRET?: string | undefined;
-  HUGGING_FACE_VISION_MODEL?: string | undefined;
-}
-// --------------------------------
-
-const HUGGING_FACE_CHAT_MODEL = "openai/gpt-oss-120b";
-const DEFAULT_HUGGING_FACE_VISION_MODEL = "Qwen/Qwen3.5-9B:together";
-const DEFAULT_ANTHROPIC_CHAT_MODEL = "claude-sonnet-4-20250514";
-
-function getHuggingFaceApiKey(env: Pick<Env, "HF_TOKEN" | "HUGGING_FACE_API_KEY">): string | null {
-  const direct = typeof env.HUGGING_FACE_API_KEY === "string" ? env.HUGGING_FACE_API_KEY.trim() : "";
-  if (direct.length > 0) return direct;
-
-  const legacy = typeof env.HF_TOKEN === "string" ? env.HF_TOKEN.trim() : "";
-  return legacy.length > 0 ? legacy : null;
-}
-
-function getHuggingFaceVisionModel(env: Pick<Env, "HUGGING_FACE_VISION_MODEL">): string {
-  const configured = typeof env.HUGGING_FACE_VISION_MODEL === "string" ? env.HUGGING_FACE_VISION_MODEL.trim() : "";
-  return configured.length > 0 ? configured : DEFAULT_HUGGING_FACE_VISION_MODEL;
-}
-
-function getAnthropicApiKey(env: Pick<Env, "ANTHROPIC_API_KEY">): string | null {
-  const configured = typeof env.ANTHROPIC_API_KEY === "string" ? env.ANTHROPIC_API_KEY.trim() : "";
-  return configured.length > 0 ? configured : null;
-}
-
-function getAnthropicChatModel(env: Pick<Env, "ANTHROPIC_CHAT_MODEL">): string {
-  const configured = typeof env.ANTHROPIC_CHAT_MODEL === "string" ? env.ANTHROPIC_CHAT_MODEL.trim() : "";
-  return configured.length > 0 ? configured : DEFAULT_ANTHROPIC_CHAT_MODEL;
-}
-
-
 const app = new Hono<AppContext>();
 
 app.onError((error, c) => {
@@ -1194,26 +913,6 @@ app.onError((error, c) => {
   applyCorsHeadersToContext(c, origin, allowHeaders);
   return c.json({ error: "Erro interno", code: "INTERNAL_ERROR" }, 500);
 });
-type SkillSeed = {
-  name: string;
-  category: string;
-  difficulty: string;
-  tier: "iniciante" | "intermediario" | "avancado" | "calistenico";
-  requiredLevel: number;
-  description: string;
-  unlockMessage: string;
-  prerequisites?: string[] | undefined;
-  attributeRequirements?: Record<string, number>;
-};
-
-type SkillStageSeed = {
-  skillName: string;
-  stageNumber: number;
-  name: string;
-  description: string;
-  levelRequired: number;
-  exerciseReference: string;
-};
 
 const localExercisePool: ExerciseRef[] = [
   { name: "Push-up", muscle: "chest", equipment: "bodyweight", difficulty: "beginner" },
@@ -1242,21 +941,21 @@ const coreSkillSeeds: SkillSeed[] = [
   },
   { name: "Barra Fixa", category: "costas", difficulty: "intermediario", tier: "intermediario", requiredLevel: 5, description: "Puxada vertical", unlockMessage: "Barra fixa dispon\u00edvel." },
   { name: "Dips", category: "triceps", difficulty: "intermediario", tier: "intermediario", requiredLevel: 7, description: "Empurrar em barras paralelas", unlockMessage: "Dips desbloqueado." },
-  { name: "Handstand", category: "calistenia", difficulty: "calistenia", tier: "calistenico", requiredLevel: 6, description: "Progressão de equilíbrio invertido", unlockMessage: "Inicie sua jornada no handstand.", prerequisites: ["Prancha"], attributeRequirements: { strength: 20, dexterity: 20 } },
+  { name: "Handstand", category: "calistenia", difficulty: "calistenia", tier: "calistenico", requiredLevel: 6, description: "ProgressÃ£o de equilÃ­brio invertido", unlockMessage: "Inicie sua jornada no handstand.", prerequisites: ["Prancha"], attributeRequirements: { strength: 20, dexterity: 20 } },
   { name: "Front Lever", category: "calistenia", difficulty: "calistenia", tier: "calistenico", requiredLevel: 10, description: "Alavanca frontal", unlockMessage: "Front Lever desbloqueado.", prerequisites: ["Barra Fixa"], attributeRequirements: { strength: 30 } },
   { name: "Back Lever", category: "calistenia", difficulty: "calistenia", tier: "calistenico", requiredLevel: 10, description: "Alavanca posterior", unlockMessage: "Back Lever desbloqueado.", prerequisites: ["Barra Fixa"], attributeRequirements: { strength: 30 } },
-  { name: "Planche", category: "calistenia", difficulty: "calistenia", tier: "calistenico", requiredLevel: 12, description: "Sustentação horizontal", unlockMessage: "Planche desbloqueada.", prerequisites: ["Dips"], attributeRequirements: { strength: 38 } },
+  { name: "Planche", category: "calistenia", difficulty: "calistenia", tier: "calistenico", requiredLevel: 12, description: "SustentaÃ§Ã£o horizontal", unlockMessage: "Planche desbloqueada.", prerequisites: ["Dips"], attributeRequirements: { strength: 38 } },
   { name: "Human Flag", category: "calistenia", difficulty: "calistenia", tier: "calistenico", requiredLevel: 14, description: "Bandeira humana", unlockMessage: "Human Flag desbloqueada.", attributeRequirements: { strength: 42, dexterity: 30 } },
-  { name: "Muscle Up", category: "calistenia", difficulty: "calistenia", tier: "calistenico", requiredLevel: 11, description: "Transição de barra", unlockMessage: "Muscle Up desbloqueado.", prerequisites: ["Barra Fixa", "Dips"], attributeRequirements: { strength: 36 } },
+  { name: "Muscle Up", category: "calistenia", difficulty: "calistenia", tier: "calistenico", requiredLevel: 11, description: "TransiÃ§Ã£o de barra", unlockMessage: "Muscle Up desbloqueado.", prerequisites: ["Barra Fixa", "Dips"], attributeRequirements: { strength: 36 } },
   { name: "Pistol Squat", category: "calistenia", difficulty: "calistenia", tier: "calistenico", requiredLevel: 9, description: "Agachamento unilateral", unlockMessage: "Pistol Squat desbloqueado.", prerequisites: ["Agachamento"], attributeRequirements: { vitality: 28 } },
-  { name: "Dragon Flag", category: "calistenia", difficulty: "calistenia", tier: "calistenico", requiredLevel: 13, description: "Core avançado", unlockMessage: "Dragon Flag desbloqueada.", prerequisites: ["Abdominal"], attributeRequirements: { strength: 34, focus: 24 } },
-  { name: "L-Sit", category: "calistenia", difficulty: "calistenia", tier: "calistenico", requiredLevel: 8, description: "Sustentação em L", unlockMessage: "L-Sit desbloqueado.", prerequisites: ["Prancha"], attributeRequirements: { strength: 24, focus: 18 } },
-  { name: "Crow Pose", category: "yoga", difficulty: "calistenia", tier: "calistenico", requiredLevel: 6, description: "Equilíbrio em braços", unlockMessage: "Crow Pose desbloqueada.", attributeRequirements: { focus: 18, dexterity: 18 } },
-  { name: "Headstand", category: "yoga", difficulty: "calistenia", tier: "calistenico", requiredLevel: 8, description: "Invertida na cabeça", unlockMessage: "Headstand desbloqueada.", attributeRequirements: { strength: 22, focus: 22 } },
-  { name: "Wheel Pose", category: "yoga", difficulty: "calistenia", tier: "calistenico", requiredLevel: 9, description: "Ponte avançada", unlockMessage: "Wheel Pose desbloqueada.", attributeRequirements: { vitality: 20 } },
-  { name: "Firefly Pose", category: "yoga", difficulty: "calistenia", tier: "calistenico", requiredLevel: 11, description: "Equilíbrio avançado", unlockMessage: "Firefly Pose desbloqueada.", attributeRequirements: { strength: 28, focus: 22 } },
-  { name: "Eight Angle Pose", category: "yoga", difficulty: "calistenia", tier: "calistenico", requiredLevel: 12, description: "Torção com braços", unlockMessage: "Eight Angle Pose desbloqueada.", attributeRequirements: { dexterity: 30, focus: 24 } },
-  { name: "Scorpion Pose", category: "yoga", difficulty: "calistenia", tier: "calistenico", requiredLevel: 15, description: "Invertida avançada", unlockMessage: "Scorpion Pose desbloqueada.", attributeRequirements: { strength: 35, dexterity: 32 } },
+  { name: "Dragon Flag", category: "calistenia", difficulty: "calistenia", tier: "calistenico", requiredLevel: 13, description: "Core avanÃ§ado", unlockMessage: "Dragon Flag desbloqueada.", prerequisites: ["Abdominal"], attributeRequirements: { strength: 34, focus: 24 } },
+  { name: "L-Sit", category: "calistenia", difficulty: "calistenia", tier: "calistenico", requiredLevel: 8, description: "SustentaÃ§Ã£o em L", unlockMessage: "L-Sit desbloqueado.", prerequisites: ["Prancha"], attributeRequirements: { strength: 24, focus: 18 } },
+  { name: "Crow Pose", category: "yoga", difficulty: "calistenia", tier: "calistenico", requiredLevel: 6, description: "EquilÃ­brio em braÃ§os", unlockMessage: "Crow Pose desbloqueada.", attributeRequirements: { focus: 18, dexterity: 18 } },
+  { name: "Headstand", category: "yoga", difficulty: "calistenia", tier: "calistenico", requiredLevel: 8, description: "Invertida na cabeÃ§a", unlockMessage: "Headstand desbloqueada.", attributeRequirements: { strength: 22, focus: 22 } },
+  { name: "Wheel Pose", category: "yoga", difficulty: "calistenia", tier: "calistenico", requiredLevel: 9, description: "Ponte avanÃ§ada", unlockMessage: "Wheel Pose desbloqueada.", attributeRequirements: { vitality: 20 } },
+  { name: "Firefly Pose", category: "yoga", difficulty: "calistenia", tier: "calistenico", requiredLevel: 11, description: "EquilÃ­brio avanÃ§ado", unlockMessage: "Firefly Pose desbloqueada.", attributeRequirements: { strength: 28, focus: 22 } },
+  { name: "Eight Angle Pose", category: "yoga", difficulty: "calistenia", tier: "calistenico", requiredLevel: 12, description: "TorÃ§Ã£o com braÃ§os", unlockMessage: "Eight Angle Pose desbloqueada.", attributeRequirements: { dexterity: 30, focus: 24 } },
+  { name: "Scorpion Pose", category: "yoga", difficulty: "calistenia", tier: "calistenico", requiredLevel: 15, description: "Invertida avanÃ§ada", unlockMessage: "Scorpion Pose desbloqueada.", attributeRequirements: { strength: 35, dexterity: 32 } },
 ];
 
 const stageProgressionSeed: SkillStageSeed[] = [
@@ -1280,112 +979,112 @@ const stageProgressionSeed: SkillStageSeed[] = [
     skillName: String(skillName),
     stageNumber: idx + 1,
     name,
-    description: `Progressão ${idx + 1} de ${skillName}`,
+    description: `ProgressÃ£o ${idx + 1} de ${skillName}`,
     levelRequired: 4 + idx * 2 + idxSkill % 2,
     exerciseReference: name,
   })));
 
 const titleSeeds = [
   { name: "Recruta", description: "Primeiros passos", reference: "RPG", unlock_condition: "level:1", rarity: "Comum" },
-  { name: "Guerreiro do Core", description: "Nível 5", reference: "Calistenia", unlock_condition: "level:5", rarity: "Comum" },
-  { name: "Veterano de Ferro", description: "Nível 10", reference: "Musculação", unlock_condition: "level:10", rarity: "Incomum" },
-  { name: "Lâmina Afiada", description: "Nível 15", reference: "Ação", unlock_condition: "level:15", rarity: "Raro" },
-  { name: "Mestre do Peso Corporal", description: "Nível 20", reference: "Calistenia", unlock_condition: "level:20", rarity: "Raro" },
-  { name: "O Último de Nós", description: "Nível 30", reference: "TLOU", unlock_condition: "level:30", rarity: "Mítico" },
-  { name: "Lendário", description: "Nível 50", reference: "RPG", unlock_condition: "level:50", rarity: "Mítico" },
+  { name: "Guerreiro do Core", description: "NÃ­vel 5", reference: "Calistenia", unlock_condition: "level:5", rarity: "Comum" },
+  { name: "Veterano de Ferro", description: "NÃ­vel 10", reference: "MusculaÃ§Ã£o", unlock_condition: "level:10", rarity: "Incomum" },
+  { name: "LÃ¢mina Afiada", description: "NÃ­vel 15", reference: "AÃ§Ã£o", unlock_condition: "level:15", rarity: "Raro" },
+  { name: "Mestre do Peso Corporal", description: "NÃ­vel 20", reference: "Calistenia", unlock_condition: "level:20", rarity: "Raro" },
+  { name: "O Ãšltimo de NÃ³s", description: "NÃ­vel 30", reference: "TLOU", unlock_condition: "level:30", rarity: "MÃ­tico" },
+  { name: "LendÃ¡rio", description: "NÃ­vel 50", reference: "RPG", unlock_condition: "level:50", rarity: "MÃ­tico" },
   { name: "O Equilibrista", description: "Handstand completo", reference: "Calistenia", unlock_condition: "skill:Handstand:6", rarity: "Raro" },
   { name: "Acima de Todos", description: "Muscle Up completo", reference: "Calistenia", unlock_condition: "skill:Muscle Up:6", rarity: "Raro" },
-  { name: "Força Gravitacional", description: "Planche completa", reference: "Calistenia", unlock_condition: "skill:Planche:6", rarity: "Mítico" },
-  { name: "Bandeira Humana", description: "Human Flag completa", reference: "Calistenia", unlock_condition: "skill:Human Flag:6", rarity: "Mítico" },
+  { name: "ForÃ§a Gravitacional", description: "Planche completa", reference: "Calistenia", unlock_condition: "skill:Planche:6", rarity: "MÃ­tico" },
+  { name: "Bandeira Humana", description: "Human Flag completa", reference: "Calistenia", unlock_condition: "skill:Human Flag:6", rarity: "MÃ­tico" },
   { name: "Suspenso no Tempo", description: "Front Lever completo", reference: "Calistenia", unlock_condition: "skill:Front Lever:6", rarity: "Raro" },
-  { name: "Shoto Style", description: "Referência Street Fighter", reference: "Street Fighter", unlock_condition: "missions:120", rarity: "Incomum" },
-  { name: "Iron Fist", description: "Referência Tekken", reference: "Tekken", unlock_condition: "strength:80", rarity: "Raro" },
-  { name: "King of Iron Body", description: "Referência jogos de luta", reference: "Fighting Games", unlock_condition: "level:35", rarity: "Mítico" },
-  { name: "300", description: "300 treinos completados", reference: "Filme 300", unlock_condition: "missions:300", rarity: "Mítico" },
+  { name: "Shoto Style", description: "ReferÃªncia Street Fighter", reference: "Street Fighter", unlock_condition: "missions:120", rarity: "Incomum" },
+  { name: "Iron Fist", description: "ReferÃªncia Tekken", reference: "Tekken", unlock_condition: "strength:80", rarity: "Raro" },
+  { name: "King of Iron Body", description: "ReferÃªncia jogos de luta", reference: "Fighting Games", unlock_condition: "level:35", rarity: "MÃ­tico" },
+  { name: "300", description: "300 treinos completados", reference: "Filme 300", unlock_condition: "missions:300", rarity: "MÃ­tico" },
   { name: "Rocky", description: "30 dias de streak", reference: "Rocky", unlock_condition: "streak:30", rarity: "Raro" },
-  { name: "Predador", description: "Caça semanal concluída", reference: "Predador", unlock_condition: "weekly:1", rarity: "Incomum" },
+  { name: "Predador", description: "CaÃ§a semanal concluÃ­da", reference: "Predador", unlock_condition: "weekly:1", rarity: "Incomum" },
   { name: "Chosen Undead", description: "Falhou e insistiu", reference: "Dark Souls", unlock_condition: "failures:10", rarity: "Secreto" },
   { name: "The Witcher", description: "Contrato semanal", reference: "The Witcher", unlock_condition: "weekly:5", rarity: "Raro" },
   { name: "Demon Slayer", description: "5 habilidades desbloqueadas", reference: "Anime", unlock_condition: "skills:5", rarity: "Raro" },
-  { name: "Hollow", description: "Perdeu sequência 3x", reference: "Hollow Knight", unlock_condition: "streak_loss:3", rarity: "Secreto" },
+  { name: "Hollow", description: "Perdeu sequÃªncia 3x", reference: "Hollow Knight", unlock_condition: "streak_loss:3", rarity: "Secreto" },
 ];
 
 const achievementSeeds = [
-  { name: "Primeiro Passo", description: "Completar a primeira missão", category: "missoes", rarity: "Comum", color: "#D1D5DB", secret: 0, condition: "missions_completed>=1", icon: "", reference: "" },
-  { name: "Aquecendo", description: "Completar 7 missões", category: "missoes", rarity: "Comum", color: "#D1D5DB", secret: 0, condition: "missions_completed>=7", icon: "", reference: "" },
-  { name: "Rotina Formada", description: "Completar 30 missões", category: "missoes", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "missions_completed>=30", icon: "", reference: "" },
+  { name: "Primeiro Passo", description: "Completar a primeira missÃ£o", category: "missoes", rarity: "Comum", color: "#D1D5DB", secret: 0, condition: "missions_completed>=1", icon: "", reference: "" },
+  { name: "Aquecendo", description: "Completar 7 missÃµes", category: "missoes", rarity: "Comum", color: "#D1D5DB", secret: 0, condition: "missions_completed>=7", icon: "", reference: "" },
+  { name: "Rotina Formada", description: "Completar 30 missÃµes", category: "missoes", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "missions_completed>=30", icon: "", reference: "" },
   { name: "Sem Desculpas", description: "5 dias seguidos", category: "missoes", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "streak>=5", icon: "", reference: "" },
-  { name: "Máquina", description: "Completar 100 missões", category: "missoes", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "missions_completed>=100", icon: "", reference: "" },
-  { name: "Imparável", description: "30 dias consecutivos", category: "missoes", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "streak>=30", icon: "", reference: "" },
-  { name: "Lenda Viva", description: "365 missões", category: "missoes", rarity: "Mítico", color: "#EF4444", secret: 0, condition: "missions_completed>=365", icon: "", reference: "" },
+  { name: "MÃ¡quina", description: "Completar 100 missÃµes", category: "missoes", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "missions_completed>=100", icon: "", reference: "" },
+  { name: "ImparÃ¡vel", description: "30 dias consecutivos", category: "missoes", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "streak>=30", icon: "", reference: "" },
+  { name: "Lenda Viva", description: "365 missÃµes", category: "missoes", rarity: "MÃ­tico", color: "#EF4444", secret: 0, condition: "missions_completed>=365", icon: "", reference: "" },
   { name: "Primeira Conversa", description: "Primeira mensagem no FitBot", category: "chat", rarity: "Comum", color: "#D1D5DB", secret: 0, condition: "chat_messages>=1", icon: "", reference: "" },
   { name: "Curioso", description: "50 perguntas ao FitBot", category: "chat", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "chat_messages>=50", icon: "", reference: "" },
-  { name: "Aprendiz Dedicado", description: "200 interações no chat", category: "chat", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "chat_messages>=200", icon: "", reference: "" },
-  { name: "Eco", description: "Condição secreta", category: "chat", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "repeat_message_streak>=5", icon: "", reference: "" },
+  { name: "Aprendiz Dedicado", description: "200 interaÃ§Ãµes no chat", category: "chat", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "chat_messages>=200", icon: "", reference: "" },
+  { name: "Eco", description: "CondiÃ§Ã£o secreta", category: "chat", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "repeat_message_streak>=5", icon: "", reference: "" },
   { name: "Na Disputa", description: "Entrar no top 100", category: "ranking", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "ranking<=100", icon: "", reference: "" },
   { name: "Elite", description: "Entrar no top 10", category: "ranking", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "ranking<=10", icon: "", reference: "" },
-  { name: "O Escolhido", description: "Alcançar #1", category: "ranking", rarity: "Mítico", color: "#EF4444", secret: 0, condition: "ranking==1", icon: "", reference: "" },
-  { name: "Ghost", description: "Condição secreta", category: "ranking", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "top10_no_friends", icon: "", reference: "" },
+  { name: "O Escolhido", description: "AlcanÃ§ar #1", category: "ranking", rarity: "MÃ­tico", color: "#EF4444", secret: 0, condition: "ranking==1", icon: "", reference: "" },
+  { name: "Ghost", description: "CondiÃ§Ã£o secreta", category: "ranking", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "top10_no_friends", icon: "", reference: "" },
   { name: "Primeiros Voos", description: "Primeira etapa do Handstand", category: "habilidades", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "skill_stage:Handstand>=1", icon: "", reference: "" },
-  { name: "Mestre do Equilíbrio", description: "Handstand completo", category: "habilidades", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "skill_stage:Handstand>=6", icon: "", reference: "" },
-  { name: "Kalista", description: "Todas as skills calistênicas", category: "habilidades", rarity: "Mítico", color: "#EF4444", secret: 0, condition: "all_calisthenics", icon: "", reference: "" },
+  { name: "Mestre do EquilÃ­brio", description: "Handstand completo", category: "habilidades", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "skill_stage:Handstand>=6", icon: "", reference: "" },
+  { name: "Kalista", description: "Todas as skills calistÃªnicas", category: "habilidades", rarity: "MÃ­tico", color: "#EF4444", secret: 0, condition: "all_calisthenics", icon: "", reference: "" },
   { name: "Jogador", description: "Primeiro minigame", category: "minigames", rarity: "Comum", color: "#D1D5DB", secret: 0, condition: "minigames_played>=1", icon: "", reference: "" },
   { name: "Competidor", description: "Vencer 10 minigames", category: "minigames", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "minigames_won>=10", icon: "", reference: "" },
-  { name: "Imbatível", description: "50 vitórias seguidas", category: "minigames", rarity: "Mítico", color: "#EF4444", secret: 0, condition: "minigame_win_streak>=50", icon: "", reference: "" },
-  { name: "Mestre Artesão", description: "Condição secreta", category: "secreta", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "craft_master", icon: "", reference: "Hollow Knight" },
-  { name: "Insônia", description: "Condição secreta", category: "secreta", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "mission_2am_4am", icon: "", reference: "" },
-  { name: "Fantasma", description: "Condição secreta", category: "secreta", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "open_gap6_complete_day7", icon: "", reference: "" },
-  { name: "Conversa de Louco", description: "Condição secreta", category: "secreta", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "chat_session_100", icon: "", reference: "" },
-  { name: "Glitch", description: "Condição secreta", category: "secreta", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "report_bug_chat", icon: "", reference: "" },
+  { name: "ImbatÃ­vel", description: "50 vitÃ³rias seguidas", category: "minigames", rarity: "MÃ­tico", color: "#EF4444", secret: 0, condition: "minigame_win_streak>=50", icon: "", reference: "" },
+  { name: "Mestre ArtesÃ£o", description: "CondiÃ§Ã£o secreta", category: "secreta", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "craft_master", icon: "", reference: "Hollow Knight" },
+  { name: "InsÃ´nia", description: "CondiÃ§Ã£o secreta", category: "secreta", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "mission_2am_4am", icon: "", reference: "" },
+  { name: "Fantasma", description: "CondiÃ§Ã£o secreta", category: "secreta", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "open_gap6_complete_day7", icon: "", reference: "" },
+  { name: "Conversa de Louco", description: "CondiÃ§Ã£o secreta", category: "secreta", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "chat_session_100", icon: "", reference: "" },
+  { name: "Glitch", description: "CondiÃ§Ã£o secreta", category: "secreta", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "report_bug_chat", icon: "", reference: "" },
   { name: "Aquecendo o Motor", description: "3 dias seguidos", category: "streak", rarity: "Comum", color: "#D1D5DB", secret: 0, condition: "streak>=3", icon: "", reference: "" },
   { name: "Semana Completa", description: "7 dias seguidos", category: "streak", rarity: "Comum", color: "#D1D5DB", secret: 0, condition: "streak>=7", icon: "", reference: "" },
   { name: "Ritmo Certo", description: "14 dias seguidos", category: "streak", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "streak>=14", icon: "", reference: "" },
   { name: "Sem Parar", description: "21 dias seguidos", category: "streak", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "streak>=21", icon: "", reference: "" },
-  { name: "Mês de Ferro", description: "30 dias seguidos", category: "streak", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "streak>=30", icon: "", reference: "" },
+  { name: "MÃªs de Ferro", description: "30 dias seguidos", category: "streak", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "streak>=30", icon: "", reference: "" },
   { name: "Disciplina Absurda", description: "60 dias seguidos", category: "streak", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "streak>=60", icon: "", reference: "" },
-  { name: "Inabalável", description: "100 dias seguidos", category: "streak", rarity: "Mítico", color: "#EF4444", secret: 0, condition: "streak>=100", icon: "", reference: "" },
-  { name: "Um Ano de Dor", description: "365 dias seguidos", category: "streak", rarity: "Mítico", color: "#EF4444", secret: 0, condition: "streak>=365", icon: "", reference: "" },
+  { name: "InabalÃ¡vel", description: "100 dias seguidos", category: "streak", rarity: "MÃ­tico", color: "#EF4444", secret: 0, condition: "streak>=100", icon: "", reference: "" },
+  { name: "Um Ano de Dor", description: "365 dias seguidos", category: "streak", rarity: "MÃ­tico", color: "#EF4444", secret: 0, condition: "streak>=365", icon: "", reference: "" },
   { name: "Acontece", description: "Quebrar streak pela primeira vez", category: "streak_break", rarity: "Comum", color: "#D1D5DB", secret: 0, condition: "streak_break>=1", icon: "", reference: "" },
-  { name: "Voltar é Difícil", description: "Quebrar streak de 30+", category: "streak_break", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "streak_break>=30", icon: "", reference: "" },
+  { name: "Voltar Ã© DifÃ­cil", description: "Quebrar streak de 30+", category: "streak_break", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "streak_break>=30", icon: "", reference: "" },
   { name: "Tudo Ruiu", description: "Quebrar streak de 100+", category: "streak_break", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "streak_break>=100", icon: "", reference: "" },
-  { name: "A Queda Épica", description: "Quebrar streak de 365+", category: "streak_break", rarity: "Mítico", color: "#EF4444", secret: 0, condition: "streak_break>=365", icon: "", reference: "" },
-  { name: "Tudo pela Streak", description: "Manter streak com 1 missão em 7 dias", category: "streak_minimal", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "minimal_streak>=7", icon: "", reference: "" },
-  { name: "O Minimalista", description: "Manter streak com 1 missão em 30 dias", category: "streak_minimal", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "minimal_streak>=30", icon: "", reference: "" },
-  { name: "Engenharia de Streak", description: "Manter streak com 1 missão em 100 dias", category: "streak_minimal", rarity: "Mítico", color: "#EF4444", secret: 0, condition: "minimal_streak>=100", icon: "", reference: "" },
-  { name: "A Arte da Preguiça", description: "Condição secreta", category: "streak_minimal", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "single_mission_30", icon: "", reference: "" },
+  { name: "A Queda Ã‰pica", description: "Quebrar streak de 365+", category: "streak_break", rarity: "MÃ­tico", color: "#EF4444", secret: 0, condition: "streak_break>=365", icon: "", reference: "" },
+  { name: "Tudo pela Streak", description: "Manter streak com 1 missÃ£o em 7 dias", category: "streak_minimal", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "minimal_streak>=7", icon: "", reference: "" },
+  { name: "O Minimalista", description: "Manter streak com 1 missÃ£o em 30 dias", category: "streak_minimal", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "minimal_streak>=30", icon: "", reference: "" },
+  { name: "Engenharia de Streak", description: "Manter streak com 1 missÃ£o em 100 dias", category: "streak_minimal", rarity: "MÃ­tico", color: "#EF4444", secret: 0, condition: "minimal_streak>=100", icon: "", reference: "" },
+  { name: "A Arte da PreguiÃ§a", description: "CondiÃ§Ã£o secreta", category: "streak_minimal", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "single_mission_30", icon: "", reference: "" },
   { name: "De Volta ao Jogo", description: "Reconstruir para 7 dias", category: "streak_rebuild", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "rebuild>=7", icon: "", reference: "" },
-  { name: "Fênix", description: "Quebrar 30+ e reconstruir 30+", category: "streak_rebuild", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "rebuild_from30", icon: "", reference: "" },
-  { name: "Lenda Resiliente", description: "Quebrar 100+ e reconstruir 100+", category: "streak_rebuild", rarity: "Mítico", color: "#EF4444", secret: 0, condition: "rebuild_from100", icon: "", reference: "" },
-  { name: "Por um Fio", description: "Últimos 5 minutos 5x", category: "timing", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "timing_last5m>=5", icon: "", reference: "" },
-  { name: "Especialista em Timing", description: "Últimos 5 minutos 20x", category: "timing", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "timing_last5m>=20", icon: "", reference: "" },
-  { name: "Missão às 23:59", description: "Condição secreta", category: "timing", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "timing_2355_streak>=7", icon: "", reference: "" },
-  { name: "404 Not Found", description: "Condição secreta", category: "secreta", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "route_not_found", icon: "", reference: "" },
-  { name: "Hoje Não", description: "Falhar 1 missão da meta", category: "meta_fail", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "goal_fail>=1", icon: "", reference: "" },
-  { name: "Amanhã Eu Começo", description: "Falhar 3 missões da meta em dias diferentes", category: "meta_fail", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "goal_fail_days>=3", icon: "", reference: "" },
-  { name: "Meta? Que Meta?", description: "Falhar 5 missões da meta", category: "meta_fail", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "goal_fail>=5", icon: "", reference: "" },
-  { name: "Plano de Mentira", description: "Falhar 15 missões da meta", category: "meta_fail", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "goal_fail>=15", icon: "", reference: "" },
-  { name: "Autobiotagem", description: "Falhar 30 missões da meta", category: "meta_fail", rarity: "Mítico", color: "#EF4444", secret: 0, condition: "goal_fail>=30", icon: "", reference: "" },
-  { name: "Speedrun do Fracasso", description: "Condição secreta", category: "meta_fail", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "goal_fail_7d", icon: "", reference: "" },
-  { name: "No Caminho Certo", description: "7 missões da meta concluídas", category: "meta_done", rarity: "Comum", color: "#D1D5DB", secret: 0, condition: "goal_done>=7", icon: "", reference: "" },
-  { name: "Focado", description: "30 missões da meta concluídas", category: "meta_done", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "goal_done>=30", icon: "", reference: "" },
-  { name: "Sem Desvios", description: "7 dias sem falhar missão da meta", category: "meta_done", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "goal_nofail>=7", icon: "", reference: "" },
-  { name: "Comprometido", description: "100 missões da meta concluídas", category: "meta_done", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "goal_done>=100", icon: "", reference: "" },
-  { name: "Olho no Alvo", description: "30 dias sem falhar missão da meta", category: "meta_done", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "goal_nofail>=30", icon: "", reference: "" },
-  { name: "Obsessão Saudável", description: "365 missões da meta", category: "meta_done", rarity: "Mítico", color: "#EF4444", secret: 0, condition: "goal_done>=365", icon: "", reference: "" },
-  { name: "Inabalável no Propósito", description: "100 dias sem falhar missão da meta", category: "meta_done", rarity: "Mítico", color: "#EF4444", secret: 0, condition: "goal_nofail>=100", icon: "", reference: "" },
-  { name: "A Meta era Essa?", description: "Condição secreta", category: "meta_change", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "goal_return_30", icon: "", reference: "" },
+  { name: "FÃªnix", description: "Quebrar 30+ e reconstruir 30+", category: "streak_rebuild", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "rebuild_from30", icon: "", reference: "" },
+  { name: "Lenda Resiliente", description: "Quebrar 100+ e reconstruir 100+", category: "streak_rebuild", rarity: "MÃ­tico", color: "#EF4444", secret: 0, condition: "rebuild_from100", icon: "", reference: "" },
+  { name: "Por um Fio", description: "Ãšltimos 5 minutos 5x", category: "timing", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "timing_last5m>=5", icon: "", reference: "" },
+  { name: "Especialista em Timing", description: "Ãšltimos 5 minutos 20x", category: "timing", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "timing_last5m>=20", icon: "", reference: "" },
+  { name: "MissÃ£o Ã s 23:59", description: "CondiÃ§Ã£o secreta", category: "timing", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "timing_2355_streak>=7", icon: "", reference: "" },
+  { name: "404 Not Found", description: "CondiÃ§Ã£o secreta", category: "secreta", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "route_not_found", icon: "", reference: "" },
+  { name: "Hoje NÃ£o", description: "Falhar 1 missÃ£o da meta", category: "meta_fail", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "goal_fail>=1", icon: "", reference: "" },
+  { name: "AmanhÃ£ Eu ComeÃ§o", description: "Falhar 3 missÃµes da meta em dias diferentes", category: "meta_fail", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "goal_fail_days>=3", icon: "", reference: "" },
+  { name: "Meta? Que Meta?", description: "Falhar 5 missÃµes da meta", category: "meta_fail", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "goal_fail>=5", icon: "", reference: "" },
+  { name: "Plano de Mentira", description: "Falhar 15 missÃµes da meta", category: "meta_fail", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "goal_fail>=15", icon: "", reference: "" },
+  { name: "Autobiotagem", description: "Falhar 30 missÃµes da meta", category: "meta_fail", rarity: "MÃ­tico", color: "#EF4444", secret: 0, condition: "goal_fail>=30", icon: "", reference: "" },
+  { name: "Speedrun do Fracasso", description: "CondiÃ§Ã£o secreta", category: "meta_fail", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "goal_fail_7d", icon: "", reference: "" },
+  { name: "No Caminho Certo", description: "7 missÃµes da meta concluÃ­das", category: "meta_done", rarity: "Comum", color: "#D1D5DB", secret: 0, condition: "goal_done>=7", icon: "", reference: "" },
+  { name: "Focado", description: "30 missÃµes da meta concluÃ­das", category: "meta_done", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "goal_done>=30", icon: "", reference: "" },
+  { name: "Sem Desvios", description: "7 dias sem falhar missÃ£o da meta", category: "meta_done", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "goal_nofail>=7", icon: "", reference: "" },
+  { name: "Comprometido", description: "100 missÃµes da meta concluÃ­das", category: "meta_done", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "goal_done>=100", icon: "", reference: "" },
+  { name: "Olho no Alvo", description: "30 dias sem falhar missÃ£o da meta", category: "meta_done", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "goal_nofail>=30", icon: "", reference: "" },
+  { name: "ObsessÃ£o SaudÃ¡vel", description: "365 missÃµes da meta", category: "meta_done", rarity: "MÃ­tico", color: "#EF4444", secret: 0, condition: "goal_done>=365", icon: "", reference: "" },
+  { name: "InabalÃ¡vel no PropÃ³sito", description: "100 dias sem falhar missÃ£o da meta", category: "meta_done", rarity: "MÃ­tico", color: "#EF4444", secret: 0, condition: "goal_nofail>=100", icon: "", reference: "" },
+  { name: "A Meta era Essa?", description: "CondiÃ§Ã£o secreta", category: "meta_change", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "goal_return_30", icon: "", reference: "" },
   { name: "Primeiro Resultado", description: "10% da meta", category: "meta_progress", rarity: "Comum", color: "#D1D5DB", secret: 0, condition: "goal_progress>=10", icon: "", reference: "" },
   { name: "Meio Caminho", description: "50% da meta", category: "meta_progress", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "goal_progress>=50", icon: "", reference: "" },
-  { name: "Quase Lá", description: "90% da meta", category: "meta_progress", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "goal_progress>=90", icon: "", reference: "" },
-  { name: "Meta Batida", description: "100% da meta", category: "meta_progress", rarity: "Mítico", color: "#EF4444", secret: 0, condition: "goal_progress>=100", icon: "", reference: "" },
-  { name: "Além da Meta", description: "120% da meta", category: "meta_progress", rarity: "Mítico", color: "#EF4444", secret: 0, condition: "goal_progress>=120", icon: "", reference: "" },
-  { name: "Overachiever", description: "Condição secreta", category: "meta_progress", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "goal_half_time", icon: "", reference: "" },
-  { name: "Novo Capítulo", description: "Primeira troca de meta", category: "meta_change", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "goal_change>=1", icon: "", reference: "" },
+  { name: "Quase LÃ¡", description: "90% da meta", category: "meta_progress", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "goal_progress>=90", icon: "", reference: "" },
+  { name: "Meta Batida", description: "100% da meta", category: "meta_progress", rarity: "MÃ­tico", color: "#EF4444", secret: 0, condition: "goal_progress>=100", icon: "", reference: "" },
+  { name: "AlÃ©m da Meta", description: "120% da meta", category: "meta_progress", rarity: "MÃ­tico", color: "#EF4444", secret: 0, condition: "goal_progress>=120", icon: "", reference: "" },
+  { name: "Overachiever", description: "CondiÃ§Ã£o secreta", category: "meta_progress", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "goal_half_time", icon: "", reference: "" },
+  { name: "Novo CapÃ­tulo", description: "Primeira troca de meta", category: "meta_change", rarity: "Incomum", color: "#22C55E", secret: 0, condition: "goal_change>=1", icon: "", reference: "" },
   { name: "Indefinido", description: "3 trocas de meta", category: "meta_change", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "goal_change>=3", icon: "", reference: "" },
-  { name: "A Jornada é o Destino", description: "Condição secreta", category: "meta_change", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "all_goals_done", icon: "", reference: "" },
-  { name: "Dupla Ameaça", description: "Streak 30 + meta perfeita", category: "meta_combo", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "combo30", icon: "", reference: "" },
-  { name: "Máquina de Resultados", description: "Streak 100 + meta perfeita", category: "meta_combo", rarity: "Mítico", color: "#EF4444", secret: 0, condition: "combo100", icon: "", reference: "" },
-  { name: "Perfeição", description: "Condição secreta", category: "meta_combo", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "combo30_all", icon: "", reference: "" },
+  { name: "A Jornada Ã© o Destino", description: "CondiÃ§Ã£o secreta", category: "meta_change", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "all_goals_done", icon: "", reference: "" },
+  { name: "Dupla AmeaÃ§a", description: "Streak 30 + meta perfeita", category: "meta_combo", rarity: "Raro", color: "#3B82F6", secret: 0, condition: "combo30", icon: "", reference: "" },
+  { name: "MÃ¡quina de Resultados", description: "Streak 100 + meta perfeita", category: "meta_combo", rarity: "MÃ­tico", color: "#EF4444", secret: 0, condition: "combo100", icon: "", reference: "" },
+  { name: "PerfeiÃ§Ã£o", description: "CondiÃ§Ã£o secreta", category: "meta_combo", rarity: "Secreto", color: "#F59E0B", secret: 1, condition: "combo30_all", icon: "", reference: "" },
 ];
 
 function conditioningOrder(level: ConditioningLevel): number {
@@ -1397,7 +1096,7 @@ function skillTierOrder(tier: string): number {
 }
 
 const VARIANT_CATEGORY_BY_PARENT: Record<string, string> = {
-  Flexões: "peito",
+  FlexÃµes: "peito",
   Agachamentos: "pernas",
   Pranchas: "core",
   Abdominais: "core",
@@ -1634,11 +1333,11 @@ async function evaluateMissionAchievementsAndTitles(db: D1Database, userId: stri
   if (missionsCompleted >= 1) await unlockAchievementIfNeeded(db, userId, "Primeiro Passo", missionsCompleted, 1);
   if (missionsCompleted >= 7) await unlockAchievementIfNeeded(db, userId, "Aquecendo", missionsCompleted, 7);
   if (missionsCompleted >= 30) await unlockAchievementIfNeeded(db, userId, "Rotina Formada", missionsCompleted, 30);
-  if (missionsCompleted >= 100) await unlockAchievementIfNeeded(db, userId, "Máquina", missionsCompleted, 100);
+  if (missionsCompleted >= 100) await unlockAchievementIfNeeded(db, userId, "MÃ¡quina", missionsCompleted, 100);
   if (missionsCompleted >= 365) await unlockAchievementIfNeeded(db, userId, "Lenda Viva", missionsCompleted, 365);
   if (consecutiveDays >= 5) await unlockAchievementIfNeeded(db, userId, "Sem Desculpas", consecutiveDays, 5);
   if (consecutiveDays >= 30) {
-    await unlockAchievementIfNeeded(db, userId, "Imparável", consecutiveDays, 30);
+    await unlockAchievementIfNeeded(db, userId, "ImparÃ¡vel", consecutiveDays, 30);
     await unlockTitleIfNeeded(db, userId, "Rocky");
   }
   if (missionsCompleted >= 300) await unlockTitleIfNeeded(db, userId, "300");
@@ -1659,8 +1358,8 @@ async function evaluateChatAchievements(db: D1Database, userId: string) {
 
 async function evaluateLevelTitles(db: D1Database, userId: string, level: number) {
   const byLevel: Array<[number, string]> = [
-    [1, "Recruta"], [5, "Guerreiro do Core"], [10, "Veterano de Ferro"], [15, "Lâmina Afiada"],
-    [20, "Mestre do Peso Corporal"], [30, "O Último de Nós"], [50, "Lendário"],
+    [1, "Recruta"], [5, "Guerreiro do Core"], [10, "Veterano de Ferro"], [15, "LÃ¢mina Afiada"],
+    [20, "Mestre do Peso Corporal"], [30, "O Ãšltimo de NÃ³s"], [50, "LendÃ¡rio"],
   ];
   for (const [threshold, name] of byLevel) {
     if (level >= threshold) await unlockTitleIfNeeded(db, userId, name);
@@ -1672,7 +1371,7 @@ async function onStreakContinued(db: D1Database, userId: string, streakDays: num
 
   const milestones: Array<[number, string]> = [
     [3, "Aquecendo o Motor"], [7, "Semana Completa"], [14, "Ritmo Certo"], [21, "Sem Parar"],
-    [30, "Mês de Ferro"], [60, "Disciplina Absurda"], [100, "Inabalável"], [365, "Um Ano de Dor"],
+    [30, "MÃªs de Ferro"], [60, "Disciplina Absurda"], [100, "InabalÃ¡vel"], [365, "Um Ano de Dor"],
   ];
   for (const [value, name] of milestones) {
     if (streakDays >= value) await unlockAchievementIfNeeded(db, userId, name, streakDays, value);
@@ -1698,7 +1397,7 @@ async function onStreakContinued(db: D1Database, userId: string, streakDays: num
   if (minimal >= 7) await unlockAchievementIfNeeded(db, userId, "Tudo pela Streak", minimal, 7);
   if (minimal >= 30) await unlockAchievementIfNeeded(db, userId, "O Minimalista", minimal, 30);
   if (minimal >= 100) await unlockAchievementIfNeeded(db, userId, "Engenharia de Streak", minimal, 100);
-  if (singleStreak >= 30) await unlockAchievementIfNeeded(db, userId, "A Arte da Preguiça", singleStreak, 30);
+  if (singleStreak >= 30) await unlockAchievementIfNeeded(db, userId, "A Arte da PreguiÃ§a", singleStreak, 30);
 
   if (lastMissionDate) {
     const d = new Date(lastMissionDate);
@@ -1710,7 +1409,7 @@ async function onStreakContinued(db: D1Database, userId: string, streakDays: num
       const t = await db.prepare(`SELECT timing_last5m_count, timing_2355_streak FROM user_event_counters WHERE user_id = ?`).bind(userId).first<{ timing_last5m_count: number; timing_2355_streak: number }>();
       if (Number(t?.timing_last5m_count ?? 0) >= 5) await unlockAchievementIfNeeded(db, userId, "Por um Fio", Number(t?.timing_last5m_count ?? 0), 5);
       if (Number(t?.timing_last5m_count ?? 0) >= 20) await unlockAchievementIfNeeded(db, userId, "Especialista em Timing", Number(t?.timing_last5m_count ?? 0), 20);
-      if (Number(t?.timing_2355_streak ?? 0) >= 7) await unlockAchievementIfNeeded(db, userId, "Missão às 23:59", Number(t?.timing_2355_streak ?? 0), 7);
+      if (Number(t?.timing_2355_streak ?? 0) >= 7) await unlockAchievementIfNeeded(db, userId, "MissÃ£o Ã s 23:59", Number(t?.timing_2355_streak ?? 0), 7);
     } else {
       await db.prepare(`UPDATE user_event_counters SET timing_2355_streak = 0, updated_at=datetime('now') WHERE user_id = ?`).bind(userId).run();
     }
@@ -1727,15 +1426,15 @@ async function onStreakBroken(db: D1Database, userId: string, streakDaysBefore: 
     WHERE user_id = ?`).bind(streakDaysBefore, userId).run();
 
   if (streakDaysBefore >= 1) await unlockAchievementIfNeeded(db, userId, "Acontece", streakDaysBefore, 1);
-  if (streakDaysBefore >= 30) await unlockAchievementIfNeeded(db, userId, "Voltar é Difícil", streakDaysBefore, 30);
+  if (streakDaysBefore >= 30) await unlockAchievementIfNeeded(db, userId, "Voltar Ã© DifÃ­cil", streakDaysBefore, 30);
   if (streakDaysBefore >= 100) await unlockAchievementIfNeeded(db, userId, "Tudo Ruiu", streakDaysBefore, 100);
-  if (streakDaysBefore >= 365) await unlockAchievementIfNeeded(db, userId, "A Queda Épica", streakDaysBefore, 365);
+  if (streakDaysBefore >= 365) await unlockAchievementIfNeeded(db, userId, "A Queda Ã‰pica", streakDaysBefore, 365);
 }
 
 async function onStreakRebuilt(db: D1Database, userId: string, newStreakDays: number, previousBestStreak: number) {
   await logUserEvent(db, userId, "onStreakRebuilt", { newStreakDays, previousBestStreak });
   if (newStreakDays >= 7) await unlockAchievementIfNeeded(db, userId, "De Volta ao Jogo", newStreakDays, 7);
-  if (previousBestStreak >= 30 && newStreakDays >= 30) await unlockAchievementIfNeeded(db, userId, "Fênix", newStreakDays, 30);
+  if (previousBestStreak >= 30 && newStreakDays >= 30) await unlockAchievementIfNeeded(db, userId, "FÃªnix", newStreakDays, 30);
   if (previousBestStreak >= 100 && newStreakDays >= 100) await unlockAchievementIfNeeded(db, userId, "Lenda Resiliente", newStreakDays, 100);
 }
 
@@ -1822,8 +1521,8 @@ async function checkMissionRelevance(userId: string, missionId: number, db: D1Da
 
 async function onGoalMissionFailed(db: D1Database, userId: string, failCount: number, distinctDays: number, consecutiveFailDays: number) {
   await logUserEvent(db, userId, 'onGoalMissionFailed', { failCount, distinctDays, consecutiveFailDays });
-  if (failCount >= 1) await unlockAchievementIfNeeded(db, userId, 'Hoje Não', failCount, 1);
-  if (distinctDays >= 3) await unlockAchievementIfNeeded(db, userId, 'Amanhã Eu Começo', distinctDays, 3);
+  if (failCount >= 1) await unlockAchievementIfNeeded(db, userId, 'Hoje NÃ£o', failCount, 1);
+  if (distinctDays >= 3) await unlockAchievementIfNeeded(db, userId, 'AmanhÃ£ Eu ComeÃ§o', distinctDays, 3);
   if (failCount >= 5) await unlockAchievementIfNeeded(db, userId, 'Meta? Que Meta?', failCount, 5);
   if (failCount >= 15) await unlockAchievementIfNeeded(db, userId, 'Plano de Mentira', failCount, 15);
   if (failCount >= 30) await unlockAchievementIfNeeded(db, userId, 'Autobiotagem', failCount, 30);
@@ -1835,28 +1534,28 @@ async function onGoalMissionCompleted(db: D1Database, userId: string, completedC
   if (completedCount >= 7) await unlockAchievementIfNeeded(db, userId, 'No Caminho Certo', completedCount, 7);
   if (completedCount >= 30) await unlockAchievementIfNeeded(db, userId, 'Focado', completedCount, 30);
   if (completedCount >= 100) await unlockAchievementIfNeeded(db, userId, 'Comprometido', completedCount, 100);
-  if (completedCount >= 365) await unlockAchievementIfNeeded(db, userId, 'Obsessão Saudável', completedCount, 365);
+  if (completedCount >= 365) await unlockAchievementIfNeeded(db, userId, 'ObsessÃ£o SaudÃ¡vel', completedCount, 365);
   if (consecutiveDays >= 7) await unlockAchievementIfNeeded(db, userId, 'Sem Desvios', consecutiveDays, 7);
   if (consecutiveDays >= 30) await unlockAchievementIfNeeded(db, userId, 'Olho no Alvo', consecutiveDays, 30);
-  if (noFailStreak >= 100) await unlockAchievementIfNeeded(db, userId, 'Inabalável no Propósito', noFailStreak, 100);
+  if (noFailStreak >= 100) await unlockAchievementIfNeeded(db, userId, 'InabalÃ¡vel no PropÃ³sito', noFailStreak, 100);
 
   const streak = await db.prepare("SELECT current_streak FROM user_progression WHERE user_id = ?").bind(userId).first<{ current_streak: number }>();
-  if (Number(streak?.current_streak ?? 0) >= 30 && noFailStreak >= 30) await unlockAchievementIfNeeded(db, userId, 'Dupla Ameaça', 30, 30);
-  if (Number(streak?.current_streak ?? 0) >= 100 && noFailStreak >= 100) await unlockAchievementIfNeeded(db, userId, 'Máquina de Resultados', 100, 100);
+  if (Number(streak?.current_streak ?? 0) >= 30 && noFailStreak >= 30) await unlockAchievementIfNeeded(db, userId, 'Dupla AmeaÃ§a', 30, 30);
+  if (Number(streak?.current_streak ?? 0) >= 100 && noFailStreak >= 100) await unlockAchievementIfNeeded(db, userId, 'MÃ¡quina de Resultados', 100, 100);
 }
 
 async function onGoalProgress(db: D1Database, userId: string, progressPercent: number) {
   await logUserEvent(db, userId, 'onGoalProgress', { progressPercent });
   if (progressPercent >= 10) await unlockAchievementIfNeeded(db, userId, 'Primeiro Resultado', progressPercent, 10);
   if (progressPercent >= 50) await unlockAchievementIfNeeded(db, userId, 'Meio Caminho', progressPercent, 50);
-  if (progressPercent >= 90) await unlockAchievementIfNeeded(db, userId, 'Quase Lá', progressPercent, 90);
+  if (progressPercent >= 90) await unlockAchievementIfNeeded(db, userId, 'Quase LÃ¡', progressPercent, 90);
   if (progressPercent >= 100) await unlockAchievementIfNeeded(db, userId, 'Meta Batida', progressPercent, 100);
-  if (progressPercent >= 120) await unlockAchievementIfNeeded(db, userId, 'Além da Meta', progressPercent, 120);
+  if (progressPercent >= 120) await unlockAchievementIfNeeded(db, userId, 'AlÃ©m da Meta', progressPercent, 120);
 }
 
 async function onGoalChanged(db: D1Database, userId: string, oldGoal: string, newGoal: string, changeCount: number) {
   await logUserEvent(db, userId, 'onGoalChanged', { oldGoal, newGoal, changeCount });
-  if (changeCount >= 1) await unlockAchievementIfNeeded(db, userId, 'Novo Capítulo', changeCount, 1);
+  if (changeCount >= 1) await unlockAchievementIfNeeded(db, userId, 'Novo CapÃ­tulo', changeCount, 1);
   if (changeCount >= 3) await unlockAchievementIfNeeded(db, userId, 'Indefinido', changeCount, 3);
 }
 
@@ -1930,7 +1629,7 @@ async function onAppOpen(db: D1Database, userId: string, timestamp: string) {
 
   const hour = new Date(timestamp).getHours();
   if (hour >= 2 && hour < 4) {
-    await unlockAchievementIfNeeded(db, userId, "Insônia", 1, 1);
+    await unlockAchievementIfNeeded(db, userId, "InsÃ´nia", 1, 1);
   }
 
   if (gapDays >= 6) {
@@ -1960,7 +1659,7 @@ async function buildInitialTrainingPlan(mainGoal: string | null | undefined, con
     injuries: injuries ?? "",
     rest_days: [restDay],
     weekly,
-    progression: "Primeiras 4 semanas com progressão linear de volume e técnica.",
+    progression: "Primeiras 4 semanas com progressÃ£o linear de volume e tÃ©cnica.",
   };
 }
 
@@ -2190,7 +1889,7 @@ async function tryUnlockSkillsFromPerformance(db: D1Database, userId: string): P
   }
 }
 
-/** XP para completar o nível atual e avançar (barra cheia). Igual ao front: `Math.max(100, level * 100)`. */
+/** XP para completar o nÃ­vel atual e avanÃ§ar (barra cheia). Igual ao front: `Math.max(100, level * 100)`. */
 function xpRequiredToAdvanceFromLevel(level: number): number {
   const L = Math.max(1, Math.floor(Number(level) || 1));
   return Math.max(100, L * 100);
@@ -2202,7 +1901,7 @@ function parseProgressionXpLevel(row: { xp?: unknown; level?: unknown } | null |
   return { xp, level };
 }
 
-/** Aplica ganho de XP e resolve todos os level-ups (evita depender de SELECT pós-UPDATE no D1 e permite vários níveis de uma vez). */
+/** Aplica ganho de XP e resolve todos os level-ups (evita depender de SELECT pÃ³s-UPDATE no D1 e permite vÃ¡rios nÃ­veis de uma vez). */
 function computeXpAndLevelAfterGain(xp: number, level: number, xpDelta: number): { xp: number; level: number; levelsGained: number } {
   const add = Math.max(0, Math.floor(Number(xpDelta) || 0));
   let x = Math.max(0, Math.floor(xp)) + add;
@@ -2220,8 +1919,8 @@ function computeXpAndLevelAfterGain(xp: number, level: number, xpDelta: number):
 }
 
 /**
- * Lê progression, soma XP/pontos, aplica todas as subidas de nível de uma vez e dispara hooks por nível.
- * Usar em qualquer fluxo que conceda XP (missão, circuito, mensal, minigame).
+ * LÃª progression, soma XP/pontos, aplica todas as subidas de nÃ­vel de uma vez e dispara hooks por nÃ­vel.
+ * Usar em qualquer fluxo que conceda XP (missÃ£o, circuito, mensal, minigame).
  */
 async function applyXpPointsAndResolveLevels(
   db: D1Database,
@@ -2375,7 +2074,7 @@ app.use("*", async (c, next) => {
 
     return createCorsResponse(
       JSON.stringify({
-        error: "Origin não permitida",
+        error: "Origin nÃ£o permitida",
         code: "ORIGIN_NOT_ALLOWED",
       }),
       {
@@ -2400,7 +2099,7 @@ app.use("*", async (c, next) => {
   applyCorsHeadersToResponseHeaders(c.res.headers, origin, allowHeaders);
 });
 
-// Helper: Gera cookie com configurações corretas
+// Helper: Gera cookie com configuraÃ§Ãµes corretas
 function shouldUseSecureCookie(requestUrl: string): boolean {
   try {
     return new URL(requestUrl).protocol === "https:";
@@ -2866,7 +2565,7 @@ async function startCheckoutForUser(
       checkout_url: null,
       product_id: null,
       subscription_id: appliedPromo.subscription_id ?? crypto.randomUUID(),
-      message: "Código promocional aplicado. Seu acesso VIP foi liberado.",
+      message: "CÃ³digo promocional aplicado. Seu acesso VIP foi liberado.",
     };
   }
 
@@ -2928,7 +2627,7 @@ async function startCheckoutForUser(
     checkout_url: checkoutUrl,
     product_id: productId,
     subscription_id: subscriptionId,
-    message: "Pagamento iniciado. Aguarde a confirmação para liberar o acesso.",
+    message: "Pagamento iniciado. Aguarde a confirmaÃ§Ã£o para liberar o acesso.",
   };
 }
 
@@ -3235,7 +2934,7 @@ app.post(
         .first();
 
       if (existing) {
-        return c.json({ error: "E-mail já cadastrado" }, 409);
+        return c.json({ error: "E-mail jÃ¡ cadastrado" }, 409);
       }
 
       const userId = crypto.randomUUID();
@@ -3275,7 +2974,7 @@ app.post(
     } catch (error) {
       console.error("[register]", error);
       return c.json(
-        { error: "Erro interno ao criar usuário", code: "INTERNAL_ERROR" },
+        { error: "Erro interno ao criar usuÃ¡rio", code: "INTERNAL_ERROR" },
         500
       );
     }
@@ -3290,7 +2989,7 @@ app.get("/api/auth/check-availability", async (c) => {
     return c.json({
       emailAvailable: null,
       usernameAvailable: null,
-      message: "Informe email e/ou username para validação.",
+      message: "Informe email e/ou username para validaÃ§Ã£o.",
     }, 400);
   }
 
@@ -3342,12 +3041,12 @@ app.post(
     }
 
     if (!userRow.password_hash || !userRow.password_salt) {
-      return c.json({ error: "Credenciais inválidas" }, 401);
+      return c.json({ error: "Credenciais invÃ¡lidas" }, 401);
     }
 
     const computed = await hashPassword(data.password, userRow.password_salt);
     if (computed !== userRow.password_hash) {
-      return c.json({ error: "Credenciais inválidas" }, 401);
+      return c.json({ error: "Credenciais invÃ¡lidas" }, 401);
     }
 
     const sessionId = crypto.randomUUID();
@@ -3369,1326 +3068,71 @@ app.post(
   }
 );
 
-app.get("/api/users/me", authMiddleware, async (c) => {
-  const user = c.get("user");
-
-  try {
-    if (!user?.id) {
-      return c.json({ error: "Usuário não encontrado", code: "USER_NOT_FOUND" }, 404);
-    }
-
-    const userRecord = await getUserAuthRecordById(c.env.fitloot_db, user.id);
-    const profileRecord = await c.env.fitloot_db.prepare(
-      "SELECT showcased_achievements FROM user_profiles WHERE user_id = ?"
-    ).bind(user.id).first<{ showcased_achievements?: string | null }>();
-
-    if (!userRecord) {
-      return c.json({ error: "Usuário não encontrado", code: "USER_NOT_FOUND" }, 404);
-    }
-
-    return c.json({
-      id: userRecord.id,
-      email: userRecord.email,
-      name: userRecord.name,
-      avatar_url: userRecord.avatar_url ?? undefined,
-      showcased_achievements: profileRecord?.showcased_achievements ?? null,
-      onboarding_completed: userRecord.onboarding_completed,
-      plan_id: userRecord.plan_id,
-      plan_status: userRecord.plan_status,
-      payment_method: userRecord.payment_method,
-    });
-  } catch (err) {
-    console.error("[/api/users/me] Erro interno:", {
-      message: err instanceof Error ? err.message : String(err),
-      stack: err instanceof Error ? err.stack : undefined,
-      userId: user?.id,
-    });
-
-    if (isMissingSchemaError(err)) {
-      return schemaMismatchResponse(c);
-    }
-
-    return internalErrorResponse(c);
-  }
-});
-
-app.post("/api/app/open", authMiddleware, async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-  try {
-    const timestamp = new Date().toISOString();
-    await onAppOpen(c.env.fitloot_db, user.id, timestamp);
-    return c.json({ success: true });
-  } catch (error) {
-    console.error("[/api/app/open]", {
-      message: getErrorMessage(error),
-      userId: user.id,
-    });
-
-    if (isMissingSchemaError(error)) {
-      return c.json({ success: true, degraded: true }, 200);
-    }
-
-    return internalErrorResponse(c);
-  }
-});
-
-app.post('/api/events/route-not-found', authMiddleware, async (c) => {
-  const user = c.get('user');
-  if (!user) return c.json({ error: 'Unauthorized' }, 401);
-
-  try {
-    await logUserEvent(c.env.fitloot_db, user.id, 'onRouteNotFound', {});
-    await unlockAchievementIfNeeded(c.env.fitloot_db, user.id, '404 Not Found', 1, 1);
-    return c.json({ success: true });
-  } catch (error) {
-    console.error("[/api/events/route-not-found]", {
-      message: getErrorMessage(error),
-      userId: user.id,
-    });
-
-    if (isMissingSchemaError(error)) {
-      return c.json({ success: true, degraded: true }, 200);
-    }
-
-    return internalErrorResponse(c);
-  }
-});
-
-app.patch(
-  "/api/users/me",
+registerAccountRoutes(app, {
   authMiddleware,
-  zValidator("json", UpdateMeRequestSchema),
-  async (c) => {
-    const user = c.get("user");
-    if (!user) return c.json({ error: "Unauthorized" }, 401);
-    const data = c.req.valid("json");
+  generateExpiredSessionCookie,
+  getSessionIdFromCookieHeader,
+  getUserAuthRecordById,
+  logUserEvent,
+  onAppOpen,
+  onProfileCustomization,
+  shouldPurgeUserOnLogout,
+  unlockAchievementIfNeeded,
+});
 
-    if (data.name !== undefined) {
-      await c.env.fitloot_db
-        .prepare("UPDATE users SET name = ? WHERE id = ?")
-        .bind(data.name, user.id)
-        .run();
-    }
-    if (data.photo_url !== undefined) {
-      await c.env.fitloot_db
-        .prepare("UPDATE users SET avatar_url = ? WHERE id = ?")
-        .bind(data.photo_url || null, user.id)
-        .run();
-    }
-
-    await onProfileCustomization(c.env.fitloot_db, user.id, {
-      name_changed: data.name !== undefined,
-      photo_changed: data.photo_url !== undefined,
-    });
-
-    const updated = await getUserAuthRecordById(c.env.fitloot_db, user.id);
-    return c.json(updated ?? c.get("user"));
-  }
-);
-
-app.post(
-  "/api/users/plan",
+registerBillingRoutes(app, {
   authMiddleware,
-  zValidator("json", UserPlanRequestSchema),
-  async (c) => {
-    c.req.valid("json");
-    return c.json(
-      {
-        error: "Endpoint desativado para evitar atualização manual de plano. Use o fluxo de checkout.",
-        code: "PLAN_ENDPOINT_DISABLED",
-      },
-      410
-    );
-  }
-);
+  applyPromoCodeForUser,
+  getLatestSubscriptionByUser,
+  getUserAuthRecordById,
+  hasPlanAccess,
+  matchesVipActivationCode,
+  normalizePlanStatus,
+  normalizePromoCodeValue,
+  normalizePublicPlanIdFromValue,
+  normalizeUserPaymentMethod,
+  processCaktoWebhook,
+  resolveCheckoutAmount,
+  resolveCheckoutProductId,
+  resolveCheckoutUrl,
+  startCheckoutForUser,
+  validatePromoCodeRecord,
+  withTransaction,
+});
 
-app.post(
-  "/api/promo/validate",
-  zValidator("json", PromoCodeRequestSchema),
-  async (c) => {
-    const schemaReady = await hasCoreSchema(c.env.fitloot_db);
-    if (!schemaReady) {
-      return databaseNotInitializedResponse(c);
-    }
-
-    try {
-      const data = c.req.valid("json");
-      const promoValidation = await validatePromoCodeRecord(c.env.fitloot_db, data.code);
-
-      if (!promoValidation) {
-        return c.json({ valid: false, message: "Código inválido ou expirado" }, 200);
-      }
-
-      if (promoValidation.effect === "activate_vip" && !matchesVipActivationCode(c.env, normalizePromoCodeValue(data.code))) {
-        return c.json({ valid: false, message: "Código inválido ou expirado" }, 200);
-      }
-
-      return c.json({
-        valid: true,
-        description: promoValidation.description,
-        effect: promoValidation.effect,
-        effect_value: promoValidation.effectValue,
-      });
-    } catch (error) {
-      if (isMissingSchemaError(error)) {
-        return schemaMismatchResponse(c);
-      }
-
-      throw error;
-    }
-  }
-);
-
-app.post(
-  "/api/promo/apply",
+registerProfileRoutes(app, {
   authMiddleware,
-  zValidator("json", PromoCodeRequestSchema),
-  async (c) => {
-    const user = c.get("user");
-    if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-    try {
-      const data = c.req.valid("json");
-      const appliedPromo = await withTransaction(c.env.fitloot_db, async () => (
-        applyPromoCodeForUser(c.env.fitloot_db, c.env, {
-          userId: user.id,
-          code: data.code,
-          markOnboardingCompleted: Number(user.onboarding_completed) === 1,
-        })
-      ));
-
-      if (!appliedPromo) {
-        return c.json({ valid: false, message: "Código inválido ou expirado" }, 400);
-      }
-
-      const refreshedUser = await getUserAuthRecordById(c.env.fitloot_db, user.id);
-      return c.json({
-        success: true,
-        valid: true,
-        ...appliedPromo,
-        user: refreshedUser,
-      });
-    } catch (error) {
-      if (isMissingSchemaError(error)) {
-        return schemaMismatchResponse(c);
-      }
-
-      throw error;
-    }
-  }
-);
-
-app.post(
-  "/api/checkout/start",
-  authMiddleware,
-  zValidator("json", CheckoutStartRequestSchema),
-  async (c) => {
-    const user = c.get("user");
-    if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-    try {
-      const data = c.req.valid("json");
-      const checkoutResult = await withTransaction(c.env.fitloot_db, async () => (
-        startCheckoutForUser(c.env.fitloot_db, c.env, {
-          userId: user.id,
-          planId: data.plan_id,
-          paymentMethod: data.payment_method,
-          cardNumber: data.card_number,
-          cardHolderName: data.card_holder_name,
-          cardExpiry: data.card_expiry,
-          promoCode: data.promo_code,
-          markOnboardingCompleted: false,
-        })
-      ));
-
-      const refreshedUser = await getUserAuthRecordById(c.env.fitloot_db, user.id);
-
-      return c.json({
-        success: true,
-        ...checkoutResult,
-        user: refreshedUser,
-      });
-    } catch (error) {
-      if (isInvalidPromoCodeError(error)) {
-        return c.json({ error: "Código inválido ou expirado" }, 400);
-      }
-      if (isMissingSchemaError(error)) {
-        return schemaMismatchResponse(c);
-      }
-
-      throw error;
-    }
-  }
-);
-
-app.get("/api/subscription/status", authMiddleware, async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-  const [latestSubscription, refreshedUser] = await Promise.all([
-    getLatestSubscriptionByUser(c.env.fitloot_db, user.id),
-    getUserAuthRecordById(c.env.fitloot_db, user.id),
-  ]);
-
-  if (!refreshedUser) {
-    return c.json({ error: "Usuário não encontrado", code: "USER_NOT_FOUND" }, 404);
-  }
-
-  const effectivePublicPlanId =
-    normalizePublicPlanIdFromValue(latestSubscription?.plan_id ?? null) ??
-    (isPublicPlanId(refreshedUser.plan_id) ? refreshedUser.plan_id : null);
-  const currentPlanAmount = effectivePublicPlanId ? resolveCheckoutAmount(effectivePublicPlanId) : 0;
-  const checkoutUrl =
-    latestSubscription?.checkout_url ??
-    (effectivePublicPlanId ? resolveCheckoutUrl(effectivePublicPlanId) : null);
-  const productId =
-    latestSubscription?.product_id ??
-    (effectivePublicPlanId ? resolveCheckoutProductId(effectivePublicPlanId) : null);
-
-  return c.json({
-    plan_id: refreshedUser.plan_id,
-    plan_status: refreshedUser.plan_status,
-    payment_method: refreshedUser.payment_method,
-    has_access: Number(refreshedUser.onboarding_completed) === 1 && hasPlanAccess(refreshedUser.plan_id, refreshedUser.plan_status),
-    amount: latestSubscription ? Number(latestSubscription.amount) : currentPlanAmount,
-    checkout_url: checkoutUrl,
-    product_id: productId,
-    subscription: latestSubscription
-      ? {
-        id: latestSubscription.id,
-        status: normalizePlanStatus(latestSubscription.status),
-        payment_method: normalizeUserPaymentMethod(latestSubscription.payment_method),
-        amount: Number(latestSubscription.amount),
-        external_order_id: latestSubscription.external_order_id,
-        external_subscription_id: latestSubscription.external_subscription_id,
-        customer_email: latestSubscription.customer_email,
-        started_at: latestSubscription.started_at,
-        expires_at: latestSubscription.expires_at,
-        updated_at: latestSubscription.updated_at,
-      }
-      : null,
-  });
-});
-
-async function handleCaktoWebhookRequest(c: import("hono").Context<AppContext>) {
-  const rawBody = await c.req.text();
-
-  let payload: Record<string, unknown>;
-  try {
-    const parsed = JSON.parse(rawBody);
-    if (!isRecord(parsed)) {
-      return c.json({ received: true, ignored: true }, 200);
-    }
-    payload = parsed;
-  } catch {
-    return c.json({ received: true, ignored: true }, 200);
-  }
-
-  const configuredSecret =
-    (typeof c.env.CAKTO_WEBHOOK_SECRET === "string" && c.env.CAKTO_WEBHOOK_SECRET.trim()) ||
-    (typeof c.env.WEBHOOK_SECRET === "string" && c.env.WEBHOOK_SECRET.trim()) ||
-    "";
-  const receivedSecret = resolveWebhookSecret(payload, c.req.raw.headers);
-
-  if (configuredSecret && receivedSecret !== configuredSecret) {
-    return c.json({ error: "Unauthorized", code: "CAKTO_WEBHOOK_SECRET_INVALID" }, 401);
-  }
-
-  c.executionCtx.waitUntil(processCaktoWebhook(c, rawBody, payload));
-  return c.json({ received: true }, 200);
-}
-
-app.post("/api/cakto/webhook", async (c) => handleCaktoWebhookRequest(c));
-app.post("/api/webhook/payment", async (c) => handleCaktoWebhookRequest(c));
-
-app.get("/api/logout", async (c) => {
-  const sessionId = getSessionIdFromCookieHeader(c.req.header("Cookie"));
-  let accountReset = false;
-
-  if (sessionId) {
-    try {
-      const session = await c.env.fitloot_db
-        .prepare("SELECT user_id FROM sessions WHERE id = ?")
-        .bind(sessionId)
-        .first<{ user_id: string }>();
-
-      if (session?.user_id) {
-        const userRecord = await getUserAuthRecordById(c.env.fitloot_db, session.user_id);
-        if (userRecord && shouldPurgeUserOnLogout(userRecord)) {
-          await purgeUserAccountData(c.env.fitloot_db, session.user_id);
-          accountReset = true;
-        } else {
-          await c.env.fitloot_db
-            .prepare("DELETE FROM sessions WHERE id = ?")
-            .bind(sessionId)
-            .run();
-        }
-      } else {
-        await c.env.fitloot_db
-          .prepare("DELETE FROM sessions WHERE id = ?")
-          .bind(sessionId)
-          .run();
-      }
-    } catch (error) {
-      console.error("[/api/logout][cleanup]", {
-        message: getErrorMessage(error),
-      });
-      return c.json({ error: "Erro ao encerrar sessão", code: "LOGOUT_CLEANUP_FAILED" }, 500);
-    }
-  }
-
-  c.header(
-    "Set-Cookie",
-    generateExpiredSessionCookie(c.req.url)
-  );
-
-  return c.json({ success: true, account_reset: accountReset });
-});
-
-
-// User profile endpoints
-app.get("/api/profile", authMiddleware, async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-  try {
-    if (Number(user.onboarding_completed ?? 0) !== 1) {
-      return c.json({ error: "Perfil nao encontrado", code: "PROFILE_NOT_FOUND" }, 404);
-    }
-
-    const profile = await c.env.fitloot_db.prepare(
-      "SELECT * FROM user_profiles WHERE user_id = ?"
-    ).bind(user.id).first();
-
-    if (!profile) {
-      return c.json({ error: "Perfil nao encontrado", code: "PROFILE_NOT_FOUND" }, 404);
-    }
-
-    return c.json(profile);
-  } catch (error) {
-    console.error("[/api/profile]", {
-      message: getErrorMessage(error),
-      userId: user.id,
-    });
-
-    if (isMissingSchemaError(error)) {
-      return schemaMismatchResponse(c);
-    }
-
-    return internalErrorResponse(c);
-  }
-});
-
-app.post("/api/profile/customization", authMiddleware, async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-  const body = await c.req.json().catch(() => ({})) as Record<string, unknown>;
-  const customPrimaryColor = typeof body.custom_primary_color === 'string' ? body.custom_primary_color : null;
-  const customSecondaryColor = typeof body.custom_secondary_color === 'string' ? body.custom_secondary_color : null;
-  const customBackgroundType = typeof body.custom_background_type === 'string' ? body.custom_background_type : null;
-  const customBackgroundValue = typeof body.custom_background_value === 'string' ? body.custom_background_value : null;
-  const customFont = typeof body.custom_font === 'string' ? body.custom_font : null;
-  const customTitleId = Number.isFinite(Number(body.custom_title_id)) ? Number(body.custom_title_id) : null;
-  const showcasedAchievements = Array.isArray(body.showcased_achievements) ? JSON.stringify(body.showcased_achievements) : null;
-
-  await c.env.fitloot_db.prepare(
-    `UPDATE user_profiles SET
-      custom_primary_color = COALESCE(?, custom_primary_color),
-      custom_secondary_color = COALESCE(?, custom_secondary_color),
-      custom_background_type = COALESCE(?, custom_background_type),
-      custom_background_value = COALESCE(?, custom_background_value),
-      custom_font = COALESCE(?, custom_font),
-      custom_title_id = COALESCE(?, custom_title_id),
-      showcased_achievements = COALESCE(?, showcased_achievements),
-      updated_at = datetime('now')
-      WHERE user_id = ?`
-  ).bind(customPrimaryColor, customSecondaryColor, customBackgroundType, customBackgroundValue, customFont, customTitleId, showcasedAchievements, user.id).run();
-
-  await onProfileCustomization(c.env.fitloot_db, user.id, {
-    custom_primary_color: customPrimaryColor,
-    custom_secondary_color: customSecondaryColor,
-    custom_background_type: customBackgroundType,
-    custom_background_value: customBackgroundValue,
-    custom_font: customFont,
-    custom_title_id: customTitleId,
-    showcased_achievements: showcasedAchievements,
-  });
-
-  const done = [customPrimaryColor, customSecondaryColor, customBackgroundType, customBackgroundValue, customFont, customTitleId, showcasedAchievements]
-    .every((v) => v !== null && v !== undefined && v !== "");
-  if (done) {
-    await unlockAchievementIfNeeded(c.env.fitloot_db, user.id, "Mestre Artesão", 1, 1);
-  }
-
-  const profile = await c.env.fitloot_db.prepare("SELECT * FROM user_profiles WHERE user_id = ?").bind(user.id).first();
-  return c.json({ success: true, profile });
-});
-
-app.post("/api/profile/skill-focus", authMiddleware, async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-  const body = await c.req.json().catch(() => ({})) as { active_skill_focus?: string | undefined };
-  const focus = body.active_skill_focus === 'yoga' ? 'yoga' : 'calistenia';
-  await c.env.fitloot_db.prepare("UPDATE user_profiles SET active_skill_focus = ?, updated_at = datetime('now') WHERE user_id = ?")
-    .bind(focus, user.id).run();
-
-  return c.json({ success: true, active_skill_focus: focus });
-});
-
-app.post("/api/profile/goal", authMiddleware, async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-  const body = await c.req.json().catch(() => ({})) as { main_goal?: string | undefined };
-  const newGoal = String(body.main_goal ?? '').trim();
-  if (!newGoal) return c.json({ error: 'main_goal obrigatório' }, 400);
-
-  const current = await c.env.fitloot_db.prepare("SELECT main_goal FROM user_profiles WHERE user_id = ?").bind(user.id).first<{ main_goal: string | null }>();
-  const oldGoal = current?.main_goal ?? 'saude_geral';
-
-  await c.env.fitloot_db.prepare("UPDATE user_profiles SET main_goal = ?, updated_at = datetime('now') WHERE user_id = ?").bind(newGoal, user.id).run();
-  await ensureGoalStatsRow(c.env.fitloot_db, user.id, newGoal);
-
-  const stats = await c.env.fitloot_db.prepare("SELECT goal_change_count, original_goal, completed_goals FROM user_goal_stats WHERE user_id = ?").bind(user.id).first<{ goal_change_count: number; original_goal: string; completed_goals: string | null }>();
-  const changeCount = Number(stats?.goal_change_count ?? 0) + (oldGoal !== newGoal ? 1 : 0);
-  const completedGoals = new Set<string>(JSON.parse(stats?.completed_goals || '[]'));
-  if (oldGoal) completedGoals.add(oldGoal);
-
-  let returned = 0;
-  if ((stats?.original_goal ?? oldGoal) === newGoal && oldGoal !== newGoal) {
-    returned = 1;
-  }
-
-  await c.env.fitloot_db.prepare(`UPDATE user_goal_stats SET current_goal = ?, goal_change_count = ?, completed_goals = ?, returned_to_original_count = COALESCE(returned_to_original_count,0) + ?, missions_after_return = CASE WHEN ? = 1 THEN 0 ELSE missions_after_return END, updated_at = datetime('now') WHERE user_id = ?`)
-    .bind(newGoal, changeCount, JSON.stringify(Array.from(completedGoals)), returned, returned, user.id).run();
-
-  await onGoalChanged(c.env.fitloot_db, user.id, oldGoal, newGoal, changeCount);
-  if (completedGoals.size >= 5) await unlockAchievementIfNeeded(c.env.fitloot_db, user.id, 'A Jornada é o Destino', completedGoals.size, 5);
-
-  const [profileForRegeneration, planForRegeneration] = await Promise.all([
-    c.env.fitloot_db
-      .prepare("SELECT initial_conditioning, injuries, equipment FROM user_profiles WHERE user_id = ?")
-      .bind(user.id)
-      .first<{ initial_conditioning: string | null; injuries: string | null; equipment: string | null }>(),
-    c.env.fitloot_db
-      .prepare("SELECT training_frequency FROM user_training_plans WHERE user_id = ?")
-      .bind(user.id)
-      .first<{ training_frequency: number | null }>(),
-  ]);
-  const conditioning = normalizeConditioning(profileForRegeneration?.initial_conditioning);
-  const injuries = typeof profileForRegeneration?.injuries === "string" ? profileForRegeneration.injuries : "";
-  const equipment = typeof profileForRegeneration?.equipment === "string" ? profileForRegeneration.equipment : "";
-  const trainingFrequency = normalizeTrainingFrequencyInput(planForRegeneration?.training_frequency);
-  const refreshedPlan = await buildInitialTrainingPlan(newGoal, conditioning, equipment, injuries);
-  await upsertTrainingPlan(
-    c.env.fitloot_db,
-    user.id,
-    refreshedPlan as unknown as Record<string, unknown>,
-    newGoal,
-    conditioning,
-    equipment,
-    injuries,
-    trainingFrequency,
-  );
-
-  const dailyCycleStart = missionCycleStartIso("daily");
-  await c.env.fitloot_db.prepare(
-    `DELETE FROM missions
-      WHERE user_id = ?
-        AND type = 'daily'
-        AND is_completed = 0
-        AND COALESCE(mission_origin, 'regular') = 'regular'
-        AND datetime(created_at) >= datetime(?)`
-  ).bind(user.id, dailyCycleStart).run();
-  c.executionCtx.waitUntil((async () => {
-    try {
-      await createMissionsForPeriod(c.env, c.env.fitloot_db, user.id, "daily", MISSION_LIMITS.daily);
-      invalidateMissionListCache(user.id);
-    } catch (error) {
-      console.error("[/api/profile/goal][background-missions]", {
-        userId: user.id,
-        message: getErrorMessage(error),
-      });
-    }
-  })());
-
-  return c.json({ success: true, old_goal: oldGoal, new_goal: newGoal, change_count: changeCount });
-});
-
-type FeedbackKind = "Sugestao" | "Bug" | "Elogio" | "Outro";
-
-type FeedbackEmailPayload = {
-  kind: FeedbackKind;
-  message: string;
-  userName: string;
-  userUsername: string;
-  userEmail: string;
-  userLevel: number;
-  timestamp: string;
-};
-
-function normalizeFeedbackKind(raw: unknown): FeedbackKind {
-  const value = String(raw ?? "").trim().toLowerCase();
-  if (value === "sugestao" || value === "sugestão" || value === "suggestion") return "Sugestao";
-  if (value === "bug") return "Bug";
-  if (value === "elogio" || value === "praise") return "Elogio";
-  return "Outro";
-}
-
-function buildFeedbackEmailText(payload: FeedbackEmailPayload): string {
-  return [
-    `Tipo: ${payload.kind}`,
-    `Usuario: ${payload.userName} (@${payload.userUsername})`,
-    `Email: ${payload.userEmail}`,
-    `Nivel: ${payload.userLevel}`,
-    `Data: ${payload.timestamp}`,
-    "",
-    "Mensagem:",
-    payload.message,
-  ].join("\n");
-}
-
-async function sendFeedbackViaResend(env: Env, subject: string, textBody: string, replyTo: string): Promise<boolean> {
-  if (!env.RESEND_API_KEY) {
-    return false;
-  }
-
-  const fromAddress = env.FEEDBACK_FROM_EMAIL ?? "FitLoot <feedback@fitloot.app>";
-  const response = await fetchResponseWithTimeout("https://api.resend.com/emails", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${env.RESEND_API_KEY}`,
-    },
-    body: JSON.stringify({
-      from: fromAddress,
-      to: ["suportefitloot@gmail.com"],
-      subject,
-      text: textBody,
-      reply_to: replyTo,
-    }),
-  }, 8_000);
-
-  if (!response.ok) {
-    const reason = await response.text();
-    throw new Error(`resend-failed:${response.status}:${reason}`);
-  }
-
-  return true;
-}
-
-async function sendFeedbackViaMailChannels(subject: string, textBody: string, payload: FeedbackEmailPayload, env: Env): Promise<void> {
-  const fromAddress = env.FEEDBACK_FROM_EMAIL ?? "feedback@fitloot.app";
-  const response = await fetchResponseWithTimeout("https://api.mailchannels.net/tx/v1/send", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      personalizations: [
-        {
-          to: [{ email: "suportefitloot@gmail.com", name: "FitLoot Suporte" }],
-        },
-      ],
-      from: {
-        email: fromAddress,
-        name: "FitLoot Feedback",
-      },
-      reply_to: {
-        email: payload.userEmail,
-        name: payload.userName,
-      },
-      subject,
-      content: [
-        {
-          type: "text/plain",
-          value: textBody,
-        },
-      ],
-    }),
-  }, 8_000);
-
-  if (!response.ok) {
-    const reason = await response.text();
-    throw new Error(`mailchannels-failed:${response.status}:${reason}`);
-  }
-}
-
-app.post("/api/feedback", authMiddleware, async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-  try {
-    const body = await c.req.json().catch(() => ({})) as { type?: unknown; message?: unknown };
-    const kind = normalizeFeedbackKind(body.type);
-    const message = String(body.message ?? "").trim();
-
-    if (message.length < 5) {
-      return c.json({ error: "Escreva uma mensagem com pelo menos 5 caracteres." }, 400);
-    }
-
-    const [profile, progression] = await Promise.all([
-      c.env.fitloot_db
-        .prepare("SELECT full_name, username FROM user_profiles WHERE user_id = ?")
-        .bind(user.id)
-        .first<{ full_name: string | null; username: string | null }>(),
-      c.env.fitloot_db
-        .prepare("SELECT level FROM user_progression WHERE user_id = ?")
-        .bind(user.id)
-        .first<{ level: number | null }>(),
-    ]);
-
-    const feedbackPayload: FeedbackEmailPayload = {
-      kind,
-      message,
-      userName: profile?.full_name ?? user.name,
-      userUsername: profile?.username ?? user.email.split("@")[0],
-      userEmail: user.email,
-      userLevel: Number(progression?.level ?? 1),
-      timestamp: new Date().toISOString(),
-    };
-
-    const subject = `[FitLoot Feedback] ${feedbackPayload.kind} - ${feedbackPayload.userName}`;
-    const textBody = buildFeedbackEmailText(feedbackPayload);
-
-    let provider: "resend" | "mailchannels" = "mailchannels";
-
-    try {
-      const sentByResend = await sendFeedbackViaResend(c.env, subject, textBody, feedbackPayload.userEmail);
-      if (sentByResend) {
-        provider = "resend";
-      } else {
-        await sendFeedbackViaMailChannels(subject, textBody, feedbackPayload, c.env);
-      }
-    } catch (primaryError) {
-      console.warn("[/api/feedback][primary-provider-failed]", {
-        message: getErrorMessage(primaryError),
-      });
-      await sendFeedbackViaMailChannels(subject, textBody, feedbackPayload, c.env);
-      provider = "mailchannels";
-    }
-
-    return c.json({ success: true, provider });
-  } catch (error) {
-    console.error("[/api/feedback]", {
-      message: getErrorMessage(error),
-      userId: user.id,
-    });
-    return c.json({ error: "Nao foi possivel enviar o feedback agora." }, 500);
-  }
-});
-
-app.post("/api/onboarding", authMiddleware, zValidator("json", OnboardingRequestSchema), async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-  const data = c.req.valid("json");
-  await ensureGamificationCatalog(c.env.fitloot_db);
-
-  const selectedGoals = Array.from(
-    new Set(
-      (Array.isArray(data.goals) && data.goals.length > 0 ? data.goals : [data.main_goal])
-        .map((item) => String(item).trim())
-        .filter((item) => item.length > 0),
-    ),
-  );
-  const username = data.username.trim();
-  const fullName = data.full_name.trim();
-  const primaryGoal = selectedGoals[0] ?? data.main_goal;
-  const trainingFrequency = normalizeTrainingFrequencyInput(data.training_frequency);
-  const goalsJson = JSON.stringify(selectedGoals);
-
-  if (username.length < 3 || fullName.length === 0) {
-    return c.json({ error: "Dados de identidade invalidos" }, 400);
-  }
-
-  const existingUsername = await c.env.fitloot_db.prepare(
-    "SELECT user_id FROM user_profiles WHERE username = ? LIMIT 1"
-  ).bind(username).first<{ user_id: string | null }>();
-
-  if (existingUsername?.user_id && existingUsername.user_id !== user.id) {
-    return c.json({ error: "Username already taken" }, 400);
-  }
-
-  let initialAttrs = { strength: 10, constitution: 10, vitality: 10, dexterity: 10, focus: 10 };
-  if (data.initial_conditioning === "iniciante") {
-    initialAttrs = { strength: 15, constitution: 15, vitality: 15, dexterity: 12, focus: 12 };
-  } else if (data.initial_conditioning === "intermediario") {
-    initialAttrs = { strength: 25, constitution: 25, vitality: 25, dexterity: 20, focus: 20 };
-  } else if (data.initial_conditioning === "avancado") {
-    initialAttrs = { strength: 40, constitution: 40, vitality: 40, dexterity: 35, focus: 35 };
-  }
-
-  initialAttrs.strength += Math.floor(data.initial_pushups / 5);
-  initialAttrs.constitution += Math.floor(data.initial_situps / 5);
-  initialAttrs.vitality += Math.floor(data.initial_squats / 5);
-
-  const conditioning = data.initial_conditioning as ConditioningLevel;
-  const maxTier = conditioningOrder(conditioning);
-  const [hasInitialPushupsColumn, hasInitialSitupsColumn, hasInitialSquatsColumn] = await Promise.all([
-    hasTableColumn(c.env.fitloot_db, "user_profiles", "initial_pushups"),
-    hasTableColumn(c.env.fitloot_db, "user_profiles", "initial_situps"),
-    hasTableColumn(c.env.fitloot_db, "user_profiles", "initial_squats"),
-  ]);
-  let checkoutResult: CheckoutStartResult | undefined;
-  try {
-    await withTransaction(c.env.fitloot_db, async () => {
-      const profileColumns = [
-        "user_id",
-        "username",
-        "full_name",
-        "weight",
-        "height",
-        "initial_conditioning",
-        "injuries",
-        "equipment",
-        "main_goal",
-        "age",
-        "gender",
-        "goals_json",
-        "updated_at",
-      ];
-      const profileValues: unknown[] = [
-        user.id,
-        username,
-        fullName,
-        data.weight,
-        data.height,
-        data.initial_conditioning,
-        data.injuries || "",
-        data.equipment || "",
-        primaryGoal,
-        data.age,
-        data.gender,
-        goalsJson,
-      ];
-      const profilePlaceholders = ["?", "?", "?", "?", "?", "?", "?", "?", "?", "?", "?", "?", "datetime('now')"];
-      const profileUpdates = [
-        "username = excluded.username",
-        "full_name = excluded.full_name",
-        "weight = excluded.weight",
-        "height = excluded.height",
-        "initial_conditioning = excluded.initial_conditioning",
-        "injuries = excluded.injuries",
-        "equipment = excluded.equipment",
-        "main_goal = excluded.main_goal",
-        "age = excluded.age",
-        "gender = excluded.gender",
-        "goals_json = excluded.goals_json",
-        "updated_at = datetime('now')",
-      ];
-
-      if (hasInitialPushupsColumn) {
-        profileColumns.splice(profileColumns.length - 1, 0, "initial_pushups");
-        profilePlaceholders.splice(profilePlaceholders.length - 1, 0, "?");
-        profileValues.push(data.initial_pushups);
-        profileUpdates.splice(profileUpdates.length - 1, 0, "initial_pushups = excluded.initial_pushups");
-      }
-      if (hasInitialSitupsColumn) {
-        profileColumns.splice(profileColumns.length - 1, 0, "initial_situps");
-        profilePlaceholders.splice(profilePlaceholders.length - 1, 0, "?");
-        profileValues.push(data.initial_situps);
-        profileUpdates.splice(profileUpdates.length - 1, 0, "initial_situps = excluded.initial_situps");
-      }
-      if (hasInitialSquatsColumn) {
-        profileColumns.splice(profileColumns.length - 1, 0, "initial_squats");
-        profilePlaceholders.splice(profilePlaceholders.length - 1, 0, "?");
-        profileValues.push(data.initial_squats);
-        profileUpdates.splice(profileUpdates.length - 1, 0, "initial_squats = excluded.initial_squats");
-      }
-
-      await c.env.fitloot_db.prepare(
-        `INSERT INTO user_profiles (${profileColumns.join(", ")})
-         VALUES (${profilePlaceholders.join(", ")})
-         ON CONFLICT(user_id) DO UPDATE SET ${profileUpdates.join(", ")}`
-      ).bind(...profileValues).run();
-
-      await c.env.fitloot_db.prepare(
-        `INSERT INTO user_attributes (user_id, strength, constitution, vitality, dexterity, focus, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
-        ON CONFLICT(user_id) DO UPDATE SET
-          strength = excluded.strength,
-          constitution = excluded.constitution,
-          vitality = excluded.vitality,
-          dexterity = excluded.dexterity,
-          focus = excluded.focus,
-          updated_at = datetime('now')`
-      ).bind(user.id, initialAttrs.strength, initialAttrs.constitution, initialAttrs.vitality, initialAttrs.dexterity, initialAttrs.focus).run();
-
-      await c.env.fitloot_db.prepare(
-        `INSERT OR IGNORE INTO user_progression (user_id, xp, level, points, current_streak, best_streak, updated_at)
-        VALUES (?, 0, 1, 0, 0, 0, datetime('now'))`
-      ).bind(user.id).run();
-
-      const initialSkills = await c.env.fitloot_db.prepare(
-        `SELECT id, tier, level_required FROM skills`
-      ).all<{ id: number; tier: string; level_required: number }>();
-
-      for (const skill of initialSkills.results) {
-        if (skillTierOrder(skill.tier) <= Math.max(1, maxTier) && Number(skill.level_required ?? 1) <= 1) {
-          await c.env.fitloot_db.prepare(
-            `INSERT OR IGNORE INTO user_skills (user_id, skill_id, status, current_stage, total_reps, total_time, best_reps, unlocked_at, updated_at)
-            VALUES (?, ?, 'unlocked', 1, 0, 0, 0, datetime('now'), datetime('now'))`
-          ).bind(user.id, skill.id).run();
-        }
-      }
-
-      const plan = await buildInitialTrainingPlan(primaryGoal, conditioning, data.equipment ?? null, data.injuries ?? null);
-      await upsertTrainingPlan(
-        c.env.fitloot_db,
-        user.id,
-        plan,
-        primaryGoal,
-        conditioning,
-        data.equipment ?? null,
-        data.injuries ?? null,
-        trainingFrequency,
-      );
-
-      checkoutResult = await startCheckoutForUser(c.env.fitloot_db, c.env, {
-        userId: user.id,
-        planId: data.plan_id,
-        paymentMethod: data.payment_method,
-        cardNumber: data.card_number,
-        cardHolderName: data.card_holder_name,
-        cardExpiry: data.card_expiry,
-        promoCode: data.promo_code,
-        markOnboardingCompleted: false,
-      });
-
-      await ensureGoalStatsRow(c.env.fitloot_db, user.id, primaryGoal);
-      await ensureUserCounterRow(c.env.fitloot_db, user.id);
-      await logUserEvent(c.env.fitloot_db, user.id, "onboarding_submitted", {
-        conditioning,
-        main_goal: primaryGoal,
-        goals: selectedGoals,
-        training_frequency: trainingFrequency,
-        plan_id: checkoutResult.plan_id,
-        plan_status: checkoutResult.plan_status,
-        amount: checkoutResult.amount,
-      });
-      await evaluateLevelTitles(c.env.fitloot_db, user.id, 1);
-    });
-  } catch (error) {
-    if (isInvalidPromoCodeError(error)) {
-      return c.json({ error: "Código inválido ou expirado" }, 400);
-    }
-    if (isMissingSchemaError(error)) {
-      return schemaMismatchResponse(c);
-    }
-
-    throw error;
-  }
-
-  if (!checkoutResult) {
-    throw new Error("Checkout result missing after onboarding transaction.");
-  }
-
-  c.executionCtx.waitUntil((async () => {
-    try {
-      await ensurePeriodicMissions(c.env, c.env.fitloot_db, user.id);
-      invalidateMissionListCache(user.id);
-    } catch (error) {
-      console.error("[/api/onboarding][background-missions]", {
-        userId: user.id,
-        message: getErrorMessage(error),
-      });
-    }
-  })());
-
-  return c.json({ success: true, plan_created: true, ...checkoutResult }, 201);
+  buildInitialTrainingPlan,
+  conditioningOrder,
+  createMissionsForPeriod,
+  ensureGamificationCatalog,
+  ensureGoalStatsRow,
+  ensurePeriodicMissions,
+  ensureUserCounterRow,
+  evaluateLevelTitles,
+  fetchResponseWithTimeout,
+  invalidateMissionListCache,
+  logUserEvent,
+  missionCycleStartIso,
+  normalizeConditioning,
+  normalizeTrainingFrequencyInput,
+  onGoalChanged,
+  onProfileCustomization,
+  startCheckoutForUser,
+  skillTierOrder,
+  unlockAchievementIfNeeded,
+  upsertTrainingPlan,
+  withTransaction,
 });
 
 // Progression endpoints
-app.get("/api/progression", authMiddleware, async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-  try {
-    let progression = await c.env.fitloot_db.prepare(
-      "SELECT * FROM user_progression WHERE user_id = ?"
-    ).bind(user.id).first<Record<string, unknown>>();
-
-    if (!progression) {
-      await c.env.fitloot_db.prepare(
-        `INSERT INTO user_progression (user_id, xp, level, points, current_streak, best_streak, updated_at)
-        VALUES (?, 0, 1, 0, 0, 0, datetime('now'))`
-      ).bind(user.id).run();
-
-      progression = await c.env.fitloot_db.prepare(
-        "SELECT * FROM user_progression WHERE user_id = ?"
-      ).bind(user.id).first<Record<string, unknown>>();
-    }
-
-    if (!progression) {
-      return c.json({ error: "Progress?o n?o encontrada", code: "PROGRESSION_NOT_FOUND" }, 404);
-    }
-
-    const beforeReconcile = parseProgressionXpLevel(progression);
-    const overflowPreview = computeXpAndLevelAfterGain(beforeReconcile.xp, beforeReconcile.level, 0);
-    let celebrateLevel: number | undefined;
-    if (overflowPreview.levelsGained > 0) {
-      const applied = await applyXpPointsAndResolveLevels(c.env.fitloot_db, user.id, 0, 0);
-      celebrateLevel = applied.newLevel;
-      const refreshed = await c.env.fitloot_db
-        .prepare("SELECT * FROM user_progression WHERE user_id = ?")
-        .bind(user.id)
-        .first<Record<string, unknown>>();
-      if (refreshed) {
-        progression = refreshed;
-      }
-    }
-
-    return c.json({
-      ...progression,
-      ...(typeof celebrateLevel === "number" && celebrateLevel > 0 ? { celebrate_level: celebrateLevel } : {}),
-    });
-  } catch (error) {
-    console.error("[/api/progression]", {
-      message: getErrorMessage(error),
-      userId: user.id,
-    });
-
-    if (isMissingSchemaError(error)) {
-      return schemaMismatchResponse(c);
-    }
-
-    return internalErrorResponse(c);
-  }
-});
-
-app.get("/api/attributes", authMiddleware, async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-  const attributes = await c.env.fitloot_db.prepare(
-    "SELECT * FROM user_attributes WHERE user_id = ?"
-  ).bind(user.id).first();
-
-  return c.json(attributes);
-});
-
-// Progress snapshots endpoints
-app.post("/api/progress/snapshot", authMiddleware, async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-  try {
-    // Obter estado atual do usuário
-    const [progression, attributes, missionsCompleted] = await Promise.all([
-      c.env.fitloot_db.prepare("SELECT * FROM user_progression WHERE user_id = ?").bind(user.id).first(),
-      c.env.fitloot_db.prepare("SELECT * FROM user_attributes WHERE user_id = ?").bind(user.id).first(),
-      c.env.fitloot_db.prepare(
-        "SELECT COUNT(*) as count FROM missions WHERE user_id = ? AND is_completed = 1"
-      ).bind(user.id).first<{ count: number }>()
-    ]);
-
-    if (!progression || !attributes) {
-      return c.json({ error: "Dados do usuário não encontrados" }, 404);
-    }
-
-    // Inserir snapshot com INSERT OR IGNORE
-    const result = await c.env.fitloot_db.prepare(`
-      INSERT OR IGNORE INTO progress_snapshots 
-      (user_id, level, xp, strength, constitution, vitality, dexterity, focus, missions_completed, streak)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).bind(
-      user.id,
-      progression.level,
-      progression.xp,
-      attributes.strength,
-      attributes.constitution,
-      attributes.vitality,
-      attributes.dexterity,
-      attributes.focus,
-      missionsCompleted?.count || 0,
-      progression.current_streak
-    ).run();
-
-    // Se o snapshot já existia, buscar o existente
-    if (result.meta.changes === 0) {
-      const existingSnapshot = await c.env.fitloot_db.prepare(
-        "SELECT * FROM progress_snapshots WHERE user_id = ? AND snapshot_date = date('now')"
-      ).bind(user.id).first();
-
-      return c.json({ snapshot: existingSnapshot, status: "existing" });
-    }
-
-    // Buscar o snapshot recém-criado
-    const newSnapshot = await c.env.fitloot_db.prepare(
-      "SELECT * FROM progress_snapshots WHERE id = ?"
-    ).bind(result.meta.last_row_id).first();
-
-    return c.json({ snapshot: newSnapshot, status: "created" });
-  } catch (error) {
-    console.error("[/api/progress/snapshot]", error);
-    return internalErrorResponse(c);
-  }
-});
-
-app.get("/api/progress/snapshots", authMiddleware, async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-  try {
-    const snapshots = await c.env.fitloot_db.prepare(`
-      SELECT * FROM progress_snapshots 
-      WHERE user_id = ? 
-      ORDER BY snapshot_date DESC 
-      LIMIT 30
-    `).bind(user.id).all();
-
-    return c.json({ snapshots: snapshots.results });
-  } catch (error) {
-    console.error("[/api/progress/snapshots]", error);
-    return internalErrorResponse(c);
-  }
-});
-
-// Physical benchmarks endpoints
-app.post("/api/benchmarks", authMiddleware, async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-  try {
-    const body = await c.req.json();
-    const {
-      pushups_max,
-      squats_max,
-      situps_max,
-      plank_seconds,
-      pullups_max,
-      run_distance_km,
-      run_time_seconds,
-      notes
-    } = body;
-
-    // Obter benchmark anterior para calcular delta
-    const previousBenchmark = await c.env.fitloot_db.prepare(`
-      SELECT * FROM physical_benchmarks 
-      WHERE user_id = ? 
-      ORDER BY test_date DESC 
-      LIMIT 1
-    `).bind(user.id).first<PhysicalBenchmarkRow>();
-
-    // Inserir novo benchmark
-    const result = await c.env.fitloot_db.prepare(`
-      INSERT INTO physical_benchmarks 
-      (user_id, pushups_max, squats_max, situps_max, plank_seconds, pullups_max, run_distance_km, run_time_seconds, notes)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).bind(
-      user.id,
-      pushups_max || null,
-      squats_max || null,
-      situps_max || null,
-      plank_seconds || null,
-      pullups_max || null,
-      run_distance_km || null,
-      run_time_seconds || null,
-      notes || null
-    ).run();
-
-    // Calcular delta de evolução
-    const delta: PhysicalBenchmarkDelta = previousBenchmark ? {
-      pushups_delta: (pushups_max || 0) - (previousBenchmark.pushups_max || 0),
-      squats_delta: (squats_max || 0) - (previousBenchmark.squats_max || 0),
-      situps_delta: (situps_max || 0) - (previousBenchmark.situps_max || 0),
-      plank_delta: (plank_seconds || 0) - (previousBenchmark.plank_seconds || 0),
-      pullups_delta: (pullups_max || 0) - (previousBenchmark.pullups_max || 0),
-      run_distance_delta: (run_distance_km || 0) - (previousBenchmark.run_distance_km || 0),
-      run_time_delta: (run_time_seconds || 0) - (previousBenchmark.run_time_seconds || 0)
-    } : {
-      pushups_delta: pushups_max || 0,
-      squats_delta: squats_max || 0,
-      situps_delta: situps_max || 0,
-      plank_delta: plank_seconds || 0,
-      pullups_delta: pullups_max || 0,
-      run_distance_delta: run_distance_km || 0,
-      run_time_delta: run_time_seconds || 0
-    };
-
-    // Atualizar atributos do usuário com base nos novos valores
-    const attributeUpdates = [];
-    const attributeValues = [];
-
-    if (pushups_max && pushups_max > 0) {
-      attributeUpdates.push("strength = strength + ?");
-      attributeValues.push(Math.floor(pushups_max / 5)); // +1 strength a cada 5 flexões
-    }
-
-    if (squats_max && squats_max > 0) {
-      attributeUpdates.push("vitality = vitality + ?");
-      attributeValues.push(Math.floor(squats_max / 5)); // +1 vitality a cada 5 agachamentos
-    }
-
-    if (situps_max && situps_max > 0) {
-      attributeUpdates.push("focus = focus + ?");
-      attributeValues.push(Math.floor(situps_max / 5)); // +1 focus a cada 5 abdominais
-    }
-
-    if (plank_seconds && plank_seconds > 0) {
-      attributeUpdates.push("dexterity = dexterity + ?");
-      attributeValues.push(Math.floor(plank_seconds / 30)); // +1 dexterity a cada 30 segundos
-    }
-
-    if (pullups_max && pullups_max > 0) {
-      attributeUpdates.push("strength = strength + ?");
-      attributeValues.push(pullups_max * 2); // +2 strength por barra (mais difícil)
-    }
-
-    if (run_distance_km && run_distance_km > 0) {
-      attributeUpdates.push("constitution = constitution + ?");
-      attributeValues.push(Math.floor(run_distance_km * 2)); // +1 constitution por 0.5km
-    }
-
-    if (attributeUpdates.length > 0) {
-      const updateQuery = `UPDATE user_attributes SET ${attributeUpdates.join(", ")}, updated_at = datetime('now') WHERE user_id = ?`;
-      await c.env.fitloot_db.prepare(updateQuery).bind(...attributeValues, user.id).run();
-    }
-
-    // Buscar o benchmark recém-criado
-    const newBenchmark = await c.env.fitloot_db.prepare(
-      "SELECT * FROM physical_benchmarks WHERE id = ?"
-    ).bind(result.meta.last_row_id).first<PhysicalBenchmarkRow>();
-
-    return c.json({ 
-      benchmark: newBenchmark, 
-      delta,
-      attributes_updated: attributeUpdates.length > 0
-    });
-  } catch (error) {
-    console.error("[/api/benchmarks]", error);
-    return internalErrorResponse(c);
-  }
-});
-
-app.get("/api/benchmarks", authMiddleware, async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-  try {
-    const benchmarks = await c.env.fitloot_db.prepare(`
-      SELECT * FROM physical_benchmarks 
-      WHERE user_id = ? 
-      ORDER BY test_date DESC
-    `).bind(user.id).all<PhysicalBenchmarkRow>();
-
-    // Calcular delta entre registros consecutivos
-    const results = benchmarks.results.map<PhysicalBenchmarkWithDelta>((benchmark, index) => {
-      if (index === 0) {
-        return { ...benchmark, delta: null };
-      }
-
-      const previous = benchmarks.results[index - 1];
-      const delta: PhysicalBenchmarkDelta = {
-        pushups_delta: (benchmark.pushups_max || 0) - (previous.pushups_max || 0),
-        squats_delta: (benchmark.squats_max || 0) - (previous.squats_max || 0),
-        situps_delta: (benchmark.situps_max || 0) - (previous.situps_max || 0),
-        plank_delta: (benchmark.plank_seconds || 0) - (previous.plank_seconds || 0),
-        pullups_delta: (benchmark.pullups_max || 0) - (previous.pullups_max || 0),
-        run_distance_delta: (benchmark.run_distance_km || 0) - (previous.run_distance_km || 0),
-        run_time_delta: (benchmark.run_time_seconds || 0) - (previous.run_time_seconds || 0)
-      };
-
-      return { ...benchmark, delta };
-    });
-
-    return c.json({ benchmarks: results });
-  } catch (error) {
-    console.error("[/api/benchmarks]", error);
-    return internalErrorResponse(c);
-  }
-});
-
-// Skills endpoints
-app.get("/api/skills", authMiddleware, async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-  const userSkills = await c.env.fitloot_db.prepare(
-    `SELECT s.*, us.total_reps, us.total_time, us.best_reps, us.unlocked_at, us.status, us.current_stage,
-      (SELECT COUNT(*) FROM skill_stages ss WHERE ss.skill_id = s.id) as total_stages
-    FROM skills s
-    INNER JOIN user_skills us ON s.id = us.skill_id
-    WHERE us.user_id = ?
-    ORDER BY COALESCE(s.level_required, s.required_level), s.id`
-  ).bind(user.id).all();
-
-  return c.json(userSkills.results);
-});
-
-app.get("/api/skills/available", authMiddleware, async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-  const progression = await c.env.fitloot_db.prepare(
-    "SELECT level FROM user_progression WHERE user_id = ?"
-  ).bind(user.id).first();
-
-  const availableSkills = await c.env.fitloot_db.prepare(
-    `SELECT s.* FROM skills s
-    WHERE COALESCE(s.level_required, s.required_level) <= ?
-    AND s.id NOT IN (SELECT skill_id FROM user_skills WHERE user_id = ?)
-    ORDER BY COALESCE(s.level_required, s.required_level), s.id`
-  ).bind(progression?.level || 1, user.id).all();
-
-  return c.json(availableSkills.results);
-});
-
-app.post("/api/skills/:id/stage/complete", authMiddleware, async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-  const skillId = Number(c.req.param("id"));
-  if (!Number.isFinite(skillId)) return c.json({ error: "Invalid skill" }, 400);
-
-  const [progression, skillProgress] = await Promise.all([
-    c.env.fitloot_db.prepare("SELECT level FROM user_progression WHERE user_id = ?").bind(user.id).first<{ level: number }>(),
-    c.env.fitloot_db.prepare("SELECT current_stage FROM user_skills WHERE user_id = ? AND skill_id = ?").bind(user.id, skillId).first<{ current_stage: number }>(),
-  ]);
-
-  if (!skillProgress) return c.json({ error: "Skill not unlocked" }, 404);
-
-  const nextStage = Number(skillProgress.current_stage ?? 0) + 1;
-  const stageData = await c.env.fitloot_db.prepare(
-    "SELECT * FROM skill_stages WHERE skill_id = ? AND stage_number = ?"
-  ).bind(skillId, nextStage).first<{ level_required: number; stage_number: number }>();
-
-  if (!stageData) return c.json({ error: "No next stage" }, 400);
-  if (Number(progression?.level ?? 1) < Number(stageData.level_required ?? 1)) {
-    return c.json({ error: "Nível insuficiente para esta etapa" }, 400);
-  }
-
-  await c.env.fitloot_db.prepare(
-    "UPDATE user_skills SET current_stage = ?, status = 'in_progress', updated_at = datetime('now') WHERE user_id = ? AND skill_id = ?"
-  ).bind(nextStage, user.id, skillId).run();
-
-  if (nextStage >= 6) {
-    await c.env.fitloot_db.prepare(
-      "UPDATE user_skills SET status = 'unlocked', updated_at = datetime('now') WHERE user_id = ? AND skill_id = ?"
-    ).bind(user.id, skillId).run();
-
-    const skill = await c.env.fitloot_db.prepare("SELECT name FROM skills WHERE id = ?").bind(skillId).first<{ name: string }>();
-    const titleBySkill: Record<string, string> = {
-      Handstand: "O Equilibrista",
-      "Muscle Up": "Acima de Todos",
-      Planche: "Força Gravitacional",
-      "Human Flag": "Bandeira Humana",
-      "Front Lever": "Suspenso no Tempo",
-    };
-    const title = titleBySkill[skill?.name ?? ""];
-    if (title) await unlockTitleIfNeeded(c.env.fitloot_db, user.id, title);
-
-    if (skill?.name === "Handstand") {
-      await unlockAchievementIfNeeded(c.env.fitloot_db, user.id, "Mestre do Equilíbrio", 6, 6);
-    }
-  }
-
-  return c.json({ success: true, current_stage: nextStage });
+registerProgressionRoutes(app, {
+  authMiddleware,
+  applyXpPointsAndResolveLevels,
+  computeXpAndLevelAfterGain,
+  parseProgressionXpLevel,
+  unlockAchievementIfNeeded,
+  unlockTitleIfNeeded,
 });
 
 // Missions endpoints
@@ -5603,7 +4047,7 @@ function createMissionRefreshPromise(
   const refreshPromise = (async () => {
     try {
       await runMissionRefreshStepSafely(userId, "repair_legacy_periodic", () =>
-        repairLegacyPeriodicMissions(env, db, userId),
+        missionPlanPersistenceService.repairLegacyPeriodicMissions(env, db, userId),
       );
       if (mode === "full") {
         await runMissionRefreshStepSafely(userId, "ensure_periodic", () =>
@@ -6720,863 +5164,107 @@ async function repairLegacyDailyMissionMetadata(
   }
 }
 
-app.get("/api/missions", authMiddleware, async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
 
-  try {
-    const forceRefresh = c.req.query("refresh") === "1";
-    if (forceRefresh) {
-      clearMissionListCache(user.id);
-    }
 
-    schedulePeriodicMissionsRefreshWithGuard(c.env, c.env.fitloot_db, user.id, c.executionCtx, "safe");
-    scheduleLegacyDailyMetadataRepairWithGuard(c.env, c.env.fitloot_db, user.id, c.executionCtx);
-    schedulePeriodicProgressRecomputeWithGuard(user.id, c.env.fitloot_db, c.executionCtx);
-
-    const cached = !forceRefresh ? readMissionListCache(user.id) : null;
-    if (!forceRefresh && cached) {
-      return streamJsonArrayResponse(cached);
-    }
-
-    if (!forceRefresh) {
-      const refreshedCache = readMissionListCache(user.id);
-      if (refreshedCache) {
-        return streamJsonArrayResponse(refreshedCache);
-      }
-    }
-
-    let missions;
-    try {
-      missions = await c.env.fitloot_db.prepare(
-        `SELECT m.*, s.name as skill_name FROM missions m
-        LEFT JOIN skills s ON m.skill_id = s.id
-        WHERE m.user_id = ?
-        AND (
-          (m.is_completed = 0 AND (m.deadline IS NULL OR m.deadline > datetime('now')))
-          OR (m.is_completed = 1 AND datetime(COALESCE(m.completed_at, m.updated_at)) >= datetime('now', '-30 day'))
-          OR (COALESCE(m.status,'pending') IN ('failed', 'expired') AND date(m.updated_at) >= date('now', '-3 day'))
-        )
-        ORDER BY CASE m.type WHEN 'daily' THEN 1 WHEN 'weekly' THEN 2 WHEN 'monthly' THEN 3 ELSE 4 END, m.created_at DESC
-        LIMIT 240`
-      ).bind(user.id).all();
-    } catch (statusQueryError) {
-      const message = getErrorMessage(statusQueryError).toLowerCase();
-      const missingStatusColumn = message.includes("no such column") && message.includes("status");
-      if (!missingStatusColumn) {
-        throw statusQueryError;
-      }
-
-      missions = await c.env.fitloot_db.prepare(
-        `SELECT m.*, s.name as skill_name FROM missions m
-        LEFT JOIN skills s ON m.skill_id = s.id
-        WHERE m.user_id = ?
-        AND (
-          (m.is_completed = 0 AND (m.deadline IS NULL OR m.deadline > datetime('now')))
-          OR (m.is_completed = 1 AND datetime(COALESCE(m.completed_at, m.updated_at)) >= datetime('now', '-30 day'))
-        )
-        ORDER BY CASE m.type WHEN 'daily' THEN 1 WHEN 'weekly' THEN 2 WHEN 'monthly' THEN 3 ELSE 4 END, m.created_at DESC
-        LIMIT 240`
-      ).bind(user.id).all();
-    }
-
-    const missionList = await hydrateMissionRowsWithSubtasks(
-      c.env.fitloot_db,
-      (Array.isArray(missions.results) ? missions.results : []) as Record<string, unknown>[],
-    );
-    const monthlyCounters = await getMonthlyCounters(c.env.fitloot_db, user.id);
-    const withProgress = missionList.map((row) => {
-      const rawMission = row as Record<string, unknown>;
-      const normalizedMission = normalizeMissionRow(rawMission);
-      const isMonthly = rawMission.type === "monthly";
-      if (!isMonthly) return normalizedMission;
-      if (normalizedMission.circuit_tasks.length > 0 && normalizedMission.progress_value !== undefined) {
-        return normalizedMission;
-      }
-
-      const isCompleted = Number(rawMission.is_completed ?? 0) === 1;
-      return {
-        ...normalizedMission,
-        progress_value: isCompleted
-          ? Number(normalizedMission.metric_value ?? 1)
-          : monthlyMissionProgressValue(rawMission, monthlyCounters),
-      };
-    });
-    const summaries = withProgress.map((mission) => missionSummaryFromNormalized(mission as NormalizedMissionRow));
-    writeMissionListCache(user.id, summaries);
-    return streamJsonArrayResponse(summaries);
-  } catch (error) {
-    console.error("[/api/missions]", {
-      message: getErrorMessage(error),
-      userId: user.id,
-    });
-
-    if (isMissingSchemaError(error)) {
-      return schemaMismatchResponse(c);
-    }
-
-    return internalErrorResponse(c);
-  }
-});
-
-app.get("/api/missions/:id", authMiddleware, async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-  const missionId = Number(c.req.param("id"));
-  if (!Number.isInteger(missionId) || missionId <= 0) {
-    return c.json({ error: "Mission id invalido" }, 400);
-  }
-
-  try {
-    const row = await c.env.fitloot_db.prepare(
-      `SELECT m.*, s.name as skill_name
-       FROM missions m
-       LEFT JOIN skills s ON m.skill_id = s.id
-       WHERE m.id = ? AND m.user_id = ?`
-    ).bind(missionId, user.id).first<Record<string, unknown>>();
-
-    if (!row) {
-      return c.json({ error: "Mission not found" }, 404);
-    }
-
-    const hydratedRows = await hydrateMissionRowsWithSubtasks(c.env.fitloot_db, [row]);
-    const normalized = normalizeMissionRow(hydratedRows[0] ?? row) as NormalizedMissionRow;
-    if (
-      normalized.type === "monthly" &&
-      Number(normalized.is_completed ?? 0) !== 1 &&
-      !(normalized.circuit_tasks.length > 0 && normalized.progress_value !== undefined)
-    ) {
-      const monthlyCounters = await getMonthlyCounters(c.env.fitloot_db, user.id);
-      normalized.progress_value = monthlyMissionProgressValue(row, monthlyCounters);
-    }
-
-    const enSteps = normalized.exercise_instructions_en;
-    const ptSteps = normalized.exercise_instructions_pt;
-    if (
-      normalized.type === "daily" &&
-      exerciseInstructionPtNeedsAiTranslation(enSteps, ptSteps) &&
-      getHuggingFaceApiKey(c.env)
-    ) {
-      const exerciseLabel =
-        typeof normalized.exercise_name === "string" && normalized.exercise_name.trim().length > 0
-          ? normalized.exercise_name.trim()
-          : extractExerciseName(String(normalized.title ?? ""));
-      const ptTranslated = await translateExerciseInstructionsToPt(enSteps, exerciseLabel, c.env);
-      if (ptTranslated.length > 0) {
-        normalized.exercise_instructions_pt = ptTranslated;
-        const mainSteps = normalizeInstructionList(normalized.instructions, 8);
-        const refreshMain =
-          mainSteps.length === 0 ||
-          exerciseInstructionPtNeedsAiTranslation(enSteps, mainSteps) ||
-          (mainSteps.length === enSteps.length &&
-            mainSteps.every((line, i) => normalizeMatchText(line) === normalizeMatchText(enSteps[i] ?? "")));
-        if (refreshMain) {
-          normalized.instructions = ensureInstructionSteps(
-            normalizeInstructionList(ptTranslated, 6),
-            exerciseLabel,
-            normalized.metric_type,
-            normalized.sets,
-            normalized.rest_seconds,
-          );
-        }
-        c.executionCtx.waitUntil(
-          (async () => {
-            try {
-              await c.env.fitloot_db
-                .prepare(
-                  `UPDATE missions SET exercise_instructions_pt_json = ?, instructions_json = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?`,
-                )
-                .bind(JSON.stringify(ptTranslated), JSON.stringify(normalized.instructions), missionId, user.id)
-                .run();
-            } catch (persistErr) {
-              console.error("[/api/missions/:id] persist translated instructions failed", {
-                missionId,
-                message: getErrorMessage(persistErr),
-              });
-            }
-          })(),
-        );
-      }
-    }
-
-    return c.json(normalized);
-  } catch (error) {
-    console.error("[/api/missions/:id]", {
-      message: getErrorMessage(error),
-      userId: user.id,
-      missionId,
-    });
-
-    if (isMissingSchemaError(error)) {
-      return schemaMismatchResponse(c);
-    }
-
-    return internalErrorResponse(c);
-  }
-});
-
-app.post("/api/missions/generate", authMiddleware, async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-  try {
-    const result = await generateStructuredMissionPlanForUser(c.env, c.env.fitloot_db, user.id, {
-      isAiSpecial: false,
-      dailyTarget: MISSION_LIMITS.daily,
-      weeklyTarget: MISSION_LIMITS.weekly,
-      monthlyTarget: MISSION_LIMITS.monthly,
-    });
-
-    return c.json({
-      success: true,
-      generated: !result.already_active,
-      code: result.already_active ? "MISSIONS_ALREADY_ACTIVE" : undefined,
-      used_ai: result.used_ai,
-      invalid_ratio: result.invalid_ratio,
-      missions: result.missions,
-    });
-  } catch (error) {
-    console.error("[/api/missions/generate]", {
-      message: getErrorMessage(error),
-      userId: user.id,
-    });
-    return internalErrorResponse(c);
-  }
-});
-
-app.post("/api/missions/generate/ai-special", authMiddleware, async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-  try {
-    const result = await generateStructuredMissionPlanForUser(c.env, c.env.fitloot_db, user.id, {
-      isAiSpecial: true,
-      dailyTarget: 1,
-      weeklyTarget: 0,
-      monthlyTarget: 0,
-    });
-
-    return c.json({
-      success: true,
-      generated: !result.already_active,
-      code: result.already_active ? "AI_SPECIAL_ALREADY_ACTIVE" : undefined,
-      used_ai: result.used_ai,
-      invalid_ratio: result.invalid_ratio,
-      missions: result.missions,
-    });
-  } catch (error) {
-    console.error("[/api/missions/generate/ai-special]", {
-      message: getErrorMessage(error),
-      userId: user.id,
-    });
-    return internalErrorResponse(c);
-  }
-});
-
-app.post("/api/missions/complete", authMiddleware, zValidator("json", CompleteMissionRequestSchema), async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-  const data = c.req.valid("json");
-  const completedMetricValue = Number(data.metric_completed ?? data.reps_completed ?? data.time_completed ?? 0);
-  let completionPhase = "load_mission";
-
-  try {
-    const mission = await c.env.fitloot_db.prepare(
-      "SELECT * FROM missions WHERE id = ? AND user_id = ? AND is_completed = 0"
-    ).bind(data.mission_id, user.id).first<Record<string, unknown>>();
-
-    if (!mission) {
-      return c.json({ error: "Mission not found" }, 404);
-    }
-
-    const missionId = Number(mission.id ?? 0);
-    if (!Number.isInteger(missionId) || missionId <= 0) {
-      return c.json({ error: "Mission not found" }, 404);
-    }
-
-    const missionType = String(mission.type ?? "");
-    if (missionType === "weekly" || missionType === "monthly") {
-      return c.json(
-        {
-          error: "Missoes semanais e mensais nao podem ser concluidas manualmente. O progresso acontece automaticamente pelas missoes diarias compativeis.",
-          code: "MISSION_AUTO_PROGRESS_ONLY",
-        },
-        400,
-      );
-    }
-
-    let streakMultiplier = 1;
-    let xpGained = 0;
-    let pointsGained = 0;
-    let leveledUp = false;
-
-    completionPhase = "schema_probe";
-    const [missionsTableHasStatus, countersHaveConsecutiveDays, countersHaveLongestDays] =
-      await Promise.all([
-        hasTableColumn(c.env.fitloot_db, "missions", "status"),
-        hasTableColumn(c.env.fitloot_db, "user_event_counters", "consecutive_days_completed"),
-        hasTableColumn(c.env.fitloot_db, "user_event_counters", "longest_consecutive_days"),
-      ]);
-    const countersHaveStreakDayColumns = countersHaveConsecutiveDays && countersHaveLongestDays;
-
-    completionPhase = "transaction";
-    await withTransaction(c.env.fitloot_db, async () => {
-      completionPhase = "mark_completed";
-      if (missionsTableHasStatus) {
-        await c.env.fitloot_db.prepare(
-          `UPDATE missions SET is_completed = 1, status = 'completed', completed_at = datetime('now'),
-        verified_by_sensor = ?, updated_at = datetime('now')
-        WHERE id = ?`
-        ).bind(data.sensor_verified ? 1 : 0, data.mission_id).run();
-      } else {
-        await c.env.fitloot_db.prepare(
-          `UPDATE missions SET is_completed = 1, completed_at = datetime('now'),
-        verified_by_sensor = ?, updated_at = datetime('now')
-        WHERE id = ?`
-        ).bind(data.sensor_verified ? 1 : 0, data.mission_id).run();
-      }
-
-      completionPhase = "load_progression";
-      const progression = await c.env.fitloot_db.prepare(
-        "SELECT * FROM user_progression WHERE user_id = ?"
-      ).bind(user.id).first<UserProgression>();
-
-      const today = assertString(safeGet(new Date().toISOString().split('T'), 0));
-      let newStreak = Number(progression?.current_streak || 0);
-
-      if (progression?.last_activity_date !== today) {
-        completionPhase = "calculate_streak";
-        const yesterday = assertString(safeGet(new Date(Date.now() - 86400000).toISOString().split('T'), 0));
-        newStreak = 1;
-
-        if (progression?.last_activity_date === yesterday) {
-          newStreak = Number(progression?.current_streak || 0) + 1;
-        }
-
-        streakMultiplier = 1 + (newStreak * 0.1);
-
-        completionPhase = "update_streak_db";
-        await c.env.fitloot_db.prepare(
-          `UPDATE user_progression SET current_streak = ?, best_streak = MAX(best_streak, ?), 
-          last_activity_date = ?, updated_at = datetime('now')
-          WHERE user_id = ?`
-        ).bind(newStreak, newStreak, today, user.id).run();
-      } else {
-        streakMultiplier = 1 + (Number(progression?.current_streak || 0) * 0.1);
-      }
-
-      completionPhase = "calculate_rewards";
-      xpGained = Math.max(0, Math.floor(Number(mission.xp_reward || 0) * streakMultiplier));
-      pointsGained = Math.max(0, Number(mission.points_reward || 0));
-
-      completionPhase = "award_xp_and_levels";
-      const progressionOutcome = await applyXpPointsAndResolveLevels(c.env.fitloot_db, user.id, xpGained, pointsGained);
-      leveledUp = progressionOutcome.leveledUp;
-
-      completionPhase = "update_event_counters_db";
-      await ensureUserCounterRow(c.env.fitloot_db, user.id);
-      const currentHour = new Date().getHours();
-      if (countersHaveStreakDayColumns) {
-        await c.env.fitloot_db.prepare(
-          `UPDATE user_event_counters
-          SET missions_completed = COALESCE(missions_completed, 0) + 1,
-              consecutive_days_completed = ?,
-              longest_consecutive_days = MAX(COALESCE(longest_consecutive_days, 0), ?),
-              updated_at = datetime('now')
-          WHERE user_id = ?`
-        ).bind(newStreak, newStreak, user.id).run();
-      } else {
-        await c.env.fitloot_db.prepare(
-          `UPDATE user_event_counters
-          SET missions_completed = COALESCE(missions_completed, 0) + 1,
-              updated_at = datetime('now')
-          WHERE user_id = ?`
-        ).bind(user.id).run();
-      }
-
-      completionPhase = "lifecycle_mission_events";
-      await runMissionLifecycleHookSafely(user.id, "mission_complete_event", () =>
-        logUserEvent(c.env.fitloot_db, user.id, 'mission_complete', {
-          missionId,
-          period: missionType,
-          xpGained,
-          pointsGained,
-          hour: currentHour,
-          leveledUp,
-        }),
-      );
-
-      completionPhase = "lifecycle_streak";
-      const completedToday = await c.env.fitloot_db.prepare("SELECT COUNT(*) as c FROM missions WHERE user_id = ? AND is_completed = 1 AND date(completed_at) = date('now')").bind(user.id).first<{ c: number }>();
-      await runMissionLifecycleHookSafely(user.id, "streak_continued", () =>
-        onStreakContinued(c.env.fitloot_db, user.id, newStreak, Number(completedToday?.c ?? 1), new Date().toISOString()),
-      );
-
-      completionPhase = "lifecycle_on_mission_complete";
-      await runMissionLifecycleHookSafely(user.id, "on_mission_complete_hook", () =>
-        onMissionComplete(c.env.fitloot_db, user.id, missionId)
-      );
-
-      completionPhase = "lifecycle_subtasks";
-      await runMissionLifecycleHookSafely(user.id, "update_subtasks", () =>
-        updateMissionSubtaskProgress(user.id, mission as Record<string, unknown>, c.env.fitloot_db),
-      );
-
-      completionPhase = "lifecycle_weekly_circuits";
-      await runMissionLifecycleHookSafely(user.id, "update_weekly_circuits", () =>
-        updateCircuitProgress(user.id, mission as Record<string, unknown>, c.env.fitloot_db),
-      );
-
-      completionPhase = "lifecycle_monthly_progress";
-      await runMissionLifecycleHookSafely(user.id, "update_monthly_progress", () =>
-        updateMonthlyMissionProgress(user.id, c.env.fitloot_db),
-      );
-
-      completionPhase = "lifecycle_goal_progress";
-      await runMissionLifecycleHookSafely(user.id, "goal_progress", async () => {
-        const relevance = await checkMissionRelevance(user.id, missionId, c.env.fitloot_db, 'completed');
-        if (!relevance.isGoalRelevant) return;
-
-        const gs = await c.env.fitloot_db.prepare("SELECT goal_completed_count FROM user_goal_stats WHERE user_id = ?").bind(user.id).first<{ goal_completed_count: number }>();
-        const progressPercent = Math.min(200, Math.floor((Number(gs?.goal_completed_count ?? 0) / 100) * 100));
-        await c.env.fitloot_db.prepare("UPDATE user_goal_stats SET goal_progress_percent = ?, updated_at = datetime('now') WHERE user_id = ?").bind(progressPercent, user.id).run();
-        await onGoalProgress(c.env.fitloot_db, user.id, progressPercent);
-      });
-
-      if (currentHour >= 2 && currentHour < 4) {
-        completionPhase = "lifecycle_night_achievement";
-        await runMissionLifecycleHookSafely(user.id, "night_achievement", () =>
-          unlockAchievementIfNeeded(c.env.fitloot_db, user.id, 'Insônia', 1, 1),
-        );
-      }
-
-      completionPhase = "update_skill_progress";
-      const missionRecord = mission;
-      const missionMetricType = normalizeMissionMetricType(
-        missionRecord.metric_type,
-        missionRecord.target_time
-      );
-      const repsForSkill = missionMetricType === "repetitions" || missionMetricType === "sets_reps"
-        ? completedMetricValue
-        : 0;
-      const timeForSkill = missionMetricType === "duration_seconds"
-        ? completedMetricValue
-        : missionMetricType === "duration_minutes"
-          ? completedMetricValue * 60
-          : 0;
-
-      const skillIdRaw = missionRecord.skill_id;
-      const skillId =
-        skillIdRaw !== null && skillIdRaw !== undefined && String(skillIdRaw).trim() !== ""
-          ? Number(skillIdRaw)
-          : null;
-      const skillIdValid = skillId !== null && Number.isInteger(skillId) && skillId > 0;
-
-      let appliedAttributeGainFromSkill = false;
-
-      if (skillIdValid && (repsForSkill > 0 || timeForSkill > 0)) {
-        completionPhase = "update_skill_stats_db";
-        await c.env.fitloot_db.prepare(
-          `UPDATE user_skills SET total_reps = total_reps + ?, total_time = total_time + ?, best_reps = MAX(best_reps, ?), updated_at = datetime('now')
-          WHERE user_id = ? AND skill_id = ?`
-        ).bind(repsForSkill, timeForSkill, repsForSkill, user.id, skillId).run();
-
-        const skill = await c.env.fitloot_db.prepare(
-          "SELECT * FROM skills WHERE id = ?"
-        ).bind(skillId).first<Record<string, unknown>>();
-
-        if (skill && totalSkillTableAttributeGain(skill) > 0) {
-          completionPhase = "update_attributes_db";
-          await ensureUserAttributesRow(c.env.fitloot_db, user.id);
-          await c.env.fitloot_db.prepare(
-            `UPDATE user_attributes SET 
-            strength = strength + ?, constitution = constitution + ?, 
-            vitality = vitality + ?, dexterity = dexterity + ?, 
-            focus = focus + ?, updated_at = datetime('now')
-            WHERE user_id = ?`
-          ).bind(
-            Number(skill.strength_gain ?? 0),
-            Number(skill.constitution_gain ?? 0),
-            Number(skill.vitality_gain ?? 0),
-            Number(skill.dexterity_gain ?? 0),
-            Number(skill.focus_gain ?? 0),
-            user.id
-          ).run();
-          appliedAttributeGainFromSkill = true;
-        }
-      }
-
-      if (!appliedAttributeGainFromSkill) {
-        completionPhase = "update_attributes_from_exercise_profile";
-        const typeDelta = computeMissionTypeAttributeDelta(missionRecord, missionMetricType, completedMetricValue);
-        await applyMissionAttributeDeltaToUser(c.env.fitloot_db, user.id, typeDelta);
-      }
-      completionPhase = "unlock_performance_variants";
-      await tryUnlockSkillsFromPerformance(c.env.fitloot_db, user.id);
-      completionPhase = "completed";
-    });
-
-    try {
-      invalidateRankingCache();
-      invalidateMissionListCache(user.id);
-    } catch (cacheError) {
-      console.error("[/api/missions/complete] cache invalidation failed:", cacheError);
-    }
-
-    c.executionCtx.waitUntil(
-      ensurePeriodicMissionsWithGuard(c.env, c.env.fitloot_db, user.id, {
-        force: true,
-        mode: "safe",
-      }).catch((refreshError) => {
-        console.error("[/api/missions/complete][refresh]", {
-          userId: user.id,
-          missionId: data.mission_id,
-          message: getErrorMessage(refreshError),
-        });
-      }),
-    );
-
-    return c.json({
-      success: true,
-      xpGained,
-      pointsGained,
-      leveledUp,
-      streakMultiplier: streakMultiplier.toFixed(1)
-    });
-  } catch (error) {
-    const errorMsg = getErrorMessage(error);
-    console.error("[/api/missions/complete]", {
-      userId: user.id,
-      missionId: data.mission_id,
-      phase: completionPhase,
-      message: errorMsg,
-      stack: error instanceof Error ? error.stack : undefined,
-    });
-    return c.json({ error: "Erro interno", code: "INTERNAL_ERROR", phase: completionPhase, detail: errorMsg }, 500);
-  }
-});
+registerMissionRoutes(
+  app,
+  {
+    applyMissionAttributeDeltaToUser: (db, userId, delta) =>
+      applyMissionAttributeDeltaToUser(db, userId, delta as MissionAttributeDelta),
+    applyXpPointsAndResolveLevels,
+    checkMissionRelevance,
+    clearMissionListCache,
+    computeMissionTypeAttributeDelta: (
+      missionRecord,
+      missionMetricType,
+      completedMetricValue,
+    ) =>
+      computeMissionTypeAttributeDelta(
+        missionRecord,
+        missionMetricType as MissionMetricType,
+        completedMetricValue,
+      ),
+    ensureInstructionSteps: (
+      steps,
+      exerciseName,
+      metricType,
+      sets,
+      restSeconds,
+    ) =>
+      ensureInstructionSteps(
+        steps,
+        exerciseName,
+        metricType as MissionMetricType,
+        sets ?? null,
+        restSeconds ?? null,
+      ),
+    ensurePeriodicMissionsWithGuard: (env, db, userId, options) =>
+      ensurePeriodicMissionsWithGuard(env, db, userId, options),
+    ensureUserAttributesRow,
+    ensureUserCounterRow,
+    extractExerciseName,
+    generateStructuredMissionPlanForUser,
+    getMonthlyCounters,
+    hydrateMissionRowsWithSubtasks,
+    invalidateMissionListCache,
+    invalidateRankingCache,
+    logUserEvent,
+    missionSummaryFromNormalized: (mission) =>
+      missionSummaryFromNormalized(mission as NormalizedMissionRow),
+    monthlyMissionProgressValue: (mission, monthlyCounters) =>
+      monthlyMissionProgressValue(mission, monthlyCounters as MonthlyCounterSnapshot),
+    normalizeInstructionList,
+    normalizeMatchText,
+    normalizeMissionMetricType,
+    normalizeMissionRow: (row) => normalizeMissionRow(row),
+    onGoalProgress,
+    onMissionComplete,
+    onStreakContinued,
+    readMissionListCache,
+    runMissionLifecycleHookSafely,
+    scheduleLegacyDailyMetadataRepairWithGuard,
+    schedulePeriodicMissionsRefreshWithGuard: (
+      env,
+      db,
+      userId,
+      executionCtx,
+      mode,
+    ) =>
+      schedulePeriodicMissionsRefreshWithGuard(
+        env,
+        db,
+        userId,
+        executionCtx,
+        mode,
+      ),
+    schedulePeriodicProgressRecomputeWithGuard,
+    streamJsonArrayResponse,
+    totalSkillTableAttributeGain,
+    translateExerciseInstructionsToPt,
+    tryUnlockSkillsFromPerformance,
+    unlockAchievementIfNeeded,
+    updateCircuitProgress,
+    updateMissionSubtaskProgress,
+    updateMonthlyMissionProgress,
+    withTransaction,
+    writeMissionListCache,
+  },
+  authMiddleware,
+);
 
 // Achievements and titles
-app.get("/api/achievements", authMiddleware, async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-  const achievements = await c.env.fitloot_db.prepare(
-    `SELECT a.*, ua.unlocked_at, ua.progress_current, ua.progress_required,
-    CASE WHEN ua.id IS NOT NULL THEN 1 ELSE 0 END as unlocked
-    FROM achievements a
-    LEFT JOIN user_achievements ua ON a.id = ua.achievement_id AND ua.user_id = ?
-    ORDER BY a.secret ASC, a.rarity, a.id`
-  ).bind(user.id).all<Record<string, unknown>>();
-
-  const mapped = achievements.results.map((achievement) => {
-    const normalizedAchievement = {
-      ...achievement,
-      name: typeof achievement.name === "string" ? repairKnownMojibakeString(achievement.name) : achievement.name,
-      description:
-        typeof achievement.description === "string"
-          ? repairKnownMojibakeString(achievement.description)
-          : achievement.description,
-      rarity:
-        typeof achievement.rarity === "string"
-          ? repairKnownMojibakeString(achievement.rarity)
-          : achievement.rarity,
-      reference:
-        typeof achievement.reference === "string"
-          ? repairKnownMojibakeString(achievement.reference)
-          : achievement.reference,
-    };
-    const unlocked = Number(achievement.unlocked ?? 0) === 1;
-    const isSecret = Number(achievement.secret ?? 0) === 1;
-    if (isSecret && !unlocked) {
-      return {
-        ...normalizedAchievement,
-        name: "?",
-        description: "Conquista secreta",
-        condition: null,
-        icon: "",
-      };
-    }
-    return normalizedAchievement;
-  });
-
-  return c.json(mapped);
-});
-
-app.get("/api/titles", authMiddleware, async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-  try {
-    const titles = await c.env.fitloot_db.prepare(
-      `SELECT t.*, ut.is_active, ut.unlocked_at,
-      CASE WHEN ut.id IS NOT NULL THEN 1 ELSE 0 END as unlocked
-      FROM titles t
-      LEFT JOIN user_titles ut ON t.id = ut.title_id AND ut.user_id = ?
-      ORDER BY t.rarity, t.id`
-    ).bind(user.id).all();
-
-    return c.json(Array.isArray(titles.results) ? titles.results : []);
-  } catch (error) {
-    console.error("[/api/titles]", {
-      message: getErrorMessage(error),
-      userId: user.id,
-    });
-
-    if (isMissingSchemaError(error)) {
-      return schemaMismatchResponse(c);
-    }
-
-    return internalErrorResponse(c);
-  }
-});
-
-app.post("/api/titles/:id/activate", authMiddleware, async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-  const titleId = parseInt(c.req.param("id"));
-
-  // Deactivate all titles
-  await c.env.fitloot_db.prepare(
-    "UPDATE user_titles SET is_active = 0, is_equipped = 0 WHERE user_id = ?"
-  ).bind(user.id).run();
-
-  // Activate selected title
-  await c.env.fitloot_db.prepare(
-    "UPDATE user_titles SET is_active = 1, is_equipped = 1, updated_at = datetime('now') WHERE user_id = ? AND title_id = ?"
-  ).bind(user.id, titleId).run();
-
-  return c.json({ success: true });
-});
+registerAchievementRoutes(app, { authMiddleware });
 
 // Shop endpoints
-const SHOP_PRODUCTS_CACHE_TTL_MS = 2 * 60_000;
-let shopProductsCacheEntry: { payload: Record<string, unknown>[]; expiresAt: number } | null = null;
-
-function readShopProductsCache(): Record<string, unknown>[] | null {
-  if (!shopProductsCacheEntry) return null;
-  if (shopProductsCacheEntry.expiresAt <= Date.now()) {
-    shopProductsCacheEntry = null;
-    return null;
-  }
-  return shopProductsCacheEntry.payload;
-}
-
-function writeShopProductsCache(payload: Record<string, unknown>[]): void {
-  shopProductsCacheEntry = {
-    payload,
-    expiresAt: Date.now() + SHOP_PRODUCTS_CACHE_TTL_MS,
-  };
-}
-
-function invalidateShopProductsCache(): void {
-  shopProductsCacheEntry = null;
-}
-
-app.get("/api/shop/products", authMiddleware, async (c) => {
-  const limit = Math.min(Math.max(Number(c.req.query("limit") ?? 200), 1), 500);
-  const offset = Math.max(Number(c.req.query("offset") ?? 0), 0);
-
-  const cachedProducts = readShopProductsCache();
-  if (cachedProducts && offset === 0 && limit >= cachedProducts.length) {
-    return streamJsonArrayResponse(cachedProducts);
-  }
-
-  const products = await c.env.fitloot_db.prepare(
-    `SELECT p.*, sp.name as partner_name, sp.logo_url as partner_logo
-    FROM shop_products p
-    INNER JOIN shop_partners sp ON p.partner_id = sp.id
-    WHERE p.is_available = 1
-    ORDER BY p.category, p.points_cost
-    LIMIT ? OFFSET ?`
-  ).bind(limit, offset).all<Record<string, unknown>>();
-
-  const payload = Array.isArray(products.results) ? products.results : [];
-  if (offset === 0) {
-    writeShopProductsCache(payload);
-  }
-
-  return streamJsonArrayResponse(payload);
-});
-
-app.post("/api/shop/purchase/:id", authMiddleware, async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-  const productId = parseInt(c.req.param("id"));
-  const body = await c.req.json().catch(() => ({})) as { request_id?: string | undefined };
-  const requestId = typeof body.request_id === "string" ? body.request_id.trim() : "";
-
-  if (requestId) {
-    const existingOrder = await c.env.fitloot_db.prepare(
-      "SELECT qr_code FROM coupon_orders WHERE user_id = ? AND request_id = ? LIMIT 1"
-    ).bind(user.id, requestId).first<{ qr_code: string }>();
-    if (existingOrder?.qr_code) {
-      return c.json({ success: true, qr_code: existingOrder.qr_code, reused: true });
-    }
-  }
-
-  const product = await c.env.fitloot_db.prepare(
-    "SELECT * FROM shop_products WHERE id = ? AND is_available = 1"
-  ).bind(productId).first();
-
-  if (!product) {
-    return c.json({ error: "Product not found" }, 404);
-  }
-
-  const progression = await c.env.fitloot_db.prepare(
-    "SELECT points FROM user_progression WHERE user_id = ?"
-  ).bind(user.id).first();
-
-  if (Number(progression?.points || 0) < Number(product.points_cost || 0)) {
-    return c.json({ error: "Insufficient points" }, 400);
-  }
-
-  const qrCode = `FITLOOT-${crypto.randomUUID()}`;
-
-  try {
-    await withTransaction(c.env.fitloot_db, async () => {
-      const deduction = await c.env.fitloot_db.prepare(
-        "UPDATE user_progression SET points = points - ?, updated_at = datetime('now') WHERE user_id = ? AND points >= ?"
-      ).bind(product.points_cost, user.id, product.points_cost).run();
-      if (Number(deduction.meta?.changes ?? 0) === 0) {
-        throw new Error("INSUFFICIENT_POINTS");
-      }
-
-      await c.env.fitloot_db.prepare(
-        `INSERT INTO coupon_orders (user_id, product_id, points_spent, qr_code, request_id, updated_at)
-        VALUES (?, ?, ?, ?, ?, datetime('now'))`
-      ).bind(user.id, productId, product.points_cost, qrCode, requestId || null).run();
-    });
-  } catch (error) {
-    const message = getErrorMessage(error).toLowerCase();
-    if (message.includes("insufficient_points")) {
-      return c.json({ error: "Insufficient points" }, 400);
-    }
-    if (requestId && message.includes("unique") && message.includes("coupon_orders.request_id")) {
-      const existingOrder = await c.env.fitloot_db.prepare(
-        "SELECT qr_code FROM coupon_orders WHERE user_id = ? AND request_id = ? LIMIT 1"
-      ).bind(user.id, requestId).first<{ qr_code: string }>();
-      if (existingOrder?.qr_code) {
-        return c.json({ success: true, qr_code: existingOrder.qr_code, reused: true });
-      }
-    }
-    throw error;
-  }
-
-  invalidateRankingCache();
-  invalidateShopProductsCache();
-
-  return c.json({ success: true, qr_code: qrCode });
-});
-
-app.get("/api/shop/orders", authMiddleware, async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
-  const limit = Math.min(Math.max(Number(c.req.query("limit") ?? 80), 1), 200);
-  const offset = Math.max(Number(c.req.query("offset") ?? 0), 0);
-
-  const orders = await c.env.fitloot_db.prepare(
-    `SELECT co.*, p.name as product_name, p.image_url
-    FROM coupon_orders co
-    INNER JOIN shop_products p ON co.product_id = p.id
-    WHERE co.user_id = ?
-    ORDER BY co.created_at DESC
-    LIMIT ? OFFSET ?`
-  ).bind(user.id, limit, offset).all();
-
-  return c.json(orders.results);
+registerShopRoutes(app, {
+  authMiddleware,
+  invalidateRankingCache,
+  streamJsonArrayResponse,
+  withTransaction,
 });
 
 // Daily metrics
-app.get("/api/metrics/today", authMiddleware, async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-  try {
-    const today = assertString(safeGet(new Date().toISOString().split('T'), 0));
-
-    let metrics = await c.env.fitloot_db.prepare(
-      "SELECT * FROM daily_metrics WHERE user_id = ? AND date = ?"
-    ).bind(user.id, today).first();
-
-    if (!metrics) {
-      await c.env.fitloot_db.prepare(
-        `INSERT INTO daily_metrics (user_id, date, steps, calories_burned, updated_at)
-        VALUES (?, ?, 0, 0, datetime('now'))`
-      ).bind(user.id, today).run();
-
-      metrics = await c.env.fitloot_db.prepare(
-        "SELECT * FROM daily_metrics WHERE user_id = ? AND date = ?"
-      ).bind(user.id, today).first();
-    }
-
-    return c.json(metrics ?? { user_id: user.id, date: today, steps: 0, calories_burned: 0 });
-  } catch (error) {
-    console.error("[/api/metrics/today]", {
-      message: getErrorMessage(error),
-      userId: user.id,
-    });
-
-    if (isMissingSchemaError(error)) {
-      return schemaMismatchResponse(c);
-    }
-
-    return internalErrorResponse(c);
-  }
-});
-
-app.post("/api/metrics/update", authMiddleware, zValidator("json", UpdateDailyMetricsRequestSchema), async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-  const data = c.req.valid("json");
-  const today = assertString(safeGet(new Date().toISOString().split('T'), 0));
-
-  await c.env.fitloot_db.prepare(
-    `INSERT INTO daily_metrics (user_id, date, steps, calories_burned, updated_at)
-    VALUES (?, ?, ?, ?, datetime('now'))
-    ON CONFLICT(user_id, date) DO UPDATE SET
-    steps = ?, calories_burned = ?, updated_at = datetime('now')`
-  ).bind(user.id, today, data.steps, data.calories_burned, data.steps, data.calories_burned).run();
-
-  return c.json({ success: true });
-});
-
-// Food diary
-app.post("/api/food/scan", authMiddleware, zValidator("json", FoodScanRequestSchema), async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-  const data = c.req.valid("json");
-
-  await c.env.fitloot_db.prepare(
-    `INSERT INTO food_diary (user_id, food_name, calories, meal_type, updated_at)
-    VALUES (?, ?, ?, ?, datetime('now'))`
-  ).bind(user.id, data.food_name, data.calories || 0, data.meal_type || 'lanche').run();
-
-  return c.json({ success: true });
-});
-
-app.get("/api/food/today", authMiddleware, async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-  const today = assertString(safeGet(new Date().toISOString().split('T'), 0));
-  const limit = Math.min(Math.max(Number(c.req.query("limit") ?? 100), 1), 300);
-
-  const foods = await c.env.fitloot_db.prepare(
-    `SELECT * FROM food_diary 
-    WHERE user_id = ? AND DATE(scanned_at) = ?
-    ORDER BY scanned_at DESC
-    LIMIT ?`
-  ).bind(user.id, today, limit).all();
-
-  return c.json(foods.results);
-});
+registerMetricsRoutes(app, { authMiddleware });
 
 type RankingRow = {
   user_id: string;
@@ -7647,190 +5335,11 @@ app.get("/api/ranking/global", authMiddleware, async (c) => {
 });
 
 // Friends endpoints
-app.get("/api/friends/search", authMiddleware, async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-  const username = (c.req.query("username") ?? "").trim();
-  if (username.length < 3) return c.json([]);
-
-  const users = await c.env.fitloot_db.prepare(
-    `SELECT up.user_id, up.username, up.full_name, pr.level, pr.xp
-      FROM user_profiles up
-      INNER JOIN user_progression pr ON up.user_id = pr.user_id
-      WHERE up.user_id != ? AND up.username LIKE ?
-      LIMIT 20`
-  ).bind(user.id, `%${username}%`).all();
-
-  return c.json(users.results);
+registerFriendsRoutes(app, {
+  authMiddleware,
+  onFriendAdded,
+  withTransaction,
 });
-
-app.get("/api/users/search", authMiddleware, async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
-  const q = (c.req.query("q") ?? "").trim();
-  if (q.length < 3) return c.json([]);
-  const users = await c.env.fitloot_db.prepare(
-    `SELECT up.user_id, up.username, up.full_name, pr.level, pr.xp
-      FROM user_profiles up
-      INNER JOIN user_progression pr ON up.user_id = pr.user_id
-      WHERE up.user_id != ? AND up.username LIKE ?
-      LIMIT 20`
-  ).bind(user.id, `%${q}%`).all();
-  return c.json(users.results);
-});
-
-app.post("/api/friends/request", authMiddleware, async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-  const body = await c.req.json().catch(() => ({})) as { username?: string | undefined; friend_user_id?: string | undefined };
-  const username = String(body.username ?? "").trim();
-  let targetUserId = String(body.friend_user_id ?? "").trim();
-
-  if (!targetUserId) {
-    if (!username) return c.json({ error: "username é obrigatório" }, 400);
-    const target = await c.env.fitloot_db.prepare("SELECT user_id FROM user_profiles WHERE username = ?").bind(username).first<{ user_id: string }>();
-    if (!target?.user_id) return c.json({ error: "Usuário não encontrado" }, 404);
-    targetUserId = target.user_id;
-  }
-
-  if (targetUserId === user.id) return c.json({ error: "Não é possível adicionar a si mesmo" }, 400);
-
-  const existingFriend = await c.env.fitloot_db.prepare(
-    `SELECT id FROM friendships
-      WHERE (user_id = ? AND COALESCE(friend_id, friend_user_id) = ?)
-         OR (user_id = ? AND COALESCE(friend_id, friend_user_id) = ?)`
-  ).bind(user.id, targetUserId, targetUserId, user.id).first();
-  if (existingFriend) return c.json({ error: "Já são amigos" }, 400);
-
-  const existingReq = await c.env.fitloot_db.prepare(
-    `SELECT id FROM friend_requests WHERE ((from_user_id = ? AND to_user_id = ?) OR (from_user_id = ? AND to_user_id = ?)) AND status = 'pending'`
-  ).bind(user.id, targetUserId, targetUserId, user.id).first();
-  if (existingReq) return c.json({ error: "Solicitação pendente" }, 400);
-
-  await c.env.fitloot_db.prepare(
-    `INSERT INTO friend_requests (from_user_id, to_user_id, status, updated_at) VALUES (?, ?, 'pending', datetime('now'))`
-  ).bind(user.id, targetUserId).run();
-
-  return c.json({ success: true }, 201);
-});
-
-app.post("/api/friends/accept", authMiddleware, async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-  const body = await c.req.json().catch(() => ({})) as { request_id?: number | undefined };
-  const requestId = Number(body.request_id);
-  if (!requestId) return c.json({ error: "request_id obrigatório" }, 400);
-
-  const request = await c.env.fitloot_db.prepare(
-    `SELECT * FROM friend_requests WHERE id = ? AND to_user_id = ? AND status = 'pending'`
-  ).bind(requestId, user.id).first<{ id: number; from_user_id: string; to_user_id: string }>();
-  if (!request) return c.json({ error: "Solicitação não encontrada" }, 404);
-
-  await withTransaction(c.env.fitloot_db, async () => {
-    await c.env.fitloot_db.prepare(
-      "UPDATE friend_requests SET status = 'accepted', updated_at = datetime('now') WHERE id = ?"
-    ).bind(requestId).run();
-    await c.env.fitloot_db.prepare(
-      `INSERT OR IGNORE INTO friendships (user_id, friend_user_id, friend_id, status, created_at, updated_at)
-      VALUES (?, ?, ?, 'accepted', datetime('now'), datetime('now'))`
-    ).bind(request.from_user_id, request.to_user_id, request.to_user_id).run();
-    await c.env.fitloot_db.prepare(
-      `INSERT OR IGNORE INTO friendships (user_id, friend_user_id, friend_id, status, created_at, updated_at)
-      VALUES (?, ?, ?, 'accepted', datetime('now'), datetime('now'))`
-    ).bind(request.to_user_id, request.from_user_id, request.from_user_id).run();
-  });
-
-  await onFriendAdded(c.env.fitloot_db, request.to_user_id);
-  await onFriendAdded(c.env.fitloot_db, request.from_user_id);
-
-  return c.json({ success: true });
-});
-
-app.post("/api/friends/reject", authMiddleware, async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-  const body = await c.req.json().catch(() => ({})) as { request_id?: number | undefined };
-  const requestId = Number(body.request_id);
-  if (!requestId) return c.json({ error: "request_id obrigatório" }, 400);
-
-  await c.env.fitloot_db.prepare(
-    `UPDATE friend_requests SET status = 'rejected', updated_at = datetime('now') WHERE id = ? AND to_user_id = ?`
-  ).bind(requestId, user.id).run();
-
-  return c.json({ success: true });
-});
-
-app.delete("/api/friends/:friendId", authMiddleware, async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-  const friendId = c.req.param("friendId");
-  await c.env.fitloot_db.prepare(
-    `DELETE FROM friendships
-      WHERE (user_id = ? AND COALESCE(friend_id, friend_user_id) = ?)
-         OR (user_id = ? AND COALESCE(friend_id, friend_user_id) = ?)`
-  )
-    .bind(user.id, friendId, friendId, user.id).run();
-  return c.json({ success: true });
-});
-
-app.get("/api/friends", authMiddleware, async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
-  const limit = Math.min(Math.max(Number(c.req.query("limit") ?? 120), 1), 300);
-  const offset = Math.max(Number(c.req.query("offset") ?? 0), 0);
-
-  const friends = await c.env.fitloot_db.prepare(
-    `SELECT f.id, COALESCE(f.friend_id, f.friend_user_id) as friend_user_id, up.username as friend_username,
-      up.full_name as friend_full_name, pr.level as friend_level, pr.xp as friend_xp,
-      pr.current_streak as friend_streak, pr.last_activity_date
-    FROM friendships f
-    INNER JOIN user_profiles up ON COALESCE(f.friend_id, f.friend_user_id) = up.user_id
-    INNER JOIN user_progression pr ON COALESCE(f.friend_id, f.friend_user_id) = pr.user_id
-    WHERE f.user_id = ?
-    ORDER BY friend_level DESC, friend_xp DESC
-    LIMIT ? OFFSET ?`
-  ).bind(user.id, limit, offset).all();
-
-  // Calcula status online baseado na última atividade (últimos 5 minutos)
-  const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
-  const friendsWithOnlineStatus = friends.results.map(friend => ({
-    ...friend,
-    is_online: friend.last_activity_date ? new Date(friend.last_activity_date as string) > new Date(fiveMinutesAgo) : false
-  }));
-
-  return c.json(friendsWithOnlineStatus);
-});
-
-app.get("/api/friends/requests", authMiddleware, async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
-  const limit = Math.min(Math.max(Number(c.req.query("limit") ?? 80), 1), 200);
-  const offset = Math.max(Number(c.req.query("offset") ?? 0), 0);
-
-  const requests = await c.env.fitloot_db.prepare(
-    `SELECT fr.id, fr.from_user_id as friend_user_id, up.username as friend_username,
-      up.full_name as friend_full_name, pr.level as friend_level, pr.xp as friend_xp,
-      pr.current_streak as friend_streak, fr.created_at
-    FROM friend_requests fr
-    INNER JOIN user_profiles up ON fr.from_user_id = up.user_id
-    INNER JOIN user_progression pr ON fr.from_user_id = pr.user_id
-    WHERE fr.to_user_id = ? AND fr.status = 'pending'
-    ORDER BY fr.created_at DESC
-    LIMIT ? OFFSET ?`
-  ).bind(user.id, limit, offset).all();
-
-  return c.json(requests.results);
-});
-
-// legacy aliases
-app.get("/api/friends/list", authMiddleware, async (c) => app.fetch(new Request(new URL('/api/friends', c.req.url).toString(), { method: 'GET', headers: c.req.raw.headers }), c.env, c.executionCtx));
-app.post("/api/friends/:id/accept", authMiddleware, async (c) => app.fetch(new Request(new URL('/api/friends/accept', c.req.url).toString(), { method: 'POST', headers: c.req.raw.headers, body: JSON.stringify({ request_id: Number(c.req.param('id')) }) }), c.env, c.executionCtx));
-app.post("/api/friends/:id/reject", authMiddleware, async (c) => app.fetch(new Request(new URL('/api/friends/reject', c.req.url).toString(), { method: 'POST', headers: c.req.raw.headers, body: JSON.stringify({ request_id: Number(c.req.param('id')) }) }), c.env, c.executionCtx));
 
 async function registerMiniGameResult(db: D1Database, userId: string, didWin: boolean) {
   await ensureUserCounterRow(db, userId);
@@ -7862,7 +5371,7 @@ async function registerMiniGameResult(db: D1Database, userId: string, didWin: bo
     await unlockAchievementIfNeeded(db, userId, "Competidor", won, 10);
   }
   if (winStreak >= 50) {
-    await unlockAchievementIfNeeded(db, userId, "Imbati­vel", winStreak, 50);
+    await unlockAchievementIfNeeded(db, userId, "ImbatiÂ­vel", winStreak, 50);
   }
 }
 // Mini-games endpoints
@@ -8305,7 +5814,7 @@ function scaleMissionAttributeDelta(delta: MissionAttributeDelta, factor: number
   };
 }
 
-/** Ganhos base por categoria de exercício da missão (quando não há skill ou skill sem gains). */
+/** Ganhos base por categoria de exercÃ­cio da missÃ£o (quando nÃ£o hÃ¡ skill ou skill sem gains). */
 function baseMissionAttributeDeltaForExerciseCategory(category: string): MissionAttributeDelta {
   const c = String(category || "default").toLowerCase();
   switch (c) {
@@ -9194,8 +6703,8 @@ function buildMissionPayload(params: {
 }
 
 /**
- * Liga missão ↔ habilidade desbloqueada pelo nome do exercício (inglês da ExerciseDB / português do app).
- * Variantes (exerciseDbTerms) têm matching específico; skills base usam padrões amplos.
+ * Liga missÃ£o â†” habilidade desbloqueada pelo nome do exercÃ­cio (inglÃªs da ExerciseDB / portuguÃªs do app).
+ * Variantes (exerciseDbTerms) tÃªm matching especÃ­fico; skills base usam padrÃµes amplos.
  */
 function exerciseMatchesUnlockedSkill(exerciseNorm: string, skillNorm: string, variantSeed?: VariantSkillSeed | null): boolean {
   if (variantSeed) {
@@ -9529,7 +7038,7 @@ function sanitizeMissionInstructionText(value: string): string {
 }
 
 function containsInstructionText(value: string): boolean {
-  return /[A-Za-zÀ-ÖØ-öø-ÿ]/.test(value);
+  return /\p{L}/u.test(value);
 }
 
 function ensureInstructionSteps(
@@ -9671,7 +7180,7 @@ function parseInstructionsPtFromModelContent(rawContent: string): string[] | nul
   return translated && translated.length > 0 ? translated : null;
 }
 
-/** EN veio da API de exercício mas PT está vazio ou ainda é cópia 1:1 do inglês. */
+/** EN veio da API de exercÃ­cio mas PT estÃ¡ vazio ou ainda Ã© cÃ³pia 1:1 do inglÃªs. */
 const ENGLISH_INSTRUCTION_TOKEN_REGEX =
   /\b(with|your|feet|foot|hands?|arms?|body|core|floor|ground|starting|start|position|pause|moment|above|push|pull|straighten|repeat|desired|number|repetitions?|seconds?|hold|keep|slightly|together|bend|bending|lower|raise|return|towards?|while|shoulders?|chest|elbows?|back)\b/i;
 
@@ -9945,7 +7454,11 @@ async function topUpStructuredDailyMissionsForUser(
     monthlyTarget: 0,
   };
 
-  const existingDailyBlueprints = await listCurrentCycleRegularDailyBlueprints(db, userId, profile);
+  const existingDailyBlueprints = await missionPlanPersistenceService.listCurrentCycleRegularDailyBlueprints(
+    db,
+    userId,
+    profile,
+  );
   const existingKeys = new Set(
     existingDailyBlueprints.map((blueprint) => `${blueprint.compatibilityKey}:${blueprint.metricType}`),
   );
@@ -9967,7 +7480,7 @@ async function topUpStructuredDailyMissionsForUser(
           ? aiValidation.invalidCount / aiValidation.totalCount
           : 0;
         if (invalidRatio > 0.3 && attempt === 0) {
-          retryReason = `Mais de 30% das missões diárias vieram inválidas (${Math.round(invalidRatio * 100)}%). Corrija nomes canônicos, métricas e volume.`;
+          retryReason = `Mais de 30% das missÃµes diÃ¡rias vieram invÃ¡lidas (${Math.round(invalidRatio * 100)}%). Corrija nomes canÃ´nicos, mÃ©tricas e volume.`;
           continue;
         }
         if (invalidRatio <= 0.3) {
@@ -10009,8 +7522,12 @@ async function topUpStructuredDailyMissionsForUser(
 
   if (selected.length === 0) return;
 
-  const materialized = await materializeMissionBlueprints(env, profile, selected.slice(0, boundedRequestedAmount));
-  await persistMaterializedMissionEntries(db, profile, materialized);
+  const materialized = await missionPlanPersistenceService.materializeMissionBlueprints(
+    env,
+    profile,
+    selected.slice(0, boundedRequestedAmount),
+  );
+  await missionPlanPersistenceService.persistMaterializedMissionEntries(db, profile, materialized);
   invalidateMissionListCache(profile.userId);
 }
 
@@ -10021,7 +7538,7 @@ async function createMissionsForPeriod(env: Env, db: D1Database, userId: string,
     if (activeCounts.daily === 0) {
       await createMissionsForPeriod(env, db, userId, "daily", MISSION_LIMITS.daily);
     }
-    await ensureStructuredPeriodicMissionsFromExistingDailyBlueprints(env, db, userId, {
+    await missionPlanPersistenceService.ensureStructuredPeriodicMissionsFromExistingDailyBlueprints(env, db, userId, {
       weeklyTarget: period === "weekly" ? boundedRequestedAmount : 0,
       monthlyTarget: period === "monthly" ? boundedRequestedAmount : 0,
     });
@@ -10656,12 +8173,12 @@ function buildMonthlyCounterGoal(
     })} km acumulados`;
   }
   if (source === "streak_days") {
-    return `${formatIntegerPtBr(metricValue)} dias ativos no mês`;
+    return `${formatIntegerPtBr(metricValue)} dias ativos no mÃªs`;
   }
   if (source === "weekly_circuits_completed") {
-    return `${formatIntegerPtBr(metricValue)} circuitos semanais concluídos`;
+    return `${formatIntegerPtBr(metricValue)} circuitos semanais concluÃ­dos`;
   }
-  return `${formatIntegerPtBr(metricValue)} missões concluídas`;
+  return `${formatIntegerPtBr(metricValue)} missÃµes concluÃ­das`;
 }
 
 function buildMonthlyCounterMissionBlueprints(
@@ -10685,7 +8202,7 @@ function buildMonthlyCounterMissionBlueprints(
     || mainGoal.includes("along")
     || mainGoal.includes("yoga")
     ? {
-      name: "Prática Ativa do Mês",
+      name: "PrÃ¡tica Ativa do MÃªs",
       source: "streak_days" as MonthlyCounterSource,
       metricType: "repetitions" as MissionMetricType,
       metricValue: monthlyActiveDaysTarget(profile, 2),
@@ -10707,14 +8224,14 @@ function buildMonthlyCounterMissionBlueprints(
         || mainGoal.includes("corrid")
         || mainGoal.includes("caminha")
         ? {
-          name: "Desafio Cardio do Mês",
+          name: "Desafio Cardio do MÃªs",
           source: "distance_meters" as MonthlyCounterSource,
           metricType: "distance_meters" as MissionMetricType,
           metricValue: monthlyDistanceMetersTarget(profile, 8_000),
           muscle: "legs",
         }
         : {
-          name: "Circuitos Semanais Concluídos",
+          name: "Circuitos Semanais ConcluÃ­dos",
           source: "weekly_circuits_completed" as MonthlyCounterSource,
           metricType: "repetitions" as MissionMetricType,
           metricValue: monthlyWeeklyCircuitTarget(profile),
@@ -10723,28 +8240,28 @@ function buildMonthlyCounterMissionBlueprints(
 
   const definitions = [
     {
-      name: "Consistência Mensal de Missões",
+      name: "ConsistÃªncia Mensal de MissÃµes",
       source: "missions_completed" as MonthlyCounterSource,
       metricType: "repetitions" as MissionMetricType,
       metricValue: missionTarget,
       muscle: "full body",
     },
     {
-      name: "Passos do Mês",
+      name: "Passos do MÃªs",
       source: "steps" as MonthlyCounterSource,
       metricType: "steps" as MissionMetricType,
       metricValue: stepsTarget,
       muscle: "legs",
     },
     {
-      name: "Distância Mensal Acumulada",
+      name: "DistÃ¢ncia Mensal Acumulada",
       source: "distance_meters" as MonthlyCounterSource,
       metricType: "distance_meters" as MissionMetricType,
       metricValue: distanceTarget,
       muscle: "legs",
     },
     {
-      name: "Dias Ativos no Mês",
+      name: "Dias Ativos no MÃªs",
       source: "streak_days" as MonthlyCounterSource,
       metricType: "repetitions" as MissionMetricType,
       metricValue: activeDaysTarget,
@@ -10784,15 +8301,7 @@ type StructuredGenerationOptions = {
   monthlyTarget: number;
 };
 
-type GeneratedMissionPlanResult = {
-  missions: Array<MissionPayload & { type: MissionPeriod }>;
-  used_ai: boolean;
-  invalid_ratio: number;
-  already_active: boolean;
-};
-
 const MISSION_GENERATION_AI_TIMEOUT_MS = 8_000;
-const MISSION_GENERATION_MEDIA_CONCURRENCY = 3;
 
 function parseGoalsJson(rawValue: unknown, fallbackGoal: string): string[] {
   const parsedGoals = parseJsonStringArray(rawValue);
@@ -11312,7 +8821,7 @@ function resolvePeriodicMissionBlueprints(params: {
     if (!source) continue;
     if (!draft) invalidCount += 1;
 
-    const name = toSafeString(source.name, `${params.period === "weekly" ? "Missão Semanal" : "Missão Mensal"} ${index + 1}`);
+    const name = toSafeString(source.name, `${params.period === "weekly" ? "MissÃ£o Semanal" : "MissÃ£o Mensal"} ${index + 1}`);
     const subtaskResolution = resolveMissionSubtasks(
       source.subtasks,
       params.dailyBlueprints,
@@ -11892,1336 +9401,10 @@ async function listCurrentCycleMissions(
     .map((mission) => missionSummaryFromNormalized(mission) as unknown as MissionPayload & { type: MissionPeriod });
 }
 
-type MaterializedMissionEntry = {
-  blueprint: MissionBlueprint;
-  mission: MissionPayload;
-};
-
-function buildDailyBlueprintFromMissionPayload(
-  mission: MissionPayload & { type: MissionPeriod },
-  profile: MissionGenerationProfileSnapshot,
-): MissionBlueprint | null {
-  if (mission.type !== "daily") return null;
-  const exerciseName = typeof mission.exercise_name === "string" && mission.exercise_name.trim().length > 0
-    ? mission.exercise_name.trim()
-    : extractExerciseName(mission.title);
-  const muscle = mission.exercise_target
-    ?? mission.muscle_groups?.[0]
-    ?? "full body";
-  const metricType = mission.metric_type;
-  if (
-    metricType !== "repetitions" &&
-    metricType !== "duration_seconds" &&
-    metricType !== "sets_reps" &&
-    metricType !== "steps" &&
-    metricType !== "distance_meters" &&
-    metricType !== "duration_minutes" &&
-    metricType !== "circuit_tasks"
-  ) {
-    return null;
-  }
-
-  const missionName = exerciseName.trim().length > 0 ? exerciseName : extractExerciseName(mission.title);
-  return {
-    period: "daily",
-    name: missionName,
-    description: mission.description ?? `Complete a meta proposta em ${missionName}.`,
-    goal: null,
-    exerciseName: missionName,
-    muscle,
-    metricType,
-    metricValue: Math.max(1, Number(mission.metric_value ?? mission.target_reps ?? mission.target_time ?? 1)),
-    xpReward: Math.max(1, Number(mission.xp_reward ?? missionConfigByPeriod("daily").xp)),
-    pointsReward: Math.max(1, Number(mission.points_reward ?? missionConfigByPeriod("daily").points)),
-    difficultyLevel: normalizeDifficultyLabel(mission.difficulty_level, profile.conditioning),
-    missionOrigin: "regular",
-    isAiSpecial: false,
-    compatibilityKey: normalizeMatchText(extractExerciseName(mission.title)),
-    compatibilityTerms: mergeUniqueStrings(
-      [
-        ...buildMissionCompatibilityTerms(missionName, muscle, metricType),
-        mission.title,
-        ...(Array.isArray(mission.muscle_groups) ? mission.muscle_groups : []),
-        ...(Array.isArray(mission.exercise_secondary_muscles) ? mission.exercise_secondary_muscles : []),
-      ],
-      12,
-    ),
-    subtasks: [],
-  };
-}
-
-function buildPeriodicFallbackDraftsFromDailyBlueprints(
-  profile: MissionGenerationProfileSnapshot,
-  dailyBlueprints: readonly MissionBlueprint[],
-  targets: { weekly: number; monthly: number },
-): { weekly: StructuredPeriodicMissionDraft[]; monthly: StructuredPeriodicMissionDraft[] } {
-  const monthlyRepeatCount = Math.max(2, Math.min(4, profile.trainingFrequency));
-  const weekly = LEGACY_WEEKLY_CIRCUIT_NAMES
-    .slice(0, targets.weekly)
-    .map((missionName, index) => ({
-      name: missionName,
-      description: `O progresso desta miss\u00e3o semanal \u00e9 atualizado automaticamente ao concluir as miss\u00f5es di\u00e1rias compat\u00edveis do circuito ${missionName}.`,
-      goal: `Conclua as miss\u00f5es di\u00e1rias compat\u00edveis do circuito ${missionName} nesta semana.`,
-      xp_reward: clampXpRewardByPeriod("weekly", 260 + index * 15),
-      fitcoins_reward: derivePointsRewardByPeriod("weekly", 55 + index * 3, 260 + index * 15),
-      subtasks: [],
-    }));
-  const monthly = Array.from({ length: targets.monthly }, (_, index) => {
-    const dailyBlueprint = dailyBlueprints[index % Math.max(1, dailyBlueprints.length)];
-    const dailyMissionName = dailyBlueprint?.name ?? "Missão diária";
-    return {
-      name: `Meta Mensal: ${dailyMissionName}`,
-      description: `Evolua esta miss\u00e3o mensal com repeti\u00e7\u00f5es da miss\u00e3o di\u00e1ria ${dailyMissionName} ao longo do m\u00eas.`,
-      goal: `Conclua as miss\u00f5es di\u00e1rias compat\u00edveis de ${dailyMissionName} ao longo deste m\u00eas.`,
-      xp_reward: clampXpRewardByPeriod("monthly", 620 + index * 25),
-      fitcoins_reward: derivePointsRewardByPeriod("monthly", 140 + index * 8, 620 + index * 25),
-      subtasks: Array.from({ length: monthlyRepeatCount }, () => dailyMissionName),
-    } satisfies StructuredPeriodicMissionDraft;
-  });
-
-  return { weekly, monthly };
-}
-
-async function materializeMissionBlueprints(
-  env: Env,
-  profile: MissionGenerationProfileSnapshot,
-  blueprints: readonly MissionBlueprint[],
-): Promise<MaterializedMissionEntry[]> {
-  return mapWithConcurrency(
-    blueprints,
-    MISSION_GENERATION_MEDIA_CONCURRENCY,
-    async (blueprint) => ({
-      blueprint,
-      mission: await materializeMissionBlueprint(env, profile, blueprint),
-    }),
-  );
-}
-
-async function deleteMissionEntries(db: D1Database, missionIds: readonly number[]): Promise<void> {
-  if (missionIds.length === 0) return;
-  const placeholders = missionIds.map(() => "?").join(", ");
-  await db.prepare(
-    `DELETE FROM mission_subtasks
-      WHERE parent_mission_id IN (${placeholders})`
-  ).bind(...missionIds).run();
-  await db.prepare(
-    `DELETE FROM missions
-      WHERE id IN (${placeholders})`
-  ).bind(...missionIds).run();
-}
-
-async function persistMaterializedMissionEntries(
-  db: D1Database,
-  profile: MissionGenerationProfileSnapshot,
-  materialized: readonly MaterializedMissionEntry[],
-  options?: { replaceMissionIds?: readonly number[] | undefined },
-): Promise<void> {
-  const replaceMissionIds = options?.replaceMissionIds ?? [];
-
-  await withTransaction(db, async () => {
-    if (!materialized.some((entry) => entry.blueprint.isAiSpecial)) {
-      await upsertTrainingPlan(
-        db,
-        profile.userId,
-        {
-          week_key: profile.weekKey,
-          profile_hash: profile.profileHash,
-          volume_multiplier: profile.volumeMultiplier,
-          progression_expected: "Progressao semanal ajustada em no maximo 10% conforme taxa de conclusao.",
-          weekly: profile.weeklyPlan,
-          ...(profile.chatPlanPreferences
-            ? { chat_preferences: serializeTrainingPlanChatPreferences(profile.chatPlanPreferences) }
-            : {}),
-        },
-        profile.mainGoal,
-        profile.conditioning,
-        profile.equipment,
-        profile.injuries,
-        profile.trainingFrequency,
-      );
-    }
-
-    await deleteMissionEntries(db, replaceMissionIds);
-
-    for (const entry of materialized) {
-      const skillId = await resolveSkillIdForExerciseMission(db, profile.userId, entry.mission.exercise_name);
-      const insertedMissionId = await insertMission(
-        db,
-        profile.userId,
-        entry.blueprint.period,
-        futureIsoForPeriod(entry.blueprint.period),
-        entry.mission,
-        skillId,
-      );
-      if (insertedMissionId && entry.blueprint.subtasks.length > 0) {
-        await createMissionSubtasks(db, insertedMissionId, entry.blueprint.subtasks);
-      }
-    }
-  });
-}
-
-async function persistGeneratedMissionPlan(
-  env: Env,
-  db: D1Database,
-  profile: MissionGenerationProfileSnapshot,
-  blueprints: readonly MissionBlueprint[],
-): Promise<Array<MissionPayload & { type: MissionPeriod }>> {
-  const materialized = await materializeMissionBlueprints(env, profile, blueprints);
-  await persistMaterializedMissionEntries(db, profile, materialized);
-
-  invalidateMissionListCache(profile.userId);
-  return materialized.map((entry) => ({ ...entry.mission, type: entry.blueprint.period }));
-}
-
-async function listCurrentCycleRegularDailyBlueprints(
-  db: D1Database,
-  userId: string,
-  profile: MissionGenerationProfileSnapshot,
-): Promise<MissionBlueprint[]> {
-  const missions = await listCurrentCycleMissions(db, userId, "regular");
-  return missions
-    .map((mission) => buildDailyBlueprintFromMissionPayload(mission, profile))
-    .filter((mission): mission is MissionBlueprint => mission !== null);
-}
-
-async function ensureStructuredPeriodicMissionsFromExistingDailyBlueprints(
-  env: Env,
-  db: D1Database,
-  userId: string,
-  params: {
-    weeklyTarget: number;
-    monthlyTarget: number;
-    weeklyDrafts?: readonly StructuredPeriodicMissionDraft[] | undefined;
-    monthlyDrafts?: readonly StructuredPeriodicMissionDraft[] | undefined;
-    replaceMissionIds?: readonly number[] | undefined;
-  },
-): Promise<number> {
-  if (params.weeklyTarget <= 0 && params.monthlyTarget <= 0) {
-    return 0;
-  }
-
-  const profile = await loadMissionGenerationProfile(db, userId);
-  if (!profile) return 0;
-
-  const dailyBlueprints = await listCurrentCycleRegularDailyBlueprints(db, userId, profile);
-  if (dailyBlueprints.length === 0) {
-    return 0;
-  }
-
-  const fallbackDrafts = buildPeriodicFallbackDraftsFromDailyBlueprints(profile, dailyBlueprints, {
-    weekly: params.weeklyTarget,
-    monthly: params.monthlyTarget,
-  });
-  const weeklyResolution = resolvePeriodicMissionBlueprints({
-    period: "weekly",
-    targetCount: params.weeklyTarget,
-    drafts: params.weeklyDrafts ?? [],
-    fallbackDrafts: fallbackDrafts.weekly,
-    dailyBlueprints,
-    profile,
-    missionOrigin: "regular",
-    isAiSpecial: false,
-  });
-  const monthlyBlueprints = buildMonthlyCounterMissionBlueprints(profile, params.monthlyTarget, {
-    missionOrigin: "regular",
-    isAiSpecial: false,
-  });
-  const blueprints = [...weeklyResolution.blueprints, ...monthlyBlueprints];
-  if (blueprints.length === 0) {
-    return 0;
-  }
-
-  const materialized = await materializeMissionBlueprints(env, profile, blueprints);
-  await persistMaterializedMissionEntries(db, profile, materialized, {
-    replaceMissionIds: params.replaceMissionIds,
-  });
-  invalidateMissionListCache(profile.userId);
-  return blueprints.length;
-}
-
-function isCurrentMonthlyCounterMissionRow(row: Record<string, unknown>): boolean {
-  const title = normalizeMatchText(typeof row.title === "string" ? row.title : "");
-  const goal = normalizeMatchText(typeof row.goal === "string" ? row.goal : "");
-  const metricType = normalizeMissionMetricType(row.metric_type, row.target_time);
-  const metricValue = Math.max(0, Number(row.metric_value ?? row.target_reps ?? row.target_time ?? 0));
-
-  if (title.includes("consistencia mensal")) {
-    return goal.includes("missoes concluidas") && metricValue >= 20 && metricValue <= 50;
-  }
-  if (title.includes("passos do mes")) {
-    return goal.includes("passos acumulados") && metricType === "steps" && metricValue >= 80_000 && metricValue <= 180_000;
-  }
-  if (title.includes("distancia mensal")) {
-    if (metricType === "distance_meters") {
-      return goal.includes("km acumulados") && metricValue >= 18_000 && metricValue <= 60_000;
-    }
-    return goal.includes("passos acumulados") && metricType === "steps" && metricValue >= 80_000 && metricValue <= 180_000;
-  }
-  if (title.includes("dias ativos") || title.includes("streak mensal") || title.includes("pratica ativa")) {
-    return goal.includes("dias ativos") && metricValue >= 12 && metricValue <= 24;
-  }
-  if (title.includes("circuitos semanais")) {
-    return goal.includes("circuitos semanais") && metricValue >= 2 && metricValue <= 4;
-  }
-  if (title.includes("volume mensal") || title.includes("ritmo mensal")) {
-    return goal.includes("missoes concluidas") && metricValue >= 20 && metricValue <= 50;
-  }
-  if (title.includes("desafio cardio")) {
-    if (metricType === "distance_meters") {
-      return goal.includes("km acumulados") && metricValue >= 20_000 && metricValue <= 70_000;
-    }
-    return goal.includes("passos acumulados") && metricType === "steps" && metricValue >= 100_000 && metricValue <= 200_000;
-  }
-
-  return false;
-}
-
-async function repairLegacyPeriodicMissions(_env: Env, db: D1Database, userId: string): Promise<void> {
-  const rows = await db.prepare(
-    `SELECT id, type, title, description, goal, metric_type, metric_value, target_reps, target_time
-      FROM missions
-      WHERE user_id = ?
-        AND type IN ('weekly', 'monthly')
-        AND is_completed = 0
-        AND COALESCE(mission_origin, 'regular') = 'regular'
-        AND (deadline IS NULL OR deadline > datetime('now'))`
-  ).bind(userId).all<Record<string, unknown>>();
-  const periodicRows = Array.isArray(rows.results) ? rows.results : [];
-  if (periodicRows.length === 0) return;
-
-  const parentIds = periodicRows
-    .map((row) => Number(row.id))
-    .filter((missionId) => Number.isInteger(missionId) && missionId > 0);
-  if (parentIds.length === 0) return;
-
-  const subtasksByParentId = await loadMissionSubtasksByParentIds(db, parentIds);
-  const weeklyRowsToRepair = periodicRows.filter((row) => {
-    if (row.type !== "weekly") return false;
-    const missionId = Number(row.id);
-    const hasGoal = typeof row.goal === "string" && row.goal.trim().length > 0;
-    return (subtasksByParentId.get(missionId)?.length ?? 0) === 0 || !hasGoal;
-  });
-  const monthlyRowsToRepair = periodicRows.filter((row) => {
-    if (row.type !== "monthly") return false;
-    return !isCurrentMonthlyCounterMissionRow(row);
-  });
-
-  if (weeklyRowsToRepair.length === 0 && monthlyRowsToRepair.length === 0) {
-    return;
-  }
-
-  const profile = await loadMissionGenerationProfile(db, userId);
-  if (!profile) return;
-
-  const dailyBlueprints = await listCurrentCycleRegularDailyBlueprints(db, userId, profile);
-  if (dailyBlueprints.length === 0) return;
-
-  const fallbackDrafts = buildPeriodicFallbackDraftsFromDailyBlueprints(profile, dailyBlueprints, {
-    weekly: weeklyRowsToRepair.length,
-    monthly: monthlyRowsToRepair.length,
-  });
-  const weeklyDrafts = weeklyRowsToRepair.map((row) => ({
-    name: stripMissionDisplayTitlePrefix(typeof row.title === "string" ? row.title : "Full Body Calisthenics Circuit"),
-    description: typeof row.description === "string" && row.description.trim().length > 0
-      ? row.description
-      : "O progresso desta miss\u00e3o semanal \u00e9 atualizado automaticamente ao concluir as miss\u00f5es di\u00e1rias compat\u00edveis.",
-    goal: typeof row.goal === "string" ? row.goal : undefined,
-    subtasks: [],
-  } satisfies StructuredPeriodicMissionDraft));
-  const weeklyResolution = resolvePeriodicMissionBlueprints({
-    period: "weekly",
-    targetCount: weeklyRowsToRepair.length,
-    drafts: weeklyDrafts,
-    fallbackDrafts: fallbackDrafts.weekly,
-    dailyBlueprints,
-    profile,
-    missionOrigin: "regular",
-    isAiSpecial: false,
-  });
-  const monthlyBlueprints = buildMonthlyCounterMissionBlueprints(profile, monthlyRowsToRepair.length, {
-    missionOrigin: "regular",
-    isAiSpecial: false,
-  });
-  const hasProgressValueColumn = await hasTableColumn(db, "missions", "progress_value");
-  const monthlyCounters = monthlyRowsToRepair.length > 0
-    ? await getMonthlyCounters(db, userId)
-    : null;
-  const weeklyConfig = missionConfigByPeriod("weekly");
-  const monthlyConfig = missionConfigByPeriod("monthly");
-
-  await withTransaction(db, async () => {
-    for (let index = 0; index < weeklyRowsToRepair.length; index += 1) {
-      const row = weeklyRowsToRepair[index];
-      const blueprint = weeklyResolution.blueprints[index];
-      const missionId = Number(row?.id ?? 0);
-      if (!row || !blueprint || !Number.isInteger(missionId) || missionId <= 0) {
-        continue;
-      }
-
-      const title = `${weeklyConfig.titlePrefix}: ${stripMissionDisplayTitlePrefix(blueprint.name)}`;
-      const circuitTasks = blueprint.subtasks.map((subtask) => ({
-        id: crypto.randomUUID(),
-        label: subtask.title,
-        mission_type: subtask.compatibilityKey,
-        required_count: Math.max(1, subtask.requiredCount),
-        current_count: 0,
-        completed: false,
-      }));
-      const muscleGroupsJson = JSON.stringify(mergeUniqueStrings(blueprint.subtasks.map((subtask) => subtask.title), 6));
-      const metricValue = Math.max(1, blueprint.subtasks.reduce((total, subtask) => total + subtask.requiredCount, 0));
-      const weeklySql = hasProgressValueColumn
-        ? `UPDATE missions
-             SET title = ?,
-                 description = '',
-                 goal = ?,
-                 metric_type = 'circuit_tasks',
-                 metric_value = ?,
-                 metric_unit = ?,
-                 target_reps = NULL,
-                 target_time = NULL,
-                 sets = NULL,
-                 rest_seconds = NULL,
-                 duration_estimate_minutes = NULL,
-                 exercise_category = 'cardio_circuit',
-                 exercise_type = 'cardio_circuit',
-                 body_area = 'full_body',
-                 mission_origin = 'regular',
-                 circuit_tasks_json = ?,
-                 safety_tips_json = '[]',
-                 difficulty_level = ?,
-                 progress_value = 0,
-                 image_url = NULL,
-                 exercise_db_gif_url = NULL,
-                 exercise_db_image_url = NULL,
-                 video_url = NULL,
-                 thumbnail_url = NULL,
-                 exercise_name = NULL,
-                 exercise_db_id = NULL,
-                 exercise_equipment = NULL,
-                 exercise_body_part = NULL,
-                 exercise_target = NULL,
-                 exercise_secondary_muscles_json = '[]',
-                 muscle_groups_json = ?,
-                 is_ai_special = 0,
-                 updated_at = datetime('now')
-           WHERE id = ?`
-        : `UPDATE missions
-             SET title = ?,
-                 description = '',
-                 goal = ?,
-                 metric_type = 'circuit_tasks',
-                 metric_value = ?,
-                 metric_unit = ?,
-                 target_reps = NULL,
-                 target_time = NULL,
-                 sets = NULL,
-                 rest_seconds = NULL,
-                 duration_estimate_minutes = NULL,
-                 exercise_category = 'cardio_circuit',
-                 exercise_type = 'cardio_circuit',
-                 body_area = 'full_body',
-                 mission_origin = 'regular',
-                 circuit_tasks_json = ?,
-                 safety_tips_json = '[]',
-                 difficulty_level = ?,
-                 image_url = NULL,
-                 exercise_db_gif_url = NULL,
-                 exercise_db_image_url = NULL,
-                 video_url = NULL,
-                 thumbnail_url = NULL,
-                 exercise_name = NULL,
-                 exercise_db_id = NULL,
-                 exercise_equipment = NULL,
-                 exercise_body_part = NULL,
-                 exercise_target = NULL,
-                 exercise_secondary_muscles_json = '[]',
-                 muscle_groups_json = ?,
-                 is_ai_special = 0,
-                 updated_at = datetime('now')
-           WHERE id = ?`;
-      await db.prepare(weeklySql).bind(
-        title,
-        blueprint.goal,
-        metricValue,
-        metricUnitByType("circuit_tasks"),
-        JSON.stringify(circuitTasks),
-        blueprint.difficultyLevel,
-        muscleGroupsJson,
-        missionId,
-      ).run();
-      await replaceMissionSubtasks(db, missionId, blueprint.subtasks);
-    }
-
-    for (let index = 0; index < monthlyRowsToRepair.length; index += 1) {
-      const row = monthlyRowsToRepair[index];
-      const blueprint = monthlyBlueprints[index];
-      const missionId = Number(row?.id ?? 0);
-      if (!row || !blueprint || !Number.isInteger(missionId) || missionId <= 0) {
-        continue;
-      }
-
-      const title = `${monthlyConfig.titlePrefix}: ${stripMissionDisplayTitlePrefix(blueprint.name)}`;
-      const targetReps =
-        blueprint.metricType === "duration_seconds" || blueprint.metricType === "duration_minutes"
-          ? null
-          : blueprint.metricValue;
-      const targetTime =
-        blueprint.metricType === "duration_seconds" || blueprint.metricType === "duration_minutes"
-          ? blueprint.metricValue
-          : null;
-      const progressValue = monthlyCounters
-        ? monthlyMissionProgressValue(
-          {
-            title,
-            metric_type: blueprint.metricType,
-            metric_value: blueprint.metricValue,
-            target_reps: targetReps,
-            target_time: targetTime,
-          },
-          monthlyCounters,
-        )
-        : 0;
-      const monthlySql = hasProgressValueColumn
-        ? `UPDATE missions
-             SET title = ?,
-                 description = '',
-                 goal = ?,
-                 metric_type = ?,
-                 metric_value = ?,
-                 metric_unit = ?,
-                 target_reps = ?,
-                 target_time = ?,
-                 sets = NULL,
-                 rest_seconds = NULL,
-                 duration_estimate_minutes = NULL,
-                 exercise_category = 'monthly_counter',
-                 exercise_type = 'meta_mensal',
-                 body_area = 'full_body',
-                 mission_origin = 'regular',
-                 circuit_tasks_json = '[]',
-                 safety_tips_json = '[]',
-                 difficulty_level = ?,
-                 progress_value = ?,
-                 image_url = NULL,
-                 exercise_db_gif_url = NULL,
-                 exercise_db_image_url = NULL,
-                 video_url = NULL,
-                 thumbnail_url = NULL,
-                 exercise_name = NULL,
-                 exercise_db_id = NULL,
-                 exercise_equipment = NULL,
-                 exercise_body_part = NULL,
-                 exercise_target = NULL,
-                 exercise_secondary_muscles_json = '[]',
-                 muscle_groups_json = '[]',
-                 is_ai_special = 0,
-                 updated_at = datetime('now')
-           WHERE id = ?`
-        : `UPDATE missions
-             SET title = ?,
-                 description = '',
-                 goal = ?,
-                 metric_type = ?,
-                 metric_value = ?,
-                 metric_unit = ?,
-                 target_reps = ?,
-                 target_time = ?,
-                 sets = NULL,
-                 rest_seconds = NULL,
-                 duration_estimate_minutes = NULL,
-                 exercise_category = 'monthly_counter',
-                 exercise_type = 'meta_mensal',
-                 body_area = 'full_body',
-                 mission_origin = 'regular',
-                 circuit_tasks_json = '[]',
-                 safety_tips_json = '[]',
-                 difficulty_level = ?,
-                 image_url = NULL,
-                 exercise_db_gif_url = NULL,
-                 exercise_db_image_url = NULL,
-                 video_url = NULL,
-                 thumbnail_url = NULL,
-                 exercise_name = NULL,
-                 exercise_db_id = NULL,
-                 exercise_equipment = NULL,
-                 exercise_body_part = NULL,
-                 exercise_target = NULL,
-                 exercise_secondary_muscles_json = '[]',
-                 muscle_groups_json = '[]',
-                 is_ai_special = 0,
-                 updated_at = datetime('now')
-           WHERE id = ?`;
-      await db.prepare(monthlySql).bind(
-        title,
-        blueprint.goal,
-        blueprint.metricType,
-        blueprint.metricValue,
-        metricUnitByType(blueprint.metricType),
-        targetReps,
-        targetTime,
-        blueprint.difficultyLevel,
-        ...(hasProgressValueColumn ? [progressValue] : []),
-        missionId,
-      ).run();
-      await db.prepare(
-        `DELETE FROM mission_subtasks
-          WHERE parent_mission_id = ?`
-      ).bind(missionId).run();
-    }
-  });
-}
-
-async function generateStructuredMissionPlanForUser(
-  env: Env,
-  db: D1Database,
-  userId: string,
-  options: StructuredGenerationOptions,
-): Promise<GeneratedMissionPlanResult> {
-  const profile = await loadMissionGenerationProfile(db, userId);
-  if (!profile) {
-    throw new Error("MISSION_GENERATION_PROFILE_INCOMPLETE");
-  }
-
-  if (!options.isAiSpecial) {
-    await repairLegacyPeriodicMissions(env, db, userId);
-  }
-
-  const activeCounts = await getActiveCycleMissionCounts(db, userId, options.isAiSpecial ? "ai_special" : "regular");
-  const hasActiveMissions = options.isAiSpecial
-    ? activeCounts.daily >= options.dailyTarget
-    : activeCounts.daily > 0 || activeCounts.weekly > 0 || activeCounts.monthly > 0;
-  if (hasActiveMissions) {
-    return {
-      missions: await listCurrentCycleMissions(db, userId, options.isAiSpecial ? "ai_special" : "regular"),
-      used_ai: false,
-      invalid_ratio: 0,
-      already_active: true,
-    };
-  }
-
-  const fallbackPlan = buildFallbackStructuredPlan(profile, options);
-  const apiKey = getHuggingFaceApiKey(env);
-  let validation = validateStructuredMissionPlan(fallbackPlan, profile, options);
-  let usedAi = false;
-
-  if (apiKey) {
-    let retryReason = "";
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      try {
-        const aiPlan = await requestStructuredMissionPlanFromAI(
-          env,
-          buildStructuredPlanPrompt(profile, options, retryReason || undefined),
-        );
-        const aiValidation = validateStructuredMissionPlan(aiPlan, profile, options);
-        const invalidRatio = aiValidation.totalCount > 0
-          ? aiValidation.invalidCount / aiValidation.totalCount
-          : 0;
-        if (invalidRatio > 0.3 && attempt === 0) {
-          retryReason = `Mais de 30% das missoes vieram invalidas (${Math.round(invalidRatio * 100)}%). Corrija metricas, XP, subtasks e circuitos diarios.`;
-          continue;
-        }
-
-        if (invalidRatio <= 0.3) {
-          validation = aiValidation;
-          usedAi = true;
-        }
-        break;
-      } catch (error) {
-        if (attempt === 0) {
-          retryReason = `A resposta anterior falhou: ${getErrorMessage(error)}`;
-          continue;
-        }
-      }
-    }
-  }
-
-  const missions = await persistGeneratedMissionPlan(env, db, profile, validation.blueprints);
-  return {
-    missions,
-    used_ai: usedAi,
-    invalid_ratio: validation.totalCount > 0 ? validation.invalidCount / validation.totalCount : 0,
-    already_active: false,
-  };
-}
-
-async function ensurePeriodicMissions(env: Env, db: D1Database, userId: string) {
-  const activeRegularCounts = await getActiveCycleMissionCounts(db, userId, "regular");
-  const shouldGenerateWholePlan =
-    activeRegularCounts.daily === 0 &&
-    activeRegularCounts.weekly === 0 &&
-    activeRegularCounts.monthly === 0;
-
-  if (shouldGenerateWholePlan) {
-    try {
-      await generateStructuredMissionPlanForUser(env, db, userId, {
-        isAiSpecial: false,
-        dailyTarget: MISSION_LIMITS.daily,
-        weeklyTarget: MISSION_LIMITS.weekly,
-        monthlyTarget: MISSION_LIMITS.monthly,
-      });
-      return;
-    } catch (error) {
-      console.error("[missions][structured-generate-fallback]", {
-        userId,
-        message: getErrorMessage(error),
-      });
-    }
-  }
-
-  const periods: MissionPeriod[] = ["daily", "weekly", "monthly"];
-  const missingPeriodicTargets = {
-    weekly: 0,
-    monthly: 0,
-  };
-
-  for (const period of periods) {
-    const cycleStart = missionCycleStartIso(period);
-    await db.prepare(
-      `UPDATE missions
-         SET status = 'expired', updated_at = datetime('now')
-       WHERE user_id = ?
-         AND type = ?
-         AND is_completed = 0
-         AND COALESCE(mission_origin, 'regular') = 'regular'
-         AND COALESCE(status, 'pending') = 'pending'
-         AND datetime(created_at) < datetime(?)`
-    ).bind(userId, period, cycleStart).run();
-
-    const generatedInCycle = await db.prepare(
-      `SELECT COUNT(*) as count
-       FROM missions
-       WHERE user_id = ?
-         AND type = ?
-         AND COALESCE(mission_origin, 'regular') = 'regular'
-         AND datetime(created_at) >= datetime(?)`
-    ).bind(userId, period, cycleStart).first<{ count: number }>();
-
-    const existingCount = Number(generatedInCycle?.count ?? 0);
-    const missingCount = Math.max(0, MISSION_LIMITS[period] - existingCount);
-    if (missingCount > 0) {
-      if (period === "daily") {
-        await createMissionsForPeriod(env, db, userId, period, missingCount);
-      } else {
-        missingPeriodicTargets[period] = missingCount;
-      }
-    }
-  }
-
-  if (missingPeriodicTargets.weekly > 0 || missingPeriodicTargets.monthly > 0) {
-    await ensureStructuredPeriodicMissionsFromExistingDailyBlueprints(env, db, userId, {
-      weeklyTarget: missingPeriodicTargets.weekly,
-      monthlyTarget: missingPeriodicTargets.monthly,
-    });
-  }
-}
 
 // AI-powered endpoints
 
-type ApiErrorCode =
-  | "SERVICE_NOT_CONFIGURED"
-  | "AUTH_FAILED"
-  | "TIMEOUT"
-  | "UPSTREAM_ERROR"
-  | "INVALID_RESPONSE"
-  | "RATE_LIMITED";
 
-class ApiIntegrationError extends Error {
-  code: ApiErrorCode;
-  status: number;
-  details?: string | undefined;
-
-  constructor(code: ApiErrorCode, status: number, message: string, details?: string | undefined) {
-    super(message);
-    this.code = code;
-    this.status = status;
-    this.details = details;
-  }
-}
-
-const RATE_LIMIT_WINDOW_MS = 60_000;
-const RATE_LIMIT_MAX_CALLS = 20;
-const RATE_LIMIT_MAX_KEYS = 2_000;
-const timeoutMsByService = {
-  huggingface: 12000,
-  anthropic: 12000,
-  usda: 8000,
-  rapidapi: 8000,
-} as const;
-
-const requestRateMap = new Map<string, number[]>();
-let rateMapLastCleanupAt = 0;
-
-function cleanupRateLimitMap(now: number): void {
-  if (now - rateMapLastCleanupAt < RATE_LIMIT_WINDOW_MS) return;
-
-  for (const [mapKey, hits] of requestRateMap.entries()) {
-    const validHits = hits.filter((ts) => now - ts < RATE_LIMIT_WINDOW_MS);
-    if (validHits.length === 0) {
-      requestRateMap.delete(mapKey);
-    } else if (validHits.length !== hits.length) {
-      requestRateMap.set(mapKey, validHits);
-    }
-  }
-
-  if (requestRateMap.size > RATE_LIMIT_MAX_KEYS) {
-    const overflow = requestRateMap.size - RATE_LIMIT_MAX_KEYS;
-    const iterator = requestRateMap.keys();
-    for (let index = 0; index < overflow; index += 1) {
-      const keyToDelete = iterator.next().value;
-      if (typeof keyToDelete === "string") {
-        requestRateMap.delete(keyToDelete);
-      }
-    }
-  }
-
-  rateMapLastCleanupAt = now;
-}
-
-function enforceRateLimit(key: string) {
-  const now = Date.now();
-  cleanupRateLimitMap(now);
-  const hits = requestRateMap.get(key) ?? [];
-  const validHits = hits.filter((ts) => now - ts < RATE_LIMIT_WINDOW_MS);
-  if (validHits.length >= RATE_LIMIT_MAX_CALLS) {
-    throw new ApiIntegrationError("RATE_LIMITED", 429, "Muitas requisições externas. Tente novamente em instantes.");
-  }
-  validHits.push(now);
-  requestRateMap.set(key, validHits);
-}
-
-function toFriendlyErrorResponse(error: unknown) {
-  if (error instanceof ApiIntegrationError) {
-    return {
-      status: error.status,
-      payload: {
-        error: error.message,
-        code: error.code,
-      },
-    };
-  }
-  return {
-    status: 500,
-    payload: {
-      error: "Serviço temporariamente indisponível. Tente novamente em alguns instantes.",
-      code: "UPSTREAM_ERROR" satisfies ApiErrorCode,
-    },
-  };
-}
-
-async function fetchJsonWithTimeout<T>(
-  url: string,
-  init: RequestInit,
-  timeoutMs: number
-): Promise<T> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const response = await fetch(url, { ...init, signal: controller.signal });
-    const responseText = await response.text();
-    if (response.status === 401 || response.status === 403) {
-      throw new ApiIntegrationError(
-        "AUTH_FAILED",
-        502,
-        "Falha de autenticação com serviço externo.",
-        responseText.slice(0, 500),
-      );
-    }
-    if (response.status === 429) {
-      throw new ApiIntegrationError(
-        "RATE_LIMITED",
-        429,
-        "Servico externo em limite temporario. Tente novamente em instantes.",
-        responseText.slice(0, 500),
-      );
-    }
-    if (!response.ok) {
-      throw new ApiIntegrationError(
-        "UPSTREAM_ERROR",
-        502,
-        "Falha ao consultar serviço externo.",
-        responseText.slice(0, 500),
-      );
-    }
-    try {
-      return JSON.parse(responseText) as T;
-    } catch {
-      throw new ApiIntegrationError(
-        "INVALID_RESPONSE",
-        502,
-        "Servico externo retornou resposta invalida.",
-        responseText.slice(0, 500),
-      );
-    }
-  } catch (error) {
-    if (error instanceof ApiIntegrationError) throw error;
-    if ((error as Error).name === "AbortError") {
-      throw new ApiIntegrationError("TIMEOUT", 504, "Tempo de resposta excedido em serviço externo.");
-    }
-    throw new ApiIntegrationError("UPSTREAM_ERROR", 502, "Falha ao consultar serviço externo.");
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-function shouldRetryHuggingFaceError(error: unknown): boolean {
-  return error instanceof ApiIntegrationError
-    && (
-      error.code === "RATE_LIMITED"
-      || error.code === "TIMEOUT"
-      || error.code === "UPSTREAM_ERROR"
-      || error.code === "INVALID_RESPONSE"
-    );
-}
-
-function waitForRetry(delayMs: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, delayMs);
-  });
-}
-
-function buildJsonOnlyRouterMessages(messages: Array<{ role: string; content: string }>) {
-  const reminder = "Responda somente JSON valido, sem markdown, sem comentarios e sem texto extra.";
-  if (messages[0]?.role === "system") {
-    return [
-      { ...messages[0], content: `${messages[0].content}\n\n${reminder}` },
-      ...messages.slice(1),
-    ];
-  }
-  return [{ role: "system", content: reminder }, ...messages];
-}
-
-async function requestHuggingFaceStructuredContent(
-  apiKey: string,
-  messages: Array<{ role: string; content: string }>,
-  maxTokens: number,
-  logLabel: string,
-  timeoutMs: number,
-): Promise<string> {
-  const attempts = [
-    { responseFormat: true, requestMessages: messages, label: `${logLabel}:json-mode` },
-    {
-      responseFormat: false,
-      requestMessages: buildJsonOnlyRouterMessages(messages),
-      label: `${logLabel}:json-retry`,
-    },
-  ];
-
-  let lastError: unknown = null;
-  for (const attempt of attempts) {
-    try {
-      const completion = await fetchJsonWithTimeout<OpenAIChatCompletionResponse>(
-        "https://router.huggingface.co/v1/chat/completions",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${apiKey}`,
-          },
-          body: JSON.stringify({
-            model: HUGGING_FACE_CHAT_MODEL,
-            messages: attempt.requestMessages,
-            max_tokens: maxTokens,
-            ...(attempt.responseFormat ? { response_format: { type: "json_object" } } : {}),
-          }),
-        },
-        timeoutMs,
-      );
-      const rawContent = safeGet(completion.choices ?? [], 0)?.message?.content ?? "";
-      if (rawContent.trim().length > 0) {
-        return rawContent;
-      }
-      lastError = new ApiIntegrationError(
-        "INVALID_RESPONSE",
-        502,
-        "Servico externo retornou conteudo vazio.",
-      );
-    } catch (error) {
-      lastError = error;
-      console.warn(`[${attempt.label}]`, {
-        message: getErrorMessage(error),
-        details: error instanceof ApiIntegrationError ? error.details : undefined,
-      });
-    }
-  }
-
-  throw lastError instanceof Error
-    ? lastError
-    : new ApiIntegrationError("UPSTREAM_ERROR", 502, "Falha ao consultar serviço externo.");
-}
-
-async function requestHuggingFaceChatCompletion(
-  apiKey: string,
-  messages: Array<{ role: string; content: string }>,
-  maxTokens: number,
-  timeoutMs: number,
-): Promise<OpenAIChatCompletionResponse> {
-  const attempts = [
-    { maxTokens, label: "chat-primary" },
-    { maxTokens: Math.min(maxTokens, 700), label: "chat-retry" },
-  ];
-
-  let lastError: unknown = null;
-  for (let index = 0; index < attempts.length; index += 1) {
-    const attempt = attempts[index];
-    try {
-      const completion = await fetchJsonWithTimeout<OpenAIChatCompletionResponse>(
-        "https://router.huggingface.co/v1/chat/completions",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${apiKey}`,
-          },
-          body: JSON.stringify({
-            model: HUGGING_FACE_CHAT_MODEL,
-            messages,
-            max_tokens: attempt.maxTokens,
-          }),
-        },
-        timeoutMs,
-      );
-      const rawContent = safeGet(completion.choices ?? [], 0)?.message?.content ?? "";
-      if (rawContent.trim().length > 0) {
-        return completion;
-      }
-      lastError = new ApiIntegrationError("INVALID_RESPONSE", 502, "Servico externo retornou conteudo vazio.");
-    } catch (error) {
-      lastError = error;
-      console.warn(`[huggingface:${attempt.label}]`, {
-        message: getErrorMessage(error),
-        details: error instanceof ApiIntegrationError ? error.details : undefined,
-      });
-      if (!shouldRetryHuggingFaceError(error) || index === attempts.length - 1) {
-        break;
-      }
-      await waitForRetry(450 * (index + 1));
-    }
-  }
-
-  throw lastError instanceof Error
-    ? lastError
-    : new ApiIntegrationError("UPSTREAM_ERROR", 502, "Falha ao consultar serviÃ§o externo.");
-}
-
-async function requestHuggingFaceVisionStructuredContent(
-  apiKey: string,
-  model: string,
-  prompt: string,
-  imageDataUrl: string,
-  maxTokens: number,
-  timeoutMs: number,
-): Promise<string> {
-  const completion = await fetchJsonWithTimeout<OpenAIChatCompletionResponse>(
-    "https://router.huggingface.co/v1/chat/completions",
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model,
-        messages: [
-          {
-            role: "user",
-            content: [
-              {
-                type: "text",
-                text: `${prompt}\nResponda somente JSON valido, sem markdown e sem texto extra.`,
-              },
-              {
-                type: "image_url",
-                image_url: {
-                  url: imageDataUrl,
-                },
-              },
-            ],
-          },
-        ],
-        max_tokens: maxTokens,
-        response_format: { type: "json_object" },
-      }),
-    },
-    timeoutMs,
-  );
-
-  const rawContent = safeGet(completion.choices ?? [], 0)?.message?.content ?? "";
-  if (rawContent.trim().length === 0) {
-    throw new ApiIntegrationError("INVALID_RESPONSE", 502, "Servico externo retornou conteudo vazio.");
-  }
-
-  return rawContent;
-}
-
-type AnthropicMessageContentBlock = {
-  type?: string | undefined;
-  text?: string | undefined;
-};
-
-type AnthropicMessagesResponse = {
-  content?: AnthropicMessageContentBlock[] | undefined;
-};
-
-function extractAnthropicTextContent(response: AnthropicMessagesResponse): string {
-  return (Array.isArray(response.content) ? response.content : [])
-    .filter((block) => block?.type === "text" && typeof block.text === "string")
-    .map((block) => block.text?.trim() ?? "")
-    .filter((value) => value.length > 0)
-    .join("\n\n");
-}
-
-function buildAnthropicMessages(
-  messages: Array<{ role: string; content: string }>,
-  jsonMode: boolean,
-): {
-  system?: string | undefined;
-  messages: Array<{ role: "user" | "assistant"; content: string }>;
-} {
-  const systemParts: string[] = [];
-  const normalizedMessages: Array<{ role: "user" | "assistant"; content: string }> = [];
-
-  for (const message of messages) {
-    const content = typeof message.content === "string" ? message.content.trim() : "";
-    if (content.length === 0) continue;
-
-    if (message.role === "system") {
-      systemParts.push(content);
-      continue;
-    }
-
-    normalizedMessages.push({
-      role: message.role === "assistant" ? "assistant" : "user",
-      content,
-    });
-  }
-
-  if (jsonMode) {
-    systemParts.push("Responda somente JSON valido, sem markdown, sem comentarios e sem texto extra.");
-  }
-
-  return {
-    system: systemParts.length > 0 ? systemParts.join("\n\n") : undefined,
-    messages: normalizedMessages,
-  };
-}
-
-async function requestAnthropicCompletion(
-  apiKey: string,
-  model: string,
-  messages: Array<{ role: string; content: string }>,
-  maxTokens: number,
-  timeoutMs: number,
-  jsonMode: boolean,
-): Promise<OpenAIChatCompletionResponse> {
-  const attempts = [
-    { maxTokens, label: "anthropic-primary" },
-    { maxTokens: Math.min(maxTokens, 700), label: "anthropic-retry" },
-  ];
-
-  let lastError: unknown = null;
-  for (let index = 0; index < attempts.length; index += 1) {
-    const attempt = attempts[index];
-    try {
-      const payload = buildAnthropicMessages(messages, jsonMode);
-      const completion = await fetchJsonWithTimeout<AnthropicMessagesResponse>(
-        "https://api.anthropic.com/v1/messages",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-api-key": apiKey,
-            "anthropic-version": "2023-06-01",
-          },
-          body: JSON.stringify({
-            model,
-            max_tokens: attempt.maxTokens,
-            ...(payload.system ? { system: payload.system } : {}),
-            messages: payload.messages,
-          }),
-        },
-        timeoutMs,
-      );
-      const rawContent = extractAnthropicTextContent(completion);
-      if (rawContent.trim().length > 0) {
-        return {
-          choices: [{ message: { content: rawContent } }],
-        };
-      }
-      lastError = new ApiIntegrationError("INVALID_RESPONSE", 502, "Servico externo retornou conteudo vazio.");
-    } catch (error) {
-      lastError = error;
-      console.warn(`[anthropic:${attempt.label}]`, {
-        message: getErrorMessage(error),
-        details: error instanceof ApiIntegrationError ? error.details : undefined,
-      });
-      if (!(error instanceof ApiIntegrationError) || index === attempts.length - 1) {
-        break;
-      }
-      if (
-        error.code !== "RATE_LIMITED" &&
-        error.code !== "TIMEOUT" &&
-        error.code !== "UPSTREAM_ERROR" &&
-        error.code !== "INVALID_RESPONSE" &&
-        error.code !== "AUTH_FAILED"
-      ) {
-        break;
-      }
-      await waitForRetry(450 * (index + 1));
-    }
-  }
-
-  throw lastError instanceof Error
-    ? lastError
-    : new ApiIntegrationError("UPSTREAM_ERROR", 502, "Falha ao consultar servico externo.");
-}
-
-async function fetchResponseWithTimeout(
-  url: string,
-  init: RequestInit,
-  timeoutMs: number
-): Promise<Response> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    return await fetch(url, { ...init, signal: controller.signal });
-  } catch (error) {
-    if (error instanceof Error && error.name === "AbortError") {
-      throw new ApiIntegrationError("TIMEOUT", 504, "Tempo de resposta excedido em serviço externo.");
-    }
-    throw error;
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-async function callHuggingFaceChat(
-  c: import("hono").Context<AppContext>,
-  messages: Array<{ role: string; content: string }>,
-  maxTokens = 1000,
-  jsonMode = false
-) {
-  const apiKey = getHuggingFaceApiKey(c.env);
-  if (!apiKey) {
-    throw new ApiIntegrationError("SERVICE_NOT_CONFIGURED", 503, "Hugging Face não configurada.");
-  }
-  enforceRateLimit(`huggingface:${c.get("user")?.id ?? "anon"}`);
-  if (jsonMode) {
-    const content = await requestHuggingFaceStructuredContent(
-      apiKey,
-      messages,
-      maxTokens,
-      "callOpenAIChat",
-      timeoutMsByService.huggingface,
-    );
-    const structuredResponse: OpenAIChatCompletionResponse = {
-      choices: [{ message: { content } }],
-    };
-    return structuredResponse;
-  }
-  return requestHuggingFaceChatCompletion(
-    apiKey,
-    messages,
-    maxTokens,
-    timeoutMsByService.huggingface,
-  );
-}
-
-function shouldFallbackToNextChatProvider(error: unknown): boolean {
-  if (!(error instanceof ApiIntegrationError)) {
-    return true;
-  }
-
-  return (
-    error.code === "AUTH_FAILED" ||
-    error.code === "RATE_LIMITED" ||
-    error.code === "TIMEOUT" ||
-    error.code === "UPSTREAM_ERROR" ||
-    error.code === "INVALID_RESPONSE" ||
-    error.code === "SERVICE_NOT_CONFIGURED"
-  );
-}
-
-async function callOpenAIChatWithFallback(
-  c: import("hono").Context<AppContext>,
-  messages: Array<{ role: string; content: string }>,
-  maxTokens = 1000,
-  jsonMode = false,
-) {
-  const providers: Array<{
-    name: "huggingface" | "anthropic";
-    execute: () => Promise<OpenAIChatCompletionResponse>;
-  }> = [];
-
-  const huggingFaceApiKey = getHuggingFaceApiKey(c.env);
-  if (huggingFaceApiKey) {
-    providers.push({
-      name: "huggingface",
-      execute: () => callHuggingFaceChat(c, messages, maxTokens, jsonMode),
-    });
-  }
-
-  const anthropicApiKey = getAnthropicApiKey(c.env);
-  if (anthropicApiKey) {
-    providers.push({
-      name: "anthropic",
-      execute: () => requestAnthropicCompletion(
-        anthropicApiKey,
-        getAnthropicChatModel(c.env),
-        messages,
-        maxTokens,
-        timeoutMsByService.anthropic,
-        jsonMode,
-      ),
-    });
-  }
-
-  if (providers.length === 0) {
-    throw new ApiIntegrationError("SERVICE_NOT_CONFIGURED", 503, "Nenhum provedor de IA configurado.");
-  }
-
-  const userId = c.get("user")?.id ?? "anon";
-  let lastError: unknown = null;
-
-  for (let index = 0; index < providers.length; index += 1) {
-    const provider = providers[index];
-    try {
-      if (provider.name === "anthropic") {
-        enforceRateLimit(`anthropic:${userId}`);
-      }
-      return await provider.execute();
-    } catch (error) {
-      lastError = error;
-      console.warn(`[callOpenAIChat:${provider.name}]`, {
-        userId,
-        message: getErrorMessage(error),
-        details: error instanceof ApiIntegrationError ? error.details : undefined,
-      });
-
-      if (!shouldFallbackToNextChatProvider(error) || index === providers.length - 1) {
-        throw error;
-      }
-    }
-  }
-
-  throw lastError instanceof Error
-    ? lastError
-    : new ApiIntegrationError("UPSTREAM_ERROR", 502, "Falha ao consultar servico externo.");
-}
-
-type USDAResponse = {
-  foods?: Array<{
-    description?: string | undefined;
-    foodNutrients?: Array<{ nutrientName?: string | undefined; value?: number | undefined }>;
-  }>;
-};
-
-type RapidApiNutritionResponse = Array<{
-  name?: string | undefined;
-  calories?: number | undefined;
-  protein_g?: number | undefined;
-  carbohydrates_total_g?: number | undefined;
-  fat_total_g?: number | undefined;
-}>;
 
 function shouldInspectTrainingPlanPreferenceRequest(message: string): boolean {
   const normalized = normalizeMatchText(message);
@@ -13383,60 +9566,6 @@ async function maybeApplyTrainingPlanPreferenceFromChat(
   }
 }
 
-async function searchFoodOnUSDA(c: import("hono").Context<AppContext>, query: string) {
-  if (!c.env.USDA_API_KEY) {
-    throw new ApiIntegrationError("SERVICE_NOT_CONFIGURED", 503, "USDA não configurada.");
-  }
-  enforceRateLimit(`usda:${c.get("user")?.id ?? "anon"}`);
-  const url = new URL("https://api.nal.usda.gov/fdc/v1/foods/search");
-  url.searchParams.set("api_key", c.env.USDA_API_KEY);
-  url.searchParams.set("query", query);
-  url.searchParams.set("pageSize", "1");
-  return fetchJsonWithTimeout<USDAResponse>(url.toString(), { method: "GET" }, timeoutMsByService.usda);
-}
-
-async function searchFoodOnRapidApi(c: import("hono").Context<AppContext>, query: string) {
-  if (!c.env.RAPID_API_KEY) {
-    throw new ApiIntegrationError("SERVICE_NOT_CONFIGURED", 503, "RapidAPI não configurada.");
-  }
-  const host = c.env.RAPID_API_HOST || "nutrition-by-api-ninjas.p.rapidapi.com";
-  enforceRateLimit(`rapidapi:${c.get("user")?.id ?? "anon"}`);
-  const url = `https://${host}/v1/nutrition?query=${encodeURIComponent(query)}`;
-  return fetchJsonWithTimeout<RapidApiNutritionResponse>(
-    url,
-    {
-      method: "GET",
-      headers: {
-        "X-RapidAPI-Key": c.env.RAPID_API_KEY,
-        "X-RapidAPI-Host": host,
-      },
-    },
-    timeoutMsByService.rapidapi
-  );
-}
-
-function parseNutritionFromOcrLabel(text: string) {
-  if (!text) return null;
-
-  const normalize = (value?: string | undefined) => (value ? Number(value.replace(",", ".")) : null);
-  const kcal = normalize(safeGet(text.match(/(\d+[.,]?\d*)\s*kcal/i) ?? [], 1));
-  const kJ = normalize(safeGet(text.match(/(\d+[.,]?\d*)\s*kj/i) ?? [], 1));
-  const protein = normalize(safeGet(text.match(/prote[ií]n[aa]s?[^\d]*(\d+[.,]?\d*)\s*g/i) ?? [], 1));
-  const carbs = normalize(safeGet(text.match(/carboidratos?[^\d]*(\d+[.,]?\d*)\s*g/i) ?? [], 1));
-  const fats = normalize(safeGet(text.match(/gorduras?(?:\s+totais?)?[^\d]*(\d+[.,]?\d*)\s*g/i) ?? [], 1));
-
-  if ([kcal, kJ, protein, carbs, fats].every((item) => item === null)) {
-    return null;
-  }
-
-  return {
-    calories: kcal,
-    energy_kj: kJ,
-    protein,
-    carbs,
-    fats,
-  };
-}
 
 type MissionDraft = {
   title?: string | undefined;
@@ -13453,13 +9582,6 @@ type MissionDraft = {
   points_reward?: number | undefined;
 };
 
-interface OpenAIChatCompletionResponse {
-  choices?: Array<{
-    message?: {
-      content?: string | undefined;
-    };
-  }>;
-}
 
 function normalizeConditioning(value: unknown): ConditioningLevel {
   if (value === "sedentario" || value === "iniciante" || value === "intermediario" || value === "avancado") {
@@ -13832,1249 +9954,46 @@ async function generateAiMissionsForUser(
   };
 }
 
-// 1. Generate personalized missions using AI (background processing with status endpoint)
-app.post("/api/ai/generate-missions", authMiddleware, async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
 
-  try {
-    await ensureMissionJobSchema(c.env.fitloot_db);
-    const requestBody = await c.req.json().catch(() => ({})) as { conditioning?: unknown };
-    const jobId = crypto.randomUUID();
 
-    await c.env.fitloot_db.prepare(
-      `INSERT INTO mission_generation_jobs (id, user_id, status, result_json, error_message, updated_at)
-       VALUES (?, ?, 'processing', NULL, NULL, datetime('now'))`
-    ).bind(jobId, user.id).run();
-
-    c.executionCtx.waitUntil((async () => {
-      try {
-        const result = await generateAiMissionsForUser(c.env, c.env.fitloot_db, user.id, requestBody.conditioning);
-        await c.env.fitloot_db.prepare(
-          `UPDATE mission_generation_jobs
-             SET status = 'completed', result_json = ?, error_message = NULL, updated_at = datetime('now')
-           WHERE id = ? AND user_id = ?`
-        ).bind(JSON.stringify(result), jobId, user.id).run();
-      } catch (jobError) {
-        console.error("[/api/ai/generate-missions][job]", {
-          message: getErrorMessage(jobError),
-          userId: user.id,
-          jobId,
-        });
-        await c.env.fitloot_db.prepare(
-          `UPDATE mission_generation_jobs
-             SET status = 'failed', error_message = ?, updated_at = datetime('now')
-           WHERE id = ? AND user_id = ?`
-        ).bind(getErrorMessage(jobError), jobId, user.id).run();
-      }
-    })());
-
-    return c.json({
-      success: true,
-      status: "processing",
-      job_id: jobId,
-    }, 202);
-  } catch (routeError) {
-    console.error("[/api/ai/generate-missions]", {
-      message: getErrorMessage(routeError),
-      userId: user.id,
-    });
-
-    if (isMissingSchemaError(routeError)) {
-      return schemaMismatchResponse(c);
-    }
-
-    return internalErrorResponse(c);
-  }
+registerAiRoutes(app, {
+  ApiIntegrationError,
+  authMiddleware,
+  callOpenAIChatWithFallback,
+  ensureMissionJobSchema,
+  ensureUserCounterRow,
+  enforceRateLimit,
+  fetchJsonWithTimeout,
+  generateAiMissionsForUser,
+  logUserEvent,
+  maybeApplyTrainingPlanPreferenceFromChat: (c, params) =>
+    maybeApplyTrainingPlanPreferenceFromChat(c, {
+      ...params,
+      conditioning: params.conditioning as ConditioningLevel,
+      activePreferences: params.activePreferences as TrainingPlanChatPreferences | null,
+    }),
+  normalizeConditioning,
+  normalizeMatchText,
+  normalizeTrainingFrequencyInput,
+  normalizeTrainingPlanChatPreferences,
+  onChatMessage,
+  parseJsonObjectFromModelContent,
+  parseStoredPlanRecord,
+  requestHuggingFaceVisionStructuredContent,
+  summarizeTrainingPlanChatPreferences: (preferences) =>
+    summarizeTrainingPlanChatPreferences(
+      preferences as TrainingPlanChatPreferences | null,
+    ),
+  timeoutMsByService,
+  toFriendlyErrorResponse,
+  unlockAchievementIfNeeded,
 });
 
-app.get("/api/ai/generate-missions/status", authMiddleware, async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
+registerHealthRoutes(app, { authMiddleware });
 
-  const jobId = String(c.req.query("job_id") ?? "").trim();
-  if (!jobId) {
-    return c.json({ error: "job_id obrigatorio" }, 400);
-  }
-
-  try {
-    await ensureMissionJobSchema(c.env.fitloot_db);
-    const job = await c.env.fitloot_db.prepare(
-      `SELECT id, status, result_json, error_message, created_at, updated_at
-       FROM mission_generation_jobs
-       WHERE id = ? AND user_id = ?`
-    ).bind(jobId, user.id).first<{
-      id: string;
-      status: string;
-      result_json: string | null;
-      error_message: string | null;
-      created_at: string;
-      updated_at: string;
-    }>();
-
-    if (!job) {
-      return c.json({ error: "Job nao encontrado" }, 404);
-    }
-
-    if (job.status === "completed") {
-      const parsed = job.result_json ? JSON.parse(job.result_json) as AiMissionGenerationResult : null;
-      return c.json({
-        success: true,
-        status: "completed",
-        missions: parsed?.missions ?? [],
-        fallback: Boolean(parsed?.fallback),
-        error: parsed?.error ?? null,
-        job_id: job.id,
-      });
-    }
-
-    if (job.status === "failed") {
-      return c.json({
-        success: false,
-        status: "failed",
-        error: job.error_message ?? "Falha ao gerar missoes",
-        job_id: job.id,
-      }, 500);
-    }
-
-    return c.json({
-      success: true,
-      status: "processing",
-      job_id: job.id,
-      updated_at: job.updated_at,
-    }, 202);
-  } catch (error) {
-    console.error("[/api/ai/generate-missions/status]", {
-      message: getErrorMessage(error),
-      userId: user.id,
-      jobId,
-    });
-    return internalErrorResponse(c);
-  }
-});
-
-// 2. AI Fitness Chatbot
-app.post("/api/ai/chat", authMiddleware, async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-  try {
-    const raw = await c.req.json();
-    const parsed = AiChatRequestSchema.safeParse(raw);
-    if (!parsed.success) {
-      return c.json({ error: "Invalid input", details: parsed.error.flatten() }, 400);
-    }
-    const { message: userMessage, history: conversationHistory = [], mode = "suporte", session_count } = parsed.data;
-
-    await ensureUserCounterRow(c.env.fitloot_db, user.id);
-    const currentCounter = await c.env.fitloot_db.prepare("SELECT chat_messages, repeated_message_streak, last_chat_message FROM user_event_counters WHERE user_id = ?")
-      .bind(user.id).first<{ chat_messages: number; repeated_message_streak: number; last_chat_message: string | null }>();
-    const sameMessage = (currentCounter?.last_chat_message ?? "") === userMessage;
-    const nextRepeat = sameMessage ? Number(currentCounter?.repeated_message_streak ?? 0) + 1 : 1;
-    await c.env.fitloot_db.prepare(
-      `UPDATE user_event_counters SET
-        chat_messages = COALESCE(chat_messages, 0) + 1,
-        repeated_message_streak = ?,
-        last_chat_message = ?,
-        updated_at = datetime('now')
-      WHERE user_id = ?`
-    ).bind(nextRepeat, userMessage, user.id).run();
-    await logUserEvent(c.env.fitloot_db, user.id, 'chat_message', { size: userMessage.length, repeated: sameMessage });
-    await onChatMessage(c.env.fitloot_db, user.id, Number(session_count ?? (Number(currentCounter?.chat_messages ?? 0) + 1)));
-    if (Number(session_count ?? 0) >= 100) {
-      await unlockAchievementIfNeeded(c.env.fitloot_db, user.id, "Conversa de Louco", Number(session_count), 100);
-    }
-
-    const [profile, progression, attributes, trainingPlanRow] = await Promise.all([
-      c.env.fitloot_db.prepare("SELECT * FROM user_profiles WHERE user_id = ?").bind(user.id).first(),
-      c.env.fitloot_db.prepare("SELECT * FROM user_progression WHERE user_id = ?").bind(user.id).first(),
-      c.env.fitloot_db.prepare("SELECT * FROM user_attributes WHERE user_id = ?").bind(user.id).first(),
-      c.env.fitloot_db.prepare("SELECT weekly_plan_json, training_frequency FROM user_training_plans WHERE user_id = ?")
-        .bind(user.id)
-        .first<{ weekly_plan_json: string | null; training_frequency: number | null }>(),
-    ]);
-    const activeTrainingPlan = parseStoredPlanRecord(trainingPlanRow?.weekly_plan_json);
-    const activeChatPlanPreferences = normalizeTrainingPlanChatPreferences(activeTrainingPlan?.chat_preferences);
-    const activeChatPlanSummary = summarizeTrainingPlanChatPreferences(activeChatPlanPreferences);
-    const profileMainGoal = typeof profile?.main_goal === "string" ? profile.main_goal : "";
-    const profileConditioning = normalizeConditioning(profile?.initial_conditioning);
-    const profileEquipment = typeof profile?.equipment === "string" ? profile.equipment : "";
-    const profileInjuries = typeof profile?.injuries === "string" ? profile.injuries : "";
-    const trainingFrequency = normalizeTrainingFrequencyInput(trainingPlanRow?.training_frequency);
-
-    const systemPrompt = `Você é o assistente oficial do app FitBot.
-Sua função é responder de forma útil, natural, objetiva e agradável, ajudando o usuário com treino, evolução física, hábitos, alimentação e uso do app.
-
-REGRAS DE COMPORTAMENTO
-
-1. TOM DE VOZ
-- Fale de forma humana, natural, clara e amigável.
-- Seja acolhedor, mas sem exagero.
-- Evite linguagem robótica.
-- Evite parecer um coach caricato ou motivacional demais.
-- Evite excesso de entusiasmo, emojis e frases decoradas.
-
-2. OBJETIVIDADE
-- Responda exatamente o que o usuário pediu.
-- Não acrescente explicações longas sem necessidade.
-- Não desvie do assunto.
-- Não invente contexto extra.
-- Se a pergunta for simples, responda de forma simples.
-
-3. PERSONALIZAÇÃO
-- Personalize a resposta quando isso realmente agregar valor.
-- Use o nome do usuário com moderação.
-- Nunca repita o nome do usuário em toda mensagem.
-- Só use o nome em momentos específicos: primeira saudação, incentivo pontual, contexto em que a personalização melhora a experiência.
-- Na maior parte do tempo, responda sem citar o nome.
-
-4. ESTILO DE RESPOSTA
-- Prefira respostas curtas ou médias.
-- Só faça respostas longas quando o usuário pedir detalhes.
-- Evite introduções desnecessárias.
-- Vá direto ao ponto.
-- Organize a resposta com clareza.
-- Quando útil, divida em etapas simples.
-
-5. PROIBIÇÕES DE ESTILO
-- Não use frases como "Estou aqui pronto para ajudar você a evoluir", "Vamos nessa rumo ao seu objetivo", "bora ganhar XP", "estou aqui para te acompanhar nessa jornada".
-- Não transforme toda resposta em mensagem motivacional.
-- Não tente ser engraçado o tempo todo.
-- Não use o nome do usuário repetidamente.
-- Não enfeite respostas com texto desnecessário.
-
-6. QUANDO O USUÁRIO MANDAR MENSAGEM CONFUSA
-- Peça esclarecimento de forma curta e natural.
-- Tom: "Não entendi muito bem. Me explica de outro jeito?" ou "Pode reformular? Quero te responder certo."
-- Não faça textos longos para dizer que não entendeu.
-
-7. QUANDO O USUÁRIO FIZER PERGUNTA DIRETA
-- Responda diretamente, sem introdução.
-
-8. QUANDO O USUÁRIO PEDIR AJUDA PRÁTICA
-- Entregue ação concreta: treino, ajuste de rotina, sugestão alimentar, explicação objetiva.
-- Menos fala inspiracional, mais utilidade.
-
-9. QUANDO NÃO SOUBER OU FALTAR CONTEXTO
-- Admita de forma simples e peça apenas a informação necessária.
-- Não invente.
-
-10. FORMATO IDEAL
-- Pergunta simples -> resposta curta
-- Pergunta pratica -> resposta objetiva com passos
-- Pergunta complexa -> resposta clara, sem enrolacao
-- Duvida emocional -> resposta acolhedora, mas sobria
-
-11. REGRA FINAL
-Antes de responder, avalie: Estou respondendo exatamente o que foi pedido? Estou sendo mais longo do que preciso? Estou usando o nome sem necessidade? Estou parecendo natural ou teatral? Se estiver teatral ou motivacional demais, simplifique.
-
-INSTRUÇÕES EXTRAS DE ESTILO
-- Não use mais de 1 emoji por resposta, e apenas quando combinar naturalmente.
-- Responda primeiro, explique depois se necessário.
-- Se a pergunta for curta, a resposta também deve ser curta.
-- Se o usuário estiver irritado ou impaciente, seja ainda mais direto.
-- NUNCA use markdown na resposta. Não use **, *, |, #, ---, tabelas ou qualquer símbolo de formatação. Escreva em texto puro e natural.
-
-Contexto do usuário:
-- Nome: ${profile?.full_name}
-- Nível: ${progression?.level}
-- XP: ${progression?.xp}
-- Streak: ${progression?.current_streak} dias
-- Objetivo: ${profileMainGoal}
-- Condicionamento: ${profileConditioning}
-- Preferencia ativa para proximas geracoes: ${activeChatPlanSummary || "nenhuma"}
-- Força: ${attributes?.strength}
-- Modo: ${mode}`;
-
-    const normalizedHistory = conversationHistory
-      .filter((msg) => {
-        const role = typeof msg?.role === "string" ? msg.role : "";
-        const content = typeof msg?.content === "string" ? msg.content : "";
-        return (
-          content.trim().length > 0 &&
-          (role === "assistant" || role === "user" || role === "system")
-        );
-      })
-      .map((msg) => ({
-        role: typeof msg.role === "string" ? msg.role : "user",
-        content: typeof msg.content === "string" ? msg.content : "",
-      }))
-      .slice(-16);
-    const dedupedHistory =
-      normalizedHistory.length > 0 &&
-      normalizedHistory[normalizedHistory.length - 1]?.role === "user" &&
-      normalizeMatchText(normalizedHistory[normalizedHistory.length - 1]?.content ?? "") ===
-        normalizeMatchText(userMessage)
-        ? normalizedHistory.slice(0, -1)
-        : normalizedHistory;
-    const compactSystemPrompt = `Você é o FitBot. Responda em português do Brasil, de forma útil, curta e direta, sem markdown. Se faltar contexto, peça só o necessário.
-
-Contexto do usuário:
-- Nome: ${profile?.full_name}
-- Objetivo: ${profileMainGoal}
-- Condicionamento: ${profileConditioning}
-- Preferencia ativa: ${activeChatPlanSummary || "nenhuma"}
-- Modo: ${mode}`;
-
-    const primaryMessages = [
-      { role: "system", content: systemPrompt },
-      ...dedupedHistory,
-      { role: "user", content: userMessage },
-    ];
-
-    let openaiData: OpenAIChatCompletionResponse;
-    try {
-      openaiData = await callOpenAIChatWithFallback(c, primaryMessages);
-    } catch (primaryError) {
-      console.warn("[ai-chat][primary]", {
-        userId: user.id,
-        message: getErrorMessage(primaryError),
-        details: primaryError instanceof ApiIntegrationError ? primaryError.details : undefined,
-      });
-
-      if (
-        !(primaryError instanceof ApiIntegrationError) ||
-        primaryError.code === "RATE_LIMITED" ||
-        primaryError.code === "SERVICE_NOT_CONFIGURED" ||
-        primaryError.code === "AUTH_FAILED"
-      ) {
-        throw primaryError;
-      }
-
-      openaiData = await callOpenAIChatWithFallback(
-        c,
-        [
-          { role: "system", content: compactSystemPrompt },
-          ...dedupedHistory.slice(-8),
-          { role: "user", content: userMessage },
-        ],
-        700,
-      );
-    }
-
-    const content = safeGet(openaiData.choices ?? [], 0)?.message?.content ?? "";
-    const appliedPlanPreference = await maybeApplyTrainingPlanPreferenceFromChat(c, {
-      userId: user.id,
-      userMessage,
-      mainGoal: profileMainGoal,
-      conditioning: profileConditioning,
-      equipment: profileEquipment,
-      injuries: profileInjuries,
-      trainingFrequency,
-      existingPlanJson: trainingPlanRow?.weekly_plan_json ?? null,
-      activePreferences: activeChatPlanPreferences,
-    });
-    const planPreferenceNotice = appliedPlanPreference
-      ? `\n\nAjuste salvo para as proximas missoes: ${summarizeTrainingPlanChatPreferences(appliedPlanPreference)}.`
-      : "";
-
-    return c.json({ message: `${content}${planPreferenceNotice}`.trim() });
-  } catch (error) {
-    console.error("[ai-chat]", {
-      userId: user.id,
-      message: getErrorMessage(error),
-      details: error instanceof ApiIntegrationError ? error.details : undefined,
-      stack: error instanceof Error ? error.stack : undefined,
-    });
-    const friendly = toFriendlyErrorResponse(error);
-    return c.json(friendly.payload, toStatusCode(friendly.status));
-  }
-});
-
-type AiRecommendationsPayload = {
-  next_skill_recommendation: {
-    name: string;
-    reason: string;
-  };
-  weak_attribute: {
-    name: string;
-    suggestion: string;
-  };
-  training_focus: {
-    type: string;
-    reason: string;
-  };
-  motivation_message: string;
-};
-
-type AiRecommendationSkillRow = {
-  name: string;
-  total_reps: number;
-  best_reps: number;
-};
-
-function toRoundedNumber(value: unknown): number {
-  const numeric = Number(value);
-  return Number.isFinite(numeric) ? Math.round(numeric) : 0;
-}
-
-function buildFallbackRecommendations(params: {
-  level: number;
-  streak: number;
-  goal: string | null | undefined;
-  attributes: {
-    strength: number;
-    constitution: number;
-    vitality: number;
-    dexterity: number;
-    focus: number;
-  };
-  skills: AiRecommendationSkillRow[];
-}): AiRecommendationsPayload {
-  const goal = typeof params.goal === "string" ? params.goal : "";
-  const focusByGoal: Record<string, { type: string; reason: string }> = {
-    perder_peso: {
-      type: "Condicionamento",
-      reason: "Aumente a frequencia de sessoes dinamicas para elevar o gasto calorico com consistencia.",
-    },
-    ganhar_massa: {
-      type: "Forca progressiva",
-      reason: "Priorize sobrecarga gradual e execucao controlada para sustentar ganho de massa.",
-    },
-    resistencia: {
-      type: "Volume e resistencia",
-      reason: "Blocos mais longos e descansos menores ajudam a consolidar sua resistencia.",
-    },
-    calistenia: {
-      type: "Tecnica de base",
-      reason: "Fortalecer movimentos fundamentais melhora o controle corporal para a progressao na calistenia.",
-    },
-    saude_geral: {
-      type: "Constancia semanal",
-      reason: "Rotina equilibrada e aderente costuma gerar o melhor resultado para saude geral.",
-    },
-  };
-
-  const weakestAttributeCandidates: Array<{ name: string; value: number; suggestion: string }> = [
-    {
-      name: "Forca",
-      value: params.attributes.strength,
-      suggestion: "Inclua exercicios compostos e aumente a carga ou repeticoes de forma gradual.",
-    },
-    {
-      name: "Constituicao",
-      value: params.attributes.constitution,
-      suggestion: "Combine volume moderado com recuperacao consistente para aguentar mais sessoes na semana.",
-    },
-    {
-      name: "Vitalidade",
-      value: params.attributes.vitality,
-      suggestion: "Mantenha cardio leve e pausas bem distribuidas para melhorar energia ao longo do treino.",
-    },
-    {
-      name: "Destreza",
-      value: params.attributes.dexterity,
-      suggestion: "Trabalhe controle de movimento e amplitude para ganhar precisao e mobilidade.",
-    },
-    {
-      name: "Foco",
-      value: params.attributes.focus,
-      suggestion: "Use treinos curtos com meta clara para aumentar concentracao e regularidade.",
-    },
-  ];
-  const weakestAttribute = weakestAttributeCandidates.sort((left, right) => left.value - right.value)[0];
-
-  const topSkill = params.skills[0] ?? null;
-  const focus = focusByGoal[goal] ?? {
-    type: "Evolucao equilibrada",
-    reason: "A melhor recomendacao agora e sustentar consistencia e ajustar o treino com base no seu progresso recente.",
-  };
-
-  return {
-    next_skill_recommendation: topSkill
-      ? {
-        name: topSkill.name,
-        reason: `Voce ja construiu base em ${topSkill.name}. Vale aprofundar essa skill enquanto mantem progressao controlada nas demais.`,
-      }
-      : {
-        name: "Fundamentos de corpo livre",
-        reason: "Comece pelas skills basicas para construir repertorio tecnico e facilitar as proximas evolucoes.",
-      },
-    weak_attribute: {
-      name: weakestAttribute.name,
-      suggestion: weakestAttribute.suggestion,
-    },
-    training_focus: focus,
-    motivation_message:
-      params.streak >= 7
-        ? `Voce ja acumula ${params.streak} dias de streak. O melhor proximo passo e proteger essa consistencia enquanto sobe o nivel.`
-        : `Seu nivel ${params.level} ja mostra progresso. Mantenha constancia nos proximos dias para transformar ritmo em resultado.`,
-  };
-}
-
-function mergeRecommendationsWithFallback(
-  raw: unknown,
-  fallback: AiRecommendationsPayload,
-): AiRecommendationsPayload {
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
-    return fallback;
-  }
-
-  const data = raw as Record<string, unknown>;
-  const nextSkill = data.next_skill_recommendation;
-  const weakAttribute = data.weak_attribute;
-  const trainingFocus = data.training_focus;
-
-  const nextSkillRecord =
-    nextSkill && typeof nextSkill === "object" && !Array.isArray(nextSkill)
-      ? nextSkill as Record<string, unknown>
-      : null;
-  const weakAttributeRecord =
-    weakAttribute && typeof weakAttribute === "object" && !Array.isArray(weakAttribute)
-      ? weakAttribute as Record<string, unknown>
-      : null;
-  const trainingFocusRecord =
-    trainingFocus && typeof trainingFocus === "object" && !Array.isArray(trainingFocus)
-      ? trainingFocus as Record<string, unknown>
-      : null;
-
-  return {
-    next_skill_recommendation: {
-      name:
-        typeof nextSkillRecord?.name === "string" && nextSkillRecord.name.trim().length > 0
-          ? nextSkillRecord.name.trim()
-          : fallback.next_skill_recommendation.name,
-      reason:
-        typeof nextSkillRecord?.reason === "string" && nextSkillRecord.reason.trim().length > 0
-          ? nextSkillRecord.reason.trim()
-          : fallback.next_skill_recommendation.reason,
-    },
-    weak_attribute: {
-      name:
-        typeof weakAttributeRecord?.name === "string" && weakAttributeRecord.name.trim().length > 0
-          ? weakAttributeRecord.name.trim()
-          : fallback.weak_attribute.name,
-      suggestion:
-        typeof weakAttributeRecord?.suggestion === "string" && weakAttributeRecord.suggestion.trim().length > 0
-          ? weakAttributeRecord.suggestion.trim()
-          : fallback.weak_attribute.suggestion,
-    },
-    training_focus: {
-      type:
-        typeof trainingFocusRecord?.type === "string" && trainingFocusRecord.type.trim().length > 0
-          ? trainingFocusRecord.type.trim()
-          : fallback.training_focus.type,
-      reason:
-        typeof trainingFocusRecord?.reason === "string" && trainingFocusRecord.reason.trim().length > 0
-          ? trainingFocusRecord.reason.trim()
-          : fallback.training_focus.reason,
-    },
-    motivation_message:
-      typeof data.motivation_message === "string" && data.motivation_message.trim().length > 0
-        ? data.motivation_message.trim()
-        : fallback.motivation_message,
-  };
-}
-
-// 3. AI Recommendations Engine
-app.get("/api/ai/recommendations", authMiddleware, async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-  try {
-    const [profile, progression, attributes, skills, completedMissions] = await Promise.all([
-      c.env.fitloot_db.prepare("SELECT * FROM user_profiles WHERE user_id = ?").bind(user.id).first(),
-      c.env.fitloot_db.prepare("SELECT * FROM user_progression WHERE user_id = ?").bind(user.id).first(),
-      c.env.fitloot_db.prepare("SELECT * FROM user_attributes WHERE user_id = ?").bind(user.id).first(),
-      c.env.fitloot_db.prepare(`
-        SELECT s.*, us.total_reps, us.best_reps 
-        FROM skills s
-        INNER JOIN user_skills us ON s.id = us.skill_id
-        WHERE us.user_id = ?
-        ORDER BY us.total_reps DESC
-      `).bind(user.id).all(),
-      c.env.fitloot_db.prepare(`
-        SELECT COUNT(*) as count 
-        FROM missions 
-        WHERE user_id = ? AND is_completed = 1
-      `).bind(user.id).first(),
-    ]);
-
-    const skillRows = Array.isArray(skills.results)
-      ? (skills.results as Array<{ name?: unknown; total_reps?: unknown; best_reps?: unknown }>)
-        .map((skill) => ({
-          name: typeof skill.name === "string" && skill.name.trim().length > 0 ? skill.name.trim() : "Skill sem nome",
-          total_reps: toRoundedNumber(skill.total_reps),
-          best_reps: toRoundedNumber(skill.best_reps),
-        }))
-      : [];
-
-    const userStats = {
-      level: toRoundedNumber(progression?.level),
-      total_missions: toRoundedNumber(completedMissions?.count),
-      streak: toRoundedNumber(progression?.current_streak),
-    };
-
-    const fallbackRecommendations = buildFallbackRecommendations({
-      level: userStats.level,
-      streak: userStats.streak,
-      goal: typeof profile?.main_goal === "string" ? profile.main_goal : null,
-      attributes: {
-        strength: toRoundedNumber(attributes?.strength),
-        constitution: toRoundedNumber(attributes?.constitution),
-        vitality: toRoundedNumber(attributes?.vitality),
-        dexterity: toRoundedNumber(attributes?.dexterity),
-        focus: toRoundedNumber(attributes?.focus),
-      },
-      skills: skillRows,
-    });
-
-    const prompt = `Analise este perfil fitness gamificado e gere recomendações personalizadas em JSON.
-Nível: ${progression?.level}
-XP: ${progression?.xp}
-Missões completas: ${completedMissions?.count}
-Streak: ${progression?.current_streak}
-Objetivo: ${profile?.main_goal}
-Atributos: força ${attributes?.strength}, constituição ${attributes?.constitution}, vitalidade ${attributes?.vitality}, destreza ${attributes?.dexterity}, foco ${attributes?.focus}
-Skills: ${skillRows.slice(0, 5).map((skill) => `${skill.name}:${skill.total_reps}`).join(",")}`;
-
-    if (!getHuggingFaceApiKey(c.env)) {
-      return c.json({
-        success: true,
-        recommendations: fallbackRecommendations,
-        user_stats: userStats,
-        degraded: true,
-        source: "fallback",
-      });
-    }
-
-    let recommendations = fallbackRecommendations;
-    let degraded = false;
-
-    try {
-      const openaiData = await callOpenAIChatWithFallback(c, [{ role: "user", content: prompt }], 1000, true);
-      const content = safeGet(openaiData.choices ?? [], 0)?.message?.content ?? "{}";
-      recommendations = mergeRecommendationsWithFallback(
-        parseJsonObjectFromModelContent<Record<string, unknown>>(content) ?? {},
-        fallbackRecommendations,
-      );
-    } catch (error) {
-      degraded = true;
-      console.error("[/api/ai/recommendations][upstream]", {
-        userId: user.id,
-        message: getErrorMessage(error),
-      });
-    }
-
-    return c.json({
-      success: true,
-      recommendations,
-      user_stats: userStats,
-      degraded,
-      source: degraded ? "fallback" : "ai",
-    });
-  } catch (error) {
-    console.error("[/api/ai/recommendations]", {
-      userId: user.id,
-      message: getErrorMessage(error),
-    });
-    return c.json({
-      success: true,
-      recommendations: buildFallbackRecommendations({
-        level: 1,
-        streak: 0,
-        goal: null,
-        attributes: {
-          strength: 0,
-          constitution: 0,
-          vitality: 0,
-          dexterity: 0,
-          focus: 0,
-        },
-        skills: [],
-      }),
-      user_stats: {
-        level: 1,
-        total_missions: 0,
-        streak: 0,
-      },
-      degraded: true,
-      source: "fallback",
-    });
-  }
-});
-
-// 4. AI workout suggestions
-app.get("/api/ai/workout-suggestions", authMiddleware, async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-  try {
-    const [profile, progression, metrics] = await Promise.all([
-      c.env.fitloot_db.prepare("SELECT * FROM user_profiles WHERE user_id = ?").bind(user.id).first(),
-      c.env.fitloot_db.prepare("SELECT * FROM user_progression WHERE user_id = ?").bind(user.id).first(),
-      c.env.fitloot_db.prepare("SELECT * FROM daily_metrics WHERE user_id = ? ORDER BY date DESC LIMIT 1").bind(user.id).first(),
-    ]);
-
-    const prompt = `Sugira treino em JSON com workout_type, duration_minutes, intensity, exercises e motivation. Contexto: nível ${progression?.level}, objetivo ${profile?.main_goal}, passos ${metrics?.steps || 0}, calorias ${metrics?.calories_burned || 0}.`;
-
-    const openaiData = await callOpenAIChatWithFallback(c, [{ role: "user", content: prompt }], 900, true);
-    const content = safeGet(openaiData.choices ?? [], 0)?.message?.content ?? "{}";
-    const workout = parseJsonObjectFromModelContent<Record<string, unknown>>(content) ?? {};
-
-    return c.json({
-      success: true,
-      workout,
-    });
-  } catch (error) {
-    const friendly = toFriendlyErrorResponse(error);
-    return c.json(friendly.payload, toStatusCode(friendly.status));
-  }
-});
-
-type IdentifiedFoodItem = {
-  food_name: string;
-  portion_description?: string | undefined;
-  portion_multiplier?: number | undefined;
-};
-
-function isIdentifiedFoodItem(item: unknown): item is IdentifiedFoodItem {
-  if (!item || typeof item !== "object") return false;
-  const value = item as { food_name?: unknown };
-  return typeof value.food_name === "string" && value.food_name.trim().length > 0;
-}
-
-async function identifyFoodItemsFromImage(
-  c: import("hono").Context<AppContext>,
-  params: {
-    imageBase64: string;
-    imageMimeType?: string | undefined;
-    foodDescription?: string | undefined;
-    ocrText?: string | undefined;
-  },
-): Promise<{ items: IdentifiedFoodItem[]; foodDescription?: string | undefined }> {
-  const apiKey = getHuggingFaceApiKey(c.env);
-  if (!apiKey) {
-    throw new ApiIntegrationError("SERVICE_NOT_CONFIGURED", 503, "Hugging Face não configurada.");
-  }
-
-  const normalizedImageBase64 = params.imageBase64.trim();
-  if (normalizedImageBase64.length === 0) {
-    return { items: [], foodDescription: params.foodDescription };
-  }
-
-  const prompt = [
-    "Analise a foto de uma refeição e responda APENAS JSON com o formato {\"food_description\":\"\",\"items\":[{\"food_name\":\"\",\"portion_description\":\"\",\"portion_multiplier\":1}]}.",
-    "Liste somente alimentos visivelmente presentes.",
-    "Use nomes simples e porções curtas, como porcao media, 1 unidade, 1 concha ou 1 colher.",
-    params.foodDescription ? `Contexto textual informado pelo app: ${params.foodDescription}` : "",
-    params.ocrText ? `Texto OCR disponível: ${params.ocrText}` : "",
-  ]
-    .filter((line) => line.length > 0)
-    .join("\n");
-
-  const content = await requestHuggingFaceVisionStructuredContent(
-    apiKey,
-    getHuggingFaceVisionModel(c.env),
-    prompt,
-    `data:${params.imageMimeType?.trim() || "image/jpeg"};base64,${normalizedImageBase64}`,
-    700,
-    timeoutMsByService.huggingface,
-  );
-
-  const parsed = (parseJsonObjectFromModelContent(content) ?? {}) as {
-    items?: unknown[];
-    food_description?: unknown;
-  };
-
-  const items = Array.isArray(parsed.items) ? parsed.items.filter(isIdentifiedFoodItem) : [];
-  const foodDescription = typeof parsed.food_description === "string" && parsed.food_description.trim().length > 0
-    ? parsed.food_description.trim()
-    : params.foodDescription;
-
-  return {
-    items,
-    foodDescription,
-  };
-}
-
-// 5. Food analysis pipeline (MediaPipe client detection + USDA + RapidAPI fallback + AI estimate)
-app.post("/api/ai/analyze-food", authMiddleware, async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-  try {
-    const raw = await c.req.json();
-    const parsed = AiAnalyzeFoodRequestSchema.safeParse(raw);
-    if (!parsed.success) {
-      return c.json({ error: "Invalid input", details: parsed.error.flatten() }, 400);
-    }
-
-    const { food_description, identified_items = [], image_base64, image_mime_type, ocr_text } = parsed.data;
-    let items: IdentifiedFoodItem[] = identified_items.filter(isIdentifiedFoodItem);
-    let resolvedFoodDescription = typeof food_description === "string" && food_description.trim().length > 0
-      ? food_description.trim()
-      : undefined;
-
-    if (items.length === 0 && image_base64) {
-      try {
-        const imageIdentification = await identifyFoodItemsFromImage(c, {
-          imageBase64: image_base64,
-          imageMimeType: image_mime_type,
-          foodDescription: resolvedFoodDescription,
-          ocrText: ocr_text,
-        });
-        if (imageIdentification.items.length > 0) {
-          items = imageIdentification.items;
-        }
-        if (imageIdentification.foodDescription) {
-          resolvedFoodDescription = imageIdentification.foodDescription;
-        }
-      } catch (imageError) {
-        console.warn("[analyze-food][vision-fallback]", {
-          message: getErrorMessage(imageError),
-        });
-      }
-    }
-
-    if (items.length === 0 && resolvedFoodDescription) {
-      const identifyPrompt = `Analise a refeição e responda APENAS em JSON no formato {"items":[{"food_name":"","portion_description":"","portion_multiplier":1}]}.
-Contexto textual: ${resolvedFoodDescription || "não informado"}
-Texto OCR do rótulo: ${ocr_text || "não identificado"}.`;
-      const aiData = await callOpenAIChatWithFallback(c, [{ role: "user", content: identifyPrompt }], 700, true);
-      const aiContent = safeGet(aiData.choices ?? [], 0)?.message?.content ?? "{}";
-      const identified = (parseJsonObjectFromModelContent(aiContent) ?? {}) as {
-        items?: Array<{ food_name?: string | undefined; portion_description?: string | undefined; portion_multiplier?: number | undefined }>;
-      };
-      items = (identified.items ?? []).filter(isIdentifiedFoodItem);
-    }
-
-    const ocrNutrition = parseNutritionFromOcrLabel(ocr_text ?? "");
-
-    if (items.length === 0 && !ocrNutrition) {
-      throw new ApiIntegrationError("INVALID_RESPONSE", 422, "Não foi possível identificar alimentos na imagem. Tente novamente com outra foto.");
-    }
-
-    const analyzedItems: Array<{
-      food_name: string;
-      portion_description: string;
-      calories: number | null;
-      protein: number | null;
-      carbs: number | null;
-      fats: number | null;
-      energy_kj: number | null;
-      source: "usda" | "rapidapi" | "estimate" | "ocr_label";
-      warning?: string | undefined;
-    }> = [];
-
-    for (const item of items) {
-      const query = assertString(item.food_name).trim();
-      if (!query) {
-        continue;
-      }
-      const multiplier = Number(item.portion_multiplier ?? 1);
-
-      try {
-        const usda = await searchFoodOnUSDA(c, query);
-        const first = safeGet(usda.foods ?? [], 0);
-        if (!first) throw new Error("not-found");
-        const nutrients = first.foodNutrients ?? [];
-        const byName = (name: string) => nutrients.find((n) => n.nutrientName?.toLowerCase() === name.toLowerCase())?.value ?? null;
-
-        const calories = byName("Energy");
-        const protein = byName("Protein");
-        const carbs = byName("Carbohydrate, by difference");
-        const fats = byName("Total lipid (fat)");
-
-        analyzedItems.push({
-          food_name: query,
-          portion_description: item.portion_description || "porção estimada",
-          calories: calories !== null ? Math.round(calories * multiplier) : null,
-          energy_kj: calories !== null ? Math.round(calories * 4.184 * multiplier) : null,
-          protein: protein !== null ? Number((protein * multiplier).toFixed(1)) : null,
-          carbs: carbs !== null ? Number((carbs * multiplier).toFixed(1)) : null,
-          fats: fats !== null ? Number((fats * multiplier).toFixed(1)) : null,
-          source: "usda",
-        });
-      } catch (itemError) {
-        console.warn(`[analyze-food][usda-fallback] ${query}`, itemError);
-        try {
-          const rapidResult = await searchFoodOnRapidApi(c, query);
-          const firstRapid = safeGet(rapidResult ?? [], 0);
-          if (!firstRapid) {
-            throw new Error("rapidapi-not-found");
-          }
-
-          const rapidCalories = Number(firstRapid.calories ?? 0);
-          const rapidProtein = Number(firstRapid.protein_g ?? 0);
-          const rapidCarbs = Number(firstRapid.carbohydrates_total_g ?? 0);
-          const rapidFats = Number(firstRapid.fat_total_g ?? 0);
-
-          analyzedItems.push({
-            food_name: query,
-            portion_description: item.portion_description || "porção estimada",
-            calories: Number.isFinite(rapidCalories) ? Math.round(rapidCalories * multiplier) : null,
-            energy_kj: Number.isFinite(rapidCalories) ? Math.round(rapidCalories * 4.184 * multiplier) : null,
-            protein: Number.isFinite(rapidProtein) ? Number((rapidProtein * multiplier).toFixed(1)) : null,
-            carbs: Number.isFinite(rapidCarbs) ? Number((rapidCarbs * multiplier).toFixed(1)) : null,
-            fats: Number.isFinite(rapidFats) ? Number((rapidFats * multiplier).toFixed(1)) : null,
-            source: "rapidapi",
-            warning: "Alimento não encontrado no USDA. Valores retornados pela RapidAPI.",
-          });
-        } catch (rapidError) {
-          console.warn(`[analyze-food][rapidapi-fallback] ${query}`, rapidError);
-          const estimatePrompt = `Estime APENAS JSON com calories, protein, carbs, fats para ${query} (${item.portion_description || "porção média"}).`;
-          const fallbackData = await callOpenAIChatWithFallback(c, [{ role: "user", content: estimatePrompt }], 350, true);
-          const estimate = (parseJsonObjectFromModelContent(
-            safeGet(fallbackData.choices ?? [], 0)?.message?.content ?? "{}",
-          ) ?? {}) as {
-            calories?: number | undefined;
-            protein?: number | undefined;
-            carbs?: number | undefined;
-            fats?: number | undefined;
-          };
-
-          analyzedItems.push({
-            food_name: query,
-            portion_description: item.portion_description || "porção estimada",
-            calories: estimate.calories ?? null,
-            energy_kj: estimate.calories ? Math.round(estimate.calories * 4.184) : null,
-            protein: estimate.protein ?? null,
-            carbs: estimate.carbs ?? null,
-            fats: estimate.fats ?? null,
-            source: "estimate",
-            warning: "Alimento não encontrado no USDA/RapidAPI. Valores estimados por IA.",
-          });
-        }
-      }
-    }
-
-    if (ocrNutrition) {
-      analyzedItems.push({
-        food_name: "Rótulo identificado",
-        portion_description: "dados extraí­dos do rótulo",
-        calories: ocrNutrition.calories,
-        energy_kj: ocrNutrition.energy_kj,
-        protein: ocrNutrition.protein,
-        carbs: ocrNutrition.carbs,
-        fats: ocrNutrition.fats,
-        source: "ocr_label",
-      });
-    }
-
-    const totals = analyzedItems.reduce(
-      (acc, item) => {
-        acc.calories += item.calories ?? 0;
-        acc.energy_kj += item.energy_kj ?? 0;
-        acc.protein += item.protein ?? 0;
-        acc.carbs += item.carbs ?? 0;
-        acc.fats += item.fats ?? 0;
-        return acc;
-      },
-      { calories: 0, energy_kj: 0, protein: 0, carbs: 0, fats: 0 }
-    );
-
-    const macroTotal = totals.protein + totals.carbs + totals.fats;
-    const percentages = {
-      protein: macroTotal > 0 ? Number(((totals.protein / macroTotal) * 100).toFixed(1)) : 0,
-      carbs: macroTotal > 0 ? Number(((totals.carbs / macroTotal) * 100).toFixed(1)) : 0,
-      fats: macroTotal > 0 ? Number(((totals.fats / macroTotal) * 100).toFixed(1)) : 0,
-    };
-
-    return c.json({
-      success: true,
-      ocr_text: ocr_text || undefined,
-      food_description: resolvedFoodDescription,
-      items: analyzedItems,
-      totals: {
-        calories: Math.round(totals.calories),
-        energy_kj: Math.round(totals.energy_kj),
-        protein: Number(totals.protein.toFixed(1)),
-        carbs: Number(totals.carbs.toFixed(1)),
-        fats: Number(totals.fats.toFixed(1)),
-        macro_percentages: percentages,
-      },
-      has_estimates: analyzedItems.some((item) => item.source !== "usda"),
-      estimation_warning: analyzedItems.some((item) => item.source === "estimate")
-        ? "Alguns alimentos não foram encontrados no USDA/RapidAPI e foram estimados por IA."
-        : undefined,
-    });
-  } catch (error) {
-    console.error("[analyze-food]", error);
-    const friendly = toFriendlyErrorResponse(error);
-    return c.json(friendly.payload, toStatusCode(friendly.status));
-  }
-});
-
-
-app.get("/health", async (c) => {
-  const host = new URL(c.req.url).hostname;
-  const schemaReady = await hasCoreSchema(c.env.fitloot_db);
-  const environment = host === "localhost" || host === "127.0.0.1" ? "local" : "production";
-
-  return c.json({
-    ok: true,
-    timestamp: new Date().toISOString(),
-    hasHuggingFace: Boolean(getHuggingFaceApiKey(c.env)),
-    hasOpenAI: false,
-    hasUSDA: Boolean(c.env.USDA_API_KEY),
-    hasRapidAPI: Boolean(c.env.RAPID_API_KEY),
-    hasVision: false,
-    hasDB: Boolean(c.env.fitloot_db),
-    hasCoreSchema: schemaReady,
-    environment,
-  });
-});
-
-async function processDailyReset(env: Env) {
-  await processDailyResetForAllUsers({
-    db: env.fitloot_db,
-    processUser: async (userId) => {
-      try {
-        await ensureUserCounterRow(env.fitloot_db, userId);
-        await cleanupSettledMissionsWithGuard(env.fitloot_db, userId);
-        await expirePendingMissionsAndUpdateStreak(env.fitloot_db, userId);
-        await ensurePeriodicMissions(env, env.fitloot_db, userId);
-        
-        // Snapshot diário automático para usuários ativos
-        await createDailySnapshot(env.fitloot_db, userId);
-      } catch (error) {
-        console.error("[processDailyReset][user]", {
-          userId,
-          message: getErrorMessage(error),
-        });
-      }
-    },
-  });
-}
-
-// Função para criar snapshot diário automático
-async function createDailySnapshot(db: D1Database, userId: string): Promise<void> {
-  try {
-    // Verificar se o usuário está ativo (sessão nos últimos 7 dias)
-    const lastActivity = await db.prepare(
-      "SELECT last_activity_date FROM user_progression WHERE user_id = ?"
-    ).bind(userId).first<{ last_activity_date: string }>();
-
-    if (!lastActivity?.last_activity_date) {
-      return; // Usuário sem atividade registrada
-    }
-
-    const sevenDaysAgo = new Date();
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-    
-    if (new Date(lastActivity.last_activity_date) < sevenDaysAgo) {
-      return; // Usuário inativo
-    }
-
-    // Obter dados atuais do usuário
-    const [progression, attributes, missionsCompleted] = await Promise.all([
-      db.prepare("SELECT * FROM user_progression WHERE user_id = ?").bind(userId).first(),
-      db.prepare("SELECT * FROM user_attributes WHERE user_id = ?").bind(userId).first(),
-      db.prepare(
-        "SELECT COUNT(*) as count FROM missions WHERE user_id = ? AND is_completed = 1"
-      ).bind(userId).first<{ count: number }>()
-    ]);
-
-    if (!progression || !attributes) {
-      return; // Dados incompletos
-    }
-
-    // Inserir snapshot com INSERT OR IGNORE (não duplicar se já existir)
-    await db.prepare(`
-      INSERT OR IGNORE INTO progress_snapshots 
-      (user_id, level, xp, strength, constitution, vitality, dexterity, focus, missions_completed, streak)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).bind(
-      userId,
-      progression.level,
-      progression.xp,
-      attributes.strength,
-      attributes.constitution,
-      attributes.vitality,
-      attributes.dexterity,
-      attributes.focus,
-      missionsCompleted?.count || 0,
-      progression.current_streak
-    ).run();
-
-  } catch (error) {
-    console.error("[createDailySnapshot]", { userId, error: getErrorMessage(error) });
-  }
-}
-
-// Função de recálculo semanal de atributos
-async function recalculateUserAttributes(db: D1Database, userId: string): Promise<void> {
-  try {
-    // Obter benchmark mais recente do usuário
-    const latestBenchmark = await db.prepare(`
-      SELECT * FROM physical_benchmarks 
-      WHERE user_id = ? 
-      ORDER BY test_date DESC 
-      LIMIT 1
-    `).bind(userId).first<PhysicalBenchmarkRow>();
-
-    // Obter histórico de missões da última semana
-    const oneWeekAgo = new Date();
-    oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
-    
-    const weeklyMissions = await db.prepare(`
-      SELECT COUNT(*) as count FROM missions 
-      WHERE user_id = ? 
-      AND is_completed = 1 
-      AND completed_at >= datetime(?)
-    `).bind(userId, oneWeekAgo.toISOString()).first<{ count: number }>();
-
-    // Obter streak atual
-    const progression = await db.prepare(
-      "SELECT current_streak FROM user_progression WHERE user_id = ?"
-    ).bind(userId).first<{ current_streak: number }>();
-
-    if (!progression) {
-      return; // Sem dados de progressão
-    }
-
-    // Calcular novos atributos baseados nos benchmarks
-    let strengthBonus = 0;
-    let vitalityBonus = 0;
-    let focusBonus = 0;
-    let dexterityBonus = 0;
-    let constitutionBonus = 0;
-
-    if (latestBenchmark) {
-      const pushupsMax = latestBenchmark.pushups_max ?? 0;
-      const squatsMax = latestBenchmark.squats_max ?? 0;
-      const situpsMax = latestBenchmark.situps_max ?? 0;
-      const plankSeconds = latestBenchmark.plank_seconds ?? 0;
-      const pullupsMax = latestBenchmark.pullups_max ?? 0;
-      const runDistanceKm = latestBenchmark.run_distance_km ?? 0;
-
-      if (pushupsMax && pushupsMax > 0) {
-        strengthBonus += Math.floor(pushupsMax / 5);
-      }
-      if (squatsMax && squatsMax > 0) {
-        vitalityBonus += Math.floor(squatsMax / 5);
-      }
-      if (situpsMax && situpsMax > 0) {
-        focusBonus += Math.floor(situpsMax / 5);
-      }
-      if (plankSeconds && plankSeconds > 0) {
-        dexterityBonus += Math.floor(plankSeconds / 30);
-      }
-      if (pullupsMax && pullupsMax > 0) {
-        strengthBonus += pullupsMax * 2;
-      }
-      if (runDistanceKm && runDistanceKm > 0) {
-        constitutionBonus += Math.floor(runDistanceKm * 2);
-      }
-    }
-
-    // Bônus adicional baseado em missões semanais
-    const missionBonus = Math.min(Math.floor((weeklyMissions?.count || 0) / 5), 10);
-    
-    // Bônus baseado em streak
-    const streakBonus = Math.min(Math.floor(progression.current_streak / 7), 5);
-
-    // Aplicar bônus distribuídos
-    const totalBonus = missionBonus + streakBonus;
-    const perAttributeBonus = Math.floor(totalBonus / 5);
-
-    // Atualizar atributos
-    await db.prepare(`
-      UPDATE user_attributes SET 
-        strength = strength + ?,
-        constitution = constitution + ?,
-        vitality = vitality + ?,
-        dexterity = dexterity + ?,
-        focus = focus + ?,
-        updated_at = datetime('now')
-      WHERE user_id = ?
-    `).bind(
-      strengthBonus + perAttributeBonus,
-      constitutionBonus + perAttributeBonus,
-      vitalityBonus + perAttributeBonus,
-      dexterityBonus + perAttributeBonus,
-      focusBonus + perAttributeBonus,
-      userId
-    ).run();
-
-    // Registrar snapshot após recálculo
-    const [updatedAttributes, updatedProgression] = await Promise.all([
-      db.prepare("SELECT * FROM user_attributes WHERE user_id = ?").bind(userId).first(),
-      db.prepare("SELECT * FROM user_progression WHERE user_id = ?").bind(userId).first()
-    ]);
-
-    if (updatedAttributes && updatedProgression) {
-      await db.prepare(`
-        INSERT OR IGNORE INTO progress_snapshots 
-        (user_id, level, xp, strength, constitution, vitality, dexterity, focus, missions_completed, streak)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).bind(
-        userId,
-        updatedProgression.level,
-        updatedProgression.xp,
-        updatedAttributes.strength,
-        updatedAttributes.constitution,
-        updatedAttributes.vitality,
-        updatedAttributes.dexterity,
-        updatedAttributes.focus,
-        weeklyMissions?.count || 0,
-        updatedProgression.current_streak
-      ).run();
-    }
-
-  } catch (error) {
-    console.error("[recalculateUserAttributes]", { userId, error: getErrorMessage(error) });
-  }
-}
-
-// Função para processar recálculo semanal de todos os usuários ativos
-async function processWeeklyRecalculation(env: Env): Promise<void> {
-  const pageSize = 50;
-  let offset = 0;
-
-  while (true) {
-    const users = await env.fitloot_db.prepare(`
-      SELECT user_id FROM user_profiles 
-      WHERE user_id IN (
-        SELECT user_id FROM user_progression 
-        WHERE last_activity_date >= datetime('now', '-7 days')
-      )
-      ORDER BY user_id 
-      LIMIT ? OFFSET ?
-    `).bind(pageSize, offset).all<{ user_id: string }>();
-
-    const batch = Array.isArray(users.results) ? users.results : [];
-    if (batch.length === 0) {
-      break;
-    }
-
-    for (const user of batch) {
-      await recalculateUserAttributes(env.fitloot_db, user.user_id);
-    }
-
-    if (batch.length < pageSize) {
-      break;
-    }
-    offset += pageSize;
-  }
-}
-
-// 6. Healthchecks for external services
-app.get("/api/health/external", authMiddleware, async (c) => {
-  return c.json({
-    huggingface: Boolean(getHuggingFaceApiKey(c.env)),
-    openai: false,
-    usda: Boolean(c.env.USDA_API_KEY),
-    rapidapi: Boolean(c.env.RAPID_API_KEY),
-    google_vision: false,
-    huggingface_vision: Boolean(getHuggingFaceApiKey(c.env)),
-    anthropic: Boolean(c.env.ANTHROPIC_API_KEY),
-  });
-});
-
-app.get("/api/health/openai", authMiddleware, async (c) => c.json({ ok: false, deprecated: true }));
-app.get("/api/health/huggingface", authMiddleware, async (c) => c.json({ ok: Boolean(getHuggingFaceApiKey(c.env)) }));
-app.get("/api/health/usda", authMiddleware, async (c) => c.json({ ok: Boolean(c.env.USDA_API_KEY) }));
-app.get("/api/health/rapidapi", authMiddleware, async (c) => c.json({ ok: Boolean(c.env.RAPID_API_KEY) }));
-app.get("/api/health/vision", authMiddleware, async (c) => c.json({
-  ok: Boolean(getHuggingFaceApiKey(c.env)),
-  provider: "huggingface_router",
-  model: getHuggingFaceVisionModel(c.env),
-}));
 
 // -----------------------------
-// SPA fallback (APENAS após todas as rotas /api/* definidas)
+// SPA fallback (APENAS apÃ³s todas as rotas /api/* definidas)
 // -----------------------------
 app.get("*", async (c, next) => {
   // Se for rota API, passa adiante para as rotas definidas
@@ -15083,10 +10002,10 @@ app.get("*", async (c, next) => {
   }
 
   try {
-    // c.req é um Request válido para passar ao binding ASSETS
+    // c.req Ã© um Request vÃ¡lido para passar ao binding ASSETS
     return await c.env.ASSETS.fetch(c.req.raw);
   } catch {
-    // se falhar, passa para próximos handlers (ou 404)
+    // se falhar, passa para prÃ³ximos handlers (ou 404)
     return next();
   }
 });
@@ -15180,28 +10099,6 @@ async function handleFetchWithGuard(request: Request, env: Env, ctx: ExecutionCo
   }
 }
 
-async function runScheduledWithGuard(event: ScheduledEvent, env: Env): Promise<void> {
-  try {
-    await processDailyReset(env);
-    
-    // Verificar se é segunda-feira (cron semanal)
-    // O cron "0 0 * * 1" significa: minuto 0, hora 0, qualquer dia do mês, qualquer mês, segunda-feira (dia 1)
-    if (event.cron === "0 0 * * 1") {
-      console.log("[worker][weekly-recalculation] Iniciando recálculo semanal de atributos");
-      await processWeeklyRecalculation(env);
-      console.log("[worker][weekly-recalculation] Recálculo semanal concluído");
-    }
-  } catch (error) {
-    console.error("[worker][scheduled-guard]", {
-      cron: event.cron,
-      scheduledTime: event.scheduledTime,
-      message: getErrorMessage(error),
-      stack: error instanceof Error ? error.stack : undefined,
-    });
-    throw error;
-  }
-}
-
 export default {
   fetch: handleFetchWithGuard,
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
@@ -15214,3 +10111,5 @@ export default {
     );
   },
 };
+
+

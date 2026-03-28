@@ -2,8 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import PaymentStatusPopup from "@/react-app/components/PaymentStatusPopup";
 import LoadingBall from "@/react-app/components/LoadingBall";
-import { ROUTE_PATHS } from "@/react-app/constants/auth";
-import { useAuth } from "@/react-app/contexts/auth";
+import { ROUTE_PATHS } from "@/react-app/auth/constants";
+import { useAuth } from "@/react-app/auth/context";
 import { hasPlanAccess } from "@/react-app/services/authService";
 import { api } from "@/react-app/utils/api";
 

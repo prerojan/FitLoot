@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router";
-import { useAuth } from "@/react-app/contexts/auth";
+import { useAuth } from "@/react-app/auth/context";
 import AppPageShell from "@/react-app/components/AppPageShell";
 import LoadingBall from "@/react-app/components/LoadingBall";
 import { ShoppingBag, Coins, QrCode, Package, Search, Bell, ShoppingCart, LayoutGrid, Utensils, Shirt, Smartphone, Ticket, ArrowRight, Star } from "lucide-react";

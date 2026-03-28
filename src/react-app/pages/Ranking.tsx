@@ -4,7 +4,7 @@ import { Crown, Trophy } from "lucide-react";
 import AppPageShell from "@/react-app/components/AppPageShell";
 import LoadingBall from "@/react-app/components/LoadingBall";
 import { Avatar } from "@/react-app/components/ui/avatar";
-import { useAuth } from "@/react-app/contexts/auth";
+import { useAuth } from "@/react-app/auth/context";
 import { ApiRequestError, fetchAndCacheJson, readCachedJson } from "@/react-app/utils/api";
 import type { RankingPlayer, UserProfile } from "@/shared/types";
 

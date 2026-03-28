@@ -18,13 +18,13 @@ import {
   Sun,
   X
 } from "lucide-react";
-import { useAuth } from "@/react-app/contexts/auth";
+import { useAuth } from "@/react-app/auth/context";
 import { useTheme } from "@/react-app/contexts/theme";
 import AppPageShell from "@/react-app/components/AppPageShell";
 import LoadingBall from "@/react-app/components/LoadingBall";
 import PageLoader from "@/react-app/components/PageLoader";
 import { Avatar } from "@/react-app/components/ui/avatar";
-import { ROUTE_PATHS } from "@/react-app/constants/auth";
+import { ROUTE_PATHS } from "@/react-app/auth/constants";
 import { TrainingRankDisplay, useTrainingRank } from "@/react-app/components/TrainingRankDisplay";
 
 import type {
@@ -38,7 +38,7 @@ import type {
 } from "@/shared/types";
 import { ApiRequestError, api, clearJsonCache, fetchAndCacheJson, readCachedJson } from "@/react-app/utils/api";
 import { getAchievementShowcaseStyle, resolveShowcasedAchievement, sanitizeAchievementsForDisplay } from "@/react-app/utils/achievementShowcase";
-import { applyProfileTheme } from "@/react-app/utils/theme";
+import { applyProfileTheme } from "@/react-app/theme/profileTheme";
 
 const FEEDBACK_TYPES = ["Sugestao", "Bug", "Elogio", "Outro"] as const;
 type FeedbackType = (typeof FEEDBACK_TYPES)[number];

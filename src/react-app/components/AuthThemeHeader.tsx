@@ -1,3 +1,1 @@
-export { AuthThemeHeader } from "../constants/components/AuthThemeHeader";
-
-
+export { AuthThemeHeader } from "../theme/AuthThemeHeader";

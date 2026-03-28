@@ -11,7 +11,7 @@ import {
   SunMedium,
   Zap,
 } from "lucide-react";
-import { useAuth } from "@/react-app/contexts/auth";
+import { useAuth } from "@/react-app/auth/context";
 import { useTheme } from "@/react-app/contexts/theme";
 import LoadingBall from "@/react-app/components/LoadingBall";
 import { api } from "@/react-app/utils/api";

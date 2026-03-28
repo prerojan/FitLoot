@@ -37,7 +37,8 @@ const EMPTY_MANUAL_OVERRIDE: ManualHealthOverride = {
   activeMinutes: 0,
 };
 
-export const useHealthData = (_options: UseHealthDataOptions = {}) => {
+export const useHealthData = (options: UseHealthDataOptions = {}) => {
+  void options;
   const { metrics, loading, error: metricsError, refreshMetrics } = useDailyMetrics({ syncRemote: true });
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [localError, setLocalError] = useState<string | null>(null);

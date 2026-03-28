@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { useNavigate } from "react-router";
-import { useAuth } from "@/react-app/contexts/auth";
-import { PENDING_404_ACHIEVEMENT_KEY, ROUTE_PATHS } from "@/react-app/constants/auth";
+import { useAuth } from "@/react-app/auth/context";
+import { PENDING_404_ACHIEVEMENT_KEY, ROUTE_PATHS } from "@/react-app/auth/constants";
 import { triggerRouteNotFoundAchievement } from "@/react-app/services/achievementService";
 
 export default function NotFound() {

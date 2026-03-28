@@ -12,7 +12,7 @@ import {
   X,
 } from "lucide-react";
 import AppPageShell from "@/react-app/components/AppPageShell";
-import { useAuth } from "@/react-app/contexts/auth";
+import { useAuth } from "@/react-app/auth/context";
 import { api } from "@/react-app/utils/api";
 
 type Message = {

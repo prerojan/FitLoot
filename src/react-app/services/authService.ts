@@ -1,6 +1,6 @@
 import { api } from "@/react-app/utils/api";
-import { AUTHENTICATED_HINT_KEY, ROUTE_PATHS } from "@/react-app/constants/auth";
-import type { User } from "@/react-app/types/auth";
+import { AUTHENTICATED_HINT_KEY, ROUTE_PATHS } from "@/react-app/auth/constants";
+import type { User } from "@/react-app/auth/types";
 
 export async function fetchCurrentUser(): Promise<User | null> {
   const response = await api("/api/users/me");

@@ -15,10 +15,10 @@ import {
 import LoadingBall from "@/react-app/components/LoadingBall";
 import { Avatar } from "@/react-app/components/ui/avatar";
 import { Button } from "@/react-app/components/ui/button";
-import { ROUTE_PATHS } from "@/react-app/constants/auth";
+import { ROUTE_PATHS } from "@/react-app/auth/constants";
 import { api } from "@/react-app/utils/api";
 import AppPageShell from "@/react-app/components/AppPageShell";
-import { useAuth } from "@/react-app/contexts/auth";
+import { useAuth } from "@/react-app/auth/context";
 
 type Friend = {
   id: number;

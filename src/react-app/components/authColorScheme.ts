@@ -1,2 +1,1 @@
-export * from "../constants/components/authColorScheme";
-
+export * from "../theme/authColorScheme";

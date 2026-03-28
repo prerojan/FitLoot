@@ -1,4 +1,4 @@
-ï»¿import {
+import {
   useCallback,
   useEffect,
   useRef,
@@ -11,9 +11,9 @@
 } from "react";
 import { useNavigate } from "react-router";
 import AppLoader from "@/react-app/components/AppLoader";
-import { AuthThemeHeader } from "@/react-app/components/AuthThemeHeader";
-import { ROUTE_PATHS } from "@/react-app/constants/auth";
-import { useAuth } from "@/react-app/contexts/auth";
+import { AuthThemeHeader } from "@/react-app/theme/AuthThemeHeader";
+import { ROUTE_PATHS } from "@/react-app/auth/constants";
+import { useAuth } from "@/react-app/auth/context";
 import { useTheme } from "@/react-app/contexts/theme";
 import { resolveAuthenticatedStartRoute } from "@/react-app/services/authService";
 import { api } from "@/react-app/utils/api";
@@ -1797,9 +1797,9 @@ export default function Onboarding() {
         <footer className="hidden justify-center pb-8 text-[10px] font-bold uppercase tracking-[0.34em] text-[var(--fl-onboarding-subtle)] md:flex">
           <div className="flex items-center gap-6">
             <span>Precisao</span>
-            <span>â€¢</span>
+            <span>•</span>
             <span>Progresso</span>
-            <span>â€¢</span>
+            <span>•</span>
             <span>Recompensas</span>
           </div>
         </footer>

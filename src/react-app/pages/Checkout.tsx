@@ -12,9 +12,9 @@ import {
 } from "lucide-react";
 import BillingCycleSwitch from "@/react-app/components/BillingCycleSwitch";
 import LoadingBall from "@/react-app/components/LoadingBall";
-import { AuthThemeHeader } from "@/react-app/components/AuthThemeHeader";
+import { AuthThemeHeader } from "@/react-app/theme/AuthThemeHeader";
 import { Input } from "@/react-app/components/ui/input";
-import { ROUTE_PATHS } from "@/react-app/constants/auth";
+import { ROUTE_PATHS } from "@/react-app/auth/constants";
 import {
   CHECKOUT_PLAN_DISPLAY_ORDER,
   CHECKOUT_PLANS,
@@ -25,7 +25,7 @@ import {
   type CheckoutPaymentMethod,
   type CheckoutPlanId,
 } from "@/react-app/constants/checkout";
-import { useAuth } from "@/react-app/contexts/auth";
+import { useAuth } from "@/react-app/auth/context";
 import { useTheme } from "@/react-app/contexts/theme";
 import { hasPlanAccess } from "@/react-app/services/authService";
 import { api } from "@/react-app/utils/api";
