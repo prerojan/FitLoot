@@ -1,0 +1,10 @@
+[
+    {
+        "merged": "com.fitloot.app-mergeDebugResources-36:/layout/activity_main.xml",
+        "source": "com.fitloot.app-main-39:/layout/activity_main.xml"
+    },
+    {
+        "merged": "com.fitloot.app-mergeDebugResources-36:/layout/activity_camera.xml",
+        "source": "com.fitloot.app-main-39:/layout/activity_camera.xml"
+    }
+]
