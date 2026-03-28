@@ -3,13 +3,25 @@ package com.fitloot.media
 import android.content.Context
 import android.net.Uri
 import android.util.Base64
+import java.io.File
 import org.json.JSONObject
 
 object NativeMediaPayloadFactory {
 
     fun fromCameraPath(path: String): JSONObject {
+        val photoFile = File(path)
+        val base64Image = if (photoFile.exists()) {
+            Base64.encodeToString(photoFile.readBytes(), Base64.NO_WRAP)
+        } else {
+            null
+        }
+
         return JSONObject().apply {
             put("path", path)
+            if (base64Image != null) {
+                put("base64", base64Image)
+                put("mimeType", "image/jpeg")
+            }
         }
     }
 
