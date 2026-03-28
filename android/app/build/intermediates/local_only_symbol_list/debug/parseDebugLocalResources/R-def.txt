@@ -10,7 +10,10 @@ color white
 drawable fitloot_background
 id image_capture_button
 id viewFinder
-id webView
+id webViewContainer
+id webViewFallback
+id webViewFallbackMessage
+id webViewFallbackTitle
 layout activity_camera
 layout activity_main
 mipmap fitloot

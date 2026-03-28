@@ -4,7 +4,9 @@ package com.fitloot.databinding;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
-import android.webkit.WebView;
+import android.widget.FrameLayout;
+import android.widget.LinearLayout;
+import android.widget.TextView;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.constraintlayout.widget.ConstraintLayout;
@@ -20,11 +22,25 @@ public final class ActivityMainBinding implements ViewBinding {
   private final ConstraintLayout rootView;
 
   @NonNull
-  public final WebView webView;
+  public final FrameLayout webViewContainer;
 
-  private ActivityMainBinding(@NonNull ConstraintLayout rootView, @NonNull WebView webView) {
+  @NonNull
+  public final LinearLayout webViewFallback;
+
+  @NonNull
+  public final TextView webViewFallbackMessage;
+
+  @NonNull
+  public final TextView webViewFallbackTitle;
+
+  private ActivityMainBinding(@NonNull ConstraintLayout rootView,
+      @NonNull FrameLayout webViewContainer, @NonNull LinearLayout webViewFallback,
+      @NonNull TextView webViewFallbackMessage, @NonNull TextView webViewFallbackTitle) {
     this.rootView = rootView;
-    this.webView = webView;
+    this.webViewContainer = webViewContainer;
+    this.webViewFallback = webViewFallback;
+    this.webViewFallbackMessage = webViewFallbackMessage;
+    this.webViewFallbackTitle = webViewFallbackTitle;
   }
 
   @Override
@@ -54,13 +70,32 @@ public final class ActivityMainBinding implements ViewBinding {
     // This is done to optimize the compiled bytecode for size and performance.
     int id;
     missingId: {
-      id = R.id.webView;
-      WebView webView = ViewBindings.findChildViewById(rootView, id);
-      if (webView == null) {
+      id = R.id.webViewContainer;
+      FrameLayout webViewContainer = ViewBindings.findChildViewById(rootView, id);
+      if (webViewContainer == null) {
         break missingId;
       }
 
-      return new ActivityMainBinding((ConstraintLayout) rootView, webView);
+      id = R.id.webViewFallback;
+      LinearLayout webViewFallback = ViewBindings.findChildViewById(rootView, id);
+      if (webViewFallback == null) {
+        break missingId;
+      }
+
+      id = R.id.webViewFallbackMessage;
+      TextView webViewFallbackMessage = ViewBindings.findChildViewById(rootView, id);
+      if (webViewFallbackMessage == null) {
+        break missingId;
+      }
+
+      id = R.id.webViewFallbackTitle;
+      TextView webViewFallbackTitle = ViewBindings.findChildViewById(rootView, id);
+      if (webViewFallbackTitle == null) {
+        break missingId;
+      }
+
+      return new ActivityMainBinding((ConstraintLayout) rootView, webViewContainer, webViewFallback,
+          webViewFallbackMessage, webViewFallbackTitle);
     }
     String missingId = rootView.getResources().getResourceName(id);
     throw new NullPointerException("Missing required view with ID: ".concat(missingId));

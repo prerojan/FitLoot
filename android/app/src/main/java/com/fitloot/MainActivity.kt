@@ -99,9 +99,7 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        if (setupWebView()) {
-            checkPermissions()
-        }
+        setupWebView()
     }
 
     private fun setupWebView(): Boolean {
@@ -128,7 +126,7 @@ class MainActivity : AppCompatActivity() {
             createdWebView,
             onCameraRequest = { intent -> cameraResultLauncher.launch(intent) },
             onGalleryRequest = { intent -> galleryResultLauncher.launch(intent) },
-            onPermissionsRequest = { checkPermissions() }
+            onPermissionsRequest = { requestAppPermissions() }
         )
 
         FitLootWebViewConfigurator.configure(
@@ -171,11 +169,18 @@ class MainActivity : AppCompatActivity() {
             }
     }
 
-    private fun checkPermissions() {
+    private fun requestAppPermissions() {
+        requestRuntimePermissions(includeActivityRecognition = true)
+        requestHealthConnectPermissionsIfNeeded()
+    }
+
+    private fun requestRuntimePermissions(includeActivityRecognition: Boolean) {
         val permissions = mutableListOf(
             Manifest.permission.CAMERA,
-            Manifest.permission.ACTIVITY_RECOGNITION
         )
+        if (includeActivityRecognition) {
+            permissions.add(Manifest.permission.ACTIVITY_RECOGNITION)
+        }
 
         val listPermissionsNeeded = ArrayList<String>()
         for (p in permissions) {
@@ -186,8 +191,6 @@ class MainActivity : AppCompatActivity() {
         if (listPermissionsNeeded.isNotEmpty()) {
             ActivityCompat.requestPermissions(this, listPermissionsNeeded.toTypedArray(), RUNTIME_PERMISSIONS_REQUEST_CODE)
         }
-
-        requestHealthConnectPermissionsIfNeeded()
     }
 
     private fun handleWebPermissionRequest(request: PermissionRequest) {
@@ -199,7 +202,7 @@ class MainActivity : AppCompatActivity() {
 
         if (needsCamera && !hasCameraPermission) {
             pendingWebPermissionRequest = request
-            checkPermissions()
+            requestRuntimePermissions(includeActivityRecognition = false)
             return
         }
 

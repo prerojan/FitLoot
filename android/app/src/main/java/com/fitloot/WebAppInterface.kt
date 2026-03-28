@@ -41,6 +41,7 @@ class WebAppInterface(
 
     @JavascriptInterface
     fun startStepTracking() {
+        onPermissionsRequest?.invoke()
         stepCounter.start()
     }
 
@@ -66,6 +67,7 @@ class WebAppInterface(
 
     @JavascriptInterface
     fun getStepMetrics() {
+        onPermissionsRequest?.invoke()
         scope.launch {
             val metrics = stepCounter.getDailyMetrics()
             sendEventToWebApp(NativeBridgeContract.EVENT_NATIVE_METRICS_UPDATED, metrics)
