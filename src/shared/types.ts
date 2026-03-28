@@ -173,6 +173,7 @@ export const MissionSchema = z.object({
   exercise_instructions_en: z.array(z.string()).optional(),
   exercise_instructions_pt: z.array(z.string()).optional(),
   image_url: z.string().nullable().optional(),
+  exercise_db_id: z.string().nullable().optional(),
   exercise_db_gif_url: z.string().nullable().optional(),
   exercise_db_image_url: z.string().nullable().optional(),
   muscle_groups: z.array(z.string()).optional(),

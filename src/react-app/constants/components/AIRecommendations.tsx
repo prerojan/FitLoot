@@ -1,5 +1,5 @@
-﻿import { useState, useEffect } from "react";
-import { Sparkles, TrendingUp, Target, Lightbulb } from "lucide-react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { Lightbulb, Sparkles, Target, TrendingUp } from "lucide-react";
 import { api } from "@/react-app/utils/api";
 import LoadingBall from "@/react-app/components/LoadingBall";
 
@@ -19,6 +19,18 @@ type Recommendations = {
   motivation_message: string;
 };
 
+type RecommendationStats = {
+  level: number;
+  total_missions: number;
+  streak: number;
+};
+
+type RecommendationApiPayload = {
+  recommendations?: unknown;
+  user_stats?: unknown;
+  degraded?: boolean;
+};
+
 function parseRecommendations(raw: unknown): Recommendations | null {
   if (!raw || typeof raw !== "object") return null;
   const data = raw as Record<string, unknown>;
@@ -27,23 +39,23 @@ function parseRecommendations(raw: unknown): Recommendations | null {
   const weakAttribute = (data.weak_attribute ?? {}) as Record<string, unknown>;
   const trainingFocus = (data.training_focus ?? {}) as Record<string, unknown>;
 
-  const parsed: Recommendations = {
+  return {
     next_skill_recommendation: {
-      name: typeof nextSkill.name === "string" && nextSkill.name.trim() ? nextSkill.name : "Sugestão indisponível",
+      name: typeof nextSkill.name === "string" && nextSkill.name.trim() ? nextSkill.name : "Sugestao indisponivel",
       reason:
         typeof nextSkill.reason === "string" && nextSkill.reason.trim()
           ? nextSkill.reason
-          : "A IA não retornou justificativa para a próxima skill.",
+          : "A IA nao retornou justificativa para a proxima skill.",
     },
     weak_attribute: {
       name:
         typeof weakAttribute.name === "string" && weakAttribute.name.trim()
           ? weakAttribute.name
-          : "Atributo não identificado",
+          : "Atributo nao identificado",
       suggestion:
         typeof weakAttribute.suggestion === "string" && weakAttribute.suggestion.trim()
           ? weakAttribute.suggestion
-          : "Sem sugestão detalhada no momento.",
+          : "Sem sugestao detalhada no momento.",
     },
     training_focus: {
       type:
@@ -58,52 +70,128 @@ function parseRecommendations(raw: unknown): Recommendations | null {
     motivation_message:
       typeof data.motivation_message === "string" && data.motivation_message.trim()
         ? data.motivation_message
-        : "Continue consistente: pequenos passos diários geram grandes resultados.",
+        : "Continue consistente: pequenos passos diarios geram grandes resultados.",
   };
+}
 
-  return parsed;
+function parseStats(raw: unknown): RecommendationStats {
+  if (!raw || typeof raw !== "object") {
+    return { level: 0, total_missions: 0, streak: 0 };
+  }
+
+  const data = raw as Record<string, unknown>;
+  return {
+    level: Number(data.level ?? 0) || 0,
+    total_missions: Number(data.total_missions ?? 0) || 0,
+    streak: Number(data.streak ?? 0) || 0,
+  };
+}
+
+function StatPill({ label, value }: { label: string; value: string }) {
+  return (
+    <div
+      className="rounded-2xl border px-4 py-3"
+      style={{
+        background:
+          "linear-gradient(180deg, color-mix(in srgb, var(--fl-surface-gradient-top) 96%, transparent), color-mix(in srgb, var(--fl-surface-gradient-bottom) 100%, transparent))",
+        borderColor: "var(--fl-border-soft)",
+      }}
+    >
+      <p className="text-[10px] font-black uppercase tracking-[0.24em]" style={{ color: "var(--fl-color-text-muted)" }}>
+        {label}
+      </p>
+      <p className="mt-2 text-lg font-black" style={{ color: "var(--fl-color-text)" }}>
+        {value}
+      </p>
+    </div>
+  );
+}
+
+function InsightCard({
+  icon,
+  eyebrow,
+  title,
+  description,
+}: {
+  icon: ReactNode;
+  eyebrow: string;
+  title: string;
+  description: string;
+}) {
+  return (
+    <article
+      className="fl-theme-surface rounded-[1.75rem] p-5"
+      style={{ boxShadow: "var(--fl-shadow-glass)" }}
+    >
+      <div className="flex items-start gap-4">
+        <div
+          className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl"
+          style={{
+            background: "color-mix(in srgb, var(--app-primary-color) 14%, transparent)",
+            color: "var(--app-primary-color)",
+          }}
+        >
+          {icon}
+        </div>
+        <div className="min-w-0">
+          <p className="text-[10px] font-black uppercase tracking-[0.24em]" style={{ color: "var(--app-primary-color)" }}>
+            {eyebrow}
+          </p>
+          <h3 className="mt-2 text-base font-black" style={{ color: "var(--fl-color-text)" }}>
+            {title}
+          </h3>
+          <p className="mt-2 text-sm leading-relaxed" style={{ color: "var(--fl-color-text-muted)" }}>
+            {description}
+          </p>
+        </div>
+      </div>
+    </article>
+  );
 }
 
 export default function AIRecommendations() {
   const [recommendations, setRecommendations] = useState<Recommendations | null>(null);
+  const [stats, setStats] = useState<RecommendationStats>({ level: 0, total_missions: 0, streak: 0 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [degraded, setDegraded] = useState(false);
 
-  useEffect(() => {
-    loadRecommendations();
-  }, []);
-
-  const loadRecommendations = async () => {
+  const loadRecommendations = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
 
       const response = await api("/api/ai/recommendations");
-
       if (!response.ok) {
-        throw new Error("Failed to load recommendations");
+        throw new Error("Falha ao carregar recomendacoes");
       }
 
-      const data = (await response.json()) as { recommendations?: unknown };
+      const data = (await response.json()) as RecommendationApiPayload;
       const parsed = parseRecommendations(data.recommendations);
       if (!parsed) {
-        throw new Error("Invalid recommendations payload");
+        throw new Error("Payload de recomendacoes invalido");
       }
 
       setRecommendations(parsed);
+      setStats(parseStats(data.user_stats));
+      setDegraded(Boolean(data.degraded));
     } catch {
-      setError("Não foi possível carregar as recomendações");
+      setError("Nao foi possivel carregar as recomendacoes agora.");
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    void loadRecommendations();
+  }, [loadRecommendations]);
 
   if (loading) {
     return (
-      <div className="fl-card p-6">
-        <div className="flex items-center justify-center gap-2 text-emerald-600">
+      <div className="fl-theme-surface rounded-[2rem] p-6">
+        <div className="flex items-center justify-center gap-3" style={{ color: "var(--app-primary-color)" }}>
           <LoadingBall size="md" />
-          <span className="text-sm">Analisando seu progresso...</span>
+          <span className="text-sm font-bold uppercase tracking-[0.18em]">Analisando seu progresso</span>
         </div>
       </div>
     );
@@ -111,13 +199,15 @@ export default function AIRecommendations() {
 
   if (error) {
     return (
-      <div className="bg-red-50 border-2 border-red-200 rounded-2xl p-4">
-        <p className="text-red-600 text-sm text-center">{error}</p>
+      <div className="fl-theme-surface rounded-[2rem] p-5">
+        <p className="text-sm text-center" style={{ color: "#dc2626" }}>{error}</p>
         <button
-          onClick={loadRecommendations}
-          className="mt-2 w-full px-4 py-2 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700 transition-colors"
+          type="button"
+          onClick={() => { void loadRecommendations(); }}
+          className="mt-4 w-full rounded-2xl py-3 text-sm font-black uppercase tracking-[0.18em]"
+          style={{ background: "var(--app-primary-color)", color: "var(--fl-nav-item-active-text)" }}
         >
-          Tentar Novamente
+          Tentar novamente
         </button>
       </div>
     );
@@ -126,68 +216,108 @@ export default function AIRecommendations() {
   if (!recommendations) return null;
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center gap-2 mb-4">
-        <Sparkles className="w-5 h-5 text-purple-600" />
-        <h2 className="fl-title-card">Recomendações IA</h2>
+    <section className="space-y-4">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div
+            className="flex h-11 w-11 items-center justify-center rounded-2xl"
+            style={{
+              background: "color-mix(in srgb, var(--app-primary-color) 16%, transparent)",
+              color: "var(--app-primary-color)",
+            }}
+          >
+            <Sparkles className="h-5 w-5" />
+          </div>
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-[0.24em]" style={{ color: "var(--app-primary-color)" }}>
+              Painel IA
+            </p>
+            <h2 className="fl-title-card">Recomendacoes personalizadas</h2>
+          </div>
+        </div>
+        {degraded ? (
+          <span
+            className="rounded-full border px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em]"
+            style={{
+              borderColor: "color-mix(in srgb, #f59e0b 30%, transparent)",
+              background: "color-mix(in srgb, #f59e0b 12%, transparent)",
+              color: "#b45309",
+            }}
+          >
+            Modo seguro
+          </span>
+        ) : null}
       </div>
 
-      <div className="bg-gradient-to-r from-purple-500 to-pink-500 rounded-2xl p-4 text-white shadow-lg">
-        <div className="flex items-start gap-3">
-          <Sparkles className="w-5 h-5 mt-1 flex-shrink-0" />
-          <p className="text-sm font-medium">{recommendations.motivation_message}</p>
+      <div
+        className="rounded-[2rem] p-6"
+        style={{
+          background:
+            "radial-gradient(circle at top right, color-mix(in srgb, var(--app-primary-color) 22%, transparent), transparent 44%), linear-gradient(135deg, color-mix(in srgb, var(--fl-surface-gradient-top) 96%, transparent), color-mix(in srgb, var(--fl-surface-gradient-bottom) 100%, transparent))",
+          border: "1px solid color-mix(in srgb, var(--app-primary-color) 18%, transparent)",
+          boxShadow: "var(--fl-shadow-glass)",
+        }}
+      >
+        <div className="flex items-start gap-4">
+          <div
+            className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl"
+            style={{
+              background: "var(--app-primary-color)",
+              color: "var(--fl-nav-item-active-text)",
+            }}
+          >
+            <Sparkles className="h-5 w-5" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-[10px] font-black uppercase tracking-[0.24em]" style={{ color: "var(--app-primary-color)" }}>
+              Leitura rapida
+            </p>
+            <p className="mt-2 text-sm leading-relaxed" style={{ color: "var(--fl-color-text)" }}>
+              {recommendations.motivation_message}
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-5 grid grid-cols-3 gap-3">
+          <StatPill label="Nivel" value={stats.level.toLocaleString("pt-BR")} />
+          <StatPill label="Streak" value={`${stats.streak.toLocaleString("pt-BR")} dias`} />
+          <StatPill label="Missoes" value={stats.total_missions.toLocaleString("pt-BR")} />
         </div>
       </div>
 
-      <div className="fl-card p-4 shadow-md">
-        <div className="flex items-start gap-3">
-          <div className="bg-emerald-100 p-2 rounded-lg">
-            <Target className="w-5 h-5 text-emerald-600" />
-          </div>
-          <div className="flex-1">
-            <h3 className="font-bold text-gray-900 mb-1">Próxima Skill Recomendada</h3>
-            <p className="text-emerald-600 font-medium text-sm mb-2">{recommendations.next_skill_recommendation.name}</p>
-            <p className="text-gray-600 text-xs">{recommendations.next_skill_recommendation.reason}</p>
-          </div>
-        </div>
-      </div>
-
-      <div className="fl-card p-4 shadow-md">
-        <div className="flex items-start gap-3">
-          <div className="bg-orange-100 p-2 rounded-lg">
-            <TrendingUp className="w-5 h-5 text-orange-600" />
-          </div>
-          <div className="flex-1">
-            <h3 className="font-bold text-gray-900 mb-1">Área para Melhorar</h3>
-            <p className="text-orange-600 font-medium text-sm mb-2">{recommendations.weak_attribute.name}</p>
-            <p className="text-gray-600 text-xs">{recommendations.weak_attribute.suggestion}</p>
-          </div>
-        </div>
-      </div>
-
-      <div className="fl-card p-4 shadow-md">
-        <div className="flex items-start gap-3">
-          <div className="bg-blue-100 p-2 rounded-lg">
-            <Lightbulb className="w-5 h-5 text-blue-600" />
-          </div>
-          <div className="flex-1">
-            <h3 className="font-bold text-gray-900 mb-1">Foco do Treino</h3>
-            <p className="text-blue-600 font-medium text-sm mb-2">{recommendations.training_focus.type}</p>
-            <p className="text-gray-600 text-xs">{recommendations.training_focus.reason}</p>
-          </div>
-        </div>
+      <div className="grid gap-4 lg:grid-cols-3">
+        <InsightCard
+          icon={<Target className="h-5 w-5" />}
+          eyebrow="Proxima skill"
+          title={recommendations.next_skill_recommendation.name}
+          description={recommendations.next_skill_recommendation.reason}
+        />
+        <InsightCard
+          icon={<TrendingUp className="h-5 w-5" />}
+          eyebrow="Ponto de atencao"
+          title={recommendations.weak_attribute.name}
+          description={recommendations.weak_attribute.suggestion}
+        />
+        <InsightCard
+          icon={<Lightbulb className="h-5 w-5" />}
+          eyebrow="Foco sugerido"
+          title={recommendations.training_focus.type}
+          description={recommendations.training_focus.reason}
+        />
       </div>
 
       <button
-        onClick={loadRecommendations}
-        className="w-full px-4 py-3 bg-gradient-to-r from-emerald-500 to-teal-600 text-white rounded-xl font-medium shadow-lg hover:shadow-xl transition-shadow"
+        type="button"
+        onClick={() => { void loadRecommendations(); }}
+        className="w-full rounded-[1.4rem] py-4 text-sm font-black uppercase tracking-[0.2em]"
+        style={{
+          background: "var(--app-primary-color)",
+          color: "var(--fl-nav-item-active-text)",
+          boxShadow: "0 0 20px color-mix(in srgb, var(--app-primary-color) 22%, transparent)",
+        }}
       >
-        <div className="flex items-center justify-center gap-2">
-          <Sparkles className="w-4 h-4" />
-          <span>Atualizar Recomendações</span>
-        </div>
+        Atualizar recomendacoes
       </button>
-    </div>
+    </section>
   );
 }
-

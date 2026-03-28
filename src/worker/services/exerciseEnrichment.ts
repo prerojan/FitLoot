@@ -1,3 +1,4 @@
+import { resolveExerciseSearchTerms } from "../../shared/exerciseCatalog";
 import { normalizeMissionMediaUrl } from "../../shared/missionLocalization";
 
 type RapidApiEnv = {
@@ -74,6 +75,10 @@ export type EnrichedExercise = {
   thumbnailUrl: string | null;
 };
 
+export type EnrichExerciseOptions = {
+  exerciseDbId?: string | null | undefined;
+};
+
 type CacheEntry<T> = {
   value: T;
   expiresAt: number;
@@ -121,6 +126,12 @@ const EXERCISE_SEARCH_ALIASES = new Map<string, readonly string[]>([
   ["yoga", ["yoga flow", "yoga"]],
   ["burpee", ["burpee"]],
   ["hollow body", ["hollow body hold", "hollow body"]],
+  ["hollow body hold", ["hollow body hold", "hollow body"]],
+  ["hollow hold", ["hollow body hold", "hollow body"]],
+  ["isometria hollow", ["hollow body hold", "hollow body"]],
+  ["bird dog", ["bird dog"]],
+  ["extensao alternada em quatro apoios", ["bird dog"]],
+  ["dead bug", ["dead bug"]],
   ["polichinelo", ["jumping jack"]],
   ["mountain climber", ["mountain climber"]],]);
 
@@ -223,6 +234,27 @@ const EXERCISE_SEARCH_HINTS = new Map<string, ExerciseSearchHint>([
     preferredBodyParts: ["upper arms", "chest"],
     preferredEquipments: ["body weight"],
     penalizedNameTokens: ["weighted", "wide"],
+  }],
+  ["bird dog", {
+    exactNames: ["bird dog"],
+    preferredTargets: ["abs", "core", "glutes"],
+    preferredBodyParts: ["waist", "upper legs"],
+    preferredEquipments: ["body weight"],
+    penalizedNameTokens: ["weighted", "machine"],
+  }],
+  ["hollow body hold", {
+    exactNames: ["hollow body hold", "hollow body"],
+    preferredTargets: ["abs", "core"],
+    preferredBodyParts: ["waist"],
+    preferredEquipments: ["body weight"],
+    penalizedNameTokens: ["weighted", "machine"],
+  }],
+  ["dead bug", {
+    exactNames: ["dead bug"],
+    preferredTargets: ["abs", "core"],
+    preferredBodyParts: ["waist"],
+    preferredEquipments: ["body weight"],
+    penalizedNameTokens: ["weighted", "machine"],
   }],]);
 
 let exerciseCatalogCache: CacheEntry<ExerciseDbExercise[]> | null = null;
@@ -524,6 +556,14 @@ function buildExerciseSearchQueries(exerciseName: string): string[] {
     seen.add(value);
     queries.push(value);
   };
+
+  for (const seedTerm of resolveExerciseSearchTerms(exerciseName)) {
+    const normalizedSeedTerm = normalizeExerciseNameToken(seedTerm);
+    if (normalizedSeedTerm) {
+      pushQuery(normalizedSeedTerm);
+    }
+  }
+
   const aliases = EXERCISE_SEARCH_ALIASES.get(normalizedBase) ?? [];
   for (const alias of aliases) {
     const normalizedAlias = normalizeExerciseNameToken(alias);
@@ -750,24 +790,17 @@ export async function fetchExerciseVideo(exerciseId: string, env: RapidApiEnv): 
   }
 }
 
-export async function enrichExercise(exerciseName: string, env: RapidApiEnv): Promise<EnrichedExercise | null> {
-  let exercises: ExerciseDbExercise[] = [];
-  try {
-    exercises = await searchExerciseDB(exerciseName, env);
-  } catch {
-    exercises = [];
-  }
-  if (exercises.length === 0) {
-    return null;
-  }
-
-  const baseExercise = exercises[0];
+async function resolveEnrichedExerciseCandidate(
+  baseExercise: ExerciseDbExercise,
+  env: RapidApiEnv,
+): Promise<{ score: number; value: EnrichedExercise }> {
   const [publicDetail, rapidDetail, media, video] = await Promise.all([
     fetchPublicExerciseDetail(baseExercise.id),
     fetchRapidExerciseDetail(baseExercise.id, env),
     fetchExerciseMedia(baseExercise.id, env),
     fetchExerciseVideo(baseExercise.id, env),
   ]);
+
   const exercise = mergeExerciseDbExercise(
     mergeExerciseDbExercise(baseExercise, publicDetail),
     rapidDetail,
@@ -805,20 +838,81 @@ export async function enrichExercise(exerciseName: string, env: RapidApiEnv): Pr
     ?? exerciseDbThumbnailUrl
     ?? exerciseDbImageUrl;
 
+  const score =
+    (ascendGifUrl ? 80 : 0)
+    + (exerciseDbGifUrl ? 60 : 0)
+    + (resolvedVideoUrl ? 55 : 0)
+    + (resolvedThumbnailUrl ? 18 : 0)
+    + (resolvedImageUrl ? 24 : 0)
+    + (exerciseInstructions.length > 0 ? 16 : 0);
+
   return {
-    id: exercise.id,
-    name: exercise.name,
-    bodyPart: exercise.bodyPart ?? "",
-    target: exercise.target ?? "",
-    equipment: exercise.equipment ?? "",
-    secondaryMuscles: Array.isArray(exercise.secondaryMuscles) ? exercise.secondaryMuscles : [],
-    instructions: exerciseInstructions,
-    gifUrl: ascendGifUrl ?? exerciseDbGifUrl,
-    ascendImageUrl,
-    exerciseDbGifUrl,
-    exerciseDbImageUrl,
-    imageUrl: resolvedImageUrl,
-    videoUrl: resolvedVideoUrl,
-    thumbnailUrl: resolvedThumbnailUrl,
+    score,
+    value: {
+      id: exercise.id,
+      name: exercise.name,
+      bodyPart: exercise.bodyPart ?? "",
+      target: exercise.target ?? "",
+      equipment: exercise.equipment ?? "",
+      secondaryMuscles: Array.isArray(exercise.secondaryMuscles) ? exercise.secondaryMuscles : [],
+      instructions: exerciseInstructions,
+      gifUrl: ascendGifUrl ?? exerciseDbGifUrl,
+      ascendImageUrl,
+      exerciseDbGifUrl,
+      exerciseDbImageUrl,
+      imageUrl: resolvedImageUrl,
+      videoUrl: resolvedVideoUrl,
+      thumbnailUrl: resolvedThumbnailUrl,
+    },
   };
+}
+
+async function enrichExerciseById(exerciseDbId: string, env: RapidApiEnv): Promise<EnrichedExercise | null> {
+  const normalizedId = exerciseDbId.trim();
+  if (!normalizedId) return null;
+
+  const [publicDetail, rapidDetail] = await Promise.all([
+    fetchPublicExerciseDetail(normalizedId),
+    fetchRapidExerciseDetail(normalizedId, env),
+  ]);
+  const baseExercise = rapidDetail ?? publicDetail;
+  if (!baseExercise) return null;
+
+  const resolved = await resolveEnrichedExerciseCandidate(baseExercise, env);
+  return resolved.value;
+}
+
+export async function enrichExercise(
+  exerciseName: string,
+  env: RapidApiEnv,
+  options?: EnrichExerciseOptions,
+): Promise<EnrichedExercise | null> {
+  const preferredExerciseDbId = typeof options?.exerciseDbId === "string" ? options.exerciseDbId.trim() : "";
+  if (preferredExerciseDbId) {
+    const enrichedById = await enrichExerciseById(preferredExerciseDbId, env).catch(() => null);
+    if (enrichedById) {
+      return enrichedById;
+    }
+  }
+
+  let exercises: ExerciseDbExercise[] = [];
+  try {
+    exercises = await searchExerciseDB(exerciseName, env);
+  } catch {
+    exercises = [];
+  }
+  if (exercises.length === 0) {
+    return null;
+  }
+
+  const candidates = exercises.slice(0, 3);
+  const resolvedCandidates = await Promise.all(
+    candidates.map((baseExercise) => resolveEnrichedExerciseCandidate(baseExercise, env)),
+  );
+
+  const bestCandidate = resolvedCandidates
+    .slice()
+    .sort((left, right) => right.score - left.score)[0];
+
+  return bestCandidate?.value ?? null;
 }

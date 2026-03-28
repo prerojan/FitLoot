@@ -421,6 +421,8 @@ function MissionExecutionModal({
 }) {
   const [state, setState] = useState<MissionExecutionState>(DEFAULT_EXECUTION_STATE);
   const [videoVisibleControls, setVideoVisibleControls] = useState(false);
+  const [finishing, setFinishing] = useState(false);
+  const [showCompletionToast, setShowCompletionToast] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
   const sets = Math.max(1, Number(mission.sets ?? 1));
@@ -440,6 +442,8 @@ function MissionExecutionModal({
       running: metricType === "duration_seconds" || metricType === "duration_minutes",
     });
     setVideoVisibleControls(false);
+    setFinishing(false);
+    setShowCompletionToast(false);
   }, [metricType, open, setDuration]);
 
   useEffect(() => {
@@ -558,6 +562,7 @@ function MissionExecutionModal({
   const totalCounterProgress = state.totalRepsDone + state.repsDone;
   const canFinishCounterMission = isCounterMission && state.finished;
   const canFinishMission = isDistanceMission ? canFinishInputMission : isTimeMission ? state.finished : canFinishCounterMission;
+  const interactionLocked = finishing || showCompletionToast;
 
   const toggleVideoPlayback = useCallback(async () => {
     const currentVideo = videoRef.current;
@@ -580,6 +585,7 @@ function MissionExecutionModal({
   const advanceTimedSet = () => {
     setState((current) => {
       if (!isTimeMission) return current;
+      if (current.running || current.resting || current.remainingSeconds > 0) return current;
       if (current.currentSet >= sets) {
         return { ...current, remainingSeconds: 0, restSeconds: 0, resting: false, running: false, finished: true };
       }
@@ -602,18 +608,28 @@ function MissionExecutionModal({
   };
 
   const resetExecution = () => {
+    if (interactionLocked) return;
     setState(DEFAULT_EXECUTION_STATE);
     setVideoVisibleControls(false);
   };
 
   const finishMission = async () => {
-    if (!canFinishMission) return;
+    if (!canFinishMission || finishing) return;
     const value = isDistanceMission
       ? Number(state.inputValue)
       : isCounterMission
         ? Math.max(totalGoal, totalCounterProgress)
         : totalGoal;
-    await onFinish(value);
+    try {
+      setFinishing(true);
+      await onFinish(value);
+      setShowCompletionToast(true);
+      await new Promise((resolve) => window.setTimeout(resolve, 1200));
+      onClose();
+    } catch {
+      setFinishing(false);
+      setShowCompletionToast(false);
+    }
   };
 
   if (!open) return null;
@@ -640,6 +656,21 @@ function MissionExecutionModal({
     activeProgress = Math.min(100, ((completedSets + currentSetProgress) / sets) * 100 || 0);
   }
   const sessionXp = Math.max(0, Math.round((mission.xp_reward * activeProgress) / 100));
+  const timedPrimaryActionLabel = state.finished
+    ? "SÉRIE CONCLUÍDA"
+    : state.resting
+      ? "DESCANSO EM ANDAMENTO"
+      : state.running
+        ? "TIMER EM ANDAMENTO"
+        : "USE PAUSAR/RETOMAR";
+  const primaryActionLabel = isCounterMission
+    ? "PRÓXIMA SÉRIE"
+    : isDistanceMission
+      ? "REGISTRO MANUAL"
+      : timedPrimaryActionLabel;
+  const primaryActionDisabled = isCounterMission
+    ? (interactionLocked || state.resting || state.repsDone <= 0)
+    : true;
 
   return (
     <div className="fl-z-mission-screen fixed inset-0 flex flex-col overflow-x-hidden font-display antialiased min-w-0" style={{ backgroundColor: "var(--app-bg-color)", color: "var(--fl-color-text)" }}>
@@ -653,10 +684,10 @@ function MissionExecutionModal({
             <h2 className="text-lg sm:text-xl font-bold tracking-tight truncate">FitLoot</h2>
           </div>
           <div className="flex gap-1 sm:gap-2 shrink-0">
-            <button type="button" className="flex size-8 sm:size-10 items-center justify-center rounded-full border transition-opacity hover:opacity-80" onClick={resetExecution} style={{ backgroundColor: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)", color: "var(--app-primary-color)", borderColor: "color-mix(in srgb, var(--app-primary-color) 20%, transparent)" }}>
+            <button type="button" className="flex size-8 sm:size-10 items-center justify-center rounded-full border transition-opacity hover:opacity-80 disabled:opacity-50" onClick={resetExecution} disabled={interactionLocked} style={{ backgroundColor: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)", color: "var(--app-primary-color)", borderColor: "color-mix(in srgb, var(--app-primary-color) 20%, transparent)" }}>
               <Info className="w-4 h-4 sm:w-5 sm:h-5" />
             </button>
-            <button type="button" className="flex size-8 sm:size-10 items-center justify-center rounded-full border transition-opacity hover:opacity-80" onClick={onClose} style={{ backgroundColor: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)", color: "var(--app-primary-color)", borderColor: "color-mix(in srgb, var(--app-primary-color) 20%, transparent)" }}>
+            <button type="button" className="flex size-8 sm:size-10 items-center justify-center rounded-full border transition-opacity hover:opacity-80 disabled:opacity-50" onClick={onClose} disabled={interactionLocked} style={{ backgroundColor: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)", color: "var(--app-primary-color)", borderColor: "color-mix(in srgb, var(--app-primary-color) 20%, transparent)" }}>
               <X className="w-4 h-4 sm:w-5 sm:h-5" />
             </button>
           </div>
@@ -799,6 +830,7 @@ function MissionExecutionModal({
                   value={state.inputValue}
                   onChange={(event) => setState((current) => ({ ...current, inputValue: event.target.value }))}
                   min={0}
+                  disabled={interactionLocked}
                 />
               </div>
             )}
@@ -810,9 +842,9 @@ function MissionExecutionModal({
                   {usesPerSideExecutionLabel ? "Repetições por lado" : "Repetições"}
                 </p>
                 <div className="flex items-center gap-4 sm:gap-6 min-w-0">
-                  <button type="button" onClick={decrementRep} disabled={state.resting} className="size-10 sm:size-14 rounded-full border text-lg sm:text-2xl active:scale-95 disabled:opacity-50" style={{ borderColor: "var(--fl-border-soft)", backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 78%, transparent)" }}>-</button>
+                  <button type="button" onClick={decrementRep} disabled={state.resting || interactionLocked} className="size-10 sm:size-14 rounded-full border text-lg sm:text-2xl active:scale-95 disabled:opacity-50" style={{ borderColor: "var(--fl-border-soft)", backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 78%, transparent)" }}>-</button>
                   <span className="text-3xl sm:text-5xl font-bold w-16 sm:w-20 text-center">{state.repsDone}</span>
-                  <button type="button" onClick={incrementRep} disabled={state.resting} className="size-10 sm:size-14 rounded-full border text-lg sm:text-2xl active:scale-95 disabled:opacity-50" style={{ borderColor: "var(--fl-border-soft)", backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 78%, transparent)" }}>+</button>
+                  <button type="button" onClick={incrementRep} disabled={state.resting || interactionLocked} className="size-10 sm:size-14 rounded-full border text-lg sm:text-2xl active:scale-95 disabled:opacity-50" style={{ borderColor: "var(--fl-border-soft)", backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 78%, transparent)" }}>+</button>
                 </div>
                 <p className="text-[10px] sm:text-xs text-center" style={{ color: "var(--fl-color-text-muted)" }}>
                   Meta da série: {setGoal}{usesPerSideExecutionLabel ? " cada lado" : ""} | Progresso: {totalCounterProgress}/{totalGoal}
@@ -829,10 +861,10 @@ function MissionExecutionModal({
               className="col-span-2 h-12 sm:h-16 rounded-xl sm:rounded-2xl font-bold text-base sm:text-xl flex items-center justify-center gap-2 shadow-lg active:scale-[0.98] transition-all disabled:opacity-50 disabled:grayscale"
               style={{ backgroundColor: "var(--app-primary-color)", color: "var(--fl-nav-item-active-text)", boxShadow: "0 10px 15px -3px color-mix(in srgb, var(--app-primary-color) 20%, transparent)" }}
               onClick={isCounterMission ? completeCurrentSet : advanceTimedSet}
-              disabled={isCounterMission ? (state.resting || state.repsDone <= 0) : state.finished}
+              disabled={primaryActionDisabled}
             >
               <FastForward className="w-5 h-5 sm:w-6 sm:h-6 fill-current" strokeWidth={1} />
-              PRÓXIMA SÉRIE
+              {primaryActionLabel}
             </button>
 
             <button
@@ -840,7 +872,7 @@ function MissionExecutionModal({
               className="h-10 sm:h-14 rounded-xl sm:rounded-2xl font-bold text-xs sm:text-sm md:text-base flex items-center justify-center gap-1 sm:gap-2 border transition-colors active:scale-95 hover:bg-white/10 truncate"
               style={{ backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 82%, transparent)", borderColor: "var(--fl-border-soft)", color: "var(--fl-color-text-muted)" }}
               onClick={toggleRunning}
-              disabled={state.finished || isDistanceMission}
+              disabled={state.finished || isDistanceMission || interactionLocked}
             >
               {state.running ? <Pause className="w-4 h-4 sm:w-5 sm:h-5 fill-current shrink-0" strokeWidth={1} /> : <Play className="w-4 h-4 sm:w-5 sm:h-5 fill-current shrink-0" strokeWidth={1} />}
               <span className="truncate">{state.running ? "PAUSAR" : "RETOMAR"}</span>
@@ -851,10 +883,10 @@ function MissionExecutionModal({
               className="h-10 sm:h-14 rounded-xl sm:rounded-2xl font-bold text-xs sm:text-sm md:text-base flex items-center justify-center gap-1 sm:gap-2 border transition-colors active:scale-95 disabled:opacity-50 disabled:grayscale truncate"
               style={{ backgroundColor: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)", borderColor: "color-mix(in srgb, var(--app-primary-color) 22%, transparent)", color: "var(--app-primary-color)" }}
               onClick={() => { void finishMission(); }}
-              disabled={!canFinishMission}
+              disabled={!canFinishMission || interactionLocked}
             >
-              <Square className="w-3 h-3 sm:w-4 sm:h-4 fill-current shrink-0" strokeWidth={2} />
-              <span className="truncate">{isDistanceMission ? "REGISTRAR" : "FINALIZAR"}</span>
+              {finishing ? <LoadingBall size="sm" /> : <Square className="w-3 h-3 sm:w-4 sm:h-4 fill-current shrink-0" strokeWidth={2} />}
+              <span className="truncate">{finishing ? "FINALIZANDO..." : isDistanceMission ? "REGISTRAR" : "FINALIZAR"}</span>
             </button>
           </div>
         </main>
@@ -864,6 +896,44 @@ function MissionExecutionModal({
           <span className="text-[9px] sm:text-[10px]">Loot desta sessão: {sessionXp} / {mission.xp_reward} XP</span>
         </footer>
       </div>
+      {(finishing || showCompletionToast) ? (
+        <div
+          className="absolute inset-0 flex items-center justify-center px-6"
+          style={{ backgroundColor: "rgba(0, 0, 0, 0.28)", backdropFilter: "blur(8px)" }}
+        >
+          <div
+            className="w-full max-w-sm rounded-[2rem] border p-6 text-center"
+            style={{
+              background: "linear-gradient(180deg, color-mix(in srgb, var(--fl-surface-strong) 96%, transparent), color-mix(in srgb, var(--fl-surface-muted) 92%, transparent))",
+              borderColor: "color-mix(in srgb, var(--app-primary-color) 18%, transparent)",
+              boxShadow: "var(--fl-shadow-glass)",
+            }}
+          >
+            <div
+              className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full"
+              style={{
+                background: showCompletionToast
+                  ? "color-mix(in srgb, var(--app-primary-color) 16%, transparent)"
+                  : "color-mix(in srgb, var(--fl-surface-muted) 92%, transparent)",
+                color: "var(--app-primary-color)",
+              }}
+            >
+              {showCompletionToast ? <CheckCircle2 className="h-8 w-8" /> : <LoadingBall size="md" />}
+            </div>
+            <p className="text-[11px] font-black uppercase tracking-[0.24em]" style={{ color: "var(--app-primary-color)" }}>
+              {showCompletionToast ? "Missão concluída" : "Finalizando"}
+            </p>
+            <h3 className="mt-3 text-xl font-black" style={{ color: "var(--fl-color-text)" }}>
+              {showCompletionToast ? "Seu progresso foi salvo" : "Estamos registrando sua missão"}
+            </h3>
+            <p className="mt-2 text-sm leading-relaxed" style={{ color: "var(--fl-color-text-muted)" }}>
+              {showCompletionToast
+                ? `+${mission.xp_reward} XP liberados para ${executionTitle}.`
+                : "Aguarde um instante enquanto validamos e fechamos sua execução."}
+            </p>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -957,7 +1027,6 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
     setCompleting(true);
     try {
       await onComplete(mission.id, value, true);
-      setShowExecution(false);
       setShowDetails(false);
       setShowWalkingExecution(false);
     } finally {
@@ -1095,7 +1164,7 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
           className="shrink-0 text-xs font-bold transition-opacity hover:opacity-80 disabled:opacity-50"
           style={{ color: "var(--app-primary-color)" }}
         >
-          {completing ? "Abrindo..." : compactActionLabel}
+          {completing ? "Finalizando..." : compactActionLabel}
         </button>
       )}
     </div>
@@ -1267,7 +1336,7 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
           className="w-full py-3 rounded-xl shadow-md hover:shadow-lg" 
           disabled={completing}
         >
-          {isTrackableWalkingMission ? "Iniciar caminhada" : "Ver detalhes"}
+          {completing ? "Finalizando..." : isTrackableWalkingMission ? "Iniciar caminhada" : "Ver detalhes"}
         </Button>
       )}
     </Card>

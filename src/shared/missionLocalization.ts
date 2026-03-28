@@ -1,3 +1,4 @@
+import { localizeExerciseCatalogText } from "./exerciseCatalog";
 import { repairKnownMojibakeString } from "./textEncoding";
 
 const STATIC_EXERCISE_DB_BASE = "https://static.exercisedb.dev";
@@ -44,6 +45,8 @@ const PHRASE_REPLACEMENTS: ReadonlyArray<readonly [RegExp, string]> = [
   [/\bGlute Bridge\b/gi, "Ponte de Gl\u00fateo"],
   [/\bSingle-?Leg Glute Bridge\b/gi, "Ponte de Gl\u00fateo Unilateral"],
   [/\bSingle-?Leg Romanian Deadlift\b/gi, "Levantamento Terra Romeno Unilateral"],
+  [/\bBird Dog\b/gi, "Extens\u00e3o alternada em quatro apoios"],
+  [/\bDead Bug\b/gi, "Dead Bug"],
   [/\bCalf Raise\b/gi, "Eleva\u00e7\u00e3o de Panturrilha"],
   [/\bTriceps Dip\b/gi, "Mergulho de Tr\u00edceps"],
   [/\bPike Push-?up\b/gi, "Flex\u00e3o Pike"],
@@ -59,6 +62,8 @@ const PHRASE_REPLACEMENTS: ReadonlyArray<readonly [RegExp, string]> = [
   [/\bLunge\b/gi, "Avan\u00e7o"],
   [/\bWall Sit\b/gi, "Cadeira Isom\u00e9trica"],
   [/\bDead Hang\b/gi, "Suspens\u00e3o na Barra"],
+  [/\bHollow Body Hold\b/gi, "Isometria Hollow"],
+  [/\bHollow Hold\b/gi, "Isometria Hollow"],
   [/\bHollow Body\b/gi, "Hollow Body"],
   [/\bStretching\b/gi, "Alongamento"],
   [/\bMobility\b/gi, "Mobilidade"],
@@ -500,9 +505,32 @@ function capitalizeSentence(value: string): string {
   return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
+function collapseRepeatedWords(value: string): string {
+  const tokens = value.split(/\s+/).filter((token) => token.length > 0);
+  const collapsed: string[] = [];
+  let previousKey = "";
+
+  for (const token of tokens) {
+    const currentKey = token
+      .normalize("NFD")
+      .replace(/\p{Diacritic}/gu, "")
+      .replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "")
+      .toLowerCase();
+
+    if (currentKey.length > 2 && currentKey === previousKey) {
+      continue;
+    }
+
+    collapsed.push(token);
+    previousKey = currentKey;
+  }
+
+  return collapsed.join(" ");
+}
+
 function summarizeTaskLabel(label: string): string {
   const localized = localizeMissionText(label) ?? label;
-  return localized
+  const summarized = localized
     .replace(/^Conclua\s+/i, "")
     .replace(/^Complete\s+/i, "")
     .replace(/^\d+\s+vezes\s+/i, "")
@@ -510,6 +538,7 @@ function summarizeTaskLabel(label: string): string {
     .replace(/^\d+\s+miss(?:\u00f5es|oes)\s+de\s+/i, "")
     .replace(new RegExp(String.raw`^miss(?:\u00e3o|ao)\s+di(?:a|\u00e1)ria\s+`, "i"), "")
     .trim();
+  return (localizeExerciseCatalogText(summarized) ?? summarized).trim();
 }
 
 export function localizeMissionText(value: string | null | undefined): string | null | undefined {
@@ -518,6 +547,7 @@ export function localizeMissionText(value: string | null | undefined): string | 
   }
 
   let localized = normalizeMissionTextBase(value);
+  localized = localizeExerciseCatalogText(localized) ?? localized;
 
   for (const [pattern, replacement] of PHRASE_REPLACEMENTS) {
     localized = localized.replace(pattern, replacement);
@@ -532,6 +562,15 @@ export function localizeMissionText(value: string | null | undefined): string | 
   }
 
   localized = localized
+    .replace(/\b(front plank)\b/gi, "prancha")
+    .replace(/\b(crunch exercise|crunch workout)\b/gi, "abdominal")
+    .replace(/\b(sit-up exercise|sit-up workout)\b/gi, "abdominal")
+    .replace(/\b(bodyweight squat)\b/gi, "agachamento livre");
+
+  localized = localizeExerciseCatalogText(localized) ?? localized;
+
+  localized = collapseRepeatedWords(localized)
+    .replace(/\b(Hollow Body)\s+(Isometria Hollow)\b/gi, "$2")
     .replace(/\s+:/g, ":")
     .replace(/\s+,/g, ",")
     .replace(/\s+\./g, ".")
