@@ -5522,20 +5522,6 @@ function createPeriodicProgressRecomputePromise(userId: string, db: D1Database):
   return recomputePromise;
 }
 
-async function recomputePeriodicProgressWithGuard(
-  userId: string,
-  db: D1Database,
-  options?: { force?: boolean | undefined },
-): Promise<void> {
-  const now = Date.now();
-  cleanupPeriodicProgressTracking(now);
-  if (options?.force !== true && shouldDebouncePeriodicProgressRecompute(userId, now)) {
-    return;
-  }
-
-  await createPeriodicProgressRecomputePromise(userId, db);
-}
-
 function schedulePeriodicProgressRecomputeWithGuard(
   userId: string,
   db: D1Database,
@@ -6716,18 +6702,12 @@ app.get("/api/missions", authMiddleware, async (c) => {
   try {
     const forceRefresh = c.req.query("refresh") === "1";
     if (forceRefresh) {
-      await ensurePeriodicMissionsWithGuard(c.env, c.env.fitloot_db, user.id, {
-        force: true,
-        mode: "safe",
-      });
-      await repairLegacyDailyMissionMetadata(c.env, c.env.fitloot_db, user.id, { limit: 12 });
-      dailyMetadataRepairLastRun.set(user.id, Date.now());
-      await recomputePeriodicProgressWithGuard(user.id, c.env.fitloot_db, { force: true });
-    } else {
-      schedulePeriodicMissionsRefreshWithGuard(c.env, c.env.fitloot_db, user.id, c.executionCtx, "safe");
-      scheduleLegacyDailyMetadataRepairWithGuard(c.env, c.env.fitloot_db, user.id, c.executionCtx);
-      schedulePeriodicProgressRecomputeWithGuard(user.id, c.env.fitloot_db, c.executionCtx);
+      clearMissionListCache(user.id);
     }
+
+    schedulePeriodicMissionsRefreshWithGuard(c.env, c.env.fitloot_db, user.id, c.executionCtx, "safe");
+    scheduleLegacyDailyMetadataRepairWithGuard(c.env, c.env.fitloot_db, user.id, c.executionCtx);
+    schedulePeriodicProgressRecomputeWithGuard(user.id, c.env.fitloot_db, c.executionCtx);
 
     const cached = !forceRefresh ? readMissionListCache(user.id) : null;
     if (!forceRefresh && cached) {

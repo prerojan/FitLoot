@@ -92,7 +92,7 @@ function resolveExpiredMissionRefreshDelay(missions: Mission[]): number | null {
 }
 
 function resolveMissionsApiPath(forceRefresh: boolean, cachedMissions: Mission[] | null): string {
-  if (forceRefresh) return "/api/missions?refresh=1";
+  void forceRefresh;
   void cachedMissions;
   return "/api/missions";
 }
@@ -292,7 +292,6 @@ export default function Dashboard() {
     clearJsonCache("/api/profile");
     clearJsonCache("/api/progression");
     clearJsonCache("/api/missions");
-    clearJsonCache("/api/missions?refresh=1");
     clearJsonCache("/api/metrics/today");
     clearJsonCache("/api/titles");
     await loadData({ forceRefresh: true });
