@@ -30,7 +30,11 @@ import {
   PARENT_SKILL_MAP,
   type VariantSkillSeed,
 } from "../shared/coreSkillSeeds";
-import { resolveExerciseDisplayNamePt } from "../shared/exerciseCatalog";
+import {
+  listSupportedMissionExerciseNamesByMuscle,
+  resolveExerciseDisplayNamePt,
+  resolveSupportedMissionExerciseName,
+} from "../shared/exerciseCatalog";
 
 const VARIANT_SEED_BY_NAME = new Map<string, VariantSkillSeed>(variantSkillSeeds.map((v) => [v.namePt, v]));
 import {
@@ -60,7 +64,7 @@ import {
   type CaktoOrderSnapshot,
   type CaktoPlanCatalog,
 } from "./services/cakto";
-import { enrichExercise, searchExerciseDB, type EnrichedExercise } from "./services/exerciseEnrichment";
+import { enrichExercise, type EnrichedExercise } from "./services/exerciseEnrichment";
 
 // Tipo do usuário autenticado
 interface AuthUser {
@@ -1190,12 +1194,12 @@ type SkillStageSeed = {
 const localExercisePool: ExerciseRef[] = [
   { name: "Push-up", muscle: "chest", equipment: "bodyweight", difficulty: "beginner" },
   { name: "Air Squat", muscle: "legs", equipment: "bodyweight", difficulty: "beginner" },
-  { name: "Plank", muscle: "core", equipment: "bodyweight", difficulty: "beginner" },
+  { name: "High Plank", muscle: "core", equipment: "bodyweight", difficulty: "beginner" },
   { name: "Glute Bridge", muscle: "glutes", equipment: "bodyweight", difficulty: "beginner" },
   { name: "Burpee", muscle: "full body", equipment: "bodyweight", difficulty: "intermediate" },
   { name: "Pike Push-up", muscle: "shoulders", equipment: "bodyweight", difficulty: "intermediate" },
   { name: "Lunge", muscle: "legs", equipment: "bodyweight", difficulty: "beginner" },
-  { name: "Superman Hold", muscle: "back", equipment: "bodyweight", difficulty: "beginner" },
+  { name: "Quarter Sit-up", muscle: "core", equipment: "bodyweight", difficulty: "beginner" },
 ];
 
 const coreSkillSeeds: SkillSeed[] = [
@@ -6054,8 +6058,38 @@ function missionMetadataLooksMismatched(
 
   if (normalizedExerciseName.includes("plank") || normalizedExerciseName.includes("prancha")) {
     return !normalizedResolvedName.includes("plank")
+      || normalizedResolvedName.includes("twist")
+      || normalizedResolvedName.includes("weighted")
+      || normalizedResolvedName.includes("power point")
       || (normalizedTarget.length > 0 && !normalizedTarget.includes("abs"))
       || (normalizedBodyPart.length > 0 && !normalizedBodyPart.includes("waist"));
+  }
+
+  if (
+    normalizedExerciseName.includes("crunch")
+    || normalizedExerciseName.includes("abdominal")
+    || normalizedExerciseName.includes("sit up")
+    || normalizedExerciseName.includes("situp")
+  ) {
+    const resolvedLooksAbdominal =
+      normalizedResolvedName.includes("crunch")
+      || normalizedResolvedName.includes("sit up")
+      || normalizedResolvedName.includes("situp");
+    const targetLooksAbdominal =
+      normalizedTarget.includes("abs")
+      || normalizedTarget.includes("waist");
+    const bodyPartLooksAbdominal =
+      normalizedBodyPart.includes("waist")
+      || normalizedBodyPart.includes("abs");
+    const resolvedLooksWrongVariant =
+      normalizedResolvedName.includes("weighted")
+      || normalizedResolvedName.includes("oblique")
+      || normalizedResolvedName.includes("groin")
+      || normalizedResolvedName.includes("reverse");
+    return !resolvedLooksAbdominal
+      || !targetLooksAbdominal
+      || !bodyPartLooksAbdominal
+      || resolvedLooksWrongVariant;
   }
 
   if (normalizedExerciseName.includes("lunge") || normalizedExerciseName.includes("avanco")) {
@@ -6118,7 +6152,7 @@ async function repairLegacyDailyMissionMetadata(env: Env, db: D1Database, userId
     const rawExerciseName = typeof row.exercise_name === "string" && row.exercise_name.trim().length > 0
       ? row.exercise_name
       : extractExerciseName(typeof row.title === "string" ? row.title : "");
-    const exerciseName = rawExerciseName.trim();
+    const exerciseName = (resolveSupportedMissionExerciseName(rawExerciseName) ?? rawExerciseName).trim();
     if (exerciseName.length === 0) {
       continue;
     }
@@ -6223,9 +6257,11 @@ async function repairLegacyDailyMissionMetadata(env: Env, db: D1Database, userId
         metricValueByPeriod(getMissionMetricType(resolvedExerciseName), "daily"),
       );
 
+      const repairedTitle = `MissÃ£o DiÃ¡ria: ${resolveExerciseDisplayNamePt(resolvedExerciseName) ?? resolvedExerciseName}`;
       const metricRepairSql = hasExerciseDbIdColumn
         ? `UPDATE missions
-         SET description = ?,
+         SET title = ?,
+             description = ?,
              metric_type = ?,
              metric_value = ?,
              metric_unit = ?,
@@ -6255,7 +6291,8 @@ async function repairLegacyDailyMissionMetadata(env: Env, db: D1Database, userId
               updated_at = datetime('now')
         WHERE id = ?`
         : `UPDATE missions
-         SET description = ?,
+         SET title = ?,
+             description = ?,
              metric_type = ?,
              metric_value = ?,
              metric_unit = ?,
@@ -6285,6 +6322,7 @@ async function repairLegacyDailyMissionMetadata(env: Env, db: D1Database, userId
        WHERE id = ?`;
 
       const metricRepairValues: unknown[] = [
+        repairedTitle,
         repairedMetricPayload.description,
         repairedMetricPayload.metric_type,
         repairedMetricPayload.metric_value,
@@ -6296,7 +6334,7 @@ async function repairLegacyDailyMissionMetadata(env: Env, db: D1Database, userId
         repairedMetricPayload.duration_estimate_minutes,
         repairedMetricPayload.exercise_category,
         repairedMetricPayload.exercise_type,
-        repairedMetricPayload.exercise_name,
+        resolveExerciseDisplayNamePt(repairedMetricPayload.exercise_name) ?? repairedMetricPayload.exercise_name,
       ];
 
       if (hasExerciseDbIdColumn) {
@@ -6325,9 +6363,11 @@ async function repairLegacyDailyMissionMetadata(env: Env, db: D1Database, userId
       continue;
     }
 
+    const repairedTitle = `MissÃ£o DiÃ¡ria: ${resolveExerciseDisplayNamePt(enriched.name) ?? enriched.name}`;
     const metadataRepairSql = hasExerciseDbIdColumn
       ? `UPDATE missions
-         SET exercise_name = ?,
+         SET title = ?,
+             exercise_name = ?,
              exercise_db_id = ?,
              exercise_equipment = ?,
              exercise_body_part = ?,
@@ -6346,7 +6386,8 @@ async function repairLegacyDailyMissionMetadata(env: Env, db: D1Database, userId
               updated_at = datetime('now')
         WHERE id = ?`
       : `UPDATE missions
-         SET exercise_name = ?,
+         SET title = ?,
+             exercise_name = ?,
              exercise_equipment = ?,
              exercise_body_part = ?,
              exercise_target = ?,
@@ -6365,6 +6406,7 @@ async function repairLegacyDailyMissionMetadata(env: Env, db: D1Database, userId
        WHERE id = ?`;
 
     const metadataRepairValues: unknown[] = [
+      repairedTitle,
       resolveExerciseDisplayNamePt(enriched.name) ?? enriched.name,
     ];
 
@@ -8217,21 +8259,21 @@ function fallbackExercisesByFocus(focus: string, muscles: string[]): string[] {
     return ["Air Squat", "Lunge", "Glute Bridge", "Wall Sit", "Calf Raise"];
   }
   if (normalized.includes("core")) {
-    return ["Plank", "Hollow Body Hold", "Abdominal Crunch", "Mountain Climber", "Dead Bug"];
+    return ["High Plank", "Crunch Floor", "Quarter Sit-up", "Mountain Climber", "Dead Bug"];
   }
   if (normalized.includes("active_recovery") || (normalized.includes("active") && normalized.includes("recover"))) {
-    return ["Air Squat", "Lunge", "Glute Bridge", "Inverted Row", "Caminhada Ativa", "Alongamento Dinamico"];
+    return ["Walking", "Stretching", "Mobility Flow", "Glute Bridge", "Air Squat"];
   }
   if (normalized.includes("rest") || normalized.includes("recover")) {
-    return ["Caminhada Ativa", "Air Squat", "Glute Bridge", "Alongamento Dinamico", "Mobility Flow"];
+    return ["Walking", "Stretching", "Mobility Flow", "Yoga Flow", "Glute Bridge"];
   }
   if (normalized.includes("yoga")) {
     return ["Yoga Flow", "Downward Dog", "Child Pose", "Warrior Sequence", "Mobility Flow"];
   }
   if (muscles.some((muscle) => muscle.toLowerCase().includes("core"))) {
-    return ["Plank", "Abdominal Crunch", "Hollow Body Hold", "Dead Bug", "Bird Dog"];
+    return ["High Plank", "Crunch Floor", "Quarter Sit-up", "Dead Bug", "Mountain Climber"];
   }
-  return ["Push-up", "Air Squat", "Plank", "Lunge", "Burpee", "Caminhada Ativa"];
+  return ["Push-up", "Air Squat", "High Plank", "Lunge", "Burpee", "Walking"];
 }
 
 function normalizeWeeklyPlanDay(
@@ -9039,16 +9081,15 @@ async function insertMission(
   return insertedId > 0 ? insertedId : null;
 }
 
-async function fetchExerciseDbExercises(env: Env, muscle: string, equipment: string): Promise<ExerciseRef[]> {
-  const results = await searchExerciseDB(muscle, env);
-  return results.slice(0, 8).map((item) => ({
-    name: item.name,
-    muscle: item.target ?? muscle,
-    equipment: item.equipment ?? (equipment || "bodyweight"),
+async function fetchExerciseDbExercises(_env: Env, muscle: string, _equipment: string): Promise<ExerciseRef[]> {
+  void _env;
+  void _equipment;
+  return listSupportedMissionExerciseNamesByMuscle(muscle).map((name) => ({
+    name,
+    muscle,
+    equipment: "bodyweight",
     difficulty: "intermediate",
-    instructions: Array.isArray(item.instructions) ? String(item.instructions[0] ?? "") : "",
-    image_url: normalizeMissionMediaUrl(item.gifUrl ?? item.imageUrl ?? item.thumbnailUrl ?? null) ?? undefined,
-    body_part: item.bodyPart,
+    instructions: "",
   }));
 }
 
@@ -9059,12 +9100,27 @@ function pickLocalExercises(muscle: string): ExerciseRef[] {
 async function resolveExercisesWithFallback(env: Env, muscle: string, equipment: string): Promise<{ source: string; exercises: ExerciseRef[] }> {
   try {
     const ex = await fetchExerciseDbExercises(env, muscle, equipment);
-    if (ex.length > 0) return { source: "exercise_db", exercises: ex };
+    if (ex.length > 0) return { source: "catalog", exercises: ex };
   } catch (error) {
     console.warn("[exercise-db]", error);
   }
 
   return { source: "local_pool", exercises: pickLocalExercises(muscle) };
+}
+
+function fallbackExerciseEntriesForPeriod(period: MissionPeriod): ExerciseRef[] {
+  if (period !== "daily") return [];
+
+  return [
+    { name: "high plank", muscle: "core" },
+    { name: "crunch floor", muscle: "core" },
+    { name: "air squat", muscle: "legs" },
+    { name: "walking", muscle: "legs" },
+    { name: "running", muscle: "legs" },
+    { name: "stretching", muscle: "mobility" },
+    { name: "push-up", muscle: "chest" },
+    { name: "dead bug", muscle: "core" },
+  ];
 }
 
 function getWeekdayPtBr(now = new Date()) {
@@ -9151,6 +9207,21 @@ type ExerciseInstructionPayload = {
   metricValue: number;
 };
 
+const INSTRUCTION_STEP_PREFIX_REGEX = new RegExp(String.raw`^\s*(?:step|passo)\s*\d+\s*(?::|\.|\)|-)?\s*`, "iu");
+const INSTRUCTION_NUMERIC_PREFIX_REGEX = new RegExp(String.raw`^\s*\d+\s*(?::|\.|\)|-)\s*`, "u");
+
+function sanitizeMissionInstructionText(value: string): string {
+  return value
+    .replace(INSTRUCTION_STEP_PREFIX_REGEX, "")
+    .replace(INSTRUCTION_NUMERIC_PREFIX_REGEX, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function containsInstructionText(value: string): boolean {
+  return /[A-Za-zÀ-ÖØ-öø-ÿ]/.test(value);
+}
+
 function ensureInstructionSteps(
   instructions: string[],
   exerciseName: string,
@@ -9159,8 +9230,8 @@ function ensureInstructionSteps(
   restSeconds: number | null,
 ): string[] {
   const compact = instructions
-    .map((item) => item.trim())
-    .filter((item) => item.length > 0);
+    .map((item) => sanitizeMissionInstructionText(item))
+    .filter((item) => item.length > 0 && containsInstructionText(item));
   const fallback = buildMissionInstructions(exerciseName, metricType, sets, restSeconds);
   const merged = [...compact];
   for (const step of fallback) {
@@ -9173,8 +9244,8 @@ function ensureInstructionSteps(
 function normalizeInstructionList(value: unknown, limit = 8): string[] {
   if (!Array.isArray(value)) return [];
   return value
-    .map((item) => String(item).trim())
-    .filter((item) => item.length > 0)
+    .map((item) => sanitizeMissionInstructionText(String(item)))
+    .filter((item) => item.length > 0 && containsInstructionText(item))
     .slice(0, limit);
 }
 
@@ -9857,7 +9928,8 @@ async function createMissionsForPeriod(env: Env, db: D1Database, userId: string,
     muscle: string,
     forceCategory?: MissionExerciseCategory | undefined,
   ): Promise<MissionPayload> => {
-    const initialMetricHintRaw = getMissionMetricType(exerciseName);
+    const supportedExerciseName = resolveSupportedMissionExerciseName(exerciseName) ?? exerciseName;
+    const initialMetricHintRaw = getMissionMetricType(supportedExerciseName);
     const initialMetricHint = period === "daily" && initialMetricHintRaw === "circuit_tasks"
       ? "sets_reps"
       : initialMetricHintRaw;
@@ -9865,10 +9937,10 @@ async function createMissionsForPeriod(env: Env, db: D1Database, userId: string,
 
     const [enriched, precomputedAiContext] = await Promise.all([
       shouldEnrichWithExerciseApi
-        ? enrichExercise(exerciseName, env).catch(() => null)
+        ? enrichExercise(supportedExerciseName, env).catch(() => null)
         : Promise.resolve(null),
       getExerciseInstructionsFromAI(
-        exerciseName,
+        supportedExerciseName,
         initialMetricHint,
         conditioning,
         env,
@@ -9878,13 +9950,13 @@ async function createMissionsForPeriod(env: Env, db: D1Database, userId: string,
     ]);
 
     const resolvedName = shouldEnrichWithExerciseApi
-      ? (enriched?.name || exerciseName)
-      : exerciseName;
+      ? (enriched?.name || supportedExerciseName)
+      : supportedExerciseName;
     const metricHintRaw = getMissionMetricType(resolvedName);
     const metricHint = period === "daily" && metricHintRaw === "circuit_tasks" ? "sets_reps" : metricHintRaw;
     const canReuseAiContext =
       precomputedAiContext !== null &&
-      normalizeMatchText(resolvedName) === normalizeMatchText(exerciseName) &&
+      normalizeMatchText(resolvedName) === normalizeMatchText(supportedExerciseName) &&
       precomputedAiContext.metricType === metricHint;
 
     const apiInstructionsEn = normalizeInstructionList(enriched?.instructions, 8);
@@ -10035,10 +10107,11 @@ async function createMissionsForPeriod(env: Env, db: D1Database, userId: string,
   );
   missionsToInsert.push(...built);
 
-  const fallbackPool = fallbackMissionsForPeriod("daily", config.titlePrefix, config.xp, config.points);
+  const fallbackPool = fallbackExerciseEntriesForPeriod("daily");
   while (missionsToInsert.length < targetAmount) {
     const fallback = fallbackPool[missionsToInsert.length % fallbackPool.length];
-    missionsToInsert.push(validateMission(fallback));
+    if (!fallback) break;
+    missionsToInsert.push(await buildFromExercise(fallback.name, fallback.muscle));
   }
 
   for (const mission of missionsToInsert.slice(0, targetAmount)) {
@@ -10992,11 +11065,16 @@ function validateStructuredMissionPlan(
 
   for (const draft of dailyDrafts.slice(0, options.dailyTarget + 3)) {
     totalCount += 1;
-    const name = toSafeString(draft.name, `Missao Diaria ${blueprints.length + 1}`);
+    const rawName = toSafeString(draft.name, `Missao Diaria ${blueprints.length + 1}`);
+    const supportedExerciseName = resolveSupportedMissionExerciseName(rawName) ?? rawName;
+    const name = resolveExerciseDisplayNamePt(supportedExerciseName) ?? rawName;
+    if (normalizeMatchText(rawName) !== normalizeMatchText(supportedExerciseName)) {
+      invalidCount += 1;
+    }
     const description = toSafeString(draft.description, `Complete a meta proposta em ${name}.`);
     const exerciseType = toSafeString(draft.exercise_type, name);
     const muscleGroup = toSafeString(draft.muscle_group, "full body");
-    const expectedMetricType = getMissionMetricType(`${name} ${exerciseType} ${muscleGroup}`);
+    const expectedMetricType = getMissionMetricType(`${supportedExerciseName} ${exerciseType} ${muscleGroup}`);
     if (expectedMetricType === "circuit_tasks" || isCircuitLikeText(name) || isCircuitLikeText(exerciseType)) {
       promotedWeeklyDrafts.push({
         name,
@@ -11010,7 +11088,13 @@ function validateStructuredMissionPlan(
       continue;
     }
 
-    const metricType = structuredMetricTypeToMissionMetric(draft.metric_type, name, exerciseType, muscleGroup, "daily");
+    const metricType = structuredMetricTypeToMissionMetric(
+      draft.metric_type,
+      supportedExerciseName,
+      exerciseType,
+      muscleGroup,
+      "daily",
+    );
     if (metricType !== expectedMetricType) {
       invalidCount += 1;
     }
@@ -11030,7 +11114,7 @@ function validateStructuredMissionPlan(
       name,
       description,
       goal: null,
-      exerciseName: name,
+      exerciseName: supportedExerciseName,
       muscle: muscleGroup,
       metricType,
       metricValue,
@@ -11039,8 +11123,8 @@ function validateStructuredMissionPlan(
       difficultyLevel: normalizeDifficultyLabel(draft.difficulty, profile.conditioning),
       missionOrigin: options.isAiSpecial ? "ai" : "regular",
       isAiSpecial: options.isAiSpecial,
-      compatibilityKey: normalizeMatchText(extractExerciseName(name)),
-      compatibilityTerms: buildMissionCompatibilityTerms(name, muscleGroup, metricType),
+      compatibilityKey: normalizeMatchText(extractExerciseName(supportedExerciseName)),
+      compatibilityTerms: buildMissionCompatibilityTerms(`${name} ${supportedExerciseName}`, muscleGroup, metricType),
       subtasks: [],
     });
   }
@@ -11054,15 +11138,23 @@ function validateStructuredMissionPlan(
     if (!fallbackDraft) break;
     totalCount += 1;
     invalidCount += 1;
-    const name = toSafeString(fallbackDraft.name, `Missao Diaria ${blueprints.length + 1}`);
+    const rawName = toSafeString(fallbackDraft.name, `Missao Diaria ${blueprints.length + 1}`);
+    const supportedExerciseName = resolveSupportedMissionExerciseName(rawName) ?? rawName;
+    const name = resolveExerciseDisplayNamePt(supportedExerciseName) ?? rawName;
     const muscleGroup = toSafeString(fallbackDraft.muscle_group, "full body");
-    const metricType = structuredMetricTypeToMissionMetric(fallbackDraft.metric_type, name, String(fallbackDraft.exercise_type ?? name), muscleGroup, "daily");
+    const metricType = structuredMetricTypeToMissionMetric(
+      fallbackDraft.metric_type,
+      supportedExerciseName,
+      String(fallbackDraft.exercise_type ?? supportedExerciseName),
+      muscleGroup,
+      "daily",
+    );
     blueprints.push({
       period: "daily",
       name,
       description: toSafeString(fallbackDraft.description, `Complete a meta proposta em ${name}.`),
       goal: null,
-      exerciseName: name,
+      exerciseName: supportedExerciseName,
       muscle: muscleGroup,
       metricType,
       metricValue: convertStructuredMetricValue(metricType, fallbackDraft.reps_or_value, fallbackDraft.unit),
@@ -11071,8 +11163,8 @@ function validateStructuredMissionPlan(
       difficultyLevel: normalizeDifficultyLabel(fallbackDraft.difficulty, profile.conditioning),
       missionOrigin: options.isAiSpecial ? "ai" : "regular",
       isAiSpecial: options.isAiSpecial,
-      compatibilityKey: normalizeMatchText(extractExerciseName(name)),
-      compatibilityTerms: buildMissionCompatibilityTerms(name, muscleGroup, metricType),
+      compatibilityKey: normalizeMatchText(extractExerciseName(supportedExerciseName)),
+      compatibilityTerms: buildMissionCompatibilityTerms(`${name} ${supportedExerciseName}`, muscleGroup, metricType),
       subtasks: [],
     });
   }
@@ -11120,12 +11212,15 @@ async function materializeMissionBlueprint(
 ): Promise<MissionPayload> {
   const config = missionConfigByPeriod(blueprint.period);
   const shouldEnrichWithExerciseApi = blueprint.period === "daily";
+  const supportedExerciseName = shouldEnrichWithExerciseApi
+    ? (resolveSupportedMissionExerciseName(blueprint.exerciseName) ?? blueprint.exerciseName)
+    : blueprint.exerciseName;
   const [enriched, aiContext] = await Promise.all([
     shouldEnrichWithExerciseApi
-      ? enrichExercise(blueprint.exerciseName, env).catch(() => null)
+      ? enrichExercise(supportedExerciseName, env).catch(() => null)
       : Promise.resolve(null),
     getExerciseInstructionsFromAI(
-      blueprint.exerciseName,
+      supportedExerciseName,
       blueprint.period === "daily" ? blueprint.metricType : "circuit_tasks",
       profile.conditioning,
       env,
@@ -11143,10 +11238,10 @@ async function materializeMissionBlueprint(
   ]);
 
   const apiInstructionsEn = normalizeInstructionList(enriched?.instructions, 8);
-  const apiInstructionsPt = await translateExerciseInstructionsToPt(apiInstructionsEn, blueprint.exerciseName, env);
+  const apiInstructionsPt = await translateExerciseInstructionsToPt(apiInstructionsEn, supportedExerciseName, env);
   const resolvedName = shouldEnrichWithExerciseApi
-    ? (enriched?.name || blueprint.exerciseName)
-    : blueprint.exerciseName;
+    ? (enriched?.name || supportedExerciseName)
+    : supportedExerciseName;
   const baseMission = buildMissionPayload({
     period: blueprint.period,
     titlePrefix: config.titlePrefix,
@@ -11182,7 +11277,7 @@ async function materializeMissionBlueprint(
       blueprint.metricValue,
       { conditioning: profile.conditioning, volumeMultiplier: profile.volumeMultiplier },
     );
-    withMetric.title = `${config.titlePrefix}: ${resolveExerciseDisplayNamePt(blueprint.name) ?? blueprint.name}`;
+    withMetric.title = `${config.titlePrefix}: ${resolveExerciseDisplayNamePt(enriched?.name ?? supportedExerciseName) ?? blueprint.name}`;
     withMetric.mission_origin = blueprint.missionOrigin;
     withMetric.is_ai_special = blueprint.isAiSpecial ? 1 : 0;
     withMetric.instructions = ensureInstructionSteps(
@@ -12818,7 +12913,8 @@ function pointsByConditioning(conditioning: ConditioningLevel): number {
 
 function sanitizeMissionDraft(raw: MissionDraft, conditioning: ConditioningLevel, index: number): MissionPayload {
   const baseTitle = `Missao Diaria ${index + 1}`;
-  const exerciseName = toSafeString(raw.skill_name ?? raw.title, baseTitle);
+  const rawExerciseName = toSafeString(raw.skill_name ?? raw.title, baseTitle);
+  const exerciseName = resolveSupportedMissionExerciseName(rawExerciseName) ?? rawExerciseName;
   const muscle = toSafeString(raw.muscle, "full body");
   const forcedCategory = raw.exercise_category ?? normalizeExerciseCategory(exerciseName, muscle);
 
@@ -12842,7 +12938,7 @@ function sanitizeMissionDraft(raw: MissionDraft, conditioning: ConditioningLevel
 
   return {
     ...payload,
-    title: toSafeString(raw.title, payload.title),
+    title: toSafeString(raw.title, `Missao Diaria: ${resolveExerciseDisplayNamePt(exerciseName) ?? exerciseName}`),
     description: toSafeString(
       raw.description,
       buildMissionDescriptionFromInstructions(
@@ -12980,7 +13076,8 @@ async function generateAiMissionsForUser(
           ? "weekly"
           : "daily";
 
-      const exerciseName = extractExerciseName(mission.title);
+      const rawExerciseName = extractExerciseName(mission.title);
+      const exerciseName = resolveSupportedMissionExerciseName(rawExerciseName) ?? rawExerciseName;
       const shouldEnrichWithExerciseApi = missionPeriod === "daily";
       const [enrichedMedia, aiContext] = await Promise.all([
         shouldEnrichWithExerciseApi
@@ -13044,10 +13141,14 @@ async function generateAiMissionsForUser(
       }
 
       const combinedMuscles = resolveExerciseApiMuscleGroups(enrichedMedia);
+      const displayExerciseName =
+        resolveExerciseDisplayNamePt(enrichedMedia?.name || exerciseName)
+        ?? (resolveExerciseDisplayNamePt(rawExerciseName) ?? rawExerciseName);
 
       const withDetails: MissionPayload = {
         ...withMetric,
         mission_origin: "ai",
+        title: missionPeriod === "daily" ? `Missao Diaria: ${displayExerciseName}` : mission.title,
         instructions: ensureInstructionSteps(
           mergedInstructionSource.length > 0 ? mergedInstructionSource : withMetric.instructions,
           exerciseName,

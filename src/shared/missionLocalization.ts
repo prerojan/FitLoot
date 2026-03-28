@@ -324,9 +324,11 @@ const PHRASE_REPLACEMENTS: ReadonlyArray<readonly [RegExp, string]> = [
 ];
 
 /** Instruções de execução (ExerciseDB / APIs em inglês) → PT-BR */
+const INSTRUCTION_STEP_PREFIX_REGEX = new RegExp(String.raw`^\s*(?:step|passo)\s*\d+\s*(?::|\.|\)|-)?\s*`, "iu");
+const INSTRUCTION_NUMERIC_PREFIX_REGEX = new RegExp(String.raw`^\s*\d+\s*(?::|\.|\)|-)\s*`, "u");
 const INSTRUCTION_PHRASE_REPLACEMENTS: ReadonlyArray<readonly [RegExp, string]> = [
-  [new RegExp(String.raw`\bStep\s*(\d+)\s*(?::|\.|\)|-)\s*`, "gi"), "Passo $1: "],
-  [/\bStep\s+(\d+)\b/gi, "Passo $1"],
+  [new RegExp(String.raw`\bStep\s*(\d+)\s*(?::|\.|\)|-)\s*`, "gi"), ""],
+  [new RegExp(String.raw`\bStep\s+(\d+)\b`, "gi"), ""],
   [/\bHigh plank position\b/gi, "posi\u00e7\u00e3o alta de prancha"],
   [/\bPlank position\b/gi, "posi\u00e7\u00e3o de prancha"],
   [/\bStarting position\b/gi, "Posi\u00e7\u00e3o inicial"],
@@ -528,6 +530,10 @@ function collapseRepeatedWords(value: string): string {
   return collapsed.join(" ");
 }
 
+function containsLocalizedText(value: string): boolean {
+  return /[A-Za-zÀ-ÖØ-öø-ÿ]/.test(value);
+}
+
 function summarizeTaskLabel(label: string): string {
   const localized = localizeMissionText(label) ?? label;
   const summarized = localized
@@ -562,6 +568,8 @@ export function localizeMissionText(value: string | null | undefined): string | 
   }
 
   localized = localized
+    .replace(INSTRUCTION_STEP_PREFIX_REGEX, "")
+    .replace(INSTRUCTION_NUMERIC_PREFIX_REGEX, "")
     .replace(/\b(front plank)\b/gi, "prancha")
     .replace(/\b(crunch exercise|crunch workout)\b/gi, "abdominal")
     .replace(/\b(sit-up exercise|sit-up workout)\b/gi, "abdominal")
@@ -585,7 +593,7 @@ export function localizeMissionTextArray(values: readonly string[] | null | unde
   return values
     .map((value) => localizeMissionText(value) ?? "")
     .map((value) => value.trim())
-    .filter((value) => value.length > 0);
+    .filter((value) => value.length > 0 && containsLocalizedText(value));
 }
 
 export function buildMissionDisplayGoalFromTasks(
