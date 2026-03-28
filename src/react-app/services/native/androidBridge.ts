@@ -14,6 +14,9 @@ export type AndroidBridgeApi = {
 
 export type AndroidCameraCapturedDetail = {
   path?: string;
+  base64?: string;
+  mimeType?: string;
+  dataUrl?: string;
 };
 
 export type AndroidGallerySelectedDetail = {

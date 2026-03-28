@@ -2,6 +2,7 @@ package com.fitloot
 
 import android.Manifest
 import android.app.Activity
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Bundle
@@ -11,6 +12,9 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.health.connect.client.PermissionController
 import androidx.lifecycle.lifecycleScope
+import android.webkit.PermissionRequest
+import android.webkit.ValueCallback
+import android.webkit.WebChromeClient
 import com.fitloot.bridge.FitLootWebViewConfigurator
 import com.fitloot.bridge.NativeBridgeContract
 import com.fitloot.health.HealthConnectPermissionCoordinator
@@ -20,8 +24,14 @@ import kotlinx.coroutines.launch
 
 class MainActivity : AppCompatActivity() {
 
+    companion object {
+        private const val RUNTIME_PERMISSIONS_REQUEST_CODE = 100
+    }
+
     private lateinit var binding: ActivityMainBinding
     private lateinit var webAppInterface: WebAppInterface
+    private var fileChooserCallback: ValueCallback<Array<Uri>>? = null
+    private var pendingWebPermissionRequest: PermissionRequest? = null
 
     private val cameraResultLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode == Activity.RESULT_OK) {
@@ -47,6 +57,20 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private val fileChooserLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        val callback = fileChooserCallback
+        fileChooserCallback = null
+
+        if (callback == null) {
+            return@registerForActivityResult
+        }
+
+        val uris = WebChromeClient.FileChooserParams.parseResult(result.resultCode, result.data)
+            ?: result.data?.data?.let { arrayOf(it) }
+
+        callback.onReceiveValue(uris)
+    }
+
     private val healthPermissionsLauncher = registerForActivityResult(
         PermissionController.createRequestPermissionResultContract()
     ) { _ -> }
@@ -70,9 +94,30 @@ class MainActivity : AppCompatActivity() {
             onPermissionsRequest = { checkPermissions() }
         )
 
-        FitLootWebViewConfigurator.configure(webView) { intent ->
-            startActivity(intent)
-        }
+        FitLootWebViewConfigurator.configure(
+            webView = webView,
+            openExternalUrl = { intent ->
+                startActivity(intent)
+            },
+            onShowFileChooser = { nextCallback, fileChooserParams ->
+                fileChooserCallback?.onReceiveValue(null)
+                fileChooserCallback = nextCallback
+
+                val chooserIntent = runCatching {
+                    fileChooserParams?.createIntent()
+                }.getOrNull() ?: Intent(Intent.ACTION_GET_CONTENT).apply {
+                    addCategory(Intent.CATEGORY_OPENABLE)
+                    type = "image/*"
+                }
+
+                runCatching {
+                    fileChooserLauncher.launch(chooserIntent)
+                }.isSuccess
+            },
+            onPermissionRequest = { request ->
+                handleWebPermissionRequest(request)
+            },
+        )
         webView.addJavascriptInterface(webAppInterface, NativeBridgeContract.BRIDGE_NAME)
         FitLootWebViewConfigurator.loadHome(webView)
     }
@@ -90,10 +135,35 @@ class MainActivity : AppCompatActivity() {
             }
         }
         if (listPermissionsNeeded.isNotEmpty()) {
-            ActivityCompat.requestPermissions(this, listPermissionsNeeded.toTypedArray(), 100)
+            ActivityCompat.requestPermissions(this, listPermissionsNeeded.toTypedArray(), RUNTIME_PERMISSIONS_REQUEST_CODE)
         }
 
         requestHealthConnectPermissionsIfNeeded()
+    }
+
+    private fun handleWebPermissionRequest(request: PermissionRequest) {
+        val requestedResources = request.resources.toList()
+        val grantedResources = mutableListOf<String>()
+
+        val needsCamera = requestedResources.contains(PermissionRequest.RESOURCE_VIDEO_CAPTURE)
+        val hasCameraPermission = ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+
+        if (needsCamera && !hasCameraPermission) {
+            pendingWebPermissionRequest = request
+            checkPermissions()
+            return
+        }
+
+        if (requestedResources.contains(PermissionRequest.RESOURCE_VIDEO_CAPTURE) && hasCameraPermission) {
+            grantedResources.add(PermissionRequest.RESOURCE_VIDEO_CAPTURE)
+        }
+
+        if (grantedResources.isEmpty()) {
+            request.deny()
+            return
+        }
+
+        request.grant(grantedResources.toTypedArray())
     }
 
     private fun requestHealthConnectPermissionsIfNeeded() {
@@ -101,6 +171,28 @@ class MainActivity : AppCompatActivity() {
             runCatching {
                 HealthConnectPermissionCoordinator.requestIfNeeded(this@MainActivity, healthPermissionsLauncher)
             }
+        }
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray,
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+
+        if (requestCode != RUNTIME_PERMISSIONS_REQUEST_CODE) {
+            return
+        }
+
+        val request = pendingWebPermissionRequest ?: return
+        pendingWebPermissionRequest = null
+
+        val cameraGranted = ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+        if (cameraGranted) {
+            handleWebPermissionRequest(request)
+        } else {
+            request.deny()
         }
     }
 

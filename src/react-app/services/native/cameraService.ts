@@ -165,12 +165,24 @@ class CameraService {
     }
 
     const handleEvent = (event: CustomEvent<AndroidCameraCapturedDetail>) => {
-      const path = event.detail?.path;
-      if (!path) {
+      const detail = event.detail ?? {};
+      const input = detail.dataUrl
+        ? { dataUrl: detail.dataUrl, source: "android-native" as const }
+        : detail.base64
+          ? {
+              base64: detail.base64,
+              mimeType: detail.mimeType ?? "image/jpeg",
+              source: "android-native" as const,
+            }
+          : detail.path
+            ? { path: detail.path, source: "android-native" as const }
+            : null;
+
+      if (!input) {
         return;
       }
 
-      void this.handleCameraResult({ path, source: "android-native" })
+      void this.handleCameraResult(input)
         .then((image) => onCaptured(image))
         .catch((error) => {
           onError?.(error instanceof Error ? error : new Error("Falha ao processar a captura da camera nativa."));
