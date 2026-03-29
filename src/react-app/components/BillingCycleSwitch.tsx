@@ -8,6 +8,7 @@ type BillingCycleSwitchProps = {
 export default function BillingCycleSwitch({ value, onChange }: BillingCycleSwitchProps) {
   return (
     <div className="mx-auto inline-flex rounded-full border border-[var(--fl-auth-card-border)] bg-[var(--fl-auth-surface)] p-1 shadow-[0_18px_48px_-28px_rgba(16,185,129,0.55)]">
+      {/* Alterna o ciclo de cobranca sem misturar a logica do checkout. */}
       {([
         { id: "monthly", label: "Mensal" },
         { id: "annual", label: "Anual" },

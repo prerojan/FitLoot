@@ -3,6 +3,7 @@ import { AUTHENTICATED_HINT_KEY, ROUTE_PATHS } from "@/react-app/auth/constants"
 import type { User } from "@/react-app/auth/types";
 
 export async function fetchCurrentUser(): Promise<User | null> {
+  // Resolve a sessao atual sem propagar excecoes para os consumidores.
   const response = await api("/api/users/me");
   if (response.status === 401 || response.status === 403) {
     localStorage.removeItem(AUTHENTICATED_HINT_KEY);
@@ -17,6 +18,7 @@ export async function fetchCurrentUser(): Promise<User | null> {
 }
 
 export async function notifyAppOpen(): Promise<void> {
+  // Notifica a abertura da app para contadores e rotinas do backend.
   await api("/api/app/open", { method: "POST" });
 }
 
@@ -33,6 +35,7 @@ type IdleWindow = Window & {
 };
 
 export function prefetchCoreRoutes(): void {
+  // Antecipar as rotas principais reduz o tempo percebido depois do login.
   const loadCoreRoutes = () => {
     void Promise.all([
       import(`@/react-app/pages/Dashboard`),
@@ -56,10 +59,12 @@ export function prefetchCoreRoutes(): void {
 }
 
 export function hasPlanAccess(user: User): boolean {
+  // Centraliza a regra minima de acesso ao fluxo completo da app.
   return user.onboarding_completed === 1 && (user.plan_id === "vip" || user.plan_status === "active");
 }
 
 export function resolveAuthenticatedStartRoute(user: User): string {
+  // Escolhe o primeiro destino valido apos a restauracao da sessao.
   if (hasPlanAccess(user)) return ROUTE_PATHS.home;
   return ROUTE_PATHS.checkout;
 }

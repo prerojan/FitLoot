@@ -1,8 +1,6 @@
 /**
- * OpenStreetMap API Service (Fallback)
- * Integrates with OpenStreetMap using Leaflet for interactive maps
- * Documentation: https://leafletjs.com/
- * React integration: https://react-leaflet.js.org/
+ * Serviço base de mapas e rotas usado pelo frontend.
+ * Centraliza geocoding, rota, POI e configuração visual do OpenStreetMap.
  */
 
 export interface OSMConfig {
@@ -53,7 +51,7 @@ export interface NominatimResult {
   boundingbox: [string, string, string, string];
 }
 
-// OpenRouteService Configuration
+// Mantém a configuração externa de rota em um único ponto.
 const OPENROUTESERVICE_CONFIG = {
   API_KEY: 'eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6IjZhYThlNWM4NDNhNzRiNzdiMTEwZjg3ZjRmMzIxM2E4IiwiaCI6Im11cm11cjY0In0=',
   BASE_URL: 'https://api.openrouteservice.org/v2',
@@ -74,12 +72,9 @@ class OpenStreetMapService {
     };
   }
 
-  /**
-   * Initialize OpenStreetMap service
-   */
+  // Valida a disponibilidade mínima dos provedores antes do uso.
   async initialize(): Promise<void> {
     try {
-      // Test Nominatim API availability
       const response = await fetch('https://nominatim.openstreetmap.org/search?q=sao+paulo&format=json&limit=1');
       
       if (!response.ok) {
@@ -94,9 +89,7 @@ class OpenStreetMapService {
     }
   }
 
-  /**
-   * Get OpenStreetMap configuration
-   */
+  // Expõe a configuração visual ativa do serviço.
   getConfig(): OSMConfig {
     if (!this.isInitialized) {
       throw new Error('OpenStreetMap service is not initialized');
@@ -104,16 +97,12 @@ class OpenStreetMapService {
     return { ...this.config };
   }
 
-  /**
-   * Update map configuration
-   */
+  // Permite ajustar a configuração sem recriar a instância.
   updateConfig(updates: Partial<OSMConfig>): void {
     this.config = { ...this.config, ...updates };
   }
 
-  /**
-   * Geocoding - Convert address to coordinates using Nominatim
-   */
+  // Converte endereço em coordenadas usando o Nominatim.
   async geocode(address: string): Promise<NominatimResult[]> {
     if (!this.isInitialized) {
       throw new Error('OpenStreetMap service is not initialized');
@@ -124,7 +113,7 @@ class OpenStreetMapService {
       
       const response = await fetch(url, {
         headers: {
-          'User-Agent': 'FitLoot App/1.0' // Required by Nominatim usage policy
+          'User-Agent': 'FitLoot App/1.0'
         }
       });
       
@@ -140,9 +129,7 @@ class OpenStreetMapService {
     }
   }
 
-  /**
-   * Reverse geocoding - Convert coordinates to address using Nominatim
-   */
+  // Converte coordenadas em endereço usando o Nominatim.
   async reverseGeocode(longitude: number, latitude: number): Promise<NominatimResult[]> {
     if (!this.isInitialized) {
       throw new Error('OpenStreetMap service is not initialized');
@@ -153,7 +140,7 @@ class OpenStreetMapService {
       
       const response = await fetch(url, {
         headers: {
-          'User-Agent': 'FitLoot App/1.0' // Required by Nominatim usage policy
+          'User-Agent': 'FitLoot App/1.0'
         }
       });
       
@@ -169,9 +156,7 @@ class OpenStreetMapService {
     }
   }
 
-  /**
-   * Get directions using OpenRouteService (free tier)
-   */
+  // Busca rota real e cai para linha reta apenas quando o provedor falha.
   async getDirections(
     start: [number, number],
     end: [number, number],
@@ -186,7 +171,6 @@ class OpenStreetMapService {
     }
 
     try {
-      // Try OpenRouteService API first if API key is available
       if (OPENROUTESERVICE_CONFIG.API_KEY) {
         const url = `${OPENROUTESERVICE_CONFIG.BASE_URL}/directions/${profile}?` +
           `api_key=${OPENROUTESERVICE_CONFIG.API_KEY}&` +
@@ -209,19 +193,17 @@ class OpenStreetMapService {
         const geometry = route.geometry.coordinates as [number, number][];
         
         return {
-          distance: route.properties.segments[0].distance, // meters
-          duration: route.properties.segments[0].duration, // seconds
+          distance: route.properties.segments[0].distance,
+          duration: route.properties.segments[0].duration,
           geometry,
         };
       }
       
-      // Fallback to straight line without API key
       console.warn('Using fallback straight-line route. Get OpenRouteService API key for real directions.');
       
       const distance = this.calculateDistance(start, end);
-      const duration = distance / (profile === 'foot-walking' ? 1.4 : profile === 'cycling-regular' ? 4.2 : 8.3); // m/s
+      const duration = distance / (profile === 'foot-walking' ? 1.4 : profile === 'cycling-regular' ? 4.2 : 8.3);
       
-      // Simple straight line geometry
       const geometry = [start, end];
       
       return {
@@ -235,9 +217,7 @@ class OpenStreetMapService {
     }
   }
 
-  /**
-   * Search for nearby places using Overpass API
-   */
+  // Reaproveita o geocoding e filtra os resultados por distância.
   async searchNearby(
     center: [number, number],
     query: string,
@@ -248,10 +228,8 @@ class OpenStreetMapService {
     }
 
     try {
-      // First try Nominatim with proximity
       const nominatimResults = await this.geocode(query);
       
-      // Filter results by distance
       const nearbyResults = nominatimResults.filter(result => {
         const resultCoords: [number, number] = [parseFloat(result.lon), parseFloat(result.lat)];
         const distance = this.calculateDistance(center, resultCoords);
@@ -265,9 +243,7 @@ class OpenStreetMapService {
     }
   }
 
-  /**
-   * Get static map image using Static Maps service
-   */
+  // Gera uma imagem estática para previews e fallbacks.
   async getStaticImage(
     center: [number, number],
     zoom: number,
@@ -280,10 +256,8 @@ class OpenStreetMapService {
     }
 
     try {
-      // Using OpenRouteService's static map service (free alternative)
       let staticMapUrl = `https://staticmap.openstreetmap.de/staticmap.php?center=${center[1]},${center[0]}&zoom=${zoom}&size=${width}x${height}&maptype=mapnik`;
       
-      // Add markers if provided
       if (markers && markers.length > 0) {
         const markerParams = markers.map(marker => 
           `${marker.latitude},${marker.longitude},${marker.color || 'red'}`
@@ -298,44 +272,36 @@ class OpenStreetMapService {
     }
   }
 
-  /**
-   * Get tile URL for Leaflet
-   */
+  // Expõe a URL de tiles usada na camada visual.
   getTileUrl(): string {
     return 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
   }
 
-  /**
-   * Validate coordinates
-   */
+  // Garante que coordenadas inválidas não avancem no fluxo.
   validateCoordinates(longitude: number, latitude: number): boolean {
     return longitude >= -180 && longitude <= 180 && latitude >= -90 && latitude <= 90;
   }
 
-  /**
-   * Calculate distance between two points (Haversine formula)
-   */
+  // Calcula distância em metros pela fórmula de Haversine.
   calculateDistance(
     point1: [number, number],
     point2: [number, number]
   ): number {
-    const R = 6371e3; // Earth's radius in meters
-    const φ1 = (point1[1] * Math.PI) / 180;
-    const φ2 = (point2[1] * Math.PI) / 180;
-    const Δφ = ((point2[1] - point1[1]) * Math.PI) / 180;
-    const Δλ = ((point2[0] - point1[0]) * Math.PI) / 180;
+    const earthRadiusMeters = 6371e3;
+    const phi1 = (point1[1] * Math.PI) / 180;
+    const phi2 = (point2[1] * Math.PI) / 180;
+    const deltaPhi = ((point2[1] - point1[1]) * Math.PI) / 180;
+    const deltaLambda = ((point2[0] - point1[0]) * Math.PI) / 180;
 
-    const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
-              Math.cos(φ1) * Math.cos(φ2) *
-              Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+    const a = Math.sin(deltaPhi / 2) * Math.sin(deltaPhi / 2) +
+              Math.cos(phi1) * Math.cos(phi2) *
+              Math.sin(deltaLambda / 2) * Math.sin(deltaLambda / 2);
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 
-    return R * c; // distance in meters
+    return earthRadiusMeters * c;
   }
 
-  /**
-   * Search for POI (Points of Interest) using Overpass API
-   */
+  // Busca pontos de interesse diretamente no Overpass.
   async searchPOI(
     center: [number, number],
     tags: Record<string, string>,
@@ -387,9 +353,7 @@ class OpenStreetMapService {
     }
   }
 
-  /**
-   * Get service status
-   */
+  // Expõe o estado atual dos provedores usados pelo serviço.
   getStatus(): {
     initialized: boolean;
     tileServer: string;

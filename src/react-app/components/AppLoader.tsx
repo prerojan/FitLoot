@@ -12,6 +12,7 @@ const SIZE_CLASS_MAP: Record<AppLoaderSize, string> = {
 };
 
 export default function AppLoader({ size = "md", className }: AppLoaderProps) {
+  // Normaliza o loader principal da app com tamanhos previsiveis.
   const sizeClass = SIZE_CLASS_MAP[size];
   const safeClassName = typeof className === "string" ? className : "";
 

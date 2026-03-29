@@ -30,6 +30,7 @@ type SearchResult = {
 
 const FRIENDS_CACHE_TTL_MS = 60_000;
 
+// Cache em memoria para evitar recargas repetidas ao reabrir o painel.
 let friendsCache:
   | {
       cachedAt: number;
@@ -48,12 +49,14 @@ export default function ProfileFriendsPanel() {
   const [searching, setSearching] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Aplica o snapshot em cache antes do refresh remoto.
   const applyCachedFriends = useCallback((cache: { friends: Friend[]; pending: Friend[] }) => {
     setFriends(cache.friends);
     setPendingRequests(cache.pending);
     setLoading(false);
   }, []);
 
+  // Carrega amigos e solicitacoes com cache curto e fallback de navegacao.
   const loadFriends = useCallback(async (forceRefresh = false) => {
     if (!forceRefresh && friendsCache) {
       applyCachedFriends({ friends: friendsCache.friends, pending: friendsCache.pending });
@@ -93,10 +96,12 @@ export default function ProfileFriendsPanel() {
     }
   }, [applyCachedFriends, navigate]);
 
+  // Resolve a carga inicial do painel.
   useEffect(() => {
     void loadFriends();
   }, [loadFriends]);
 
+  // Busca usuarios por username para iniciar novas conexoes.
   const searchUsers = async () => {
     if (!searchQuery.trim()) {
       setSearchResults([]);
@@ -122,6 +127,7 @@ export default function ProfileFriendsPanel() {
     }
   };
 
+  // Envia solicitacao de amizade e recarrega o painel consolidado.
   const sendFriendRequest = async (friendUserId: string) => {
     try {
       const response = await api("/api/friends/request", {
@@ -149,6 +155,7 @@ export default function ProfileFriendsPanel() {
     }
   };
 
+  // Aceita ou rejeita uma solicitacao pendente.
   const respondRequest = async (requestId: number, accept: boolean) => {
     try {
       const response = await api(accept ? "/api/friends/accept" : "/api/friends/reject", {
@@ -184,6 +191,7 @@ export default function ProfileFriendsPanel() {
 
   return (
     <div className="space-y-5">
+      {/* Mensagem global de erro com acao de recarga. */}
       {error ? (
         <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700 flex items-center justify-between gap-3">
           <span>{error}</span>
@@ -193,6 +201,7 @@ export default function ProfileFriendsPanel() {
         </div>
       ) : null}
 
+      {/* Busca e resultados imediatos para adicionar novos amigos. */}
       <div className="space-y-3">
         <h3 className="text-lg font-bold text-gray-900">Buscar amigos</h3>
         <div className="relative flex items-center gap-2">
@@ -241,6 +250,7 @@ export default function ProfileFriendsPanel() {
         ) : null}
       </div>
 
+      {/* Fila de solicitacoes aguardando decisao do usuario. */}
       {pendingRequests.length > 0 ? (
         <div className="space-y-3">
           <h3 className="text-lg font-bold text-gray-900">Solicitacoes pendentes ({pendingRequests.length})</h3>
@@ -263,6 +273,7 @@ export default function ProfileFriendsPanel() {
         </div>
       ) : null}
 
+      {/* Lista principal de amizades ja consolidadas. */}
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <h3 className="text-lg font-bold text-gray-900">Meus amigos ({friends.length})</h3>

@@ -14,6 +14,7 @@ export default function AchievementShowcaseBadge({
   variant = "profile",
   className,
 }: AchievementShowcaseBadgeProps) {
+  // Adapta o selo da conquista honrada ao contexto de dashboard ou perfil.
   const style = getAchievementShowcaseStyle(achievement.rarity);
   const isDashboard = variant === "dashboard";
 

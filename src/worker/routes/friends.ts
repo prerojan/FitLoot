@@ -1,11 +1,7 @@
 import { Hono, type MiddlewareHandler } from "hono";
 
 import type { AppContext } from "../core/types";
-
-type WithTransaction = <T>(
-  db: D1Database,
-  run: () => Promise<T>,
-) => Promise<T>;
+import type { WithTransaction } from "./contracts";
 
 type FriendsRouteDeps = {
   authMiddleware: MiddlewareHandler<AppContext>;
@@ -69,19 +65,19 @@ export function registerFriendsRoutes(
     let targetUserId = String(body.friend_user_id ?? "").trim();
 
     if (!targetUserId) {
-      if (!username) return c.json({ error: "username Ã© obrigatÃ³rio" }, 400);
+      if (!username) return c.json({ error: "username é obrigatório" }, 400);
       const target = await c.env.fitloot_db
         .prepare("SELECT user_id FROM user_profiles WHERE username = ?")
         .bind(username)
         .first<{ user_id: string }>();
       if (!target?.user_id) {
-        return c.json({ error: "UsuÃ¡rio nÃ£o encontrado" }, 404);
+        return c.json({ error: "Usuário não encontrado" }, 404);
       }
       targetUserId = target.user_id;
     }
 
     if (targetUserId === user.id) {
-      return c.json({ error: "NÃ£o Ã© possÃ­vel adicionar a si mesmo" }, 400);
+      return c.json({ error: "Não é possível adicionar a si mesmo" }, 400);
     }
 
     const existingFriend = await c.env.fitloot_db
@@ -92,7 +88,7 @@ export function registerFriendsRoutes(
       )
       .bind(user.id, targetUserId, targetUserId, user.id)
       .first();
-    if (existingFriend) return c.json({ error: "JÃ¡ sÃ£o amigos" }, 400);
+    if (existingFriend) return c.json({ error: "Já são amigos" }, 400);
 
     const existingReq = await c.env.fitloot_db
       .prepare(
@@ -100,7 +96,7 @@ export function registerFriendsRoutes(
       )
       .bind(user.id, targetUserId, targetUserId, user.id)
       .first();
-    if (existingReq) return c.json({ error: "SolicitaÃ§Ã£o pendente" }, 400);
+    if (existingReq) return c.json({ error: "Solicitação pendente" }, 400);
 
     await c.env.fitloot_db
       .prepare(
@@ -120,7 +116,7 @@ export function registerFriendsRoutes(
       request_id?: number | undefined;
     };
     const requestId = Number(body.request_id);
-    if (!requestId) return c.json({ error: "request_id obrigatÃ³rio" }, 400);
+    if (!requestId) return c.json({ error: "request_id obrigatório" }, 400);
 
     const request = await c.env.fitloot_db
       .prepare(
@@ -129,7 +125,7 @@ export function registerFriendsRoutes(
       .bind(requestId, user.id)
       .first<{ id: number; from_user_id: string; to_user_id: string }>();
     if (!request) {
-      return c.json({ error: "SolicitaÃ§Ã£o nÃ£o encontrada" }, 404);
+      return c.json({ error: "Solicitação não encontrada" }, 404);
     }
 
     await withTransaction(c.env.fitloot_db, async () => {
@@ -169,7 +165,7 @@ export function registerFriendsRoutes(
       request_id?: number | undefined;
     };
     const requestId = Number(body.request_id);
-    if (!requestId) return c.json({ error: "request_id obrigatÃ³rio" }, 400);
+    if (!requestId) return c.json({ error: "request_id obrigatório" }, 400);
 
     await c.env.fitloot_db
       .prepare(

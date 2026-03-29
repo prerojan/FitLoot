@@ -251,7 +251,7 @@ export default function FoodAnalysis() {
       try {
         classifier.close();
       } catch {
-        // no-op: evita crash em desmontagem concorrente
+        // Evita falha durante desmontagem concorrente.
       }
       classifierRef.current = null;
     }
@@ -408,7 +408,7 @@ export default function FoodAnalysis() {
 
     const classifier = classifierRef.current;
     if (!classifier) {
-      throw new Error("MediaPipe nÃ£o estÃ¡ disponÃ­vel para anÃ¡lise no momento.");
+      throw new Error("MediaPipe não está disponível para análise no momento.");
     }
 
     const prediction = classifier.classify(image);
@@ -547,10 +547,10 @@ export default function FoodAnalysis() {
         console.log("[Camera] Iniciando camera...");
       }
       
-      // Configurações otimizadas para mobile
+      // Usa constraints tolerantes para mobile e WebView.
       const constraints = {
         video: {
-          facingMode: { ideal: "environment" }, // Evita exact para melhor compatibilidade
+          facingMode: { ideal: "environment" },
           width: { ideal: 1280, max: 1920 },
           height: { ideal: 720, max: 1080 }
         },
@@ -572,7 +572,7 @@ export default function FoodAnalysis() {
         const currentVideo = videoRef.current;
         currentVideo.srcObject = stream;
         
-        // Adiciona eventos para debug
+        // Instrumenta o video apenas em desenvolvimento.
         currentVideo.onloadedmetadata = () => {
           if (import.meta.env.DEV) {
             console.log("[Camera] Video metadata loaded");
@@ -594,7 +594,7 @@ export default function FoodAnalysis() {
           console.error("[Camera] Video error:", event);
         };
         
-        // Tenta reproduzir o vídeo
+        // Garante a inicializacao do video antes da captura.
         try {
           await currentVideo.play();
           if (import.meta.env.DEV) {
@@ -880,10 +880,10 @@ export default function FoodAnalysis() {
         .custom-scrollbar::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--app-primary-color) 20%, transparent); border-radius: 10px; }
       `}</style>
 
-      {/* Welcome Screen (Initial State) */}
+      {/* Estado inicial */}
       {(!streamActive && !preview && !result) ? (
         <div className="flex-1 flex flex-col relative z-20 overflow-y-auto custom-scrollbar pb-4 min-w-0">
-          {/* Header */}
+          {/* Cabecalho */}
           <header className="sticky top-0 z-10 flex items-center justify-between border-b p-3 sm:p-4 lg:p-6 backdrop-blur-md" style={{ borderColor: "var(--fl-border-soft)", backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 84%, transparent)" }}>
             <button 
               onClick={handleBack}
@@ -893,10 +893,10 @@ export default function FoodAnalysis() {
               <ArrowLeft className="h-5 w-5" />
             </button>
             <h1 className="text-[0.68rem] font-bold uppercase tracking-[0.2em] sm:text-xs" style={{ color: "var(--fl-color-text)" }}>Scanner de Alimentos</h1>
-            <div className="w-10 h-10" /> {/* Spacer */}
+            <div className="w-10 h-10" aria-hidden="true" />
           </header>
 
-          {/* Hero Section */}
+          {/* Introducao */}
           <div className="px-4 py-6 text-center sm:px-6 sm:py-10 min-w-0">
             <h2 className="mb-1 text-2xl sm:text-4xl font-bold tracking-tight">Scanner IA</h2>
             <p className="text-[11px] sm:text-sm font-medium" style={{ color: 'var(--app-primary-color)' }}>
@@ -904,9 +904,9 @@ export default function FoodAnalysis() {
             </p>
           </div>
 
-          {/* Cards Section */}
+          {/* Entradas principais */}
           <div className="flex-1 space-y-6 px-4 sm:space-y-8 sm:px-6">
-            {/* Primary Card - Camera */}
+            {/* Atalho da camera */}
             <div className="group relative">
               <div className="absolute -inset-1 bg-primary rounded-3xl blur opacity-10 card-glow-bg group-hover:opacity-30 transition-opacity" style={{ backgroundColor: 'var(--app-primary-color)' }}></div>
               <div className="fl-theme-surface relative flex flex-col items-center overflow-hidden rounded-[1.5rem] sm:rounded-3xl p-5 sm:p-6 lg:p-8 min-w-0">
@@ -934,7 +934,7 @@ export default function FoodAnalysis() {
               </div>
             </div>
 
-            {/* Secondary Card - Gallery */}
+            {/* Atalho da galeria */}
             <button 
               onClick={() => { void openGallery(); }}
               className="fl-theme-surface-soft group relative flex w-full items-center justify-between overflow-hidden rounded-3xl border-l-4 p-4 transition-all sm:p-6"
@@ -951,7 +951,7 @@ export default function FoodAnalysis() {
             </button>
           </div>
 
-          {/* Footer Badge */}
+          {/* Selo inferior */}
           <div className="mt-auto flex justify-center px-4 pb-6 pt-8 sm:px-6 sm:pb-8">
             <div className="fl-theme-surface-soft inline-flex items-center gap-2 rounded-full px-4 py-2 backdrop-blur-sm">
               <ShieldCheck className="w-4 h-4" style={{ color: 'var(--app-primary-color)' }} />
@@ -960,9 +960,9 @@ export default function FoodAnalysis() {
           </div>
         </div>
       ) : result && !preview ? (
-        /* Results Screen (Full screen, no black void) */
+        /* Tela de resultado sem preview */
         <div className="custom-scrollbar flex flex-1 flex-col overflow-y-auto p-3 pb-4 sm:p-4 sm:pb-5 lg:p-6 animate-in fade-in slide-in-from-bottom-5 duration-500 min-w-0" style={{ backgroundColor: "var(--app-bg-color)" }}>
-          {/* Header */}
+          {/* Cabecalho */}
           <div className="flex items-center justify-between mb-8">
             <button 
               onClick={handleBack}
@@ -975,7 +975,7 @@ export default function FoodAnalysis() {
             <div className="w-10 h-10" />
           </div>
 
-          {/* Energy Display */}
+          {/* Totais energeticos */}
           <div className="flex justify-between items-start mb-8">
             <div>
               <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.2em]" style={{ color: "var(--fl-color-text-muted)" }}>Energia Estimada</p>
@@ -989,7 +989,7 @@ export default function FoodAnalysis() {
             </div>
           </div>
 
-          {/* Macros Grid */}
+          {/* Grade de macros */}
           <div className="mb-8 grid grid-cols-3 gap-2 sm:mb-10 sm:gap-3">
             <MacroCard label="Proteínas" value={`${result.totals.protein}g`} percentage={macroBars.protein} />
             <MacroCard label="Carbs" value={`${result.totals.carbs}g`} percentage={macroBars.carbs} />
@@ -1007,7 +1007,7 @@ export default function FoodAnalysis() {
             </div>
           </div>
 
-          {/* Ingredients Section */}
+          {/* Lista detalhada */}
           <div className="mb-10 sm:mb-12">
             <h4 className="mb-4 text-[10px] font-bold uppercase tracking-[0.2em]" style={{ color: "var(--fl-color-text-muted)" }}>Ingredientes Detectados</h4>
             <div className="space-y-3">
@@ -1041,7 +1041,7 @@ export default function FoodAnalysis() {
             </div>
           ) : null}
 
-          {/* Action Buttons (Fixed or scroll end) */}
+          {/* Acoes finais */}
           <div className="mt-auto grid grid-cols-2 gap-3 pt-4 sm:gap-4">
             <button 
               onClick={() => { void openCamera(); }}
@@ -1184,9 +1184,9 @@ export default function FoodAnalysis() {
         </div>
       ) : (
         <>
-          {/* Camera Viewfinder Section (Active Scanner) */}
+          {/* Scanner ativo */}
           <main className="relative flex-1 overflow-hidden">
-            {/* Simulated Camera Feed / Video Source */}
+            {/* Fonte visual */}
             <div className="absolute inset-0 z-0 overflow-hidden flex items-center justify-center bg-black">
               {!preview && streamActive ? (
                 <video 
@@ -1196,7 +1196,7 @@ export default function FoodAnalysis() {
                   playsInline 
                   muted 
                   style={{ 
-                    transform: 'scaleX(-1)', // Espelha para melhor experiência
+                    transform: 'scaleX(-1)',
                     objectFit: 'cover',
                     width: '100%',
                     height: '100%'
@@ -1211,10 +1211,10 @@ export default function FoodAnalysis() {
                 </div>
               )}
 
-              {/* Scanning Overlay Effects */}
+              {/* Overlay do scanner */}
               <div className="absolute inset-0 bg-black/20"></div>
 
-              {/* Scanner Frame Corners */}
+              {/* Moldura ativa */}
               <div className="absolute left-6 right-6 top-24 bottom-8 pointer-events-none" style={{ animation: "pulse-border 2s infinite" }}>
                 <div className="absolute inset-0 rounded-[2.5rem] border border-white/10 bg-white/[0.02]"></div>
                 <div className="absolute top-0 left-0 w-9 h-9 border-t-4 border-l-4 rounded-tl-[1.5rem]" style={{ borderColor: 'var(--app-primary-color)' }}></div>
@@ -1225,7 +1225,7 @@ export default function FoodAnalysis() {
               </div>
             </div>
 
-            {/* Header Overlay (In Scanner) */}
+            {/* Cabecalho do scanner */}
             <header className="absolute top-0 left-0 right-0 p-6 flex justify-between items-center z-10 bg-gradient-to-b from-black/70 to-transparent">
               <button 
                 onClick={() => {
@@ -1262,7 +1262,7 @@ export default function FoodAnalysis() {
 
             <div className="absolute inset-x-0 bottom-0 z-10 h-52 bg-gradient-to-t from-black/85 via-black/40 to-transparent pointer-events-none"></div>
 
-            {/* Status Messages */}
+            {/* Mensagens de estado */}
             <div className="absolute bottom-32 left-0 right-0 px-6 z-20 text-center pointer-events-none">
               {cameraError && (
                 <div className={`inline-flex items-center gap-3 px-4 py-2 rounded-full border border-red-500/30 ${reduceInlineCameraEffects ? "bg-red-950/90" : "bg-red-950/60 backdrop-blur-md"}`}>
@@ -1285,6 +1285,8 @@ export default function FoodAnalysis() {
             </div>
 
             {!preview && streamActive && (
+              <>
+                {/* Biblioteca inline */}
               <div className={`absolute left-4 right-4 z-30 transition-all duration-300 ${libraryOpen ? "bottom-28 opacity-100 translate-y-0" : "bottom-24 pointer-events-none opacity-0 translate-y-6"}`}>
                 <div className={`overflow-hidden rounded-[1.75rem] border border-white/10 ${scannerLibrarySurfaceClass}`}>
                   <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
@@ -1339,9 +1341,10 @@ export default function FoodAnalysis() {
                   </div>
                 </div>
               </div>
+              </>
             )}
 
-            {/* Capture Control (Visible when in scanner but no result) */}
+            {/* Disparo da captura */}
             {!preview && streamActive && !loading && (
                <div className="absolute bottom-8 left-0 right-0 flex flex-col items-center justify-center gap-3 z-30">
                  <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-white/65">

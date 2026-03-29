@@ -56,6 +56,7 @@ const DEFAULT_EXECUTION_STATE: MissionExecutionState = {
   finished: false,
 };
 
+// Normalizes mission metrics and goals before any card or modal rendering happens.
 function normalizeMetricType(mission: Mission): MissionMetricType {
   if (
     mission.metric_type === "repetitions" ||
@@ -286,6 +287,7 @@ function resolveMissionGoalText(mission: Mission, metricType: MissionMetricType)
 
 const MISSION_TITLE_PREFIX_PATTERN = /^(?:miss(?:\u00e3o|ao)\s+(?:di[a\u00e1]ria|semanal|mensal)|daily mission|weekly mission|monthly mission|meta\s+(?:di[a\u00e1]ria|semanal|mensal)|daily goal|weekly goal|monthly goal)\s*:\s*/i;
 
+// Cleans display copy and media choices so each card surfaces the best localized presentation.
 function resolveMissionDisplayTitle(value: string | null | undefined): string {
   const localized = localizeMissionText(value ?? "") ?? "";
   const stripped = localized.replace(MISSION_TITLE_PREFIX_PATTERN, "").trim();
@@ -349,6 +351,7 @@ const UNILATERAL_EXECUTION_PATTERNS: ReadonlyArray<RegExp> = [
   /\b(?:cada lado|cada perna|cada braco|troque de lado|troque de perna|alterne os lados|alterne as pernas)\b/,
 ];
 
+// Detects execution-specific mission behavior and chooses the most suitable media asset.
 function isUnilateralExecutionMission(mission: Mission): boolean {
   const sourceTexts = [
     mission.title,
@@ -449,6 +452,7 @@ function MissionExecutionModal({
   const [showCompletionToast, setShowCompletionToast] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
+  // Derives the execution targets used by counters, timers, and finish validation.
   const sets = Math.max(1, Number(mission.sets ?? 1));
   const restSecondsConfigured = Math.max(0, Number(mission.rest_seconds ?? 0));
   const totalGoal = missionTotalGoal(mission, metricType);
@@ -458,6 +462,7 @@ function MissionExecutionModal({
     ? Math.max(1, Math.floor(totalTimeSeconds / sets))
     : 0;
 
+  // Resets the execution state every time a new modal session starts.
   useEffect(() => {
     if (!open) return;
     setState({
@@ -470,6 +475,7 @@ function MissionExecutionModal({
     setShowCompletionToast(false);
   }, [metricType, open, setDuration]);
 
+  // Advances the timer-based mission flow while the timer is actively running.
   useEffect(() => {
     if (!open) return;
     if (!state.running) return;
@@ -516,6 +522,7 @@ function MissionExecutionModal({
     return () => window.clearInterval(timer);
   }, [metricType, open, restSecondsConfigured, setDuration, sets, state.running]);
 
+  // Counts down the rest window for counter-based missions between sets.
   useEffect(() => {
     if (!open) return;
     if (!state.resting) return;
@@ -535,11 +542,13 @@ function MissionExecutionModal({
     return () => window.clearInterval(restTimer);
   }, [metricType, open, state.restSeconds, state.resting]);
 
+  // Classifies the current mission execution mode to drive the available controls.
   const isTimeMission = metricType === "duration_seconds" || metricType === "duration_minutes";
   const isCounterMission = metricType === "repetitions" || metricType === "sets_reps";
   const isDistanceMission = metricType === "steps" || metricType === "distance_meters";
   const usesPerSideExecutionLabel = isCounterMission && isUnilateralExecutionMission(mission);
 
+  // Handles counter interactions for rep-based execution flows.
   const incrementRep = () => {
     if (!isCounterMission) return;
     setState((current) => ({ ...current, repsDone: current.repsDone + 1 }));
@@ -588,6 +597,7 @@ function MissionExecutionModal({
   const canFinishMission = isDistanceMission ? canFinishInputMission : isTimeMission ? state.finished : canFinishCounterMission;
   const interactionLocked = finishing || showCompletionToast;
 
+  // Controls inline video playback for exercise demonstrations inside the modal.
   const toggleVideoPlayback = useCallback(async () => {
     const currentVideo = videoRef.current;
     if (!currentVideo) return;
@@ -606,6 +616,7 @@ function MissionExecutionModal({
     setVideoVisibleControls(true);
   }, []);
 
+  // Lets timed missions manually advance after a set is completed or skipped.
   const advanceTimedSet = () => {
     setState((current) => {
       if (!isTimeMission) return current;
@@ -637,6 +648,7 @@ function MissionExecutionModal({
     setVideoVisibleControls(false);
   };
 
+  // Finalizes the mission with the value expected by the existing completion contract.
   const finishMission = async () => {
     if (!canFinishMission || finishing) return;
     const value = isDistanceMission
@@ -699,7 +711,7 @@ function MissionExecutionModal({
   return (
     <div className="fl-z-mission-screen fixed inset-0 flex flex-col overflow-x-hidden font-display antialiased min-w-0" style={{ backgroundColor: "var(--app-bg-color)", color: "var(--fl-color-text)" }}>
       <div className="layout-container flex h-full grow flex-col min-w-0">
-        {/* Header */}
+        {/* Keeps the brand framing and top-level session controls visible. */}
         <header className="flex items-center justify-between border-b px-3 py-2 sm:px-4 sm:py-3 md:px-6 md:py-4" style={{ borderColor: "var(--fl-border-soft)" }}>
           <div className="flex items-center gap-2 sm:gap-3 min-w-0">
             <div className="flex size-7 sm:size-8 items-center justify-center rounded shrink-0" style={{ backgroundColor: "var(--app-primary-color)", color: "var(--fl-nav-item-active-text)" }}>
@@ -718,7 +730,7 @@ function MissionExecutionModal({
         </header>
 
         <main className="flex-1 max-w-2xl mx-auto w-full px-3 py-4 sm:px-6 sm:py-8 flex flex-col min-w-0">
-          {/* Progress Bar */}
+          {/* Shows the overall completion percentage for the active mission session. */}
           <div className="mb-6 sm:mb-10">
             <div className="flex justify-between items-end mb-2 sm:mb-3 gap-2">
               <div className="min-w-0 overflow-hidden">
@@ -740,7 +752,7 @@ function MissionExecutionModal({
           </div>
 
           <div className="flex-1 flex flex-col items-center justify-center py-10">
-            {/* Rest Timer */}
+            {/* Displays the live timer for active sets or rest intervals. */}
             {(isTimeMission || state.resting) && (
               <div className="text-center mb-6 sm:mb-12">
                 <p className="text-xs sm:text-sm md:text-base lg:text-lg mb-2 sm:mb-4" style={{ color: "var(--fl-color-text-muted)" }}>
@@ -778,7 +790,7 @@ function MissionExecutionModal({
               </div>
             )}
 
-            {/* Mission Media */}
+            {/* Renders the mission media preview with optional inline video controls. */}
             <div
               className="relative w-full max-w-md aspect-video overflow-hidden rounded-2xl border shadow-2xl"
               style={{
@@ -840,7 +852,7 @@ function MissionExecutionModal({
               </div>
             </div>
             
-            {/* Input for Distance Missions */}
+            {/* Allows manual progress entry for distance and step missions. */}
             {isDistanceMission && (
               <div className="mt-4 sm:mt-6 w-full max-w-md space-y-3 min-w-0">
                 <p className="text-[10px] sm:text-sm text-center" style={{ color: "var(--fl-color-text-muted)" }}>
@@ -859,7 +871,7 @@ function MissionExecutionModal({
               </div>
             )}
 
-            {/* Reps Counter */}
+            {/* Drives the manual repetition flow for counter-based missions. */}
             {isCounterMission && !isTimeMission && (
               <div className="mt-4 sm:mt-6 w-full max-w-md flex flex-col items-center justify-center space-y-2 min-w-0">
                 <p className="text-[10px] sm:text-xs md:text-sm uppercase tracking-widest font-bold" style={{ color: "var(--app-primary-color)" }}>
@@ -878,7 +890,7 @@ function MissionExecutionModal({
             
           </div>
 
-          {/* Action Buttons */}
+          {/* Anchors the execution actions used to progress, pause, and finish the mission. */}
           <div className="grid grid-cols-2 gap-2 sm:gap-4 mt-auto pt-4 sm:pt-8 min-w-0">
             <button
               type="button"
@@ -915,11 +927,12 @@ function MissionExecutionModal({
           </div>
         </main>
 
-        {/* Footer */}
+        {/* Shows the session loot preview derived from the current execution progress. */}
         <footer className="mt-auto py-3 sm:py-6 flex justify-center uppercase tracking-[0.2em] sm:tracking-[0.3em] font-medium" style={{ color: "var(--fl-color-text-muted)", fontSize: 0 }}>
           <span className="text-[9px] sm:text-[10px]">Loot desta sessão: {sessionXp} / {mission.xp_reward} XP</span>
         </footer>
       </div>
+      {/* Blocks interaction while the mission completion is being finalized or confirmed. */}
       {(finishing || showCompletionToast) ? (
         <div
           className="absolute inset-0 flex items-center justify-center px-6"
@@ -972,6 +985,7 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
   const [detailsError, setDetailsError] = useState<string | null>(null);
   const [detailedMission, setDetailedMission] = useState<Mission | null>(null);
 
+  // Derives the mission state used by the compact card, details modal, and execution entrypoints.
   const metricType = useMemo(() => normalizeMetricType(mission), [mission]);
   const missionStatus = (mission as Mission & { status?: string | undefined }).status || (mission.is_completed === 1 ? "completed" : "pending");
   const isFailed = missionStatus === "failed" || missionStatus === "expired";
@@ -1023,6 +1037,7 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
   const hasInlineMuscles = Array.isArray(mission.muscle_groups) && mission.muscle_groups.length > 0;
   const hasInlineDetails = hasInlineInstructions && hasInlineMuscles && Array.isArray(mission.safety_tips) && mission.safety_tips.length > 0;
 
+  // Loads the rich mission payload only when inline data is incomplete.
   const loadMissionDetails = useCallback(async (options?: { silent?: boolean }) => {
     if (hasInlineDetails) return;
     if (detailsLoading || detailedMission) return;
@@ -1064,11 +1079,13 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
     await loadMissionDetails();
   };
 
+  // Keeps detail data warm in the background once the card is mounted.
   useEffect(() => {
     if (hasInlineDetails || detailedMission || detailsLoading) return;
     void loadMissionDetails({ silent: true });
   }, [detailedMission, detailsLoading, hasInlineDetails, loadMissionDetails]);
 
+  // Mirrors modal visibility into the shared chrome context.
   useEffect(() => {
     setMissionDetailsOpen(showDetails);
     return () => { setMissionDetailsOpen(false); };
@@ -1079,6 +1096,7 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
     return () => { setMissionExecutionOpen(false); };
   }, [setMissionExecutionOpen, showExecution]);
 
+  // Recomputes the detail-modal state from the best mission payload currently available.
   const missionDetails = detailedMission ?? mission;
   const detailMetricType = normalizeMetricType(missionDetails);
   const detailCircuitTasks = resolveCircuitTasks(missionDetails);
@@ -1149,6 +1167,8 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
           ? [compactDurationLabel, `${circuitTasks.length || monthlyTarget} tarefas`].filter(Boolean).join(" | ")
           : [compactDurationLabel, formatGoal(mission, metricType)].filter(Boolean).join(" | ");
   const compactActionLabel = isAutoProgressMission ? "Ver progresso" : isTrackableWalkingMission ? "Iniciar caminhada" : isCircuitMission ? "Ver detalhes" : "Iniciar treino";
+
+  // Switches between the compact row layout and the richer card layout.
   const triggerContent = layout === "compact" ? (
     <div className="flex items-center justify-between gap-4">
       <div className="flex min-w-0 items-center gap-4">
@@ -1313,7 +1333,7 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
       ) : (
         <div className="space-y-1 mb-3">
           <p className="text-sm text-gray-600">Meta: {formatGoal(mission, metricType)}</p>
-          {mission.rest_seconds ? <p className="text-xs text-gray-500">Descanso entre series: {mission.rest_seconds}s</p> : null}
+          {mission.rest_seconds ? <p className="text-xs text-gray-500">Descanso entre séries: {mission.rest_seconds}s</p> : null}
         </div>
       )}
 
@@ -1371,10 +1391,10 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
       {triggerContent}
       {showDetails && (
         <div className="fl-z-modal fixed inset-0 bg-black/60 backdrop-blur-md flex items-center justify-center p-4 md:p-8 overflow-y-auto">
-          {/* Modal Container */}
+          {/* Hosts the full mission-detail experience above the card grid. */}
           <div className="layout-content-container flex flex-col max-w-[600px] w-full rounded-xl shadow-2xl overflow-hidden relative" style={{ background: "var(--fl-surface-strong)", border: "1px solid color-mix(in srgb, var(--app-primary-color) 20%, transparent)" }}>
             
-            {/* Header */}
+            {/* Keeps the detail header and close affordance pinned to the top of the modal. */}
             <header className="flex items-center justify-between px-6 py-4" style={{ borderBottom: "1px solid var(--fl-border-soft)" }}>
               <div className="flex items-center gap-3">
                 <Dumbbell className="w-6 h-6" style={{ color: "var(--app-primary-color)" }} />
@@ -1430,7 +1450,7 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
                 ) : null}
               </div>
 
-              {/* Title & Description */}
+              {/* Summarizes the mission identity, difficulty, and load state. */}
               <div className="px-6 py-2">
                 <h1 className="text-3xl font-black leading-tight" style={{ color: "var(--fl-color-text)" }}>{detailTitle}</h1>
                 <p className="hidden text-base font-medium mt-1" style={{ color: "var(--app-primary-color)" }}>
@@ -1457,6 +1477,7 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
                 ) : null}
               </div>
 
+              {/* Shows either automatic-progress tracking or the manual execution briefing. */}
               {detailIsAutoProgressMission ? (
                 <div className="px-6 pt-6">
                   <div
@@ -1629,7 +1650,7 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
                 </>
               ) : null}
 
-              {/* Loot / Rewards */}
+              {/* Highlights the rewards tied to completing the mission. */}
               <div className="px-6 pt-8 pb-4">
                 <h3 className="text-lg font-bold mb-3 flex items-center gap-2" style={{ color: "var(--fl-color-text)" }}>
                   <Trophy className="w-5 h-5" style={{ color: "var(--app-primary-color)" }} />
@@ -1660,7 +1681,7 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
               </div>
             </div>
 
-            {/* Sticky Bottom Action */}
+            {/* Anchors the primary action that closes, continues, or starts the mission. */}
             <div className="absolute bottom-0 left-0 right-0 p-6 backdrop-blur-md flex flex-col items-center" style={{ borderTop: "1px solid var(--fl-border-soft)", background: "color-mix(in srgb, var(--fl-surface-strong) 92%, transparent)" }}>
               <button 
                 onClick={() => {
@@ -1699,6 +1720,7 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
         </div>
       )}
       
+      {/* Opens the exercise execution flow only for trackable, non-auto-progress training missions. */}
       {!detailIsCircuitMission && !detailIsTrackableWalkingMission && !detailIsAutoProgressMission && (
         <MissionExecutionModal
           mission={missionDetails}
@@ -1709,7 +1731,7 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
         />
       )}
 
-      {/* Walking Mission Execution Modal */}
+      {/* Routes walking missions to the dedicated tracking experience. */}
       {showWalkingExecution && detailIsTrackableWalkingMission && (
         <WalkingMissionExecution
           mission={missionDetails}
@@ -1721,6 +1743,7 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
         />
       )}
 
+      {/* Keeps a lightweight footer context visible while the detail modal is open. */}
       {showDetails && !detailIsAutoProgressMission && (
         <div className="fl-z-modal fixed bottom-6 left-1/2 -translate-x-1/2 text-xs text-gray-500 flex items-center gap-2">
           <MapPinned className="w-3 h-3" />

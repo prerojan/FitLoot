@@ -25,6 +25,7 @@ type RecommendationApiPayload = {
 };
 
 function msUntilNextLocalMidnight(): number {
+  // Agenda a proxima atualizacao diaria respeitando a meia-noite local.
   const now = new Date();
   const nextMidnight = new Date(now);
   nextMidnight.setHours(24, 0, 0, 0);
@@ -32,6 +33,7 @@ function msUntilNextLocalMidnight(): number {
 }
 
 function parseRecommendations(raw: unknown): Recommendations | null {
+  // Normaliza o payload da IA para um formato estavel de renderizacao.
   if (!raw || typeof raw !== "object") return null;
   const data = raw as Record<string, unknown>;
 
@@ -85,6 +87,7 @@ function InsightCard({
   title: string;
   description: string;
 }) {
+  // Cartao-base das leituras geradas pela IA no painel.
   return (
     <article
       className="fl-theme-surface min-w-0 rounded-[1.5rem] p-4 sm:rounded-[1.75rem] sm:p-5"
@@ -122,6 +125,7 @@ export default function AIRecommendations() {
   const [error, setError] = useState<string | null>(null);
   const [degraded, setDegraded] = useState(false);
 
+  // Carrega a recomendacao atual e marca quando o backend entrou em modo degradado.
   const loadRecommendations = useCallback(async () => {
     try {
       setLoading(true);
@@ -147,10 +151,12 @@ export default function AIRecommendations() {
     }
   }, []);
 
+  // Resolve a carga inicial do painel assim que o componente entra em tela.
   useEffect(() => {
     void loadRecommendations();
   }, [loadRecommendations]);
 
+  // Reagenda a leitura para a proxima virada de dia local.
   useEffect(() => {
     let cancelled = false;
     let timeoutId = 0;
@@ -205,6 +211,7 @@ export default function AIRecommendations() {
 
   return (
     <section className="space-y-3 sm:space-y-4">
+      {/* Cabecalho do painel de recomendacoes e indicador de degradacao. */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex min-w-0 items-center gap-3">
           <div
@@ -237,6 +244,7 @@ export default function AIRecommendations() {
         ) : null}
       </div>
 
+      {/* Mensagem principal sintetizada para leitura rapida. */}
       <div
         className="rounded-[1.5rem] p-4 sm:rounded-[2rem] sm:p-6"
         style={{
@@ -267,6 +275,7 @@ export default function AIRecommendations() {
         </div>
       </div>
 
+      {/* Grade das tres recomendacoes acionaveis geradas pela IA. */}
       <div className="grid gap-3 sm:gap-4 md:grid-cols-2 xl:grid-cols-3">
         <InsightCard
           icon={<Target className="h-5 w-5" />}

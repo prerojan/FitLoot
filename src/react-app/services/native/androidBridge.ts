@@ -57,6 +57,7 @@ declare global {
   }
 }
 
+// Evita repetição de logs ruidosos enquanto a bridge mantém o mesmo estado.
 const debugLogCache = new Set<string>();
 let lastAvailability: boolean | null = null;
 
@@ -79,6 +80,7 @@ export function debugNativeOnce(key: string, message: string, payload?: unknown)
   debugNative(message, payload);
 }
 
+// Resolve a bridge Android real a partir do objeto global exposto pelo WebView.
 export function getAndroidBridge(): AndroidBridgeApi | null {
   if (typeof window === "undefined") return null;
   return typeof window.AndroidBridge === "object" && window.AndroidBridge !== null
@@ -86,6 +88,7 @@ export function getAndroidBridge(): AndroidBridgeApi | null {
     : null;
 }
 
+// Normaliza a disponibilidade da camada nativa para os consumidores do frontend.
 export function isAndroidNativeAvailable(): boolean {
   const bridge = getAndroidBridge();
   let available = Boolean(bridge);

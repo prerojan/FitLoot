@@ -170,7 +170,7 @@ export default function Shop() {
       className="fl-theme-page"
     >
       <div className="flex flex-1 min-h-0 flex-col overflow-hidden">
-        {/* Inner Header (Search + Points) */}
+        {/* Cabecalho interno com busca e saldo. */}
         <header className="sticky top-0 z-10 flex h-20 items-center justify-between border-b px-4 backdrop-blur-xl sm:px-6" style={{ borderColor: "var(--fl-border-soft)", backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 82%, transparent)" }}>
           <div className="flex-1 max-w-xl">
             <div className="relative group">
@@ -199,9 +199,9 @@ export default function Shop() {
           </div>
         </header>
 
-        {/* Shop Body */}
+        {/* Corpo principal da loja. */}
         <div className="custom-scrollbar flex-1 overflow-y-auto p-4 pb-[98px] sm:p-6 lg:p-8 min-w-0">
-          {/* Hero Promo */}
+          {/* Destaque promocional. */}
           <div className="group relative mb-6 sm:mb-8 h-44 sm:h-64 w-full overflow-hidden rounded-[1.5rem] sm:rounded-3xl border min-w-0" style={{ borderColor: "var(--fl-border-soft)" }}>
             <div className="absolute inset-0 bg-gradient-to-r from-black via-black/50 to-transparent z-10"></div>
             <img 
@@ -216,7 +216,7 @@ export default function Shop() {
             </div>
           </div>
 
-          {/* Categories */}
+          {/* Filtros e abas principais. */}
           <div className="flex gap-3 mb-10 overflow-x-auto pb-4 scrollbar-hide">
             <CategoryItem 
               active={activeTab === 'shop' && selectedCategory === 'todos'} 
@@ -285,7 +285,7 @@ export default function Shop() {
                 </div>
               )}
 
-              {/* Brand Partners */}
+              {/* Vitrine de parceiros. */}
               <div className="mt-20 mb-8">
                 <h3 className="mb-8 flex items-center gap-3 text-xl font-bold tracking-tight" style={{ color: "var(--fl-color-text)" }}>
                   <Star className="w-5 h-5 text-yellow-500 fill-yellow-500" />
@@ -369,6 +369,7 @@ function ProductCard({
 
   return (
     <div className="fl-theme-surface rounded-[1.5rem] sm:rounded-3xl overflow-hidden group hover:border-primary/20 transition-all flex flex-col shadow-xl min-w-0">
+      {/* Card de produto com estado de compra habilitado ou bloqueado. */}
       <div className="h-48 relative overflow-hidden" style={{ backgroundColor: "color-mix(in srgb, var(--fl-surface-muted) 70%, transparent)" }}>
         {product.image_url ? (
           <img
@@ -420,7 +421,7 @@ function OrderCard({ order }: { order: ShopOrderView }) {
 
   return (
     <div className={`fl-theme-surface relative rounded-3xl flex items-stretch p-2 transition-all ${isRedeemed ? 'opacity-40 grayscale pointer-events-none' : 'hover:border-primary/20 shadow-xl'}`}>
-      {/* Ticket QR Section */}
+      {/* Area visual do cupom. */}
       <div className="flex w-28 flex-col items-center justify-center rounded-2xl p-3 sm:w-32" style={{ backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 98%, transparent)", border: "1px solid var(--fl-border-soft)" }}>
         {order.qr_code ? (
           <div className="flex aspect-square w-full items-center justify-center overflow-hidden rounded-lg" style={{ backgroundColor: "color-mix(in srgb, var(--fl-surface-muted) 92%, transparent)" }}>
@@ -434,7 +435,7 @@ function OrderCard({ order }: { order: ShopOrderView }) {
         <p className="mt-2 text-[8px] font-mono font-bold tracking-widest" style={{ color: "var(--fl-color-text)" }}>{order.qr_code || 'PENDING'}</p>
       </div>
 
-      {/* Ticket Details */}
+      {/* Metadados do resgate. */}
       <div className="ml-2 flex flex-1 flex-col justify-center border-l border-dashed p-4 sm:p-6" style={{ borderColor: "var(--fl-border-soft)" }}>
         <div className="flex items-start justify-between" style={{ color: "var(--fl-color-text)" }}>
           <div className="flex-1">

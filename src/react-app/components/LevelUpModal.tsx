@@ -40,6 +40,7 @@ type LevelUpTitle = TitleWithUnlock & {
   unlocked_at?: string | null | undefined;
 };
 
+// Defines the themed presentation for each attribute bar shown in the modal.
 const ATTRIBUTE_META = [
   {
     key: "strength",
@@ -80,6 +81,7 @@ const ATTRIBUTE_META = [
 
 const RECENT_UNLOCK_WINDOW_MS = 10 * 60 * 1000;
 
+// Keeps the unlock spotlight focused on the immediate level-up window.
 function isRecentUnlock(value: string | null | undefined): boolean {
   if (!value) return false;
   const unlockedAt = Date.parse(value);
@@ -88,6 +90,7 @@ function isRecentUnlock(value: string | null | undefined): boolean {
   return delta >= 0 && delta <= RECENT_UNLOCK_WINDOW_MS;
 }
 
+// Formats dashboard counters with the same locale used across the app.
 function formatCompactNumber(value: number | null | undefined): string {
   return new Intl.NumberFormat("pt-BR").format(Number(value ?? 0));
 }
@@ -109,6 +112,7 @@ export default function LevelUpModal({ level, onClose }: LevelUpModalProps) {
   const [shareStatus, setShareStatus] = useState<string | null>(null);
   const { metrics } = useDailyMetrics({ syncRemote: true });
 
+  // Refreshes the cached progression snapshot while preserving a fast first paint.
   useEffect(() => {
     let cancelled = false;
 
@@ -128,7 +132,7 @@ export default function LevelUpModal({ level, onClose }: LevelUpModalProps) {
         setSkills(Array.isArray(nextSkills) ? nextSkills : []);
         setTitles(Array.isArray(nextTitles) ? nextTitles : []);
       } catch {
-        // The modal still renders from cached/local state if one of the requests fails.
+        // Keeps the modal usable with cached data if one of the requests fails.
       } finally {
         if (!cancelled) {
           setLoading(false);
@@ -143,6 +147,7 @@ export default function LevelUpModal({ level, onClose }: LevelUpModalProps) {
     };
   }, []);
 
+  // Surfaces the freshest unlocked skills so the modal reflects the actual level-up reward.
   const recentUnlockedSkills = useMemo(() => {
     return [...skills]
       .filter((skill) => isRecentUnlock(skill.unlocked_at))
@@ -150,6 +155,7 @@ export default function LevelUpModal({ level, onClose }: LevelUpModalProps) {
       .slice(0, 2);
   }, [skills]);
 
+  // Mirrors the same unlock-window rule for titles earned with the current level-up.
   const recentUnlockedTitles = useMemo(() => {
     return [...titles]
       .filter((title) => title.unlocked === 1 && isRecentUnlock(title.unlocked_at))
@@ -157,6 +163,7 @@ export default function LevelUpModal({ level, onClose }: LevelUpModalProps) {
       .slice(0, 2);
   }, [titles]);
 
+  // Builds the quick-glance counters shown in the first summary section.
   const summaryCards = useMemo(
     () => [
       {
@@ -183,6 +190,7 @@ export default function LevelUpModal({ level, onClose }: LevelUpModalProps) {
     [metrics?.caloriesBurned, metrics?.steps, progression?.best_streak, progression?.current_streak],
   );
 
+  // Merges the fixed reward with newly unlocked skills and titles for the unlock grid.
   const unlockedContent = useMemo(() => {
     return [
       {
@@ -212,6 +220,7 @@ export default function LevelUpModal({ level, onClose }: LevelUpModalProps) {
     ].slice(0, 4);
   }, [recentUnlockedSkills, recentUnlockedTitles]);
 
+  // Reuses a single share payload for both native sharing and clipboard fallback.
   const shareMessage = useMemo(() => {
     const parts = [`Acabei de alcançar o nível ${level} no FitLoot.`];
 
@@ -230,6 +239,7 @@ export default function LevelUpModal({ level, onClose }: LevelUpModalProps) {
     return parts.join(" ");
   }, [level, progression?.current_streak, recentUnlockedSkills, recentUnlockedTitles]);
 
+  // Chooses the best available sharing capability for the current device.
   const handleShare = async () => {
     setShareStatus(null);
 
@@ -256,10 +266,12 @@ export default function LevelUpModal({ level, onClose }: LevelUpModalProps) {
   };
 
   return (
+    // Provides the full-screen celebration backdrop and dismiss-on-overlay behavior.
     <div
       className="fl-z-modal fixed inset-0 flex items-center justify-center bg-black/80 p-4 backdrop-blur-md animate-fadeIn md:p-8"
       onClick={onClose}
     >
+      {/* Houses the modal shell, decorative background layers, and scrollable sections. */}
       <div
         className="relative flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-[2.4rem] border animate-scaleIn"
         style={{
@@ -271,6 +283,7 @@ export default function LevelUpModal({ level, onClose }: LevelUpModalProps) {
         }}
         onClick={(event) => event.stopPropagation()}
       >
+        {/* Paints the ambient glow and floating particles behind the celebration content. */}
         <div className="pointer-events-none absolute inset-0 overflow-hidden">
           <div
             className="absolute -left-16 top-8 h-40 w-40 rounded-full blur-[68px]"
@@ -298,6 +311,7 @@ export default function LevelUpModal({ level, onClose }: LevelUpModalProps) {
           ))}
         </div>
 
+        {/* Keeps the close action visible regardless of the current scroll position. */}
         <button
           type="button"
           onClick={onClose}
@@ -308,6 +322,7 @@ export default function LevelUpModal({ level, onClose }: LevelUpModalProps) {
           <X className="h-5 w-5" />
         </button>
 
+        {/* Presents the level-up hero, reward headline, and contextual subtitle. */}
         <div className="relative z-10 px-6 pt-10 text-center sm:px-8 md:px-12">
           <span
             className="mb-3 inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[10px] font-black uppercase tracking-[0.22em]"
@@ -358,8 +373,10 @@ export default function LevelUpModal({ level, onClose }: LevelUpModalProps) {
           </p>
         </div>
 
+        {/* Groups the summary cards, attribute bars, and unlocked-content sections. */}
         <div className="relative z-10 mt-8 flex-1 overflow-y-auto px-6 pb-8 sm:px-8 md:px-12">
           <div className="space-y-8 pb-2">
+            {/* Summarizes the streak and activity counters tied to the new level. */}
             <section>
               <div className="mb-4 flex items-center gap-3">
                 <div
@@ -395,6 +412,7 @@ export default function LevelUpModal({ level, onClose }: LevelUpModalProps) {
               </div>
             </section>
 
+            {/* Renders the persisted attribute totals using animated themed progress bars. */}
             <section>
               <div className="mb-5 flex items-center gap-3">
                 <div
@@ -452,6 +470,7 @@ export default function LevelUpModal({ level, onClose }: LevelUpModalProps) {
               )}
             </section>
 
+            {/* Highlights the concrete skills, titles, and reward points unlocked now. */}
             <section>
               <div className="mb-4 flex items-center gap-3">
                 <div
@@ -500,6 +519,7 @@ export default function LevelUpModal({ level, onClose }: LevelUpModalProps) {
           </div>
         </div>
 
+        {/* Anchors the primary continue action and the optional share affordance. */}
         <div
           className="relative z-10 border-t px-6 py-5 sm:px-8 md:px-12"
           style={{

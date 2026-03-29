@@ -8,5 +8,6 @@ type LoadingBallProps = {
 };
 
 export default function LoadingBall({ size = "md", className }: LoadingBallProps) {
+  // Mantem compatibilidade com o nome antigo do componente.
   return <AppLoader size={size} className={className} />;
 }

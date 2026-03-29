@@ -119,6 +119,7 @@ export default function Achievements() {
   const hasFilteredResults = filteredUnlockedAchievements.length > 0 || filteredLockedAchievements.length > 0;
 
   const honorAchievement = useCallback(async (achievement: AchievementWithUnlock) => {
+    // Atualiza a conquista honrada usada no perfil e no dashboard.
     setHonorSaving(true);
     setHonorStatus(null);
 
@@ -165,6 +166,7 @@ export default function Achievements() {
     <AppPageShell bottomNavActive="missions" className="fl-theme-page" profile={profile ?? undefined} progression={progression ?? undefined}>
       <div className="flex flex-1 flex-col overflow-hidden">
         <div className="flex-1 overflow-y-auto p-4 pb-4 sm:p-6 md:p-8 min-w-0">
+          {/* Navegacao rapida e conquista honrada atual. */}
           <div className="mb-6 flex flex-col gap-3 sm:mb-8 sm:flex-row sm:items-center sm:justify-between">
             <button
               type="button"
@@ -200,6 +202,7 @@ export default function Achievements() {
           </div>
 
           <div className="mb-12 grid grid-cols-1 gap-8 lg:grid-cols-[1fr_400px]">
+            {/* Identidade da tela e indicadores de progresso. */}
             <div>
               <header className="mb-6 sm:mb-8 min-w-0">
                 <h1 className="mb-1 sm:mb-2 text-2xl sm:text-4xl font-black uppercase tracking-[0.1em] sm:tracking-[0.2em] md:text-5xl truncate">Hall of Fame</h1>
@@ -214,6 +217,7 @@ export default function Achievements() {
               </div>
             </div>
 
+            {/* Barra de dominio da colecao. */}
             <div className="relative overflow-hidden rounded-[2.5rem] border p-8" style={{ backgroundColor: "color-mix(in srgb, var(--app-primary-color) 5%, transparent)", borderColor: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)" }}>
               <div
                 className="pointer-events-none absolute -right-16 top-0 h-40 w-40 rounded-full"
@@ -239,6 +243,7 @@ export default function Achievements() {
             </div>
           </div>
 
+          {/* Controles de filtro e busca. */}
           <div className="mb-10 flex flex-col items-center justify-between gap-6 md:flex-row">
             <div className="flex w-full flex-wrap gap-2 md:w-auto">
               <button
@@ -293,6 +298,7 @@ export default function Achievements() {
             </div>
           </div>
 
+          {/* Galeria principal das conquistas filtradas. */}
           {hasFilteredResults ? (
             <div className="space-y-10">
               <AchievementSection
@@ -328,6 +334,7 @@ export default function Achievements() {
         </div>
       </div>
 
+      {/* Modal de detalhe e acao da conquista selecionada. */}
       {selectedAchievement ? (
         <div className="fl-z-modal fixed inset-0 flex items-center justify-center bg-black/90 p-4 backdrop-blur-md" onClick={() => setSelectedAchievement(null)}>
           <div className="relative w-full max-w-lg overflow-hidden rounded-[3rem] border p-8 shadow-[0_0_100px_rgba(0,0,0,0.8)]" style={{ borderColor: "var(--fl-border-soft)", backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 98%, transparent)" }} onClick={(event) => event.stopPropagation()}>
@@ -444,6 +451,7 @@ function AchievementSection({
 
   return (
     <section className="space-y-4">
+      {/* Cabecalho e grade da categoria atual. */}
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h2 className="text-sm font-black uppercase tracking-[0.2em]">{title}</h2>

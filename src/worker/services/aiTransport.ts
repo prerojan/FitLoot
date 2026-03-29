@@ -121,7 +121,7 @@ export async function fetchJsonWithTimeout<T>(
       throw new ApiIntegrationError(
         "RATE_LIMITED",
         429,
-        "Servico externo em limite temporario. Tente novamente em instantes.",
+        "Servi\u00e7o externo em limite tempor\u00e1rio. Tente novamente em instantes.",
         responseText.slice(0, 500),
       );
     }
@@ -139,7 +139,7 @@ export async function fetchJsonWithTimeout<T>(
       throw new ApiIntegrationError(
         "INVALID_RESPONSE",
         502,
-        "Servico externo retornou resposta invalida.",
+        "Servi\u00e7o externo retornou resposta inv\u00e1lida.",
         responseText.slice(0, 500),
       );
     }
@@ -224,7 +224,7 @@ export async function requestHuggingFaceStructuredContent(
       lastError = new ApiIntegrationError(
         "INVALID_RESPONSE",
         502,
-        "Servico externo retornou conteudo vazio.",
+        "Servi\u00e7o externo retornou conte\u00fado vazio.",
       );
     } catch (error) {
       lastError = error;
@@ -275,7 +275,7 @@ async function requestHuggingFaceChatCompletion(
       if (rawContent.trim().length > 0) {
         return completion;
       }
-      lastError = new ApiIntegrationError("INVALID_RESPONSE", 502, "Servico externo retornou conteudo vazio.");
+      lastError = new ApiIntegrationError("INVALID_RESPONSE", 502, "Servi\u00e7o externo retornou conte\u00fado vazio.");
     } catch (error) {
       lastError = error;
       console.warn(`[huggingface:${attempt.label}]`, {
@@ -291,7 +291,7 @@ async function requestHuggingFaceChatCompletion(
 
   throw lastError instanceof Error
     ? lastError
-    : new ApiIntegrationError("UPSTREAM_ERROR", 502, "Falha ao consultar serviÃ§o externo.");
+    : new ApiIntegrationError("UPSTREAM_ERROR", 502, "Falha ao consultar serviço externo.");
 }
 
 export async function requestHuggingFaceVisionStructuredContent(
@@ -338,7 +338,7 @@ export async function requestHuggingFaceVisionStructuredContent(
 
   const rawContent = safeGet(completion.choices ?? [], 0)?.message?.content ?? "";
   if (rawContent.trim().length === 0) {
-    throw new ApiIntegrationError("INVALID_RESPONSE", 502, "Servico externo retornou conteudo vazio.");
+    throw new ApiIntegrationError("INVALID_RESPONSE", 502, "Servi\u00e7o externo retornou conte\u00fado vazio.");
   }
 
   return rawContent;
@@ -438,7 +438,7 @@ async function requestAnthropicCompletion(
           choices: [{ message: { content: rawContent } }],
         };
       }
-      lastError = new ApiIntegrationError("INVALID_RESPONSE", 502, "Servico externo retornou conteudo vazio.");
+      lastError = new ApiIntegrationError("INVALID_RESPONSE", 502, "Servi\u00e7o externo retornou conte\u00fado vazio.");
     } catch (error) {
       lastError = error;
       console.warn(`[anthropic:${attempt.label}]`, {
@@ -463,7 +463,7 @@ async function requestAnthropicCompletion(
 
   throw lastError instanceof Error
     ? lastError
-    : new ApiIntegrationError("UPSTREAM_ERROR", 502, "Falha ao consultar servico externo.");
+    : new ApiIntegrationError("UPSTREAM_ERROR", 502, "Falha ao consultar servi\u00e7o externo.");
 }
 
 export async function fetchResponseWithTimeout(
@@ -596,7 +596,7 @@ export async function callOpenAIChatWithFallback(
 
   throw lastError instanceof Error
     ? lastError
-    : new ApiIntegrationError("UPSTREAM_ERROR", 502, "Falha ao consultar servico externo.");
+    : new ApiIntegrationError("UPSTREAM_ERROR", 502, "Falha ao consultar servi\u00e7o externo.");
 }
 
 export interface OpenAIChatCompletionResponse {

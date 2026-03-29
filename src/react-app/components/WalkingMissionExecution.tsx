@@ -1,6 +1,6 @@
 /**
- * Componente de Execução de Missões de Caminhada/Corrida
- * Integra APIs de saúde (Google Fit) e mapas (OpenStreetMap + OpenRouteService)
+ * Modal de execução para missões de caminhada e corrida.
+ * Mantém a UI sincronizada com saúde, rota e conclusão da missão.
  */
 
 import { memo, useCallback, useEffect, useState } from "react";
@@ -41,7 +41,7 @@ type ExecutionState = {
 const WalkingMissionExecution = ({ mission, onComplete, onClose }: WalkingMissionExecutionProps) => {
   const { healthData, isAuthenticated } = useHealthData({
     autoRefresh: true,
-    refreshInterval: 1, // Atualizar a cada 1 minuto
+    refreshInterval: 1,
   });
 
   const { 
@@ -67,29 +67,29 @@ const WalkingMissionExecution = ({ mission, onComplete, onClose }: WalkingMissio
     error: null,
   });
 
-  // Determinar tipo e metas da missão
+  // Resolve o tipo de métrica esperado para a missão ativa.
   const metricType = mission.metric_type as MissionMetricType;
   const isStepsMission = metricType === "steps";
   const isDistanceMission = metricType === "distance_meters";
 
+  // Converte a meta para passos e distância a partir da configuração da missão.
   useEffect(() => {
-    // Configurar metas baseadas na missão
     if (isStepsMission) {
       setState(prev => ({
         ...prev,
-        targetSteps: mission.metric_value || 5000, // Meta padrão 5000 passos
-        targetDistance: (mission.metric_value || 5000) * 0.0007, // ~0.7m por passo
+        targetSteps: mission.metric_value || 5000,
+        targetDistance: (mission.metric_value || 5000) * 0.0007,
       }));
     } else if (isDistanceMission) {
       setState(prev => ({
         ...prev,
-        targetDistance: mission.metric_value || 3000, // Meta padrão 3000m
-        targetSteps: Math.ceil((mission.metric_value || 3000) / 0.0007), // Converter para passos
+        targetDistance: mission.metric_value || 3000,
+        targetSteps: Math.ceil((mission.metric_value || 3000) / 0.0007),
       }));
     }
   }, [mission, isStepsMission, isDistanceMission]);
 
-  // Atualizar dados de saúde quando disponíveis
+  // Mantém o progresso local alinhado com a fonte de saúde ativa.
   useEffect(() => {
     if (healthData && state.isRunning && !state.isCompleted) {
       setState(prev => ({
@@ -98,7 +98,7 @@ const WalkingMissionExecution = ({ mission, onComplete, onClose }: WalkingMissio
         currentDistance: healthData.distance * 1000, // Converter km para metros
       }));
 
-      // Verificar se completou a missão
+      // Fecha automaticamente a missão quando a meta é atingida.
       if (isStepsMission && healthData.steps >= state.targetSteps) {
         completeMission(healthData.steps);
       } else if (isDistanceMission && healthData.distance * 1000 >= state.targetDistance) {
@@ -107,12 +107,11 @@ const WalkingMissionExecution = ({ mission, onComplete, onClose }: WalkingMissio
     }
   }, [healthData, state.isRunning, state.isCompleted, isStepsMission, isDistanceMission, state.targetSteps, state.targetDistance]);
 
-  // Gerar rota segura para caminhada
+  // Gera uma rota sugerida a partir da posição atual e da meta calculada.
   const generateSafeRoute = useCallback(async () => {
     try {
       setState(prev => ({ ...prev, error: null }));
 
-      // Obter localização atual do usuário
       const currentLocation = mapUserLocation || await getCurrentLocation();
       if (!currentLocation) {
         setState(prev => ({ ...prev, error: "Não foi possível obter sua localização atual" }));
@@ -121,15 +120,13 @@ const WalkingMissionExecution = ({ mission, onComplete, onClose }: WalkingMissio
 
       setState(prev => ({ ...prev, userLocation: currentLocation }));
 
-      // Gerar ponto de destino baseado na meta de distância
       const targetDistance = state.targetDistance;
-      const angle = Math.random() * 2 * Math.PI; // Direção aleatória
+      const angle = Math.random() * 2 * Math.PI;
       const destination: [number, number] = [
         currentLocation[0] + (targetDistance / 111320) * Math.cos(angle) / Math.cos(currentLocation[1] * Math.PI / 180),
         currentLocation[1] + (targetDistance / 111320) * Math.sin(angle),
       ];
 
-      // Obter rota do OpenRouteService
       const directions = await getDirections(currentLocation, destination, 'foot-walking');
 
       setState(prev => ({
@@ -137,7 +134,7 @@ const WalkingMissionExecution = ({ mission, onComplete, onClose }: WalkingMissio
         route: directions,
       }));
 
-      // Adicionar marcadores no mapa
+      // Recria os marcadores para a execução atual.
       clearMarkers();
       addMarker({
         id: 'start',
@@ -166,7 +163,7 @@ const WalkingMissionExecution = ({ mission, onComplete, onClose }: WalkingMissio
     }
   }, [mapUserLocation, getCurrentLocation, getDirections, addMarker, clearMarkers, state.targetDistance]);
 
-  // Iniciar execução da missão
+  // Inicia a execução, prepara a rota e marca o relógio inicial.
   const startExecution = useCallback(async () => {
     try {
       setState(prev => ({
@@ -177,7 +174,6 @@ const WalkingMissionExecution = ({ mission, onComplete, onClose }: WalkingMissio
         error: null,
       }));
 
-      // Gerar rota segura
       await generateSafeRoute();
 
       if (import.meta.env.DEV && healthData && healthData.confidence !== "official") {
@@ -194,7 +190,7 @@ const WalkingMissionExecution = ({ mission, onComplete, onClose }: WalkingMissio
     }
   }, [generateSafeRoute, healthData?.source, isAuthenticated]);
 
-  // Pausar/Retomar execução
+  // Alterna entre execução ativa e pausada.
   const togglePause = useCallback(() => {
     setState(prev => ({
       ...prev,
@@ -202,7 +198,7 @@ const WalkingMissionExecution = ({ mission, onComplete, onClose }: WalkingMissio
     }));
   }, []);
 
-  // Completar missão
+  // Finaliza a missão usando o valor confirmado pela fonte ativa.
   const completeMission = useCallback(async (finalValue: number) => {
     try {
       setState(prev => ({
@@ -213,7 +209,6 @@ const WalkingMissionExecution = ({ mission, onComplete, onClose }: WalkingMissio
         isPaused: false,
       }));
 
-      // Completar missão com valor verificado
       const verified = healthData
         ? healthData.source !== "api" && healthData.source !== "unavailable"
         : false;
@@ -228,7 +223,7 @@ const WalkingMissionExecution = ({ mission, onComplete, onClose }: WalkingMissio
     }
   }, [mission.id, onComplete]);
 
-  // Cancelar execução
+  // Cancela a execução, limpa o mapa e fecha o modal.
   const cancelExecution = useCallback(() => {
     setState(prev => ({
       ...prev,
@@ -240,12 +235,12 @@ const WalkingMissionExecution = ({ mission, onComplete, onClose }: WalkingMissio
     onClose();
   }, [clearMarkers, onClose]);
 
-  // Calcular progresso
+  // Deriva o percentual de progresso a partir da métrica da missão.
   const progress = isStepsMission 
     ? Math.min(100, (state.currentSteps / state.targetSteps) * 100)
     : Math.min(100, (state.currentDistance / state.targetDistance) * 100);
 
-  // Calcular tempo decorrido
+  // Calcula o tempo corrido desde o início da execução.
   const elapsedSeconds = state.startTime 
     ? Math.floor((Date.now() - state.startTime.getTime()) / 1000)
     : 0;
@@ -261,7 +256,7 @@ const WalkingMissionExecution = ({ mission, onComplete, onClose }: WalkingMissio
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <Card className="w-full max-w-2xl max-h-[90vh] overflow-y-auto">
         <div className="p-6 space-y-6">
-          {/* Header */}
+          {/* Cabeçalho da missão */}
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div className="p-2 rounded-full bg-blue-100">
@@ -279,7 +274,7 @@ const WalkingMissionExecution = ({ mission, onComplete, onClose }: WalkingMissio
             </Button>
           </div>
 
-          {/* Error Display */}
+          {/* Erro operacional da execução */}
           {state.error && (
             <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-lg">
               <AlertCircle className="w-5 h-5 text-red-600" />
@@ -287,7 +282,7 @@ const WalkingMissionExecution = ({ mission, onComplete, onClose }: WalkingMissio
             </div>
           )}
 
-          {/* Progress Overview */}
+          {/* Resumo de progresso */}
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <span className="text-sm font-medium">Progresso</span>
@@ -318,7 +313,7 @@ const WalkingMissionExecution = ({ mission, onComplete, onClose }: WalkingMissio
             </div>
           </div>
 
-          {/* Route Information */}
+          {/* Dados da rota sugerida */}
           {state.route && (
             <div className="space-y-3">
               <h3 className="font-semibold flex items-center gap-2">
@@ -344,7 +339,7 @@ const WalkingMissionExecution = ({ mission, onComplete, onClose }: WalkingMissio
             </div>
           )}
 
-          {/* Timer */}
+          {/* Cronômetro da execução */}
           <div className="flex items-center justify-center">
             <div className="text-center">
               <Clock className="w-8 h-8 mx-auto mb-2 text-gray-600" />
@@ -355,7 +350,7 @@ const WalkingMissionExecution = ({ mission, onComplete, onClose }: WalkingMissio
             </div>
           </div>
 
-          {/* Health Data Status */}
+          {/* Origem e atualização dos dados de saúde */}
           <div className="p-3 bg-blue-50 rounded-lg">
             <div className="flex items-center justify-between text-sm">
               <span className="text-blue-700">Fonte de dados:</span>
@@ -370,7 +365,7 @@ const WalkingMissionExecution = ({ mission, onComplete, onClose }: WalkingMissio
             )}
           </div>
 
-          {/* Action Buttons */}
+          {/* Ações disponíveis conforme o estado da execução */}
           <div className="flex gap-3">
             {!state.isRunning && !state.isCompleted && (
               <Button onClick={startExecution} className="flex-1">

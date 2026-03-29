@@ -34,16 +34,19 @@ export default function DesktopAppNavbar({
   const [resolvedProgression, setResolvedProgression] = useState<UserProgression | null>(() => progression ?? readCachedJson<UserProgression>("/api/progression")?.data ?? null);
   const [levelLoading, setLevelLoading] = useState(() => !progression && !readCachedJson<UserProgression>("/api/progression"));
 
+  // Garante os icones do Material Symbols para a navegacao desktop.
   useEffect(() => {
     ensureMaterialSymbolsLoaded();
   }, []);
 
+  // Prioriza o perfil recebido por props quando a tela ja o tem carregado.
   useEffect(() => {
     if (profile) {
       setResolvedProfile(profile);
     }
   }, [profile]);
 
+  // Prioriza a progressao recebida por props para evitar recarga desnecessaria.
   useEffect(() => {
     if (progression) {
       setResolvedProgression(progression);
@@ -51,6 +54,7 @@ export default function DesktopAppNavbar({
     }
   }, [progression]);
 
+  // Hidrata o chrome da navegacao com cache e refresh em segundo plano.
   useEffect(() => {
     let cancelled = false;
 
@@ -109,6 +113,7 @@ export default function DesktopAppNavbar({
       }}
     >
       <div className="fl-app-container grid grid-cols-[auto_1fr_auto] items-center gap-4 py-4 lg:gap-6">
+        {/* Marca e atalho principal de retorno ao dashboard. */}
         <button type="button" onClick={() => navigate(ROUTE_PATHS.dashboard)} className="flex min-w-0 items-center gap-3 lg:gap-4" aria-label="Abrir dashboard">
           <div className="shrink-0" style={{ color: "var(--app-primary-color)" }}>
             <svg fill="none" viewBox="0 0 48 48" className="h-8 w-8" xmlns="http://www.w3.org/2000/svg">
@@ -120,6 +125,7 @@ export default function DesktopAppNavbar({
           </span>
         </button>
 
+        {/* Nivel atual e navegacao desktop entre as areas principais. */}
         <div className="flex min-w-0 items-center justify-center gap-3 lg:gap-4">
           <div
             className="inline-flex shrink-0 items-center rounded-full border px-3 py-1.5 text-[0.7rem] font-black uppercase tracking-[0.2em] lg:text-xs"
@@ -156,6 +162,7 @@ export default function DesktopAppNavbar({
           </nav>
         </div>
 
+        {/* Acoes rapidas de configuracao e acesso ao perfil. */}
         <div className="flex items-center gap-3 lg:gap-4">
           <button
             type="button"

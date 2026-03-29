@@ -12,10 +12,12 @@ export function AuthThemeHeader({
   colorScheme,
   onToggleColorScheme,
 }: AuthThemeHeaderProps) {
+  // Prepara o texto acessivel do proximo tema disponivel no toggle.
   const nextThemeLabel = colorScheme === "dark" ? "tema claro" : "tema escuro";
 
   return (
     <header className="fl-auth-header py-2 sm:py-4">
+      {/* Marca do produto e acao de alternancia do funil auth. */}
       <div className="fl-auth-logo">
         <div className="fl-auth-logo-mark">
           <Zap className="h-5 w-5 sm:h-6 sm:w-6" strokeWidth={2.3} />

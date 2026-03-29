@@ -252,9 +252,9 @@ export function createBackgroundProcessingService(
       await processDailyReset(env);
 
       if (event.cron === "0 0 * * 1") {
-        console.log("[worker][weekly-recalculation] Iniciando recÃ¡lculo semanal de atributos");
+        console.log("[worker][weekly-recalculation] Iniciando recálculo semanal de atributos");
         await processWeeklyRecalculation(env);
-        console.log("[worker][weekly-recalculation] RecÃ¡lculo semanal concluÃ­do");
+        console.log("[worker][weekly-recalculation] Recálculo semanal concluído");
       }
     } catch (error) {
       console.error("[worker][scheduled-guard]", {

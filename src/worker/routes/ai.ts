@@ -183,6 +183,7 @@ type RapidApiNutritionResponse = Array<{
   fat_total_g?: number | undefined;
 }>;
 
+// Consulta a base oficial do USDA quando a análise pode usar dados públicos.
 async function searchFoodOnUSDA(c: import("hono").Context<AppContext>, query: string) {
   if (!c.env.USDA_API_KEY) {
     throw new ApiIntegrationError("SERVICE_NOT_CONFIGURED", 503, "USDA não configurada.");
@@ -195,6 +196,7 @@ async function searchFoodOnUSDA(c: import("hono").Context<AppContext>, query: st
   return fetchJsonWithTimeout<USDAResponse>(url.toString(), { method: "GET" }, timeoutMsByService.usda);
 }
 
+// Usa a RapidAPI como fallback quando o USDA não devolve resultado útil.
 async function searchFoodOnRapidApi(c: import("hono").Context<AppContext>, query: string) {
   if (!c.env.RAPID_API_KEY) {
     throw new ApiIntegrationError("SERVICE_NOT_CONFIGURED", 503, "RapidAPI não configurada.");
@@ -215,6 +217,7 @@ async function searchFoodOnRapidApi(c: import("hono").Context<AppContext>, query
   );
 }
 
+// Extrai macros básicos quando o OCR identifica um rótulo nutricional legível.
 function parseNutritionFromOcrLabel(text: string) {
   if (!text) return null;
 
@@ -238,7 +241,7 @@ function parseNutritionFromOcrLabel(text: string) {
   };
 }
 
-// 1. Generate personalized missions using AI (background processing with status endpoint)
+// Enfileira a geração personalizada de missões sem bloquear a resposta da rota.
 app.post("/api/ai/generate-missions", authMiddleware, async (c) => {
   const user = c.get("user");
   if (!user) return c.json({ error: "Unauthorized" }, 401);
@@ -294,13 +297,14 @@ app.post("/api/ai/generate-missions", authMiddleware, async (c) => {
   }
 });
 
+// Retorna o andamento da geração assíncrona de missões do usuário.
 app.get("/api/ai/generate-missions/status", authMiddleware, async (c) => {
   const user = c.get("user");
   if (!user) return c.json({ error: "Unauthorized" }, 401);
 
   const jobId = String(c.req.query("job_id") ?? "").trim();
   if (!jobId) {
-    return c.json({ error: "job_id obrigatorio" }, 400);
+    return c.json({ error: "job_id obrigatório" }, 400);
   }
 
   try {
@@ -319,7 +323,7 @@ app.get("/api/ai/generate-missions/status", authMiddleware, async (c) => {
     }>();
 
     if (!job) {
-      return c.json({ error: "Job nao encontrado" }, 404);
+      return c.json({ error: "Job não encontrado" }, 404);
     }
 
     if (job.status === "completed") {
@@ -359,7 +363,7 @@ app.get("/api/ai/generate-missions/status", authMiddleware, async (c) => {
   }
 });
 
-// 2. AI Fitness Chatbot
+// Centraliza o chatbot com contexto de perfil, progresso e plano ativo.
 app.post("/api/ai/chat", authMiddleware, async (c) => {
   const user = c.get("user");
   if (!user) return c.json({ error: "Unauthorized" }, 401);
@@ -467,9 +471,9 @@ REGRAS DE COMPORTAMENTO
 
 10. FORMATO IDEAL
 - Pergunta simples -> resposta curta
-- Pergunta pratica -> resposta objetiva com passos
-- Pergunta complexa -> resposta clara, sem enrolacao
-- Duvida emocional -> resposta acolhedora, mas sobria
+- Pergunta prática -> resposta objetiva com passos
+- Pergunta complexa -> resposta clara, sem enrolação
+- Dúvida emocional -> resposta acolhedora, mas sóbria
 
 11. REGRA FINAL
 Antes de responder, avalie: Estou respondendo exatamente o que foi pedido? Estou sendo mais longo do que preciso? Estou usando o nome sem necessidade? Estou parecendo natural ou teatral? Se estiver teatral ou motivacional demais, simplifique.
@@ -488,7 +492,7 @@ Contexto do usuário:
 - Streak: ${progression?.current_streak} dias
 - Objetivo: ${profileMainGoal}
 - Condicionamento: ${profileConditioning}
-- Preferencia ativa para proximas geracoes: ${activeChatPlanSummary || "nenhuma"}
+- Preferência ativa para próximas gerações: ${activeChatPlanSummary || "nenhuma"}
 - Força: ${attributes?.strength}
 - Modo: ${mode}`;
 
@@ -519,7 +523,7 @@ Contexto do usuário:
 - Nome: ${profile?.full_name}
 - Objetivo: ${profileMainGoal}
 - Condicionamento: ${profileConditioning}
-- Preferencia ativa: ${activeChatPlanSummary || "nenhuma"}
+- Preferência ativa: ${activeChatPlanSummary || "nenhuma"}
 - Modo: ${mode}`;
 
     const primaryMessages = [
@@ -576,7 +580,7 @@ Contexto do usuário:
       activePreferences: activeChatPlanPreferences,
     });
     const planPreferenceNotice = appliedPlanPreference
-      ? `\n\nAjuste salvo para as proximas missoes: ${summarizeTrainingPlanChatPreferences(appliedPlanPreference)}.`
+      ? `\n\nAjuste salvo para as próximas missões: ${summarizeTrainingPlanChatPreferences(appliedPlanPreference)}.`
       : "";
 
     return c.json({ message: `${content}${planPreferenceNotice}`.trim() });
@@ -619,6 +623,7 @@ function toRoundedNumber(value: unknown): number {
   return Number.isFinite(numeric) ? Math.round(numeric) : 0;
 }
 
+// Gera recomendações úteis mesmo quando o provider externo falha ou degrada.
 function buildFallbackRecommendations(params: {
   level: number;
   streak: number;
@@ -636,70 +641,70 @@ function buildFallbackRecommendations(params: {
   const focusByGoal: Record<string, { type: string; reason: string }> = {
     perder_peso: {
       type: "Condicionamento",
-      reason: "Aumente a frequencia de sessoes dinamicas para elevar o gasto calorico com consistencia.",
+      reason: "Aumente a frequência de sessões dinâmicas para elevar o gasto calórico com consistência.",
     },
     ganhar_massa: {
-      type: "Forca progressiva",
-      reason: "Priorize sobrecarga gradual e execucao controlada para sustentar ganho de massa.",
+      type: "Força progressiva",
+      reason: "Priorize sobrecarga gradual e execução controlada para sustentar ganho de massa.",
     },
     resistencia: {
-      type: "Volume e resistencia",
-      reason: "Blocos mais longos e descansos menores ajudam a consolidar sua resistencia.",
+      type: "Volume e resistência",
+      reason: "Blocos mais longos e descansos menores ajudam a consolidar sua resistência.",
     },
     calistenia: {
-      type: "Tecnica de base",
-      reason: "Fortalecer movimentos fundamentais melhora o controle corporal para a progressao na calistenia.",
+      type: "Técnica de base",
+      reason: "Fortalecer movimentos fundamentais melhora o controle corporal para a progressão na calistenia.",
     },
     saude_geral: {
-      type: "Constancia semanal",
-      reason: "Rotina equilibrada e aderente costuma gerar o melhor resultado para saude geral.",
+      type: "Constância semanal",
+      reason: "Rotina equilibrada e aderente costuma gerar o melhor resultado para saúde geral.",
     },
   };
 
   const weakestAttributeCandidates: Array<{ name: string; value: number; suggestion: string }> = [
     {
-      name: "Forca",
+      name: "Força",
       value: params.attributes.strength,
-      suggestion: "Inclua exercicios compostos e aumente a carga ou repeticoes de forma gradual.",
+      suggestion: "Inclua exercícios compostos e aumente a carga ou repetições de forma gradual.",
     },
     {
-      name: "Constituicao",
+      name: "Constituição",
       value: params.attributes.constitution,
-      suggestion: "Combine volume moderado com recuperacao consistente para aguentar mais sessoes na semana.",
+      suggestion: "Combine volume moderado com recuperação consistente para aguentar mais sessões na semana.",
     },
     {
       name: "Vitalidade",
       value: params.attributes.vitality,
-      suggestion: "Mantenha cardio leve e pausas bem distribuidas para melhorar energia ao longo do treino.",
+      suggestion: "Mantenha cardio leve e pausas bem distribuídas para melhorar energia ao longo do treino.",
     },
     {
       name: "Destreza",
       value: params.attributes.dexterity,
-      suggestion: "Trabalhe controle de movimento e amplitude para ganhar precisao e mobilidade.",
+      suggestion: "Trabalhe controle de movimento e amplitude para ganhar precisão e mobilidade.",
     },
     {
       name: "Foco",
       value: params.attributes.focus,
-      suggestion: "Use treinos curtos com meta clara para aumentar concentracao e regularidade.",
+      suggestion: "Use treinos curtos com meta clara para aumentar concentração e regularidade.",
     },
   ];
   const weakestAttribute = weakestAttributeCandidates.sort((left, right) => left.value - right.value)[0];
 
   const topSkill = params.skills[0] ?? null;
   const focus = focusByGoal[goal] ?? {
-    type: "Evolucao equilibrada",
-    reason: "A melhor recomendacao agora e sustentar consistencia e ajustar o treino com base no seu progresso recente.",
+    type: "Evolução equilibrada",
+    reason: "A melhor recomendação agora é sustentar consistência e ajustar o treino com base no seu progresso recente.",
   };
 
   return {
     next_skill_recommendation: topSkill
       ? {
         name: topSkill.name,
-        reason: `Voce ja construiu base em ${topSkill.name}. Vale aprofundar essa skill enquanto mantem progressao controlada nas demais.`,
+        reason: `Você já construiu base em ${topSkill.name}. Vale aprofundar essa skill enquanto mantém progressão controlada nas demais.`,
       }
       : {
         name: "Fundamentos de corpo livre",
-        reason: "Comece pelas skills basicas para construir repertorio tecnico e facilitar as proximas evolucoes.",
+        reason: "Comece pelas skills básicas para construir repertório técnico e facilitar as próximas evoluções.",
       },
     weak_attribute: {
       name: weakestAttribute.name,
@@ -708,11 +713,12 @@ function buildFallbackRecommendations(params: {
     training_focus: focus,
     motivation_message:
       params.streak >= 7
-        ? `Voce ja acumula ${params.streak} dias de streak. O melhor proximo passo e proteger essa consistencia enquanto sobe o nivel.`
-        : `Seu nivel ${params.level} ja mostra progresso. Mantenha constancia nos proximos dias para transformar ritmo em resultado.`,
+        ? `Você já acumula ${params.streak} dias de streak. O melhor próximo passo é proteger essa consistência enquanto sobe o nível.`
+        : `Seu nível ${params.level} já mostra progresso. Mantenha constância nos próximos dias para transformar ritmo em resultado.`,
   };
 }
 
+// Mescla a resposta externa com o fallback local para evitar payload quebrado.
 function mergeRecommendationsWithFallback(
   raw: unknown,
   fallback: AiRecommendationsPayload,
@@ -777,7 +783,7 @@ function mergeRecommendationsWithFallback(
   };
 }
 
-// 3. AI Recommendations Engine
+// Entrega recomendações de skill, atributo fraco e foco de treino.
 app.get("/api/ai/recommendations", authMiddleware, async (c) => {
   const user = c.get("user");
   if (!user) return c.json({ error: "Unauthorized" }, 401);
@@ -905,7 +911,7 @@ Skills: ${skillRows.slice(0, 5).map((skill) => `${skill.name}:${skill.total_reps
   }
 });
 
-// 4. AI workout suggestions
+// Gera sugestões rápidas de treino com base no estado recente do usuário.
 app.get("/api/ai/workout-suggestions", authMiddleware, async (c) => {
   const user = c.get("user");
   if (!user) return c.json({ error: "Unauthorized" }, 401);
@@ -945,6 +951,7 @@ function isIdentifiedFoodItem(item: unknown): item is IdentifiedFoodItem {
   return typeof value.food_name === "string" && value.food_name.trim().length > 0;
 }
 
+// Pede ao modelo visual uma lista simples de alimentos visíveis na foto.
 async function identifyFoodItemsFromImage(
   c: import("hono").Context<AppContext>,
   params: {
@@ -967,7 +974,7 @@ async function identifyFoodItemsFromImage(
   const prompt = [
     "Analise a foto de uma refeição e responda APENAS JSON com o formato {\"food_description\":\"\",\"items\":[{\"food_name\":\"\",\"portion_description\":\"\",\"portion_multiplier\":1}]}.",
     "Liste somente alimentos visivelmente presentes.",
-    "Use nomes simples e porções curtas, como porcao media, 1 unidade, 1 concha ou 1 colher.",
+    "Use nomes simples e porções curtas, como porção média, 1 unidade, 1 concha ou 1 colher.",
     params.foodDescription ? `Contexto textual informado pelo app: ${params.foodDescription}` : "",
     params.ocrText ? `Texto OCR disponível: ${params.ocrText}` : "",
   ]
@@ -999,7 +1006,7 @@ async function identifyFoodItemsFromImage(
   };
 }
 
-// 5. Food analysis pipeline (MediaPipe client detection + USDA + RapidAPI fallback + AI estimate)
+// Orquestra a análise alimentar com visão, OCR e fallbacks nutricionais.
 app.post("/api/ai/analyze-food", authMiddleware, async (c) => {
   const user = c.get("user");
   if (!user) return c.json({ error: "Unauthorized" }, 401);
@@ -1153,7 +1160,7 @@ Texto OCR do rótulo: ${ocr_text || "não identificado"}.`;
     if (ocrNutrition) {
       analyzedItems.push({
         food_name: "Rótulo identificado",
-        portion_description: "dados extraí­dos do rótulo",
+        portion_description: "dados extraídos do rótulo",
         calories: ocrNutrition.calories,
         energy_kj: ocrNutrition.energy_kj,
         protein: ocrNutrition.protein,

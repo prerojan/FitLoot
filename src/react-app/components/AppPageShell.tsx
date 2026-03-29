@@ -43,15 +43,19 @@ export default function AppPageShell({
       className={cn("fl-app-page", hideNavigation ? "pb-0" : undefined, className)}
       data-route={location.pathname}
     >
+      {/* Navbar desktop compartilhada para paginas com chrome completo. */}
       {!hideNavigation ? <DesktopAppNavbar profile={profile} progression={progression} /> : null}
+      {/* Backdrop visual padrao das telas autenticadas. */}
       <div className="fl-theme-backdrop" aria-hidden="true">
         <div className="fl-theme-backdrop-orb fl-theme-backdrop-orb-primary absolute -left-24 top-6 h-72 w-72" />
         <div className="fl-theme-backdrop-orb fl-theme-backdrop-orb-secondary absolute right-[-5rem] top-16 h-80 w-80" />
         <div className="fl-theme-backdrop-orb fl-theme-backdrop-orb-tertiary absolute bottom-[-6rem] left-1/2 h-96 w-96 -translate-x-1/2" />
       </div>
+      {/* Conteudo principal da pagina. */}
       <div className={cn("relative flex min-h-0 min-w-0 flex-1 flex-col", contentClassName)}>
         {children}
       </div>
+      {/* Navegacao inferior exclusiva do mobile. */}
       {!hideNavigation ? (
         <div className="md:hidden">
           <BottomNav active={bottomNavActive} />

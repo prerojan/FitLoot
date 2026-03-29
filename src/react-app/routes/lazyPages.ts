@@ -1,5 +1,6 @@
 import { lazy } from "react";
 
+// Mantem o mapa de carregamento sob demanda das paginas principais.
 export const HomePage = lazy(() => import("../pages/Home"));
 export const Onboarding = lazy(() => import("../pages/Onboarding"));
 export const Checkout = lazy(() => import("../pages/Checkout"));

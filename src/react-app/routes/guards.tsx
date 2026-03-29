@@ -16,14 +16,17 @@ export function ProtectedRoute({ children }: { children: ReactNode }) {
   const { user, loading } = useAuth();
   const location = useLocation();
 
+  // Mantem a navegacao suspensa enquanto a sessao esta sendo resolvida.
   if (loading) {
     return <RouteLoader />;
   }
 
+  // Redireciona visitantes anonimos para a entrada publica.
   if (!user) {
     return <Navigate to={ROUTE_PATHS.login} replace />;
   }
 
+  // Permite pagamento sem liberar o restante da area protegida.
   if (!hasPlanAccess(user) && !BILLING_ROUTE_PATHS.has(location.pathname)) {
     return <Navigate to={ROUTE_PATHS.checkout} replace />;
   }
@@ -34,10 +37,12 @@ export function ProtectedRoute({ children }: { children: ReactNode }) {
 export function PublicAuthRoute({ children }: { children: ReactNode }) {
   const { user, loading } = useAuth();
 
+  // Usa o mesmo carregador ate resolver a sessao atual.
   if (loading) {
     return <RouteLoader />;
   }
 
+  // Impede retorno para a tela publica apos autenticacao.
   if (user) {
     return <Navigate to={resolveAuthenticatedStartRoute(user)} replace />;
   }
@@ -48,6 +53,7 @@ export function PublicAuthRoute({ children }: { children: ReactNode }) {
 export function AppEntryRoute() {
   const { user, loading } = useAuth();
 
+  // Resolve o destino inicial correto antes de entrar no app.
   if (loading) {
     return <RouteLoader />;
   }

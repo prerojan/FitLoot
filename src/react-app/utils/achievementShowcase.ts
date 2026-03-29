@@ -20,12 +20,14 @@ type ShowcaseToken = {
 };
 
 function toTokenValue(value: unknown): string | null {
+  // Normaliza ids e nomes misturados em strings ou numeros vindos do backend.
   if (typeof value === "string" && value.trim()) return value;
   if (typeof value === "number" && Number.isFinite(value)) return String(value);
   return null;
 }
 
 function normalizeToken(value: string): string {
+  // Remove mojibake conhecido e normaliza para comparacoes tolerantes.
   return repairKnownMojibakeString(value)
     .normalize("NFD")
     .replace(/\p{Diacritic}/gu, "")
@@ -36,6 +38,7 @@ function normalizeToken(value: string): string {
 export function sanitizeAchievementForDisplay(
   achievement: AchievementWithUnlock,
 ): AchievementWithUnlock {
+  // Corrige campos textuais antes de qualquer renderizacao no frontend.
   return {
     ...achievement,
     name: repairKnownMojibakeString(achievement.name),
@@ -54,10 +57,12 @@ export function sanitizeAchievementForDisplay(
 export function sanitizeAchievementsForDisplay(
   achievements: AchievementWithUnlock[],
 ): AchievementWithUnlock[] {
+  // Aplica a sanitizacao em lote para listas inteiras de conquistas.
   return achievements.map((achievement) => sanitizeAchievementForDisplay(achievement));
 }
 
 function normalizeRarity(value: string | null | undefined): AchievementRarity {
+  // Reconciliacao tolerante das raridades persistidas em formatos antigos.
   const normalized = normalizeToken(String(value ?? "")).toUpperCase();
 
   if (
@@ -74,6 +79,7 @@ function normalizeRarity(value: string | null | undefined): AchievementRarity {
 }
 
 function toShowcaseTokens(rawValue: string | null | undefined): ShowcaseToken[] {
+  // Aceita JSON, valores simples ou listas delimitadas no campo de destaque.
   if (!rawValue) return [];
 
   const trimmedValue = rawValue.trim();
@@ -153,6 +159,7 @@ export function resolveShowcasedAchievement(
   showcasedValue: string | null | undefined,
   achievements: AchievementWithUnlock[],
 ): AchievementWithUnlock | null {
+  // Resolve a conquista destacada comparando por id e por nome normalizado.
   const showcaseTokens = toShowcaseTokens(showcasedValue);
   if (showcaseTokens.length === 0) return null;
 
@@ -172,6 +179,7 @@ export function resolveShowcasedAchievement(
 }
 
 export function getAchievementShowcaseStyle(rarity: string | null | undefined) {
+  // Deriva a paleta visual do selo de acordo com a raridade final normalizada.
   const normalizedRarity = normalizeRarity(rarity);
   const accent = ACHIEVEMENT_RARITY_ACCENT[normalizedRarity];
 

@@ -27,10 +27,12 @@ const TONE_STYLES: Record<PaymentStatusPopupProps["tone"], { border: string; bg:
 export default function PaymentStatusPopup({ open, title, message, tone, onClose }: PaymentStatusPopupProps) {
   if (!open) return null;
 
+  // Seleciona a paleta do popup de acordo com o status retornado pelo pagamento.
   const styles = TONE_STYLES[tone];
 
   return (
     <div className="fl-z-toast fixed inset-0 flex items-center justify-center bg-black/35 px-4">
+      {/* Modal leve para feedback de checkout sem sair do fluxo atual. */}
       <div className={`w-full max-w-sm rounded-2xl border ${styles.border} ${styles.bg} p-5 shadow-2xl`}>
         <h3 className={`text-lg font-bold ${styles.title}`}>{title}</h3>
         <p className="mt-2 text-sm text-gray-700">{message}</p>

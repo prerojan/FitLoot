@@ -1,14 +1,9 @@
 /**
- * Google Fit API Service (Fallback)
- * Integrates with Google Fit for health and fitness data
- * Note: Google Fit APIs will be deprecated in 2026, used as fallback for older devices
- * Documentation: https://developers.google.com/fit/android
+ * Serviço de fallback para leitura e escrita de dados no Google Fit.
+ * Mantém uma implementação web simulada para ambientes sem camada nativa.
  */
 
-// Note: This is a web implementation. For native mobile, use React Native
-// Platform detection would work differently in a native environment
-
-// Google Fit Configuration
+// Centraliza as permissões e credenciais usadas pelo fluxo web.
 const GOOGLE_FIT_CONFIG = {
   CLIENT_ID: '973548034883-d5k59mvdmd3kp8ghgb179f90imlpcr7d.apps.googleusercontent.com',
   API_KEY: process.env.REACT_APP_GOOGLE_FIT_API_KEY || '',
@@ -47,34 +42,24 @@ class GoogleFitService {
     this.checkAvailability();
   }
 
-  /**
-   * Check if Google Fit is available on the device
-   */
+  // Determina se o ambiente atual realmente suporta integração com Google Fit.
   private async checkAvailability(): Promise<void> {
-    // Web implementation - Google Fit is only available on Android
-    // In a real React Native app, this would check Platform.OS === 'android'
     this.isAvailable = false;
     return;
   }
 
-  /**
-   * Get Google Fit availability status
-   */
+  // Expõe a disponibilidade calculada para os consumidores do serviço.
   async getAvailability(): Promise<boolean> {
-    // Web implementation - always false for web
     return false;
   }
 
-  /**
-   * Authenticate with Google Fit and request OAuth token
-   */
+  // Conduz a autenticação OAuth e persiste o token concedido.
   async authenticate(): Promise<boolean> {
     if (!this.isAvailable) {
       throw new Error('Google Fit is not available on this device');
     }
 
     try {
-      // Web implementation using Google Sign-In for Web
       const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
         `client_id=${GOOGLE_FIT_CONFIG.CLIENT_ID}&` +
         `redirect_uri=${window.location.origin}&` +
@@ -82,7 +67,6 @@ class GoogleFitService {
         `scope=${GOOGLE_FIT_CONFIG.SCOPES.join(' ')}&` +
         `include_granted_scopes=true`;
 
-      // Open popup for authentication
       const popup = window.open(authUrl, 'google-fit-auth', 'width=500,height=600');
       
       return new Promise((resolve, reject) => {
@@ -94,7 +78,6 @@ class GoogleFitService {
           }
 
           try {
-            // Check if popup redirected back with token
             if (popup.location.href.includes(window.location.origin)) {
               const urlParams = new URLSearchParams(popup.location.hash.substring(1));
               const token = urlParams.get('access_token');
@@ -108,11 +91,10 @@ class GoogleFitService {
               }
             }
           } catch {
-            // Cross-origin error, ignore and continue checking
+            // Ignora o erro de origem cruzada enquanto o popup ainda está fora do domínio local.
           }
         }, 1000);
 
-        // Timeout after 5 minutes
         setTimeout(() => {
           clearInterval(checkPopup);
           if (popup && !popup.closed) {
@@ -127,16 +109,12 @@ class GoogleFitService {
     }
   }
 
-  /**
-   * Check authentication status
-   */
+  // Retorna o estado atual do token e dos escopos concedidos.
   async checkAuthStatus(): Promise<GoogleFitPermissions> {
     return this.permissions;
   }
 
-  /**
-   * Read today's health data from Google Fit
-   */
+  // Lê os dados de hoje e consolida passos, calorias e métricas derivadas.
   async readTodayData(): Promise<GoogleFitData> {
     if (!this.isAvailable) {
       throw new Error('Google Fit is not available on this device');
@@ -150,7 +128,6 @@ class GoogleFitService {
       const now = new Date();
       const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
-      // Read steps data
       const stepsResponse = await fetch(
         `https://www.googleapis.com/fitness/v1/users/me/dataset:aggregate?` +
         `aggregateBydataTypeName=com.google.step_count.delta&` +
@@ -164,7 +141,6 @@ class GoogleFitService {
         }
       );
 
-      // Read calories data
       const caloriesResponse = await fetch(
         `https://www.googleapis.com/fitness/v1/users/me/dataset:aggregate?` +
         `aggregateBydataTypeName=com.google.calories.expended&` +
@@ -191,7 +167,6 @@ class GoogleFitService {
         calories = caloriesData.bucket?.[0]?.dataset?.[0]?.point?.[0]?.value?.[0]?.fpVal || 0;
       }
 
-      // Calculate derived metrics
       const distance = steps * 0.0007; // Average step length ~0.7m
       const activeMinutes = Math.floor(steps / 100); // Rough estimate
 
@@ -204,8 +179,7 @@ class GoogleFitService {
       };
     } catch (error) {
       console.error('Failed to read Google Fit data:', error);
-      
-      // Fallback to simulated data if API fails
+
       return {
         steps: Math.floor(Math.random() * 12000) + 3000,
         calories: Math.floor(Math.random() * 400) + 150,
@@ -216,9 +190,7 @@ class GoogleFitService {
     }
   }
 
-  /**
-   * Write health data to Google Fit
-   */
+  // Mantém a escrita simulada para preservar o contrato do serviço.
   async writeHealthData(data: Partial<GoogleFitData>): Promise<void> {
     if (!this.isAvailable) {
       throw new Error('Google Fit is not available on this device');
@@ -229,14 +201,10 @@ class GoogleFitService {
     }
 
     try {
-      // In a real implementation, this would use the Google Fit APIs
-      // to write actual data. For now, we'll simulate the write
-      
       console.log('Writing health data to Google Fit:', data);
-      
-      // Simulate write operation
+
       await new Promise(resolve => setTimeout(resolve, 800));
-      
+
       console.log('Google Fit data written successfully');
     } catch (error) {
       console.error('Failed to write Google Fit data:', error);
@@ -244,9 +212,7 @@ class GoogleFitService {
     }
   }
 
-  /**
-   * Read historical health data for a date range
-   */
+  // Gera uma série histórica simulada compatível com o contrato do app.
   async readHistoricalData(startDate: Date, endDate: Date): Promise<GoogleFitData[]> {
     if (!this.isAvailable) {
       throw new Error('Google Fit is not available on this device');
@@ -257,9 +223,6 @@ class GoogleFitService {
     }
 
     try {
-      // In a real implementation, this would use the Google Fit APIs
-      // to read historical data. For now, we'll simulate the data
-      
       const data: GoogleFitData[] = [];
       const current = new Date(startDate);
       
@@ -283,9 +246,7 @@ class GoogleFitService {
     }
   }
 
-  /**
-   * Subscribe to real-time data updates
-   */
+  // Simula a inscrição em atualizações em tempo real para manter a API estável.
   async subscribeToRealTimeData(): Promise<void> {
     if (!this.isAvailable) {
       throw new Error('Google Fit is not available on this device');
@@ -296,14 +257,10 @@ class GoogleFitService {
     }
 
     try {
-      // In a real implementation, this would use the Google Fit Recording API
-      // to subscribe to real-time data updates
-      
       console.log('Subscribing to Google Fit real-time data...');
-      
-      // Simulate subscription
+
       await new Promise(resolve => setTimeout(resolve, 1000));
-      
+
       console.log('Successfully subscribed to Google Fit real-time data');
     } catch (error) {
       console.error('Failed to subscribe to Google Fit real-time data:', error);
@@ -311,23 +268,17 @@ class GoogleFitService {
     }
   }
 
-  /**
-   * Unsubscribe from real-time data updates
-   */
+  // Simula o desligamento da inscrição em tempo real.
   async unsubscribeFromRealTimeData(): Promise<void> {
     if (!this.isAvailable) {
       throw new Error('Google Fit is not available on this device');
     }
 
     try {
-      // In a real implementation, this would use the Google Fit Recording API
-      // to unsubscribe from real-time data updates
-      
       console.log('Unsubscribing from Google Fit real-time data...');
-      
-      // Simulate unsubscription
+
       await new Promise(resolve => setTimeout(resolve, 500));
-      
+
       console.log('Successfully unsubscribed from Google Fit real-time data');
     } catch (error) {
       console.error('Failed to unsubscribe from Google Fit real-time data:', error);
@@ -335,12 +286,9 @@ class GoogleFitService {
     }
   }
 
-  /**
-   * Sign out from Google Fit
-   */
+  // Limpa o estado de autenticação mantido no cliente.
   async signOut(): Promise<void> {
     try {
-      // Clear authentication
       this.permissions = {
         oauthToken: null,
         grantedScopes: [],

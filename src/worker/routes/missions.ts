@@ -17,6 +17,7 @@ import {
 } from "../core/errors";
 import { getHuggingFaceApiKey } from "../core/providerConfig";
 import type { AppContext } from "../core/types";
+import type { WithTransaction } from "./contracts";
 
 type StreamJsonArrayResponse = (
   items: readonly unknown[],
@@ -53,11 +54,6 @@ type MissionAttributeDelta = {
   dexterity: number;
   focus: number;
 };
-
-type WithTransaction = <T>(
-  db: D1Database,
-  run: () => Promise<T>,
-) => Promise<T>;
 
 type MissionRouteDeps = {
   applyMissionAttributeDeltaToUser: (
@@ -234,7 +230,7 @@ type MissionRouteDeps = {
   ) => void;
 };
 
-// Route registration for mission list, mission detail, generation, and completion.
+// Registra listagem, detalhes, geração e conclusão de missões.
 export function registerMissionRoutes(
   app: Hono<AppContext>,
   deps: MissionRouteDeps,
@@ -256,6 +252,7 @@ export function registerMissionRoutes(
     writeMissionListCache,
   } = deps;
 
+  // Lista as missões relevantes, reutilizando cache e agendando reparos leves em segundo plano.
   app.get("/api/missions", authMiddleware, async (c) => {
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
@@ -387,13 +384,14 @@ export function registerMissionRoutes(
     }
   });
 
+  // Carrega uma missão específica e completa a tradução dos passos quando necessário.
   app.get("/api/missions/:id", authMiddleware, async (c) => {
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
 
     const missionId = Number(c.req.param("id"));
     if (!Number.isInteger(missionId) || missionId <= 0) {
-      return c.json({ error: "Mission id invalido" }, 400);
+      return c.json({ error: "Mission id inválido" }, 400);
     }
 
     try {
@@ -524,6 +522,7 @@ export function registerMissionRoutes(
     }
   });
 
+  // Gera o plano estruturado padrão de missões do usuário.
   app.post("/api/missions/generate", authMiddleware, async (c) => {
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
@@ -558,6 +557,7 @@ export function registerMissionRoutes(
     }
   });
 
+  // Gera uma missão especial por IA sem recriar o plano periódico completo.
   app.post("/api/missions/generate/ai-special", authMiddleware, async (c) => {
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
@@ -631,7 +631,7 @@ export function registerMissionRoutes(
           return c.json(
             {
               error:
-                "Missoes semanais e mensais nao podem ser concluidas manualmente. O progresso acontece automaticamente pelas missoes diarias compativeis.",
+                "Missões semanais e mensais não podem ser concluídas manualmente. O progresso acontece automaticamente pelas missões diárias compatíveis.",
               code: "MISSION_AUTO_PROGRESS_ONLY",
             },
             400,

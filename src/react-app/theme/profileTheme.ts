@@ -22,6 +22,7 @@ const FONT_QUERY_BY_KEY: Record<string, string> = {
 const loadedFonts = new Set<string>();
 
 function clearThemeClasses(root: HTMLElement): void {
+  // Remove apenas as classes de fonte gerenciadas pelo tema de perfil.
   const removable = Array.from(root.classList).filter((className) =>
     CLASS_PREFIXES.some((prefix) => className.startsWith(prefix)),
   );
@@ -32,6 +33,7 @@ function clearThemeClasses(root: HTMLElement): void {
 }
 
 function ensureThemeFontLoaded(fontKey: string): void {
+  // Injeta a fonte dinamicamente apenas uma vez por chave.
   if (loadedFonts.has(fontKey)) return;
   const query = FONT_QUERY_BY_KEY[fontKey];
   if (!query) return;
@@ -53,10 +55,12 @@ function ensureThemeFontLoaded(fontKey: string): void {
 }
 
 function persistProfileTheme(theme: UserProfileTheme): void {
+  // Persiste a configuracao visual atual do perfil no cliente.
   localStorage.setItem(THEME_STORAGE_KEY, JSON.stringify(theme));
 }
 
 function normalizeHexColor(color: string): string | null {
+  // Converte hex curto ou longo para um formato unico de seis digitos.
   const value = color.trim();
   if (!value.startsWith("#")) return null;
 
@@ -76,6 +80,7 @@ function normalizeHexColor(color: string): string | null {
 }
 
 function resolveRgbTriplet(color: string | null | undefined, fallback: string): string {
+  // Deriva a versao RGB usada pelas variaveis CSS do app.
   if (!color) return fallback;
 
   const normalizedHex = normalizeHexColor(color);
@@ -110,6 +115,7 @@ function resolveRgbTriplet(color: string | null | undefined, fallback: string): 
 }
 
 export function getStoredProfileTheme(): UserProfileTheme | null {
+  // Le do storage o ultimo tema de perfil aplicado localmente.
   try {
     const rawTheme = localStorage.getItem(THEME_STORAGE_KEY);
     if (!rawTheme) return null;
@@ -120,6 +126,7 @@ export function getStoredProfileTheme(): UserProfileTheme | null {
 }
 
 export function clearStoredProfileTheme(): void {
+  // Remove o tema persistido quando o perfil deixa de controlar a interface.
   localStorage.removeItem(THEME_STORAGE_KEY);
 }
 
@@ -128,6 +135,7 @@ export function applyProfileTheme(profile: UserProfileTheme | null): void {
   const root = document.documentElement;
   clearThemeClasses(root);
 
+  // Normaliza o payload antes de projetar as variaveis CSS na pagina.
   const theme = profile ?? {
     custom_primary_color: DEFAULT_PRIMARY_COLOR,
     custom_secondary_color: DEFAULT_SECONDARY_COLOR,
@@ -165,6 +173,7 @@ export function applyProfileTheme(profile: UserProfileTheme | null): void {
     root.classList.add("font-title-" + fontKey);
   }
 
+  // Resolve imagem ou cor de fundo sem deixar residuos do tema anterior.
   if (theme.custom_background_type === "image" && theme.custom_background_value) {
     root.style.setProperty("--app-bg-image", "url(" + String(theme.custom_background_value) + ")");
     root.style.setProperty("--app-bg-color", "transparent");

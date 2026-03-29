@@ -2,11 +2,7 @@ import { Hono, type MiddlewareHandler } from "hono";
 
 import { getErrorMessage } from "../core/errors";
 import type { AppContext } from "../core/types";
-
-type WithTransaction = <T>(
-  db: D1Database,
-  run: () => Promise<T>,
-) => Promise<T>;
+import type { WithTransaction } from "./contracts";
 
 type StreamJsonArrayResponse = (
   items: readonly unknown[],
@@ -25,6 +21,7 @@ let shopProductsCacheEntry:
   | { payload: Record<string, unknown>[]; expiresAt: number }
   | null = null;
 
+// Reaproveita a vitrine quando a consulta ainda está dentro da janela curta de cache.
 function readShopProductsCache(): Record<string, unknown>[] | null {
   if (!shopProductsCacheEntry) return null;
   if (shopProductsCacheEntry.expiresAt <= Date.now()) {
@@ -34,6 +31,7 @@ function readShopProductsCache(): Record<string, unknown>[] | null {
   return shopProductsCacheEntry.payload;
 }
 
+// Atualiza o snapshot em memória usado pela listagem principal da loja.
 function writeShopProductsCache(payload: Record<string, unknown>[]): void {
   shopProductsCacheEntry = {
     payload,
@@ -41,11 +39,12 @@ function writeShopProductsCache(payload: Record<string, unknown>[]): void {
   };
 }
 
+// Invalida o cache sempre que uma compra pode mudar disponibilidade ou ranking.
 function invalidateShopProductsCache(): void {
   shopProductsCacheEntry = null;
 }
 
-// Route registration for rewards shop and coupon orders.
+// Registra as rotas da loja de recompensas e dos pedidos de cupons.
 export function registerShopRoutes(
   app: Hono<AppContext>,
   {
@@ -55,6 +54,7 @@ export function registerShopRoutes(
     withTransaction,
   }: ShopRouteDeps,
 ): void {
+  // Lista os produtos disponíveis, priorizando o cache da vitrine quando possível.
   app.get("/api/shop/products", authMiddleware, async (c) => {
     const limit = Math.min(Math.max(Number(c.req.query("limit") ?? 200), 1), 500);
     const offset = Math.max(Number(c.req.query("offset") ?? 0), 0);
@@ -84,6 +84,7 @@ export function registerShopRoutes(
     return streamJsonArrayResponse(payload);
   });
 
+  // Processa a compra e reaproveita pedidos idempotentes com o mesmo request_id.
   app.post("/api/shop/purchase/:id", authMiddleware, async (c) => {
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
@@ -184,6 +185,7 @@ export function registerShopRoutes(
     return c.json({ success: true, qr_code: qrCode });
   });
 
+  // Retorna o histórico paginado de pedidos já emitidos para o usuário.
   app.get("/api/shop/orders", authMiddleware, async (c) => {
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);

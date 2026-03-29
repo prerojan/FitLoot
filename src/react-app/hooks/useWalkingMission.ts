@@ -1,6 +1,6 @@
 /**
- * Hook especializado para missões de caminhada/corrida
- * Integra APIs de saúde e mapas de forma coesa
+ * Hook especializado para missões de caminhada e corrida.
+ * Une sensores de saúde, geolocalização e rota em um único fluxo.
  */
 
 import { useState, useEffect, useCallback } from 'react';
@@ -67,12 +67,12 @@ export const useWalkingMission = ({ mission, onComplete, autoRefresh = true }: U
     elapsedSeconds: 0,
   });
 
-  // Determinar tipo e metas da missão
+  // Resolve o tipo de métrica esperado para a missão atual.
   const metricType = mission.metric_type as MissionMetricType;
   const isStepsMission = metricType === "steps";
   const isDistanceMission = metricType === "distance_meters";
 
-  // Configurar metas baseadas na missão
+  // Converte a meta da missão para passos e distância, mantendo ambos disponíveis.
   useEffect(() => {
     if (isStepsMission) {
       const targetSteps = mission.metric_value || 5000;
@@ -91,7 +91,7 @@ export const useWalkingMission = ({ mission, onComplete, autoRefresh = true }: U
     }
   }, [mission, isStepsMission, isDistanceMission]);
 
-  // Atualizar dados de saúde quando disponíveis
+  // Sincroniza o progresso local com a fonte de saúde ativa.
   useEffect(() => {
     if (healthData && state.isRunning && !state.isCompleted) {
       const newSteps = healthData.steps;
@@ -107,7 +107,7 @@ export const useWalkingMission = ({ mission, onComplete, autoRefresh = true }: U
         progress: newProgress,
       }));
 
-      // Verificar se completou a missão
+      // Fecha automaticamente a missão quando a meta é atingida.
       if ((isStepsMission && newSteps >= state.targetSteps) || 
           (isDistanceMission && newDistance >= state.targetDistance)) {
         completeMission(isStepsMission ? newSteps : Math.round(newDistance));
@@ -132,12 +132,12 @@ export const useWalkingMission = ({ mission, onComplete, autoRefresh = true }: U
     return () => clearInterval(timer);
   }, [state.isRunning, state.isPaused, state.isCompleted, state.startTime]);
 
-  // Gerar rota segura para caminhada
+  // Gera uma rota sugerida a partir da posição atual e da meta de distância.
   const generateSafeRoute = useCallback(async () => {
     try {
       setState(prev => ({ ...prev, error: null }));
 
-      // Obter localização atual do usuário
+      // Resolve a posição atual antes de montar o destino.
       const currentLocation = mapUserLocation || await getCurrentLocation();
       if (!currentLocation) {
         setState(prev => ({ ...prev, error: "Não foi possível obter sua localização atual" }));
@@ -146,15 +146,14 @@ export const useWalkingMission = ({ mission, onComplete, autoRefresh = true }: U
 
       setState(prev => ({ ...prev, userLocation: currentLocation }));
 
-      // Gerar ponto de destino baseado na meta de distância
+      // Projeta um destino inicial coerente com a meta.
       const targetDistance = state.targetDistance;
-      const angle = Math.random() * 2 * Math.PI; // Direção aleatória
+      const angle = Math.random() * 2 * Math.PI;
       const destination: [number, number] = [
         currentLocation[0] + (targetDistance / 111320) * Math.cos(angle) / Math.cos(currentLocation[1] * Math.PI / 180),
         currentLocation[1] + (targetDistance / 111320) * Math.sin(angle),
       ];
 
-      // Obter rota do OpenRouteService
       const directions = await getDirections(currentLocation, destination, 'foot-walking');
 
       setState(prev => ({
@@ -162,7 +161,7 @@ export const useWalkingMission = ({ mission, onComplete, autoRefresh = true }: U
         route: directions,
       }));
 
-      // Adicionar marcadores no mapa
+      // Recria os marcadores da execução atual.
       clearMarkers();
       addMarker({
         id: 'start',
@@ -191,7 +190,7 @@ export const useWalkingMission = ({ mission, onComplete, autoRefresh = true }: U
     }
   }, [mapUserLocation, getCurrentLocation, getDirections, addMarker, clearMarkers, state.targetDistance]);
 
-  // Iniciar execução da missão
+  // Inicia a execução, prepara a rota e registra o estado inicial.
   const startExecution = useCallback(async () => {
     try {
       setState(prev => ({
@@ -202,7 +201,6 @@ export const useWalkingMission = ({ mission, onComplete, autoRefresh = true }: U
         error: null,
       }));
 
-      // Gerar rota segura
       await generateSafeRoute();
 
       if (import.meta.env.DEV && healthData && healthData.confidence !== "official") {
@@ -219,7 +217,7 @@ export const useWalkingMission = ({ mission, onComplete, autoRefresh = true }: U
     }
   }, [generateSafeRoute, healthData?.source, isAuthenticated]);
 
-  // Pausar/Retomar execução
+  // Alterna entre execução ativa e pausada.
   const togglePause = useCallback(() => {
     setState(prev => ({
       ...prev,
@@ -227,7 +225,7 @@ export const useWalkingMission = ({ mission, onComplete, autoRefresh = true }: U
     }));
   }, []);
 
-  // Completar missão
+  // Finaliza a missão com o valor validado pela fonte disponível.
   const completeMission = useCallback(async (finalValue: number) => {
     try {
       setState(prev => ({
@@ -238,7 +236,6 @@ export const useWalkingMission = ({ mission, onComplete, autoRefresh = true }: U
         isPaused: false,
       }));
 
-      // Completar missão com valor verificado
       const verified = healthData
         ? healthData.source !== "api" && healthData.source !== "unavailable"
         : false;
@@ -253,7 +250,7 @@ export const useWalkingMission = ({ mission, onComplete, autoRefresh = true }: U
     }
   }, [mission.id, onComplete]);
 
-  // Cancelar execução
+  // Cancela a execução e limpa os marcadores da sessão atual.
   const cancelExecution = useCallback(() => {
     setState(prev => ({
       ...prev,
@@ -264,7 +261,7 @@ export const useWalkingMission = ({ mission, onComplete, autoRefresh = true }: U
     clearMarkers();
   }, [clearMarkers]);
 
-  // Reset para nova execução
+  // Reinicia o estado para uma nova tentativa da mesma missão.
   const resetExecution = useCallback(() => {
     setState({
       isRunning: false,
@@ -285,7 +282,7 @@ export const useWalkingMission = ({ mission, onComplete, autoRefresh = true }: U
     clearMarkers();
   }, [state.targetSteps, state.targetDistance, clearMarkers]);
 
-  // Formatar tempo
+  // Formata o cronômetro em HH:MM:SS para a UI.
   const formatTime = useCallback((seconds: number) => {
     const hours = Math.floor(seconds / 3600);
     const minutes = Math.floor((seconds % 3600) / 60);
@@ -294,17 +291,17 @@ export const useWalkingMission = ({ mission, onComplete, autoRefresh = true }: U
   }, []);
 
   return {
-    // Estado
+    // Estado exposto
     state,
     
-    // Actions
+    // Ações de execução
     startExecution,
     togglePause,
     completeMission,
     cancelExecution,
     resetExecution,
     
-    // Computed values
+    // Derivados da execução
     progress: state.progress,
     elapsedSeconds: state.elapsedSeconds,
     formattedTime: formatTime(state.elapsedSeconds),
@@ -313,7 +310,7 @@ export const useWalkingMission = ({ mission, onComplete, autoRefresh = true }: U
     healthData,
     isAuthenticated,
     
-    // Status
+    // Flags prontas para a interface
     canStart: !state.isRunning && !state.isCompleted,
     canPause: state.isRunning && !state.isPaused,
     canResume: state.isRunning && state.isPaused,

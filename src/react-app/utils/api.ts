@@ -35,10 +35,12 @@ type PlanAccessRequiredPayload = {
 };
 
 function normalizePath(path: string): string {
+  // Garante um formato consistente para construir URLs e chaves de cache.
   return path.startsWith("/") ? path : `/${path}`;
 }
 
 function buildCacheKey(path: string): string {
+  // Usa apenas GET como chave de leitura cacheada no cliente.
   return `GET:${normalizePath(path)}`;
 }
 
@@ -53,6 +55,7 @@ function stripEphemeralProgressionFields(data: unknown): unknown {
 }
 
 async function parseJsonResponse<T>(response: Response): Promise<T> {
+  // Converte a resposta da API para JSON validando contrato e mensagens de erro.
   if (response.status === 204) {
     return null as T;
   }
@@ -86,6 +89,7 @@ async function parseJsonResponse<T>(response: Response): Promise<T> {
 }
 
 async function handlePlanAccessRequired(response: Response): Promise<void> {
+  // Redireciona o navegador quando o backend exige plano ativo para continuar.
   if (response.status !== 402 || typeof window === "undefined") return;
 
   const payload = (await response.clone().json().catch(() => null)) as PlanAccessRequiredPayload | null;
@@ -99,6 +103,7 @@ async function handlePlanAccessRequired(response: Response): Promise<void> {
 }
 
 export async function api(path: string, options: ApiRequestOptions = {}) {
+  // Wrapper padrao de fetch com cookies, timeout e suporte a cancelamento externo.
   const requestPath = normalizePath(path);
   const url = API_URL ? `${API_URL}${requestPath}` : requestPath;
   const { timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS, headers, signal, ...restOptions } = options;
@@ -152,6 +157,7 @@ export async function api(path: string, options: ApiRequestOptions = {}) {
 }
 
 export function readCachedJson<T>(path: string, ttlMs = DEFAULT_CACHE_TTL_MS): { data: T; stale: boolean } | null {
+  // Le o snapshot atual do cache sem disparar nova requisicao.
   const cacheKey = buildCacheKey(path);
   const entry = requestCache.get(cacheKey);
   if (!entry || typeof entry.data === "undefined") return null;
@@ -163,11 +169,13 @@ export function readCachedJson<T>(path: string, ttlMs = DEFAULT_CACHE_TTL_MS): {
 }
 
 export async function fetchJson<T>(path: string, options: ApiRequestOptions = {}): Promise<T> {
+  // Combina o wrapper de request com a validacao padrao de JSON.
   const response = await api(path, options);
   return parseJsonResponse<T>(response);
 }
 
 export async function fetchAndCacheJson<T>(path: string): Promise<T> {
+  // Reutiliza requisicoes inflight e atualiza o cache consolidado ao final.
   const cacheKey = buildCacheKey(path);
   const entry = requestCache.get(cacheKey);
 
@@ -212,6 +220,7 @@ export async function fetchAndCacheJson<T>(path: string): Promise<T> {
 }
 
 export async function prefetchJson(path: string): Promise<void> {
+  // Prefetch falha em silencio para nao interferir na navegacao principal.
   try {
     await fetchAndCacheJson(path);
   } catch {
@@ -220,6 +229,7 @@ export async function prefetchJson(path: string): Promise<void> {
 }
 
 export function clearJsonCache(path?: string): void {
+  // Permite invalidar um recurso especifico ou todo o cache do cliente.
   if (!path) {
     requestCache.clear();
     return;

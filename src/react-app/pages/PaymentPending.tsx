@@ -57,6 +57,7 @@ export default function PaymentPending() {
   } | null>(null);
 
   const clearScheduledPoll = useCallback(() => {
+    // Cancela o timer atual antes de reagendar qualquer consulta.
     if (pollTimerRef.current !== null) {
       window.clearTimeout(pollTimerRef.current);
       pollTimerRef.current = null;
@@ -64,6 +65,7 @@ export default function PaymentPending() {
   }, []);
 
   const scheduleNextPoll = useCallback(() => {
+    // Aplica backoff progressivo entre as verificacoes automaticas.
     clearScheduledPoll();
     const delayIndex = Math.min(pollAttemptRef.current, STATUS_BACKOFF_SCHEDULE_MS.length - 1);
     const delay = STATUS_BACKOFF_SCHEDULE_MS[delayIndex];
@@ -95,7 +97,7 @@ export default function PaymentPending() {
     try {
       await api("/api/logout");
     } catch {
-      // Ignore network issues and continue local reset.
+      // Ignora falhas de rede e segue com o reset local.
     } finally {
       logout();
       navigate(ROUTE_PATHS.login, { replace: true });
@@ -103,6 +105,7 @@ export default function PaymentPending() {
   };
 
   const verifyStatus = useCallback(async (options: VerifyStatusOptions = {}) => {
+    // Consulta o status atual da assinatura e decide o proximo passo.
     const silent = options.silent === true;
     if (options.resetBackoff) {
       pollAttemptRef.current = 0;
@@ -195,10 +198,12 @@ export default function PaymentPending() {
   }, [checkAuth, clearScheduledPoll, navigate, scheduleNextPoll]);
 
   useEffect(() => {
+    // Mantem a referencia atualizada para o polling reagendado.
     verifyStatusRef.current = verifyStatus;
   }, [verifyStatus]);
 
   useEffect(() => {
+    // Inicia o polling automatico apenas enquanto o pagamento estiver pendente.
     if (!user || user.plan_status !== "pending") {
       clearScheduledPoll();
       return;
@@ -217,6 +222,7 @@ export default function PaymentPending() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 px-4 py-8">
       <div className="mx-auto max-w-xl rounded-3xl border border-white/70 bg-white/85 p-6 shadow-xl backdrop-blur-xl md:p-8">
+        {/* Status principal e instrucoes do pagamento em andamento. */}
         <h1 className="text-2xl font-bold text-gray-900">Aguardando confirmacao do pagamento</h1>
         <p className="mt-2 text-sm text-gray-600">
           Seu checkout foi iniciado e o sistema esta consultando a Cakto com backoff para liberar o acesso assim que o pagamento for aprovado.
@@ -248,6 +254,7 @@ export default function PaymentPending() {
           </p>
         ) : null}
 
+        {/* Acoes manuais de verificacao, retorno e reabertura do checkout. */}
         <button
           type="button"
           onClick={() => {
@@ -295,6 +302,7 @@ export default function PaymentPending() {
         ) : null}
       </div>
 
+      {/* Popup de feedback para mudancas de status. */}
       <PaymentStatusPopup
         open={statusPopup !== null}
         title={statusPopup?.title ?? ""}

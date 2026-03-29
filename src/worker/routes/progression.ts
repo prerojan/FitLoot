@@ -88,7 +88,7 @@ export function registerProgressionRoutes(
 
       if (!progression) {
         return c.json(
-          { error: "Progress?o n?o encontrada", code: "PROGRESSION_NOT_FOUND" },
+          { error: "Progressão não encontrada", code: "PROGRESSION_NOT_FOUND" },
           404,
         );
       }
@@ -172,7 +172,7 @@ export function registerProgressionRoutes(
       ]);
 
       if (!progression || !attributes) {
-        return c.json({ error: "Dados do usuÃ¡rio nÃ£o encontrados" }, 404);
+        return c.json({ error: "Dados do usuário não encontrados" }, 404);
       }
 
       const result = await c.env.fitloot_db
@@ -484,7 +484,7 @@ export function registerProgressionRoutes(
 
     if (!stageData) return c.json({ error: "No next stage" }, 400);
     if (Number(progression?.level ?? 1) < Number(stageData.level_required ?? 1)) {
-      return c.json({ error: "NÃ­vel insuficiente para esta etapa" }, 400);
+      return c.json({ error: "Nível insuficiente para esta etapa" }, 400);
     }
 
     await c.env.fitloot_db
@@ -509,7 +509,7 @@ export function registerProgressionRoutes(
       const titleBySkill: Record<string, string> = {
         Handstand: "O Equilibrista",
         "Muscle Up": "Acima de Todos",
-        Planche: "ForÃ§a Gravitacional",
+        Planche: "Força Gravitacional",
         "Human Flag": "Bandeira Humana",
         "Front Lever": "Suspenso no Tempo",
       };
@@ -520,7 +520,7 @@ export function registerProgressionRoutes(
         await unlockAchievementIfNeeded(
           c.env.fitloot_db,
           user.id,
-          "Mestre do EquilÃ­brio",
+          "Mestre do Equilíbrio",
           6,
           6,
         );

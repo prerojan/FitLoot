@@ -21,6 +21,7 @@ type NoticeState = {
 };
 
 function isRegularActiveMission(mission: Mission): boolean {
+  // Considera apenas missoes regulares ainda ativas para detectar geracao nova.
   const status = mission.status ?? (mission.is_completed === 1 ? "completed" : "pending");
   const isAiSpecial = Number(mission.is_ai_special ?? 0) === 1 || mission.mission_origin === "ai";
 
@@ -34,6 +35,7 @@ export default function AIMissionGenerator({ onMissionsGenerated }: AIMissionGen
   const baselineMissionIdsRef = useRef<Set<number>>(new Set());
   const refreshTriggeredRef = useRef(false);
 
+  // Dispara a atualizacao do dashboard apenas uma vez por ciclo de geracao.
   const triggerDashboardRefresh = useCallback(() => {
     if (refreshTriggeredRef.current) return;
     refreshTriggeredRef.current = true;
@@ -41,6 +43,7 @@ export default function AIMissionGenerator({ onMissionsGenerated }: AIMissionGen
     onMissionsGenerated?.();
   }, [onMissionsGenerated]);
 
+  // Le o conjunto atual de missoes para comparar antes e depois da geracao.
   const readCurrentRegularMissionIds = useCallback(async (): Promise<Set<number>> => {
     try {
       const response = await api("/api/missions", { timeoutMs: 10_000 });
@@ -58,6 +61,7 @@ export default function AIMissionGenerator({ onMissionsGenerated }: AIMissionGen
     }
   }, []);
 
+  // Faz polling temporario enquanto o backend conclui a nova rodada de missoes.
   useEffect(() => {
     if (!loading) return;
 
@@ -93,6 +97,7 @@ export default function AIMissionGenerator({ onMissionsGenerated }: AIMissionGen
     };
   }, [loading, triggerDashboardRefresh]);
 
+  // Limpa automaticamente o aviso visual depois da confirmacao.
   useEffect(() => {
     if (!notice) return;
 
@@ -105,6 +110,7 @@ export default function AIMissionGenerator({ onMissionsGenerated }: AIMissionGen
     };
   }, [notice]);
 
+  // Aciona a geracao e converte o retorno em feedback simples para o usuario.
   const generateMissions = useCallback(async () => {
     try {
       setLoading(true);
@@ -152,6 +158,7 @@ export default function AIMissionGenerator({ onMissionsGenerated }: AIMissionGen
         boxShadow: "var(--fl-shadow-glass)",
       }}
     >
+      {/* Contexto e proposta do gerador de missao baseado em IA. */}
       <div className="mb-3 flex items-start gap-3">
         <div
           className="rounded-2xl border p-2"
@@ -170,6 +177,7 @@ export default function AIMissionGenerator({ onMissionsGenerated }: AIMissionGen
         </div>
       </div>
 
+      {/* Retorno positivo ou informativo apos a tentativa de geracao. */}
       {notice ? (
         <div
           className="mb-3 rounded-xl border px-3 py-2 text-sm"
@@ -194,6 +202,7 @@ export default function AIMissionGenerator({ onMissionsGenerated }: AIMissionGen
         </div>
       ) : null}
 
+      {/* Retorno de erro quando a geracao nao pode ser concluida. */}
       {error ? (
         <div
           className="mb-3 rounded-xl border px-3 py-2 text-sm"
@@ -210,6 +219,7 @@ export default function AIMissionGenerator({ onMissionsGenerated }: AIMissionGen
         </div>
       ) : null}
 
+      {/* Acao principal de disparo com feedback inline de carregamento. */}
       <button
         onClick={() => { void generateMissions(); }}
         disabled={loading}
@@ -233,6 +243,7 @@ export default function AIMissionGenerator({ onMissionsGenerated }: AIMissionGen
         )}
       </button>
 
+      {/* Resumo operacional do que esse gerador entrega ao usuario. */}
       <p className="mt-2 text-center text-xs" style={{ color: "var(--fl-color-text-muted)" }}>
         Gera até 8 diárias, 5 semanais e 5 mensais, com polling automático do dashboard a cada 2 segundos.
       </p>

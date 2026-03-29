@@ -29,11 +29,7 @@ import type {
   UserAuthRecord,
   UserPaymentMethod,
 } from "../core/types";
-
-type WithTransaction = <T>(
-  db: D1Database,
-  run: () => Promise<T>,
-) => Promise<T>;
+import type { WithTransaction } from "./contracts";
 
 type BillingRouteDeps = {
   authMiddleware: MiddlewareHandler<AppContext>;
@@ -97,7 +93,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-// Route registration for promo, checkout, subscription status, and payment webhooks.
+// Registra as rotas de promo, checkout, assinatura e webhooks de pagamento.
 export function registerBillingRoutes(
   app: Hono<AppContext>,
   {
@@ -120,6 +116,7 @@ export function registerBillingRoutes(
     withTransaction,
   }: BillingRouteDeps,
 ): void {
+  // Valida um cupom sem consumi-lo, para o frontend antecipar a resposta do checkout.
   app.post(
     "/api/promo/validate",
     zValidator("json", PromoCodeRequestSchema),
@@ -172,6 +169,7 @@ export function registerBillingRoutes(
     },
   );
 
+  // Aplica o cupom autenticado e devolve o usuário já atualizado.
   app.post(
     "/api/promo/apply",
     authMiddleware,
@@ -217,6 +215,7 @@ export function registerBillingRoutes(
     },
   );
 
+  // Inicia o checkout persistindo a tentativa com o método de pagamento escolhido.
   app.post(
     "/api/checkout/start",
     authMiddleware,
@@ -263,6 +262,7 @@ export function registerBillingRoutes(
     },
   );
 
+  // Resume o estado efetivo da assinatura e do plano atualmente ativo.
   app.get("/api/subscription/status", authMiddleware, async (c) => {
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
@@ -328,6 +328,7 @@ export function registerBillingRoutes(
     });
   });
 
+  // Normaliza o webhook da Cakto e delega o processamento assíncrono.
   async function handleCaktoWebhookRequest(
     c: import("hono").Context<AppContext>,
   ) {

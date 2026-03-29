@@ -97,6 +97,7 @@ function buildOnboardingCheckoutPayload(
   paymentMethod: CheckoutPaymentMethod,
   promoCode: string,
 ) {
+  // Reaproveita os dados do onboarding para iniciar o checkout final.
   const equipment = [...draft.selectedEquipment, draft.equipment].filter(Boolean).join(", ");
   const normalizedPromoCode = normalizePromoCode(promoCode);
 
@@ -247,6 +248,7 @@ export default function Checkout() {
   );
 
   useEffect(() => {
+    // Redireciona usuarios que ja possuem acesso ou pagamento pendente.
     if (!user) return;
     if (hasPlanAccess(user)) {
       navigate(ROUTE_PATHS.home, { replace: true });
@@ -267,7 +269,7 @@ export default function Checkout() {
     try {
       await api("/api/logout");
     } catch {
-      // Local cleanup still needs to happen.
+      // A limpeza local ainda precisa acontecer.
     } finally {
       clearOnboardingDraft();
       logout();
@@ -283,6 +285,7 @@ export default function Checkout() {
   };
 
   const validatePromoCode = async (rawCode = promoCode, options?: { force?: boolean }): Promise<boolean> => {
+    // Valida e memoriza o ultimo codigo promocional consultado.
     const normalizedCode = normalizePromoCode(rawCode);
 
     if (!normalizedCode) {
@@ -372,7 +375,7 @@ export default function Checkout() {
       try {
         checkoutWindow.opener = null;
       } catch {
-        // Browsers may block access to opener assignment.
+        // Alguns navegadores bloqueiam esse ajuste no opener.
       }
     }
 
@@ -462,6 +465,7 @@ export default function Checkout() {
 
   return (
     <div className="fl-auth-page fl-auth-funnel-page">
+      {/* Backdrop tematico do checkout. */}
       <div className="pointer-events-none absolute inset-0 -z-10 overflow-hidden">
         <div className="absolute -left-24 top-16 h-72 w-72 rounded-full bg-[var(--fl-auth-primary-soft)] blur-3xl" />
         <div className="absolute right-[-4rem] top-[18%] h-96 w-96 rounded-full bg-[var(--fl-auth-secondary-soft)] blur-3xl" />
@@ -474,6 +478,7 @@ export default function Checkout() {
         <main className="flex flex-1 items-center justify-center py-4 lg:py-8">
           <div className="w-full rounded-[2.4rem] border border-[var(--fl-auth-card-border)] bg-[var(--fl-auth-panel)] p-6 shadow-[0_32px_90px_-48px_rgba(16,185,129,0.45)] sm:p-8 lg:p-10">
             <div className="mx-auto max-w-5xl space-y-8">
+              {/* Introducao do plano e contexto do fluxo. */}
               <div className="space-y-5 text-center">
                 <span className="mx-auto inline-flex items-center gap-2 rounded-full border border-[var(--app-primary-color)]/35 bg-[rgba(var(--fl-color-accent-rgb),0.12)] px-4 py-2 text-xs font-semibold uppercase tracking-[0.26em] text-[var(--app-primary-color)]">
                   <Sparkles className="h-4 w-4" />
@@ -491,10 +496,12 @@ export default function Checkout() {
                 </div>
               </div>
 
+              {/* Seletor de ciclo de cobranca. */}
               <div className="flex justify-center">
                 <BillingCycleSwitch value={billingCycle} onChange={setBillingCycle} />
               </div>
 
+              {/* Grade de planos disponiveis. */}
               <div className="grid gap-5 lg:grid-cols-3">
                 {checkoutPlansInDisplayOrder.map((plan) => (
                   <PlanCard
@@ -507,6 +514,7 @@ export default function Checkout() {
                 ))}
               </div>
 
+              {/* Blocos de pagamento, promocao e resumo final. */}
               <section className="grid gap-6 lg:grid-cols-[1.05fr_0.95fr]">
                 <div className="rounded-[2rem] border border-[var(--fl-auth-card-border)] bg-[var(--fl-auth-surface)] p-6">
                   <div className="space-y-3">
@@ -548,6 +556,7 @@ export default function Checkout() {
                   </div>
 
                   <div className="mt-6 space-y-4">
+                    {/* Contexto do metodo e validacao do codigo promocional. */}
                     <div className="rounded-[1.5rem] border border-[var(--fl-auth-card-border)] bg-[rgba(var(--fl-color-accent-rgb),0.08)] p-5 text-sm text-[var(--fl-auth-muted)]">
                       {paymentMethod === "pix"
                         ? "O checkout Cakto sera aberto com o plano selecionado para concluir o PIX fora do app."
@@ -626,6 +635,7 @@ export default function Checkout() {
 
                 <div className="rounded-[2rem] border border-[var(--fl-auth-card-border)] bg-[var(--fl-auth-surface)] p-6">
                   <div className="space-y-4">
+                    {/* Resumo final antes de abrir o checkout externo. */}
                     <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[var(--fl-auth-subtle)]">
                       Resumo
                     </p>

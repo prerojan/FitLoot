@@ -14,6 +14,7 @@ const variants: Record<NonNullable<BadgeProps['variant']>, string> = {
 };
 
 export function Badge({ className, variant = 'default', ...props }: BadgeProps) {
+  // Badge generico com variantes tonais reaproveitadas pelo app.
   return (
     <span
       className={cn('inline-flex items-center rounded-full px-3 py-1 text-xs font-medium', variants[variant], className)}

@@ -20,6 +20,7 @@ export default function BottomNav({ active }: BottomNavProps) {
   return (
     <div className="fl-z-nav fixed bottom-4 left-1/2 -translate-x-1/2">
       <div className="fl-bottom-nav-shell px-2 py-2">
+        {/* Navegacao principal mobile entre os destinos fixos da app. */}
         <div className="flex items-center justify-between gap-1">
           {NAV_ITEMS.map(({ id, label, icon: Icon, path }) => {
             const isActive = active === id;

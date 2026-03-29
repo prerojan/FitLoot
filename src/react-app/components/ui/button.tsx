@@ -8,8 +8,10 @@ export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElemen
 
 const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
   ({ className, variant = 'default', size = 'default', type = 'button', ...props }, ref) => {
+    // Base compartilhada de interacao e acessibilidade dos botoes.
     const baseClasses = 'inline-flex touch-manipulation items-center justify-center gap-2 rounded-md font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50';
 
+    // Mapeia as variacoes visuais sem misturar logica de negocio ao primitive.
     const variantClasses: Record<NonNullable<ButtonProps['variant']>, string> = {
       default: 'bg-emerald-600 text-white hover:bg-emerald-700',
       primary: 'fl-btn-primary text-white',
@@ -26,6 +28,7 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
       icon: 'h-11 w-11',
     };
 
+    // Garante tipo padrao seguro e composicao consistente de classes.
     return (
       <button
         type={type}

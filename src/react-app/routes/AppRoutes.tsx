@@ -25,6 +25,7 @@ import {
 export default function AppRoutes() {
   return (
     <Routes>
+      {/* Entradas publicas. */}
       <Route path={ROUTE_PATHS.landing} element={<LandingPage />} />
       <Route path={ROUTE_PATHS.publicLanding} element={<LandingPage />} />
       <Route
@@ -37,6 +38,7 @@ export default function AppRoutes() {
       />
       <Route path={ROUTE_PATHS.app} element={<AppEntryRoute />} />
       <Route path={ROUTE_PATHS.onboarding} element={<Onboarding />} />
+      {/* Fluxo de pagamento acessivel para usuarios autenticados sem plano. */}
       <Route
         path={ROUTE_PATHS.payment}
         element={
@@ -61,6 +63,7 @@ export default function AppRoutes() {
           </ProtectedRoute>
         }
       />
+      {/* Area autenticada principal. */}
       <Route
         path={ROUTE_PATHS.home}
         element={
@@ -157,6 +160,7 @@ export default function AppRoutes() {
           </ProtectedRoute>
         }
       />
+      {/* Fallback final de navegacao. */}
       <Route path={ROUTE_PATHS.wildcard} element={<NotFoundPage />} />
     </Routes>
   );

@@ -58,6 +58,7 @@ const STEP_DISTANCE_KM = 0.0007;
 const DEFAULT_INTERVAL_MS = 60 * 1000;
 const NATIVE_REQUEST_TIMEOUT_MS = 1_500;
 
+// Constrói o snapshot único de passos usado pelo restante do frontend.
 function buildStepSnapshot(
   data: StepSnapshotInput,
   source: StepSource,
@@ -114,8 +115,8 @@ export function formatStepsSourceLabel(source: StepSource | "api" | null | undef
   if (source === "health-connect") return "Health Connect";
   if (source === "google-fit") return "Google Fit";
   if (source === "api") return "Servidor";
-  if (source === "unavailable") return "Nao disponivel";
-  return "Nao disponivel";
+  if (source === "unavailable") return "Não disponível";
+  return "Não disponível";
 }
 
 class StepsService {
@@ -124,6 +125,7 @@ class StepsService {
   private lastNativeSnapshot: StepSnapshot | null = null;
   private nativeRequestInFlight: Promise<StepSnapshot | null> | null = null;
 
+  // Decide a melhor fonte disponível e inicializa o tracking quando necessário.
   async startTracking(): Promise<StepSource> {
     const nativeStarted = this.startAndroidTrackingIfAvailable();
     if (nativeStarted) {
@@ -135,13 +137,14 @@ class StepsService {
 
     const fallbackSource = await this.resolveBestFallbackSource();
     if (!fallbackSource) {
-      throw new Error("Nenhuma fonte oficial de passos disponivel.");
+      throw new Error("Nenhuma fonte oficial de passos disponível.");
     }
 
     this.logSource(fallbackSource);
     return fallbackSource;
   }
 
+  // Lê passos priorizando Android, depois Health Connect e por fim Google Fit.
   async getCurrentSteps(options: { allowFallback?: boolean } = {}): Promise<StepSnapshot> {
     const { allowFallback = true } = options;
 
@@ -164,12 +167,13 @@ class StepsService {
     }
 
     if (!allowFallback) {
-      throw new Error("Nenhuma fonte oficial de passos disponivel.");
+      throw new Error("Nenhuma fonte oficial de passos disponível.");
     }
 
-    throw new Error("Nenhuma fonte oficial de passos disponivel.");
+    throw new Error("Nenhuma fonte oficial de passos disponível.");
   }
 
+  // Mantém um polling simples para consumidores reativos.
   subscribeToSteps(
     callback: (snapshot: StepSnapshot) => void,
     options: StepSubscriptionOptions = {},
@@ -210,6 +214,7 @@ class StepsService {
     };
   }
 
+  // Tenta ativar a coleta nativa do Android apenas uma vez por sessão.
   private startAndroidTrackingIfAvailable(): boolean {
     if (!isAndroidNativeAvailable()) return false;
 
@@ -231,6 +236,7 @@ class StepsService {
     return true;
   }
 
+  // Prioriza o snapshot rico nativo e cai para o contador simples quando necessário.
   private async getAndroidSnapshot(): Promise<StepSnapshot | null> {
     if (!this.startAndroidTrackingIfAvailable()) {
       return null;
@@ -276,6 +282,7 @@ class StepsService {
     }
   }
 
+  // Aguarda a resposta assíncrona da bridge nativa com timeout curto.
   private requestNativeMetrics(): Promise<StepSnapshot | null> {
     if (typeof window === "undefined") {
       return Promise.resolve(null);
@@ -333,6 +340,7 @@ class StepsService {
     return this.nativeRequestInFlight;
   }
 
+  // Converte o detalhe bruto do evento nativo em snapshot tipado.
   private parseNativeMetrics(detail: AndroidNativeMetricsDetail | null | undefined): StepSnapshot | null {
     if (!detail || typeof detail !== "object") {
       return null;
@@ -377,6 +385,7 @@ class StepsService {
     );
   }
 
+  // Lê o fallback oficial via Health Connect quando disponível.
   private async getHealthConnectSnapshot(): Promise<StepSnapshot | null> {
     const available = await healthConnectService.getAvailability().catch(() => false);
     if (!available) return null;
@@ -402,6 +411,7 @@ class StepsService {
     }
   }
 
+  // Lê o fallback oficial via Google Fit quando o usuário já está autenticado.
   private async getGoogleFitSnapshot(): Promise<StepSnapshot | null> {
     const available = await googleFitService.getAvailability().catch(() => false);
     if (!available) return null;
@@ -430,6 +440,7 @@ class StepsService {
     }
   }
 
+  // Resolve qual fonte oficial ainda pode sustentar o tracking atual.
   private async resolveBestFallbackSource(): Promise<StepSource | null> {
     const healthConnectSnapshot = await this.getHealthConnectSnapshot();
     if (healthConnectSnapshot) return healthConnectSnapshot.source;
@@ -440,6 +451,7 @@ class StepsService {
     return null;
   }
 
+  // Emite logs diagnósticos apenas quando a origem efetiva muda.
   private logSource(source: StepSource): void {
     if (this.lastLoggedSource === source) return;
     this.lastLoggedSource = source;

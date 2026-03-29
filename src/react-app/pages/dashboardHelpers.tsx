@@ -11,6 +11,7 @@ export function MaterialIcon({
   className?: string | undefined;
   filled?: boolean | undefined;
 }) {
+  // Encapsula o uso dos Material Symbols para manter a variacao visual consistente.
   return (
     <span
       aria-hidden="true"
@@ -35,6 +36,7 @@ export function SectionHeader({
   actionLabel?: string | undefined;
   onAction?: (() => void) | undefined;
 }) {
+  // Padrao de cabecalho reutilizado entre secoes do dashboard com CTA opcional.
   return (
     <div className="mb-2 sm:mb-4 flex flex-nowrap items-center justify-between gap-2 sm:gap-3 min-w-0">
       <h2 className="min-w-0 text-sm sm:text-base md:text-lg lg:text-xl font-bold truncate" style={{ color: "var(--fl-color-text)" }}>
@@ -69,6 +71,7 @@ export function MetricCard({
   footer?: ReactNode;
   loading: boolean;
 }) {
+  // Cartao-base das metricas principais com estado de carregamento embutido.
   return (
     <div className="flex min-h-[7.5rem] sm:min-h-[9rem] md:min-h-[10rem] flex-col justify-between rounded-[1.25rem] sm:rounded-[1.5rem] md:rounded-[1.75rem] p-2 sm:p-3 md:p-5 min-w-0" style={PANEL_STYLE}>
       <div className="flex items-start justify-between gap-2 md:gap-4 min-w-0">

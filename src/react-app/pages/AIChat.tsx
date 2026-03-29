@@ -48,6 +48,7 @@ function renderMessageContent(text: string) {
 function parseAIResponse(text: string): string {
   if (!text) return "";
 
+  // Normaliza markdown simples em texto amigavel para o balão do chat.
   return text
     .replace(/^\s*#{1,6}\s*/gm, "")
     .split("\n")
@@ -109,6 +110,7 @@ function HistoryModal({
         className="fl-theme-surface w-full max-w-xl rounded-[2rem] p-5 sm:p-6"
         onClick={(event) => event.stopPropagation()}
       >
+        {/* Cabecalho do historico persistido localmente. */}
         <div className="mb-5 flex items-center justify-between gap-3">
           <div>
             <h2 className="text-lg font-black tracking-tight sm:text-xl">
@@ -128,6 +130,7 @@ function HistoryModal({
           </button>
         </div>
 
+        {/* Lista de mensagens salvas na sessao atual. */}
         <div className="custom-scrollbar max-h-[60vh] space-y-3 overflow-y-auto pr-1">
           {messages.map((message, index) => (
             <div
@@ -160,6 +163,7 @@ function HistoryModal({
           ))}
         </div>
 
+        {/* Acoes do modal. */}
         <div className="mt-5 flex flex-col gap-3 sm:flex-row">
           <button
             type="button"
@@ -193,6 +197,7 @@ export default function AIChat() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    // Restaura a sessao local do usuario autenticado.
     if (!user) {
       navigate("/app");
       return;
@@ -223,6 +228,7 @@ export default function AIChat() {
   }, [navigate, user]);
 
   useEffect(() => {
+    // Persiste e mantem a conversa ancorada no final.
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     if (!user) return;
 
@@ -339,6 +345,7 @@ export default function AIChat() {
           paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 9.5rem)",
         }}
       >
+        {/* Topbar fixa do assistente. */}
         <div
           className="pointer-events-none fixed inset-x-0 top-0 z-20 px-3 pb-2 sm:px-4 lg:px-8"
           style={{ paddingTop: "calc(env(safe-area-inset-top, 0px) + 0.75rem)" }}
@@ -395,6 +402,7 @@ export default function AIChat() {
           </header>
         </div>
 
+        {/* Feed principal de mensagens. */}
         <main className="custom-scrollbar mx-auto flex min-h-0 w-full max-w-5xl flex-1 flex-col gap-4 overflow-y-auto px-3 py-4 pb-4 sm:px-4 sm:pb-4 lg:px-8 lg:py-6 lg:pb-5 min-w-0">
           {messages.map((message, index) =>
             message.role === "assistant" ? (
@@ -511,6 +519,7 @@ export default function AIChat() {
           <div ref={messagesEndRef} />
         </main>
 
+        {/* Composer fixo com atalhos iniciais. */}
         <div
           className="pointer-events-none fixed inset-x-0 bottom-0 z-20 px-3 pb-[calc(env(safe-area-inset-bottom,0px)+0.5rem)] pt-3 sm:px-4 lg:px-8 lg:pt-4"
         >
@@ -576,6 +585,7 @@ export default function AIChat() {
           </div>
         </div>
 
+        {/* Historico sob demanda. */}
         {historyOpen ? (
           <HistoryModal
             messages={messages}

@@ -11,6 +11,7 @@ const toneClasses: Record<NonNullable<CardProps['tone']>, string> = {
 };
 
 const Card = React.forwardRef<HTMLDivElement, CardProps>(
+  // Wrapper minimo para superfices reutilizaveis com dois tons padrao.
   ({ className, tone = 'default', ...props }, ref) => (
     <div ref={ref} className={cn(toneClasses[tone], className)} {...props} />
   )

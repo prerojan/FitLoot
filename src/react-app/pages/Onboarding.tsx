@@ -638,6 +638,7 @@ export default function Onboarding() {
   const emailReqRef = useRef(0);
   const planPreviewTimerRef = useRef<number | null>(null);
 
+  // Reaproveita o e-mail retornado do checkout quando o usuario volta ao onboarding.
   useEffect(() => {
     const email = sessionStorage.getItem("onboarding_email");
     if (email) {
@@ -646,12 +647,14 @@ export default function Onboarding() {
     }
   }, []);
 
+  // Redireciona usuarios ja autenticados para o primeiro destino valido da app.
   useEffect(() => {
     if (authLoading) return;
     if (!user) return;
     navigate(resolveAuthenticatedStartRoute(user), { replace: true });
   }, [authLoading, navigate, user]);
 
+  // Garante que o timer da tela de preview nao sobreviva ao desmontar da pagina.
   useEffect(() => {
     return () => {
       if (planPreviewTimerRef.current !== null) {
@@ -762,6 +765,7 @@ export default function Onboarding() {
     }
   }, []);
 
+  // Faz o debounce da disponibilidade do username durante a digitacao.
   useEffect(() => {
     const username = profile.username.trim();
     if (!username) {
@@ -774,6 +778,7 @@ export default function Onboarding() {
     return () => clearTimeout(timer);
   }, [profile.username, validateUsername]);
 
+  // Faz o debounce da disponibilidade do e-mail sem disparar validacao a cada tecla.
   useEffect(() => {
     const email = credentials.email.trim();
     if (!email) {
@@ -786,6 +791,7 @@ export default function Onboarding() {
     return () => clearTimeout(timer);
   }, [credentials.email, validateEmail]);
 
+  // Centraliza o avancar de etapa para limpar erros e reposicionar a tela.
   const advanceToStep = useCallback((nextStep: number) => {
     setStepError(null);
     setIsGeneratingPlanPreview(false);
@@ -795,6 +801,7 @@ export default function Onboarding() {
     }
   }, []);
 
+  // Simula o preparo do preview do plano antes de abrir a etapa final de resumo.
   const handleWeeklyFrequencyContinue = useCallback(() => {
     setStepError(null);
     setIsGeneratingPlanPreview(true);
@@ -831,6 +838,7 @@ export default function Onboarding() {
     advanceToStep(3);
   };
 
+  // Valida a capacidade base antes de liberar limitacoes e equipamentos.
   const handleCapacityContinue = () => {
     setStepError(null);
 
@@ -864,6 +872,7 @@ export default function Onboarding() {
     advanceToStep(8);
   };
 
+  // Cria a conta, autentica, salva o rascunho do onboarding e envia para o checkout.
   const handleAccountSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setStepError(null);
@@ -992,6 +1001,7 @@ export default function Onboarding() {
     }
   };
 
+  // Alterna limitacoes catalogadas sem perder observacoes livres do usuario.
   const toggleInjurySelection = (injuryId: string) => {
     setProfile((currentProfile) => {
       const { selected, notes } = splitCatalogValues(currentProfile.injuries, INJURY_OPTIONS);
@@ -1006,6 +1016,7 @@ export default function Onboarding() {
     });
   };
 
+  // Mantem notas livres sincronizadas com as limitacoes selecionadas.
   const setInjuryNotes = (notes: string) => {
     setProfile((currentProfile) => {
       const { selected } = splitCatalogValues(currentProfile.injuries, INJURY_OPTIONS);
@@ -1089,6 +1100,7 @@ export default function Onboarding() {
   let stepContent: ReactNode;
 
   if (currentStep === 0) {
+    // Etapa de abertura e enquadramento do produto.
     stepContent = (
       <section className="space-y-8">
         <StepIntro
@@ -1108,6 +1120,7 @@ export default function Onboarding() {
       </section>
     );
   } else if (currentStep === 1) {
+    // Etapa de objetivo principal do usuario.
     stepContent = (
       <section className="space-y-8">
         <StepIntro
@@ -1149,6 +1162,7 @@ export default function Onboarding() {
       </section>
     );
   } else if (currentStep === 2) {
+    // Etapa de nivel inicial para calibrar a progressao do plano.
     stepContent = (
       <section className="space-y-8">
         <StepIntro
@@ -1190,6 +1204,7 @@ export default function Onboarding() {
       </section>
     );
   } else if (currentStep === 3) {
+    // Etapa de contexto corporal basico antes das medidas.
     stepContent = (
       <section className="space-y-8">
         <StepIntro
@@ -1236,6 +1251,7 @@ export default function Onboarding() {
       </section>
     );
   } else if (currentStep === 4) {
+    // Etapa de idade com seletor vertical.
     stepContent = (
       <section className="space-y-8">
         <StepIntro
@@ -1267,6 +1283,7 @@ export default function Onboarding() {
       </section>
     );
   } else if (currentStep === 5) {
+    // Etapa de altura usando o mesmo padrao de picker.
     stepContent = (
       <section className="space-y-8">
         <StepIntro
@@ -1298,6 +1315,7 @@ export default function Onboarding() {
       </section>
     );
   } else if (currentStep === 6) {
+    // Etapa de peso antes da avaliacao de capacidade.
     stepContent = (
       <section className="space-y-8">
         <StepIntro
@@ -1329,6 +1347,7 @@ export default function Onboarding() {
       </section>
     );
   } else if (currentStep === 7) {
+    // Etapa de capacidade inicial por exercicio-chave.
     stepContent = (
       <section className="space-y-8">
         <StepIntro
@@ -1393,6 +1412,7 @@ export default function Onboarding() {
       </section>
     );
   } else if (currentStep === 8) {
+    // Etapa de limitacoes e restricoes que influenciam o plano.
     stepContent = (
       <section className="space-y-8">
         <div className="flex justify-end">
@@ -1448,6 +1468,7 @@ export default function Onboarding() {
       </section>
     );
   } else if (currentStep === 9) {
+    // Etapa de equipamentos disponiveis para montar o setup inicial.
     stepContent = (
       <section className="space-y-8">
         <div className="flex justify-end">
@@ -1515,6 +1536,7 @@ export default function Onboarding() {
     );
   } else if (currentStep === 10) {
     if (isGeneratingPlanPreview) {
+      // Estado de transicao enquanto o resumo personalizado fica pronto.
       stepContent = (
         <section className="space-y-8">
           <StepIntro
@@ -1541,6 +1563,7 @@ export default function Onboarding() {
         </section>
       );
     } else {
+      // Etapa de frequencia semanal que dispara o preview final.
       stepContent = (
         <section className="space-y-8">
           <StepIntro
@@ -1587,6 +1610,7 @@ export default function Onboarding() {
       );
     }
   } else if (currentStep === 11) {
+    // Etapa de preview do plano antes da criacao da conta.
     stepContent = (
       <section className="space-y-8">
         <StepIntro
@@ -1654,6 +1678,7 @@ export default function Onboarding() {
       </section>
     );
   } else {
+    // Etapa final de criacao de conta e envio para o pagamento.
     stepContent = (
       <section className="space-y-8">
         <StepIntro
@@ -1771,6 +1796,7 @@ export default function Onboarding() {
 
   return (
     <div className="fl-auth-page fl-auth-funnel-page">
+      {/* Fundo atmosferico que acompanha toda a jornada do onboarding. */}
       <div className="pointer-events-none absolute inset-0 -z-10 overflow-hidden">
         <div className="absolute -left-20 top-12 h-72 w-72 rounded-full bg-[var(--fl-auth-primary-soft)] blur-3xl" />
         <div className="absolute right-[-6rem] top-[14%] h-[28rem] w-[28rem] rounded-full bg-[var(--fl-auth-secondary-soft)] blur-[130px]" />
@@ -1782,24 +1808,27 @@ export default function Onboarding() {
 
         <main className="relative z-10 flex flex-1 flex-col items-center justify-start px-0 pb-12 pt-6">
           <div className="w-full max-w-[540px]">
+            {/* Mensagem global para erros de etapa sem quebrar o fluxo visual. */}
             {stepError ? (
               <div className="mb-6">
                 <StatusMessage message={stepError} />
               </div>
             ) : null}
 
+            {/* Conteudo da etapa atual com animacao de troca entre telas. */}
             <div key={currentStep} className="animate-authStepEnter">
               {stepContent}
             </div>
           </div>
         </main>
 
+        {/* Assinatura visual discreta do onboarding em telas maiores. */}
         <footer className="hidden justify-center pb-8 text-[10px] font-bold uppercase tracking-[0.34em] text-[var(--fl-onboarding-subtle)] md:flex">
           <div className="flex items-center gap-6">
             <span>Precisao</span>
-            <span>•</span>
+            <span>|</span>
             <span>Progresso</span>
-            <span>•</span>
+            <span>|</span>
             <span>Recompensas</span>
           </div>
         </footer>

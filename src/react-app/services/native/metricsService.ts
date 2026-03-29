@@ -47,6 +47,7 @@ const METRICS_API_PATH = "/api/metrics/today";
 const METRICS_UPDATE_API_PATH = "/api/metrics/update";
 const SUBSCRIPTION_INTERVAL_MS = 60 * 1000;
 
+// Normaliza timestamps e payloads mínimos antes de montar o estado consolidado.
 function toIsoString(value: string | null | undefined, fallback: string): string {
   return typeof value === "string" && value.trim().length > 0 ? value : fallback;
 }
@@ -136,7 +137,7 @@ function buildConsolidatedMetrics(
 }
 
 function getErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : "Falha ao carregar metricas.";
+  return error instanceof Error ? error.message : "Falha ao carregar métricas.";
 }
 
 function shouldSyncOfficialMetrics(stepSnapshot: StepSnapshot | null): boolean {
@@ -158,10 +159,12 @@ class MetricsService {
   private refreshInFlight: Promise<ConsolidatedMetrics> | null = null;
   private lastSyncedPayloadKey: string | null = null;
 
+  // Expõe o snapshot atual para hooks e consumidores diretos.
   getState(): MetricsStoreState {
     return this.state;
   }
 
+  // Liga a coleta quando surge o primeiro assinante e desliga no último unsubscribe.
   subscribe(listener: MetricsListener): () => void {
     this.listeners.add(listener);
     listener(this.state);
@@ -178,6 +181,7 @@ class MetricsService {
     };
   }
 
+  // Serializa refresh concorrente para evitar disputa entre API e sensores.
   async refresh(options: RefreshMetricsOptions = {}): Promise<ConsolidatedMetrics> {
     if (this.refreshInFlight) {
       return this.refreshInFlight;
@@ -191,6 +195,7 @@ class MetricsService {
     return refreshPromise;
   }
 
+  // Inicia tracking, hidrata cache e assina atualizações de passos.
   private start(): void {
     if (this.started) return;
     this.started = true;
@@ -231,12 +236,14 @@ class MetricsService {
     );
   }
 
+  // Encerra apenas a assinatura local mantida por este serviço.
   private stop(): void {
     this.unsubscribeSteps?.();
     this.unsubscribeSteps = null;
     this.started = false;
   }
 
+  // Consolida dados de servidor e nativos em um único snapshot.
   private async performRefresh(options: RefreshMetricsOptions): Promise<ConsolidatedMetrics> {
     const { forceApi = false, syncRemote = true } = options;
 
@@ -273,6 +280,7 @@ class MetricsService {
     return metrics;
   }
 
+  // Reaproveita cache local antes de buscar o resumo remoto novamente.
   private async loadApiMetrics(forceApi: boolean): Promise<DailyMetrics | null> {
     if (!forceApi) {
       const cached = readCachedJson<DailyMetrics>(METRICS_API_PATH);
@@ -294,6 +302,7 @@ class MetricsService {
     }
   }
 
+  // Sincroniza o backend apenas quando a fonte oficial mudou de fato.
   private async syncOfficialMetrics(
     stepSnapshot: StepSnapshot | null,
     consolidatedMetrics: ConsolidatedMetrics,
@@ -348,6 +357,7 @@ class MetricsService {
     }
   }
 
+  // Notifica todos os consumidores assinados com o novo estado consolidado.
   private setState(nextState: MetricsStoreState): void {
     this.state = nextState;
     this.listeners.forEach((listener) => listener(this.state));

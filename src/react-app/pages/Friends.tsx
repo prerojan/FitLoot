@@ -29,7 +29,7 @@ type Friend = {
   friend_xp: number;
   friend_streak: number;
   status?: string | undefined;
-  is_online?: boolean; // Baseado na última atividade (últimos 5 minutos)
+  is_online?: boolean; // Derivado da atividade recente.
 };
 
 type SearchResult = {
@@ -57,7 +57,7 @@ export default function Friends() {
   const navigate = useNavigate();
   const [friends, setFriends] = useState<Friend[]>([]);
   const [receivedRequests, setReceivedRequests] = useState<Friend[]>([]);
-  const [sentRequests] = useState<Friend[]>([]); // Mocked sent requests as API doesn't fully support separate sent list yet
+  const [sentRequests] = useState<Friend[]>([]); // Mantem a aba enquanto a API nao expoe enviados.
   const [activeTab, setActiveTab] = useState<TabType>('friends');
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
@@ -213,10 +213,10 @@ export default function Friends() {
     <AppPageShell bottomNavActive="arena" className="fl-theme-page">
       <div className="flex flex-1 min-h-0 flex-col overflow-hidden md:flex-row">
         
-        {/* Main Content */}
+        {/* Conteudo principal */}
         <div className="flex-1 overflow-y-auto custom-scrollbar p-4 pb-[98px] sm:p-6 md:p-8 min-w-0">
           
-          {/* Header */}
+          {/* Cabecalho */}
           <header className="mb-6 sm:mb-10 min-w-0">
             <h1 className="mb-1 sm:mb-2 text-2xl sm:text-4xl lg:text-5xl font-black leading-none tracking-[0.1em] sm:tracking-[0.2em] truncate" style={{ color: "var(--fl-color-text)" }}>Social Hub</h1>
             <p className="font-bold text-[9px] sm:text-[10px] uppercase tracking-[0.2em] sm:tracking-[0.3em] truncate">Sua rede de elite e alianças estratégicas.</p>
@@ -227,7 +227,7 @@ export default function Friends() {
             )}
           </header>
 
-          {/* Search Area */}
+          {/* Busca */}
           <div className="relative mb-8 sm:mb-10 group min-w-0">
             <div className="absolute inset-y-0 left-4 sm:left-5 flex items-center pointer-events-none">
               <Search className="w-4 h-4 sm:w-5 sm:h-5 transition-colors group-focus-within:text-primary" style={{ color: "var(--fl-color-text-muted)" }} />
@@ -250,7 +250,7 @@ export default function Friends() {
             </button>
           </div>
 
-          {/* Search Results */}
+          {/* Resultados da busca */}
           {searchResults.length > 0 && (
             <div className="mb-12 space-y-4 animate-in fade-in slide-in-from-top-4 duration-500">
               <div className="flex items-center justify-between mb-4">
@@ -281,7 +281,7 @@ export default function Friends() {
             </div>
           )}
 
-          {/* Tabs */}
+          {/* Abas */}
           <div className="mb-8 flex gap-8 overflow-x-auto border-b no-scrollbar" style={{ borderColor: "var(--fl-border-soft)" }}>
             <button 
               onClick={() => setActiveTab('friends')}
@@ -309,11 +309,11 @@ export default function Friends() {
             </button>
           </div>
 
-          {/* List Content */}
+          {/* Conteudo da aba */}
           <div className="space-y-12 pb-8">
             {activeTab === 'friends' && (
               <>
-                {/* Online Friends */}
+                {/* Amigos online */}
                 <section>
                   <div className="flex items-center gap-2 mb-6">
                     <div className="size-1.5 rounded-full animate-pulse shadow-[0_0_8px_var(--app-primary-color)]" style={{ backgroundColor: 'var(--app-primary-color)' }}></div>
@@ -371,7 +371,7 @@ export default function Friends() {
                   )}
                 </section>
 
-                {/* Offline Friends */}
+                {/* Amigos offline */}
                 <section>
                   <div className="flex items-center gap-2 mb-6">
                     <div className="size-1.5 rounded-full bg-slate-700"></div>
@@ -467,7 +467,7 @@ export default function Friends() {
 
         </div>
 
-        {/* Sidebar Info */}
+        {/* Painel lateral */}
         <aside className="hidden w-full flex-col gap-8 border-l p-6 md:w-[340px] md:p-8 lg:flex" style={{ borderColor: "var(--fl-border-soft)", backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 78%, transparent)" }}>
           
           <section className="space-y-6">

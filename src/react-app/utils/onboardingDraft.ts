@@ -19,14 +19,17 @@ export type OnboardingDraft = {
 };
 
 function isStringArray(value: unknown): value is string[] {
+  // Valida o unico campo composto persistido no draft.
   return Array.isArray(value) && value.every((item) => typeof item === "string");
 }
 
 export function saveOnboardingDraft(draft: OnboardingDraft): void {
+  // Persiste o estado final do onboarding para reuso no checkout.
   sessionStorage.setItem(ONBOARDING_DRAFT_STORAGE_KEY, JSON.stringify(draft));
 }
 
 export function loadOnboardingDraft(): OnboardingDraft | null {
+  // Reidrata o draft apenas se todos os campos esperados estiverem validos.
   const rawDraft = sessionStorage.getItem(ONBOARDING_DRAFT_STORAGE_KEY);
   if (!rawDraft) return null;
 
@@ -65,5 +68,6 @@ export function loadOnboardingDraft(): OnboardingDraft | null {
 }
 
 export function clearOnboardingDraft(): void {
+  // Limpa o draft quando o fluxo nao precisa mais ser reaproveitado.
   sessionStorage.removeItem(ONBOARDING_DRAFT_STORAGE_KEY);
 }

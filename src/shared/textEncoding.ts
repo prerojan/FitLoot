@@ -35,6 +35,42 @@ const MOJIBAKE_MARKERS = [
   "\u0192",
 ];
 
+function latin1ToUtf8(value: string): string {
+  const bytes = Uint8Array.from(
+    Array.from(value, (char) => char.charCodeAt(0) & 0xff),
+  );
+  return new TextDecoder("utf-8", {
+    fatal: false,
+    ignoreBOM: false,
+  }).decode(bytes);
+}
+
+function mojibakeScore(value: string): number {
+  return MOJIBAKE_MARKERS.reduce(
+    (total, marker) => total + value.split(marker).length - 1,
+    0,
+  );
+}
+
+function isBetterDecodedCandidate(
+  currentValue: string,
+  nextValue: string,
+): boolean {
+  if (nextValue.length === 0) return false;
+  if (nextValue === currentValue) return false;
+  if (nextValue.includes("\ufffd") && !currentValue.includes("\ufffd")) {
+    return false;
+  }
+
+  const currentScore = mojibakeScore(currentValue);
+  const nextScore = mojibakeScore(nextValue);
+
+  if (nextScore < currentScore) return true;
+  if (nextScore > currentScore) return false;
+
+  return nextValue !== currentValue;
+}
+
 export function repairKnownMojibake(value: string | null | undefined): string | null | undefined {
   if (typeof value !== "string" || value.length === 0) {
     return value;
@@ -58,6 +94,13 @@ export function repairKnownMojibake(value: string | null | undefined): string | 
     }
 
     repairedValue = nextValue;
+
+    if (MOJIBAKE_MARKERS.some((marker) => repairedValue.includes(marker))) {
+      const decodedCandidate = latin1ToUtf8(repairedValue);
+      if (isBetterDecodedCandidate(repairedValue, decodedCandidate)) {
+        repairedValue = decodedCandidate;
+      }
+    }
   }
 
   return repairedValue;

@@ -5,6 +5,7 @@ export type InputProps = React.InputHTMLAttributes<HTMLInputElement>;
 
 const Input = React.forwardRef<HTMLInputElement, InputProps>(
   ({ className, type = 'text', ...props }, ref) => {
+    // Primitive de input alinhado ao tema visual e aos estados de foco do app.
     return (
       <input
         type={type}

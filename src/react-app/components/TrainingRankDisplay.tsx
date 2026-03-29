@@ -44,6 +44,7 @@ export function TrainingRankDisplay({
   showDetails = false,
   compact = false,
 }: TrainingRankDisplayProps) {
+  // Renderiza o rank em formato compacto ou expandido a partir do snapshot atual.
   if (isLoading) {
     return (
       <div className="animate-pulse">
@@ -156,6 +157,7 @@ export function TrainingRankDisplay({
         </div>
       </div>
 
+      {/* Avisa quando o rank foi estimado com dados incompletos. */}
       {snapshot.fallbackUsed ? (
         <div
           className="mb-3 rounded border p-2"
@@ -176,6 +178,7 @@ export function TrainingRankDisplay({
         </div>
       ) : null}
 
+      {/* Detalha os fatores usados no calculo do rank atual. */}
       {showDetails ? (
         <div className="space-y-2">
           <h4 className="text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--fl-color-text)" }}>
@@ -257,6 +260,7 @@ export function useTrainingRank(
     skillStageScore?: number;
   }
 ) {
+  // Calcula o rank localmente sempre que progressao, skills ou benchmarks mudam.
   const [snapshot, setSnapshot] = React.useState<TrainingRankSnapshot | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);

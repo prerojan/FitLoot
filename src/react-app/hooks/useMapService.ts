@@ -1,6 +1,6 @@
 /**
- * Hook unificado para serviços de mapa
- * Usa OpenStreetMap como principal com Leaflet
+ * Hook unificado para mapa, geolocalização e rotas.
+ * Mantém o OpenStreetMap como fonte principal para a camada visual.
  */
 
 import { useState, useEffect, useCallback } from 'react';
@@ -46,7 +46,7 @@ export const useMapService = (options: UseMapServiceOptions = {}) => {
   const [userLocation, setUserLocation] = useState<[number, number] | null>(null);
   const [isInitialized, setIsInitialized] = useState<boolean>(false);
 
-  // Initialize map service
+  // Inicializa o serviço e, quando permitido, tenta buscar a posição atual.
   const initialize = useCallback(async (): Promise<void> => {
     try {
       setMapState(prev => ({ ...prev, isLoading: true, error: null }));
@@ -66,7 +66,7 @@ export const useMapService = (options: UseMapServiceOptions = {}) => {
     }
   }, [enableGeolocation]);
 
-  // Get current user location
+  // Resolve a localização atual usando a API nativa do navegador.
   const getCurrentLocation = useCallback(async (): Promise<[number, number] | null> => {
     if (!navigator.geolocation) {
       console.warn('Geolocalização não suportada pelo navegador');
@@ -100,7 +100,7 @@ export const useMapService = (options: UseMapServiceOptions = {}) => {
     }
   }, []);
 
-  // Search for location
+  // Executa geocoding textual e adapta a resposta para o formato consumido pela UI.
   const searchLocation = useCallback(async (query: string): Promise<SearchResult[]> => {
     if (!isInitialized) {
       throw new Error('Serviço de mapa não inicializado');
@@ -127,7 +127,7 @@ export const useMapService = (options: UseMapServiceOptions = {}) => {
     }
   }, [isInitialized]);
 
-  // Reverse geocoding
+  // Converte coordenadas em um endereço legível para exibição.
   const reverseGeocode = useCallback(async (coordinates: [number, number]): Promise<string> => {
     if (!isInitialized) {
       throw new Error('Serviço de mapa não inicializado');
@@ -147,7 +147,7 @@ export const useMapService = (options: UseMapServiceOptions = {}) => {
     }
   }, [isInitialized]);
 
-  // Add marker to map
+  // Mantém a coleção local de marcadores exibidos no mapa.
   const addMarker = useCallback((marker: OSMMarker): void => {
     setMapState(prev => ({
       ...prev,
@@ -155,7 +155,6 @@ export const useMapService = (options: UseMapServiceOptions = {}) => {
     }));
   }, []);
 
-  // Remove marker from map
   const removeMarker = useCallback((markerId: string): void => {
     setMapState(prev => ({
       ...prev,
@@ -163,12 +162,11 @@ export const useMapService = (options: UseMapServiceOptions = {}) => {
     }));
   }, []);
 
-  // Clear all markers
   const clearMarkers = useCallback((): void => {
     setMapState(prev => ({ ...prev, markers: [] }));
   }, []);
 
-  // Update map center and zoom
+  // Atualiza o viewport sem recriar o restante do estado.
   const updateView = useCallback((center: [number, number], zoom?: number): void => {
     setMapState(prev => ({
       ...prev,
@@ -177,7 +175,7 @@ export const useMapService = (options: UseMapServiceOptions = {}) => {
     }));
   }, []);
 
-  // Get directions between two points
+  // Busca rota entre dois pontos e normaliza a resposta para o app.
   const getDirections = useCallback(async (
     start: [number, number],
     end: [number, number],
@@ -193,8 +191,7 @@ export const useMapService = (options: UseMapServiceOptions = {}) => {
 
     try {
       const directions = await openStreetMapService.getDirections(start, end, profile);
-      
-      // Mapear a resposta para o formato esperado
+
       return {
         distance: directions.distance,
         duration: directions.duration,
@@ -207,7 +204,7 @@ export const useMapService = (options: UseMapServiceOptions = {}) => {
     }
   }, [isInitialized]);
 
-  // Search nearby places
+  // Filtra resultados próximos a um centro já conhecido.
   const searchNearby = useCallback(async (
     center: [number, number],
     query: string,
@@ -238,7 +235,7 @@ export const useMapService = (options: UseMapServiceOptions = {}) => {
     }
   }, [isInitialized]);
 
-  // Get static map image URL
+  // Gera uma URL estática para previews e fallbacks visuais.
   const getStaticMapUrl = useCallback((
     center: [number, number],
     zoom: number,
@@ -253,7 +250,7 @@ export const useMapService = (options: UseMapServiceOptions = {}) => {
     return openStreetMapService.getStaticImage(center, zoom, width, height, markers);
   }, [isInitialized]);
 
-  // Calculate distance between two points
+  // Reexpõe o cálculo de distância para consumidores do hook.
   const calculateDistance = useCallback((
     point1: [number, number],
     point2: [number, number]
@@ -261,7 +258,7 @@ export const useMapService = (options: UseMapServiceOptions = {}) => {
     return openStreetMapService.calculateDistance(point1, point2);
   }, []);
 
-  // Format address from Nominatim result
+  // Consolida o endereço do Nominatim em uma string amigável.
   const formatAddress = (address: NominatimResult["address"] | undefined): string => {
     if (!address) return 'Endereço desconhecido';
     const parts: string[] = [];
@@ -281,7 +278,7 @@ export const useMapService = (options: UseMapServiceOptions = {}) => {
     return parts.join(', ') || 'Endereço desconhecido';
   };
 
-  // Get map configuration for Leaflet
+  // Repassa a configuração base do mapa para componentes visuais.
   const getMapConfig = useCallback((): OSMConfig => {
     if (!isInitialized) {
       throw new Error('Serviço de mapa não inicializado');
@@ -289,23 +286,23 @@ export const useMapService = (options: UseMapServiceOptions = {}) => {
     return openStreetMapService.getConfig();
   }, [isInitialized]);
 
-  // Get tile URL for Leaflet
+  // Expõe a URL de tiles usada pela camada Leaflet.
   const getTileUrl = useCallback((): string => {
     return openStreetMapService.getTileUrl();
   }, []);
 
-  // Initialize on mount
+  // Inicializa o serviço assim que o hook entra em uso.
   useEffect(() => {
     initialize();
   }, [initialize]);
 
   return {
-    // State
+    // Estado exposto
     mapState,
     userLocation,
     isInitialized,
 
-    // Actions
+    // Ações de mapa
     initialize,
     getCurrentLocation,
     searchLocation,
@@ -319,11 +316,11 @@ export const useMapService = (options: UseMapServiceOptions = {}) => {
     getStaticMapUrl,
     calculateDistance,
 
-    // Configuration
+    // Configuração visual
     getMapConfig,
     getTileUrl,
 
-    // Computed values
+    // Derivados prontos para consumo
     hasUserLocation: !!userLocation,
     markerCount: mapState.markers.length,
   };

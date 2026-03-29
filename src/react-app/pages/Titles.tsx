@@ -35,6 +35,7 @@ const RARITY_CONFIG: Record<NormalizedRarity, { color: string; label: string }> 
 };
 
 function sanitizeTitlesForDisplay(titles: TitleWithUnlock[]): TitleWithUnlock[] {
+  // Corrige textos conhecidos antes da exibicao no frontend.
   return titles.map((title) => ({
     ...title,
     name: repairKnownMojibakeString(title.name),
@@ -64,6 +65,7 @@ function formatRarityLabel(value: string | null | undefined) {
 }
 
 function formatUnlockCondition(title: TitleWithUnlock) {
+  // Traduz o unlock_condition tecnico em texto amigavel para a galeria.
   const condition = title.unlock_condition?.trim();
   if (!condition) return title.description ?? "Disponível ao cumprir os requisitos do título.";
 
@@ -205,6 +207,7 @@ export default function Titles() {
   );
 
   const equipTitle = useCallback(async (title: TitleWithUnlock) => {
+    // Marca o titulo como ativo na conta do usuario.
     setEquipPendingId(title.id);
     setStatus(null);
 
@@ -247,6 +250,7 @@ export default function Titles() {
     >
       <main className="mx-auto w-full max-w-[72rem] px-4 pb-[98px] pt-4 sm:px-6 md:px-8 md:pt-8">
         <div className="space-y-8 sm:space-y-10">
+          {/* Volta, contadores e status geral da colecao. */}
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <button
               type="button"
@@ -275,6 +279,7 @@ export default function Titles() {
             </div>
           </div>
 
+          {/* Hero da colecao e resumo dos titulos. */}
           <section className="relative overflow-hidden rounded-[2rem] border p-6 sm:p-8 md:p-10" style={{
             borderColor: "color-mix(in srgb, var(--app-primary-color) 16%, var(--fl-border-soft))",
             backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 94%, transparent)",
@@ -322,6 +327,7 @@ export default function Titles() {
             </div>
           </section>
 
+          {/* Bloco do titulo atualmente equipado. */}
           <section className="space-y-4">
             <div className="flex items-center gap-3">
               <CheckCircle2 className="h-5 w-5" style={{ color: "var(--app-primary-color)" }} />
@@ -344,6 +350,7 @@ export default function Titles() {
             )}
           </section>
 
+          {/* Filtros, status e galeria completa de titulos. */}
           <section className="space-y-5">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
               <div>
@@ -455,6 +462,7 @@ function ActiveTitleCard({ title }: { title: TitleWithUnlock }) {
   const tone = getAchievementShowcaseStyle(title.rarity);
 
   return (
+    // Destaque do titulo atualmente visivel no perfil.
     <div className="relative overflow-hidden rounded-[2rem] border p-6 sm:p-8" style={{
       borderColor: tone.borderColor,
       backgroundColor: tone.backgroundColor,
@@ -534,6 +542,7 @@ function TitleCard({
   const tone = getAchievementShowcaseStyle(title.rarity);
 
   return (
+    // Card individual com estado bloqueado, desbloqueado ou equipado.
     <article
       className={`relative flex h-full flex-col overflow-hidden rounded-[2rem] border p-5 sm:p-6 ${unlocked ? "transition-transform duration-300 hover:-translate-y-1" : "opacity-80 grayscale-[0.18]"}`}
       style={{

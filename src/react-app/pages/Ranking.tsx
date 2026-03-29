@@ -27,6 +27,7 @@ type RankingEntry = {
 };
 
 function normalizeRankingEntry(player: RankingPlayer | FriendRankingRow): RankingEntry {
+  // Unifica o formato do ranking global e do ranking entre amigos.
   if ("friend_username" in player) {
     return {
       username: player.friend_username,
@@ -55,6 +56,7 @@ export default function Ranking() {
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<RankingMode>("global");
 
+  // Carrega ranking e perfil em paralelo, reaproveitando cache quando disponivel.
   const loadRanking = useCallback(async (currentMode: RankingMode) => {
     setError(null);
 
@@ -98,6 +100,7 @@ export default function Ranking() {
     }
   }, [navigate]);
 
+  // Recarrega o ranking sempre que o modo ou a sessao mudam.
   useEffect(() => {
     if (!user) {
       navigate("/app");
@@ -130,6 +133,7 @@ export default function Ranking() {
   return (
     <AppPageShell bottomNavActive="ranking" className="fl-theme-page">
       <div className="flex flex-1 flex-col overflow-y-auto p-4 pb-[98px] sm:p-6 lg:p-8 min-w-0">
+        {/* Cabecalho contextual do ranking atual. */}
         <header className="mb-4 sm:mb-8 flex flex-wrap items-center justify-between gap-3 min-w-0">
           <div className="min-w-0">
             <h1 className="mb-1 text-xl sm:text-2xl font-bold uppercase tracking-[0.15em] sm:tracking-[0.2em] truncate">
@@ -154,6 +158,7 @@ export default function Ranking() {
           </div>
         ) : null}
 
+        {/* Alterna entre o ranking global e a visao apenas de amigos. */}
         <div className="mb-6 sm:mb-10">
           <div className="fl-theme-surface-soft mx-auto flex max-w-[320px] rounded-2xl p-1.5 min-w-0">
             <button
@@ -175,6 +180,7 @@ export default function Ranking() {
           </div>
         </div>
 
+        {/* Resume a posicao atual do usuario para orientar a leitura da tabela. */}
         {currentUserEntry ? (
           <section className="fl-theme-surface mb-6 sm:mb-10 rounded-[1.5rem] sm:rounded-[2rem] p-4 sm:p-6 min-w-0">
             <div className="mb-4 sm:mb-5 flex items-center gap-3">
@@ -210,12 +216,14 @@ export default function Ranking() {
           </section>
         ) : null}
 
+        {/* Destaque do podium com os tres melhores colocados. */}
         <div className="mx-auto mb-16 sm:mb-24 flex w-full max-w-[720px] items-end justify-center gap-1.5 sm:gap-6 px-1 sm:px-4 pt-10 sm:pt-14 min-w-0">
           <PodiumCard entry={top3[1]} position={2} highlightColor="#64748b" />
           <PodiumCard entry={top3[0]} position={1} highlightColor="var(--app-primary-color)" featured />
           <PodiumCard entry={top3[2]} position={3} highlightColor="#92400e" />
         </div>
 
+        {/* Lista completa dos demais competidores e fallback vazio. */}
         <div className="mx-auto mb-8 flex w-full max-w-[800px] flex-col gap-4">
           <div className="flex items-center px-4 py-2 text-[10px] font-bold uppercase tracking-[0.3em] fl-theme-text-muted sm:px-6">
             <span className="w-8 sm:w-10">POS</span>
@@ -298,6 +306,7 @@ function PodiumCard({
   highlightColor: string;
   featured?: boolean;
 }) {
+  // Renderiza a versao compacta de cada faixa do podium.
   if (!entry) return <div className="flex-1" />;
 
   return (
