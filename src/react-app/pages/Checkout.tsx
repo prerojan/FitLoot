@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import BillingCycleSwitch from "@/react-app/components/BillingCycleSwitch";
 import LoadingBall from "@/react-app/components/LoadingBall";
+import PaymentStatusPopup from "@/react-app/components/PaymentStatusPopup";
 import { AuthThemeHeader } from "@/react-app/theme/AuthThemeHeader";
 import { Input } from "@/react-app/components/ui/input";
 import { ROUTE_PATHS } from "@/react-app/auth/constants";
@@ -217,6 +218,7 @@ export default function Checkout() {
   const navigate = useNavigate();
   const { user, checkAuth, logout } = useAuth();
   const { themeMode, toggleThemeMode } = useTheme();
+  const vipRedirectTimerRef = useRef<number | null>(null);
   const requiresOnboardingCheckout = user ? !hasStartedCheckoutFlow(user) && user.onboarding_completed !== 1 : false;
   const [planId, setPlanId] = useState<CheckoutPlanId>(
     requiresOnboardingCheckout
@@ -232,6 +234,12 @@ export default function Checkout() {
   const [promoValidationResult, setPromoValidationResult] = useState<PromoValidationResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [vipActivationInProgress, setVipActivationInProgress] = useState(false);
+  const [statusPopup, setStatusPopup] = useState<{
+    title: string;
+    message: string;
+    tone: "success" | "warning" | "error";
+  } | null>(null);
   const [onboardingDraft, setOnboardingDraft] = useState<OnboardingDraft | null>(() => loadOnboardingDraft());
   const promoValidationRequestIdRef = useRef(0);
   const promoValidationCodeRef = useRef("");
@@ -250,6 +258,7 @@ export default function Checkout() {
   useEffect(() => {
     // Redireciona usuarios que ja possuem acesso ou pagamento pendente.
     if (!user) return;
+    if (vipActivationInProgress) return;
     if (hasPlanAccess(user)) {
       clearOnboardingDraft();
       setOnboardingDraft(null);
@@ -259,7 +268,15 @@ export default function Checkout() {
     if (user.plan_status === "pending") {
       navigate(ROUTE_PATHS.paymentPending, { replace: true });
     }
-  }, [navigate, user]);
+  }, [navigate, user, vipActivationInProgress]);
+
+  useEffect(() => {
+    return () => {
+      if (vipRedirectTimerRef.current !== null) {
+        window.clearTimeout(vipRedirectTimerRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (!requiresOnboardingCheckout) return;
@@ -404,14 +421,6 @@ export default function Checkout() {
     }
 
     const normalizedPromoCode = normalizePromoCode(promoCode);
-    const checkoutWindow = window.open("about:blank", "_blank");
-    if (checkoutWindow) {
-      try {
-        checkoutWindow.opener = null;
-      } catch {
-        // Alguns navegadores bloqueiam esse ajuste no opener.
-      }
-    }
 
     if (normalizedPromoCode) {
       const promoIsValid = await validatePromoCode(normalizedPromoCode, {
@@ -419,9 +428,6 @@ export default function Checkout() {
       });
 
       if (!promoIsValid) {
-        if (checkoutWindow && !checkoutWindow.closed) {
-          checkoutWindow.close();
-        }
         return;
       }
     }
@@ -443,30 +449,43 @@ export default function Checkout() {
       });
 
       if (response.status === 401 || response.status === 403) {
-        if (checkoutWindow && !checkoutWindow.closed) {
-          checkoutWindow.close();
-        }
         navigate(ROUTE_PATHS.app, { replace: true });
         return;
       }
 
       const payload = (await response.json().catch(() => null)) as CheckoutFlowResponse | null;
       if (!response.ok) {
-        if (checkoutWindow && !checkoutWindow.closed) {
-          checkoutWindow.close();
-        }
         setError(payload?.error ?? "Nao foi possivel iniciar o checkout.");
+        return;
+      }
+
+      if (payload?.checkout_status === "vip_active") {
+        clearOnboardingDraft();
+        setOnboardingDraft(null);
+        setVipActivationInProgress(true);
+        setStatusPopup({
+          title: "Ativacao VIP iniciada",
+          message:
+            payload?.message ??
+            "Seu codigo VIP foi validado. Redirecionando sua conta para o dashboard...",
+          tone: "success",
+        });
+        await checkAuth();
+        if (vipRedirectTimerRef.current !== null) {
+          window.clearTimeout(vipRedirectTimerRef.current);
+        }
+        vipRedirectTimerRef.current = window.setTimeout(() => {
+          setVipActivationInProgress(false);
+          navigate(ROUTE_PATHS.dashboard, { replace: true });
+        }, 1500);
         return;
       }
 
       await checkAuth();
 
-      if (payload?.checkout_status === "vip_active" || payload?.plan_status === "active") {
+      if (payload?.plan_status === "active") {
         clearOnboardingDraft();
         setOnboardingDraft(null);
-        if (checkoutWindow && !checkoutWindow.closed) {
-          checkoutWindow.close();
-        }
         navigate(ROUTE_PATHS.home, { replace: true });
         return;
       }
@@ -475,20 +494,13 @@ export default function Checkout() {
         (typeof payload?.checkout_url === "string" && payload.checkout_url) ||
         selectedPlan.checkoutUrl;
 
-      if (checkoutUrl) {
-        if (checkoutWindow && !checkoutWindow.closed) {
-          checkoutWindow.location.replace(checkoutUrl);
-        } else {
-          window.location.assign(checkoutUrl);
-          return;
-        }
+      if (!checkoutUrl) {
+        setError("Nao foi possivel obter a URL de checkout da Cakto.");
+        return;
       }
 
-      navigate(ROUTE_PATHS.paymentPending, { replace: true });
+      window.location.assign(checkoutUrl);
     } catch {
-      if (checkoutWindow && !checkoutWindow.closed) {
-        checkoutWindow.close();
-      }
       setError("Erro de conexao ao iniciar o checkout.");
     } finally {
       setLoading(false);
@@ -757,6 +769,13 @@ export default function Checkout() {
           </div>
         </main>
       </div>
+      <PaymentStatusPopup
+        open={statusPopup !== null}
+        title={statusPopup?.title ?? ""}
+        message={statusPopup?.message ?? ""}
+        tone={statusPopup?.tone ?? "warning"}
+        onClose={() => setStatusPopup(null)}
+      />
     </div>
   );
 }

@@ -9,13 +9,20 @@ import {
   databaseNotInitializedResponse,
   hasCoreSchema,
   hasTableColumn,
+  purgeUserAccountData,
 } from "../core/database";
-import type { AppContext } from "../core/types";
+import type { AppContext, UserAuthRecord } from "../core/types";
+import { getUserAuthRecordById, hasPlanAccess } from "../services/userPlanAccess";
 
 type AuthRouteDeps = {
   generateCookie: (sessionId: string, requestUrl: string) => string;
   hashPassword: (password: string, salt: string) => Promise<string>;
 };
+
+function isReusableIncompleteAccount(user: UserAuthRecord | null): boolean {
+  if (!user) return false;
+  return Number(user.onboarding_completed) !== 1 && !hasPlanAccess(user.plan_id, user.plan_status);
+}
 
 // Registers the authentication surface responsible for account creation and session login.
 export function registerAuthRoutes(
@@ -32,14 +39,20 @@ export function registerAuthRoutes(
 
       try {
         const data = c.req.valid("json");
+        const normalizedEmail = data.email.trim().toLowerCase();
 
         const existing = await c.env.fitloot_db
-          .prepare("SELECT id FROM users WHERE email = ?")
-          .bind(data.email)
-          .first();
+          .prepare("SELECT id FROM users WHERE lower(email) = ?")
+          .bind(normalizedEmail)
+          .first<{ id: string }>();
 
-        if (existing) {
-          return c.json({ error: "E-mail já cadastrado" }, 409);
+        if (existing?.id) {
+          const existingUser = await getUserAuthRecordById(c.env.fitloot_db, existing.id);
+          if (!isReusableIncompleteAccount(existingUser)) {
+            return c.json({ error: "E-mail já cadastrado" }, 409);
+          }
+
+          await purgeUserAccountData(c.env.fitloot_db, existing.id);
         }
 
         const userId = crypto.randomUUID();
@@ -50,7 +63,7 @@ export function registerAuthRoutes(
           .prepare(
             "INSERT INTO users (id, email, name, password_hash, password_salt) VALUES (?, ?, ?, ?, ?)",
           )
-          .bind(userId, data.email, data.name ?? "", passwordHash, salt)
+          .bind(userId, normalizedEmail, data.name ?? "", passwordHash, salt)
           .run();
 
         const [
@@ -128,8 +141,18 @@ export function registerAuthRoutes(
           : Promise.resolve(null),
       ]);
 
+      let emailAvailable: boolean | null = null;
+      if (emailQuery) {
+        if (!emailExisting?.id) {
+          emailAvailable = true;
+        } else {
+          const existingUser = await getUserAuthRecordById(c.env.fitloot_db, emailExisting.id);
+          emailAvailable = isReusableIncompleteAccount(existingUser);
+        }
+      }
+
       return c.json({
-        emailAvailable: emailQuery ? !emailExisting : null,
+        emailAvailable,
         usernameAvailable: usernameQuery ? !usernameExisting : null,
       });
     } catch (error) {
