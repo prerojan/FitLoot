@@ -16,6 +16,7 @@ import {
   createInvalidPromoCodeError,
   getErrorMessage,
 } from "../core/errors";
+import { purgeIncompleteOnboardingData } from "../core/database";
 import type { PromoCodeEffect } from "../../shared/types";
 import type {
   AppContext,
@@ -818,7 +819,12 @@ export async function startCheckoutForUser(
 type CaktoUserSyncMode = "apply" | "preserve-active" | "keep-current";
 
 // Webhook helpers translate external payment events back into the local subscription and plan-access model.
-function resolveCaktoSyncMode(eventType: string): { status: PlanStatus; syncMode: CaktoUserSyncMode; paymentMethod: UserPaymentMethod | null } {
+function resolveCaktoSyncMode(
+  eventType: string,
+  options?: { isIncompleteOnboarding?: boolean | undefined },
+): { status: PlanStatus; syncMode: CaktoUserSyncMode; paymentMethod: UserPaymentMethod | null } {
+  const isIncompleteOnboarding = options?.isIncompleteOnboarding === true;
+
   switch (eventType) {
     case "purchase_approved":
     case "subscription_created":
@@ -827,7 +833,11 @@ function resolveCaktoSyncMode(eventType: string): { status: PlanStatus; syncMode
     case "subscription_canceled":
       return { status: "cancelled", syncMode: "apply", paymentMethod: null };
     case "purchase_refused":
-      return { status: "failed", syncMode: "keep-current", paymentMethod: null };
+      return {
+        status: "failed",
+        syncMode: isIncompleteOnboarding ? "apply" : "keep-current",
+        paymentMethod: null,
+      };
     case "checkout_abandonment":
       return { status: "pending", syncMode: "keep-current", paymentMethod: null };
     default:
@@ -1012,6 +1022,8 @@ export async function processCaktoWebhook(
       return;
     }
 
+    const currentUser = await getUserAuthRecordById(c.env.fitloot_db, userId);
+    const isIncompleteOnboarding = Number(currentUser?.onboarding_completed ?? 0) !== 1;
     const anchorId = await resolveSubscriptionAnchorId(c.env.fitloot_db, snapshot, userId);
     const latestSubscription = await getLatestSubscriptionByUser(c.env.fitloot_db, userId);
     const effectivePlanId =
@@ -1021,7 +1033,9 @@ export async function processCaktoWebhook(
       snapshot.amountCents ??
       (latestSubscription ? Number(latestSubscription.amount) : null) ??
       (effectivePlanId ? resolveCheckoutAmount(effectivePlanId) : null);
-    const syncRule = resolveCaktoSyncMode(eventType);
+    const syncRule = resolveCaktoSyncMode(eventType, {
+      isIncompleteOnboarding,
+    });
     const paymentMethod =
       syncRule.paymentMethod ??
       (snapshot.paymentMethod !== "none" ? snapshot.paymentMethod : normalizeUserPaymentMethod(latestSubscription?.payment_method));
@@ -1079,8 +1093,15 @@ export async function processCaktoWebhook(
     await syncUserPlanFromSubscription(c.env.fitloot_db, subscription, {
       keepCurrentState: syncRule.syncMode === "keep-current",
       preserveActiveAccess: syncRule.syncMode === "preserve-active",
-      markOnboardingCompleted: true,
+      markOnboardingCompleted: syncRule.status === "active",
     });
+
+    if (
+      isIncompleteOnboarding &&
+      (syncRule.status === "failed" || syncRule.status === "cancelled" || syncRule.status === "expired")
+    ) {
+      await purgeIncompleteOnboardingData(c.env.fitloot_db, userId);
+    }
 
     await updateCaktoWebhookEventStatus(c.env.fitloot_db, eventId, {
       status: "processed",

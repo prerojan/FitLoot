@@ -232,7 +232,7 @@ export default function Checkout() {
   const [promoValidationResult, setPromoValidationResult] = useState<PromoValidationResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const onboardingDraft = useMemo(() => loadOnboardingDraft(), []);
+  const [onboardingDraft, setOnboardingDraft] = useState<OnboardingDraft | null>(() => loadOnboardingDraft());
   const promoValidationRequestIdRef = useRef(0);
   const promoValidationCodeRef = useRef("");
   const promoValidationPromiseRef = useRef<Promise<boolean> | null>(null);
@@ -251,6 +251,8 @@ export default function Checkout() {
     // Redireciona usuarios que ja possuem acesso ou pagamento pendente.
     if (!user) return;
     if (hasPlanAccess(user)) {
+      clearOnboardingDraft();
+      setOnboardingDraft(null);
       navigate(ROUTE_PATHS.home, { replace: true });
       return;
     }
@@ -260,9 +262,35 @@ export default function Checkout() {
   }, [navigate, user]);
 
   useEffect(() => {
-    if (requiresOnboardingCheckout && !onboardingDraft) {
+    if (!requiresOnboardingCheckout) return;
+
+    const refreshDraft = () => {
+      setOnboardingDraft(loadOnboardingDraft());
+    };
+
+    refreshDraft();
+    window.addEventListener("focus", refreshDraft);
+    window.addEventListener("storage", refreshDraft);
+
+    return () => {
+      window.removeEventListener("focus", refreshDraft);
+      window.removeEventListener("storage", refreshDraft);
+    };
+  }, [requiresOnboardingCheckout]);
+
+  useEffect(() => {
+    if (!requiresOnboardingCheckout) return;
+
+    if (!onboardingDraft) {
       setError("Nao encontramos os dados do onboarding. Saia e recomece a criacao da conta.");
+      return;
     }
+
+    setError((currentError) =>
+      currentError === "Nao encontramos os dados do onboarding. Saia e recomece a criacao da conta."
+        ? null
+        : currentError,
+    );
   }, [onboardingDraft, requiresOnboardingCheckout]);
 
   const handleLogoutAndReset = async () => {
@@ -272,6 +300,7 @@ export default function Checkout() {
       // A limpeza local ainda precisa acontecer.
     } finally {
       clearOnboardingDraft();
+      setOnboardingDraft(null);
       logout();
       navigate(ROUTE_PATHS.login, { replace: true });
     }
@@ -363,8 +392,13 @@ export default function Checkout() {
 
   const handleCheckout = async () => {
     setError(null);
+    const currentOnboardingDraft = requiresOnboardingCheckout ? loadOnboardingDraft() : null;
 
-    if (requiresOnboardingCheckout && !onboardingDraft) {
+    if (requiresOnboardingCheckout) {
+      setOnboardingDraft(currentOnboardingDraft);
+    }
+
+    if (requiresOnboardingCheckout && !currentOnboardingDraft) {
       setError("Nao encontramos os dados do onboarding. Saia e recomece a criacao da conta.");
       return;
     }
@@ -395,8 +429,8 @@ export default function Checkout() {
     setLoading(true);
     try {
       const endpoint = requiresOnboardingCheckout ? "/api/onboarding" : "/api/checkout/start";
-      const payloadBody = requiresOnboardingCheckout && onboardingDraft
-        ? buildOnboardingCheckoutPayload(onboardingDraft, planId, paymentMethod, normalizedPromoCode)
+      const payloadBody = requiresOnboardingCheckout && currentOnboardingDraft
+        ? buildOnboardingCheckoutPayload(currentOnboardingDraft, planId, paymentMethod, normalizedPromoCode)
         : {
             plan_id: planId,
             payment_method: paymentMethod,
@@ -425,13 +459,11 @@ export default function Checkout() {
         return;
       }
 
-      if (requiresOnboardingCheckout) {
-        clearOnboardingDraft();
-      }
-
       await checkAuth();
 
       if (payload?.checkout_status === "vip_active" || payload?.plan_status === "active") {
+        clearOnboardingDraft();
+        setOnboardingDraft(null);
         if (checkoutWindow && !checkoutWindow.closed) {
           checkoutWindow.close();
         }

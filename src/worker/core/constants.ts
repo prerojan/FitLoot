@@ -70,6 +70,14 @@ export const USER_PURGE_TARGETS: ReadonlyArray<{ table: string; columns: Readonl
   { table: "users", columns: ["id"] },
 ];
 
+export const INCOMPLETE_ONBOARDING_PURGE_TARGETS = USER_PURGE_TARGETS.filter(
+  (target) =>
+    target.table !== "sessions" &&
+    target.table !== "subscriptions" &&
+    target.table !== "cakto_webhook_events" &&
+    target.table !== "users",
+);
+
 export const PLAN_GUARD_EXEMPT_PATHS = new Set<string>([
   "/api/users/me",
   "/api/app/open",

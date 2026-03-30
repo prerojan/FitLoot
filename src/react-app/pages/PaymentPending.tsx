@@ -6,6 +6,7 @@ import { ROUTE_PATHS } from "@/react-app/auth/constants";
 import { useAuth } from "@/react-app/auth/context";
 import { hasPlanAccess } from "@/react-app/services/authService";
 import { api } from "@/react-app/utils/api";
+import { clearOnboardingDraft } from "@/react-app/utils/onboardingDraft";
 
 type PaymentMethod = "none" | "card" | "pix";
 
@@ -79,6 +80,7 @@ export default function PaymentPending() {
     if (!user) return;
     if (hasPlanAccess(user)) {
       clearScheduledPoll();
+      clearOnboardingDraft();
       navigate(ROUTE_PATHS.home, { replace: true });
       return;
     }
@@ -99,6 +101,7 @@ export default function PaymentPending() {
     } catch {
       // Ignora falhas de rede e segue com o reset local.
     } finally {
+      clearOnboardingDraft();
       logout();
       navigate(ROUTE_PATHS.login, { replace: true });
     }
@@ -146,6 +149,7 @@ export default function PaymentPending() {
 
       if (payload.has_access) {
         clearScheduledPoll();
+        clearOnboardingDraft();
         setStatusPopup({
           title: "Pagamento aprovado",
           message: "Seu acesso foi liberado. Redirecionando para o painel...",

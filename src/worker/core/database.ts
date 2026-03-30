@@ -1,6 +1,9 @@
 import type { Context } from "hono";
 
-import { USER_PURGE_TARGETS } from "./constants";
+import {
+  INCOMPLETE_ONBOARDING_PURGE_TARGETS,
+  USER_PURGE_TARGETS,
+} from "./constants";
 import type { AppContext } from "./types";
 
 let cachedSchemaState: { ready: boolean; checkedAt: number } | null = null;
@@ -88,6 +91,15 @@ async function deleteUserDataByColumns(
 
 export async function purgeUserAccountData(db: D1Database, userId: string): Promise<void> {
   for (const target of USER_PURGE_TARGETS) {
+    await deleteUserDataByColumns(db, target.table, target.columns, userId);
+  }
+}
+
+export async function purgeIncompleteOnboardingData(
+  db: D1Database,
+  userId: string,
+): Promise<void> {
+  for (const target of INCOMPLETE_ONBOARDING_PURGE_TARGETS) {
     await deleteUserDataByColumns(db, target.table, target.columns, userId);
   }
 }

@@ -823,19 +823,6 @@ export default function Onboarding() {
         return;
       }
 
-      localStorage.setItem("fitloot_authenticated_hint", "1");
-      await checkAuth();
-
-      const patchRes = await api("/api/users/me", {
-        method: "PATCH",
-        body: JSON.stringify({ name: trimmedFullName }),
-      });
-
-      if (!patchRes.ok) {
-        setStepError("Erro ao atualizar perfil.");
-        return;
-      }
-
       saveOnboardingDraft({
         username: trimmedUsername,
         full_name: trimmedFullName,
@@ -854,6 +841,19 @@ export default function Onboarding() {
         selectedEquipment,
       });
 
+      localStorage.setItem("fitloot_authenticated_hint", "1");
+
+      const patchRes = await api("/api/users/me", {
+        method: "PATCH",
+        body: JSON.stringify({ name: trimmedFullName }),
+      });
+
+      if (!patchRes.ok) {
+        setStepError("Erro ao atualizar perfil.");
+        return;
+      }
+
+      await checkAuth();
       navigate(ROUTE_PATHS.checkout, { replace: true });
     } catch {
       setStepError("Nao foi possivel conectar ao servidor.");
