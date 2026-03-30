@@ -1,195 +1,31 @@
 import { useCallback, useMemo, useRef, useState, useEffect, type ChangeEventHandler } from "react";
 import { useNavigate } from "react-router";
-import { Camera, AlertTriangle, CheckCircle2, Bolt, ShieldCheck, ImageIcon, ArrowLeft, BookOpen, Clock3 } from "lucide-react";
+import { Camera, AlertTriangle, CheckCircle2, Bolt, ShieldCheck, ImageIcon, ArrowLeft, BookOpen } from "lucide-react";
 import AppPageShell from "@/react-app/components/AppPageShell";
 import LoadingBall from "@/react-app/components/LoadingBall";
 import { isAndroidNativeAvailable } from "@/react-app/services/native/androidBridge";
 import { cameraService, type NormalizedCameraImage } from "@/react-app/services/native/cameraService";
 import { ApiRequestError, clearJsonCache, fetchJson } from "@/react-app/utils/api";
 import { safeGet } from "@/utils/typeHelpers";
-
-type AnalysisItem = {
-  food_name: string;
-  portion_description: string;
-  calories: number | null;
-  protein: number | null;
-  carbs: number | null;
-  fats: number | null;
-  energy_kj: number | null;
-  source: "usda" | "rapidapi" | "estimate" | "ocr_label";
-  warning?: string | undefined;
-};
-
-type AnalysisResult = {
-  success: boolean;
-  items: AnalysisItem[];
-  totals: {
-    calories: number;
-    energy_kj: number;
-    protein: number;
-    carbs: number;
-    fats: number;
-    macro_percentages: { protein: number; carbs: number; fats: number };
-  };
-  has_estimates?: boolean | undefined;
-  estimation_warning?: string | undefined;
-};
-
-type IdentifiedItem = {
-  food_name: string;
-  portion_description: string;
-  portion_multiplier: number;
-};
-
-type MediaPipeClassifier = {
-  classify: (image: HTMLImageElement) => {
-    classifications?: Array<{
-      categories?: Array<{ categoryName?: string | undefined; score?: number | undefined }>;
-    }>;
-  };
-  close: () => void;
-};
-
-type MediaPipeVisionModule = {
-  FilesetResolver: {
-    forVisionTasks: (wasmRootPath: string) => Promise<unknown>;
-  };
-  ImageClassifier: {
-    createFromOptions: (vision: unknown, options: Record<string, unknown>) => Promise<MediaPipeClassifier>;
-  };
-};
-
-type ClassificationCandidate = {
-  label: string;
-  score: number;
-};
-
-type FoodClassificationResult = {
-  identifiedItems: IdentifiedItem[];
-  foodDescription?: string | undefined;
-};
-
-type PreviewSource = "camera" | "gallery";
-type WebCameraStartResult = "started" | "unsupported" | "blocked" | "fallback-native";
-
-type SavedFoodEntry = {
-  id: number;
-  food_name: string;
-  calories: number | null;
-  meal_type?: string | null;
-  scanned_at?: string | null;
-  created_at?: string | null;
-};
-
-const STRICT_CLASSIFICATION_SCORE = 0.12;
-const RELAXED_CLASSIFICATION_SCORE = 0.04;
-const MAX_IDENTIFIED_ITEMS = 3;
-const MAX_DESCRIPTION_LABELS = 6;
-
-async function loadVisionModule(): Promise<MediaPipeVisionModule> {
-  const moduleUrl = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/+esm";
-  return (await import(/* @vite-ignore */ moduleUrl)) as MediaPipeVisionModule;
-}
-
-function toIdentifiedItems(result: { classifications?: Array<{ categories?: Array<{ categoryName?: string | undefined; score?: number | undefined }> }> }): IdentifiedItem[] {
-  const categories = safeGet(result.classifications ?? [], 0)?.categories ?? [];
-  return categories
-    .filter((category) => Number(category.score ?? 0) >= 0.2)
-    .slice(0, 3)
-    .map((category) => ({
-      food_name: String(category.categoryName || "alimento"),
-      portion_description: "porção média",
-      portion_multiplier: 1,
-    }));
-}
-
-function normalizeCategoryLabel(rawLabel?: string | undefined): string {
-  return String(rawLabel || "")
-    .trim()
-    .replace(/[_-]+/g, " ")
-    .replace(/\s+/g, " ");
-}
-
-function extractClassificationCandidates(
-  result: { classifications?: Array<{ categories?: Array<{ categoryName?: string | undefined; score?: number | undefined }> }> },
-): ClassificationCandidate[] {
-  const seen = new Set<string>();
-
-  return (result.classifications ?? [])
-    .flatMap((classification) => classification.categories ?? [])
-    .map((category) => ({
-      label: normalizeCategoryLabel(category.categoryName),
-      score: Number(category.score ?? 0),
-    }))
-    .filter((category) => category.label.length > 0 && Number.isFinite(category.score) && category.score > 0)
-    .sort((left, right) => right.score - left.score)
-    .filter((category) => {
-      const key = category.label.toLowerCase();
-      if (seen.has(key)) {
-        return false;
-      }
-      seen.add(key);
-      return true;
-    });
-}
-
-function toIdentifiedItemsFromCandidates(candidates: ClassificationCandidate[]): IdentifiedItem[] {
-  return candidates
-    .filter((candidate) => candidate.score >= STRICT_CLASSIFICATION_SCORE)
-    .slice(0, MAX_IDENTIFIED_ITEMS)
-    .map((candidate) => ({
-      food_name: candidate.label,
-      portion_description: "porcao media",
-      portion_multiplier: 1,
-    }));
-}
-
-function toFoodDescription(candidates: ClassificationCandidate[]): string | undefined {
-  const preferredLabels = candidates
-    .filter((candidate) => candidate.score >= RELAXED_CLASSIFICATION_SCORE)
-    .slice(0, MAX_DESCRIPTION_LABELS)
-    .map((candidate) => candidate.label);
-
-  const fallbackLabels = preferredLabels.length > 0
-    ? preferredLabels
-    : candidates.slice(0, Math.min(3, candidates.length)).map((candidate) => candidate.label);
-
-  return fallbackLabels.length > 0 ? fallbackLabels.join(", ") : undefined;
-}
-
-function toPreviewSource(source: NormalizedCameraImage["source"]): PreviewSource {
-  return source === "android-gallery" || source === "web-file" ? "gallery" : "camera";
-}
-
-function formatMealType(mealType?: string | null): string {
-  const normalizedMealType = String(mealType || "lanche").trim().toLowerCase();
-  const mealTypeMap: Record<string, string> = {
-    cafe_da_manha: "Cafe da manha",
-    cafe: "Cafe",
-    almoco: "Almoco",
-    almoço: "Almoco",
-    lanche: "Lanche",
-    jantar: "Jantar",
-    ceia: "Ceia",
-  };
-
-  return mealTypeMap[normalizedMealType] ?? normalizedMealType.replace(/[_-]+/g, " ");
-}
-
-function formatSavedFoodTime(entry: SavedFoodEntry): string {
-  const timestamp = entry.scanned_at ?? entry.created_at;
-  if (!timestamp) return "agora";
-
-  const date = new Date(timestamp);
-  if (Number.isNaN(date.getTime())) {
-    return "agora";
-  }
-
-  return new Intl.DateTimeFormat("pt-BR", {
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
-}
+import MacroCard from "./food-analysis/MacroCard";
+import SavedFoodsLibraryPanel from "./food-analysis/SavedFoodsLibraryPanel";
+import {
+  extractClassificationCandidates,
+  loadVisionModule,
+  toFoodDescription,
+  toIdentifiedItems,
+  toIdentifiedItemsFromCandidates,
+  toPreviewSource,
+} from "./food-analysis/helpers";
+import type {
+  AnalysisResult,
+  FoodClassificationResult,
+  IdentifiedItem,
+  MediaPipeClassifier,
+  PreviewSource,
+  SavedFoodEntry,
+  WebCameraStartResult,
+} from "./food-analysis/types";
 
 export default function FoodAnalysis() {
   const navigate = useNavigate();
@@ -224,14 +60,14 @@ export default function FoodAnalysis() {
   const androidNativeAvailable = isAndroidNativeAvailable();
   const reduceInlineCameraEffects = androidNativeAvailable && streamActive && !preview;
 
-  const clearPreviewWatchdog = () => {
+  const clearPreviewWatchdog = useCallback(() => {
     if (previewWatchdogRef.current !== null) {
       window.clearTimeout(previewWatchdogRef.current);
       previewWatchdogRef.current = null;
     }
-  };
+  }, []);
 
-  const stopCamera = (updateState = true) => {
+  const stopCamera = useCallback((updateState = true) => {
     clearPreviewWatchdog();
     const stream = videoRef.current?.srcObject as MediaStream | null;
     stream?.getTracks().forEach((track) => track.stop());
@@ -241,7 +77,7 @@ export default function FoodAnalysis() {
     if (updateState && mountedRef.current) {
       setStreamActive(false);
     }
-  };
+  }, [clearPreviewWatchdog]);
 
   const destroyMediaPipe = () => {
     if (classifierClosingRef.current) return;
@@ -351,7 +187,7 @@ export default function FoodAnalysis() {
       destroyMediaPipe();
       classifierInitRef.current = null;
     };
-  }, [loadSavedFoods]);
+  }, [clearPreviewWatchdog, loadSavedFoods, stopCamera]);
 
   useEffect(() => {
     const handleCaptureError = (captureError: Error) => {
@@ -1287,60 +1123,14 @@ export default function FoodAnalysis() {
             {!preview && streamActive && (
               <>
                 {/* Biblioteca inline */}
-              <div className={`absolute left-4 right-4 z-30 transition-all duration-300 ${libraryOpen ? "bottom-28 opacity-100 translate-y-0" : "bottom-24 pointer-events-none opacity-0 translate-y-6"}`}>
-                <div className={`overflow-hidden rounded-[1.75rem] border border-white/10 ${scannerLibrarySurfaceClass}`}>
-                  <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
-                    <div>
-                      <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-white/55">Biblioteca salva</p>
-                      <h3 className="mt-1 text-sm font-bold text-white">Alimentos registrados hoje</h3>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => { void loadSavedFoods(); }}
-                      className="rounded-full border border-white/10 px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-white/75 transition-opacity hover:opacity-80"
-                    >
-                      Atualizar
-                    </button>
-                  </div>
-
-                  <div className="custom-scrollbar max-h-56 space-y-2 overflow-y-auto px-3 py-3">
-                    {savedFoodsLoading ? (
-                      <div className="flex items-center justify-center gap-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-5">
-                        <LoadingBall size="sm" />
-                        <span className="text-xs font-bold uppercase tracking-widest text-white/70">Carregando biblioteca</span>
-                      </div>
-                    ) : savedFoodsError ? (
-                      <div className="rounded-2xl border border-red-500/25 bg-red-950/35 px-4 py-4 text-center text-xs font-bold uppercase tracking-widest text-red-300">
-                        {savedFoodsError}
-                      </div>
-                    ) : savedFoods.length === 0 ? (
-                      <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-5 text-center">
-                        <p className="text-xs font-bold uppercase tracking-widest text-white/75">Nenhum alimento salvo hoje</p>
-                        <p className="mt-2 text-[11px] text-white/55">Quando voce confirmar uma analise, ela aparece aqui.</p>
-                      </div>
-                    ) : (
-                      savedFoods.map((food) => (
-                        <div key={food.id} className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3">
-                          <div className="min-w-0">
-                            <p className="truncate text-sm font-bold text-white">{food.food_name}</p>
-                            <div className="mt-1 flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.16em] text-white/50">
-                              <span>{formatMealType(food.meal_type)}</span>
-                              <span className="h-1 w-1 rounded-full bg-white/35"></span>
-                              <span className="inline-flex items-center gap-1">
-                                <Clock3 className="h-3 w-3" />
-                                {formatSavedFoodTime(food)}
-                              </span>
-                            </div>
-                          </div>
-                          <div className="ml-4 rounded-full border border-white/10 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-white/80">
-                            {food.calories ?? 0} kcal
-                          </div>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </div>
-              </div>
+                <SavedFoodsLibraryPanel
+                  libraryOpen={libraryOpen}
+                  savedFoods={savedFoods}
+                  savedFoodsLoading={savedFoodsLoading}
+                  savedFoodsError={savedFoodsError}
+                  scannerLibrarySurfaceClass={scannerLibrarySurfaceClass}
+                  onRefresh={loadSavedFoods}
+                />
               </>
             )}
 
@@ -1366,20 +1156,5 @@ export default function FoodAnalysis() {
       )}
       <canvas ref={canvasRef} className="hidden" />
     </AppPageShell>
-  );
-}
-
-function MacroCard({ label, value, percentage }: { label: string; value: string; percentage: number }) {
-  return (
-    <div className="fl-theme-surface p-3 rounded-2xl flex flex-col items-center">
-      <span className="text-[10px] fl-theme-text-muted uppercase font-medium">{label}</span>
-      <span className="text-xl font-bold tracking-tight">{value}</span>
-      <div className="mt-2 h-1 w-full overflow-hidden rounded-full" style={{ backgroundColor: "color-mix(in srgb, var(--fl-color-text) 8%, transparent)" }}>
-        <div 
-          className="h-full transition-all duration-1000" 
-          style={{ backgroundColor: 'var(--app-primary-color)', width: `${Math.min(100, Math.max(0, percentage))}%` }}
-        />
-      </div>
-    </div>
   );
 }

@@ -1,6 +1,6 @@
 import { Route, Routes } from "react-router";
 
-import { ROUTE_PATHS } from "../constants/auth";
+import { ROUTE_PATHS } from "../auth/constants";
 import { AppEntryRoute, ProtectedRoute, PublicAuthRoute } from "./guards";
 import {
   Achievements,

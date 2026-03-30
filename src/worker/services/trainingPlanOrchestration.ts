@@ -159,6 +159,7 @@ const WEEKDAY_ORDER: WeekdayPtBr[] = [
   "domingo",
 ];
 
+// Shared normalization helpers keep profile snapshots deterministic before AI generation or fallback drafting.
 function toStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value
@@ -314,6 +315,7 @@ export function normalizeWeeklyPlanDay(
 export function createTrainingPlanOrchestrationService(
   deps: TrainingPlanOrchestrationDeps,
 ) {
+  // Builds the canonical generation snapshot from profile, history, capacities, and stored training-plan context.
   async function loadMissionGenerationProfile(
     db: D1Database,
     userId: string,
@@ -494,6 +496,7 @@ export function createTrainingPlanOrchestrationService(
     };
   }
 
+  // Tops up missing daily missions without disturbing an already-valid cycle.
   async function topUpStructuredDailyMissionsForUser(
     env: Env,
     db: D1Database,
@@ -614,6 +617,7 @@ export function createTrainingPlanOrchestrationService(
     );
   }
 
+  // Orchestrates period creation by choosing between AI output, validation, fallback drafting, and persistence.
   async function createMissionsForPeriod(
     env: Env,
     db: D1Database,

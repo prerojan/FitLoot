@@ -10,10 +10,13 @@ node_modules/
 
 # Build
 dist/
+dist-worker/
 .wrangler/
 .output/
 android/app/build/
+android/.gradle/
 *.apk
+/public/*.apk
 
 # Logs
 *.log
@@ -26,6 +29,7 @@ Thumbs.db
 # IDEs e editores
 .vscode/
 .idea/
+android/.idea/
 *.suo
 *.swp
 
@@ -33,6 +37,7 @@ Thumbs.db
 .cache/
 .turbo/
 .eslintcache
+*.tsbuildinfo
 
 # Arquivos sensíveis
 *.pem

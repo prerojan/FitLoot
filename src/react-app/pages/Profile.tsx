@@ -25,7 +25,8 @@ import LoadingBall from "@/react-app/components/LoadingBall";
 import PageLoader from "@/react-app/components/PageLoader";
 import { Avatar } from "@/react-app/components/ui/avatar";
 import { ROUTE_PATHS } from "@/react-app/auth/constants";
-import { TrainingRankDisplay, useTrainingRank } from "@/react-app/components/TrainingRankDisplay";
+import { TrainingRankDisplay } from "@/react-app/components/TrainingRankDisplay";
+import { useTrainingRank } from "@/react-app/hooks/useTrainingRank";
 
 import type {
   AchievementWithUnlock,

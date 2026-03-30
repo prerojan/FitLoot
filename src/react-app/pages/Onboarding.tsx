@@ -20,6 +20,34 @@ import { api } from "@/react-app/utils/api";
 import { saveOnboardingDraft } from "@/react-app/utils/onboardingDraft";
 import { Input } from "@/react-app/components/ui/input";
 import {
+  EMAIL_REGEX,
+  FIELD_INPUT,
+  FIELD_TEXTAREA,
+  FIELD_WRAP,
+  INITIAL_CREDENTIALS,
+  INITIAL_PROFILE,
+  PLAN_PREVIEW_LOADING_MS,
+  STEP_META,
+  TOTAL_STEPS,
+} from "./onboarding/constants";
+import {
+  availabilityMessage,
+  conditioningPlanCopy,
+  conditioningPlanNarrative,
+  frequencyMessage,
+  getPasswordMismatchMessage,
+  goalPlanCopy,
+  mergeCatalogValues,
+  splitCatalogValues,
+  toneClass,
+} from "./onboarding/helpers";
+import type {
+  AvailabilityState,
+  CredentialsStep,
+  GoalValue,
+  ProfileStep,
+} from "./onboarding/types";
+import {
   Activity,
   ArrowRight,
   CalendarDays,
@@ -52,17 +80,6 @@ type ScrollPickerProps = {
   description?: string;
 };
 
-const FIELD_WRAP = "fl-onboarding-input-shell";
-const FIELD_INPUT =
-  "h-full w-full !border-0 !bg-transparent !p-0 text-base text-[var(--fl-onboarding-ink)] !shadow-none !ring-0 " +
-  "placeholder:text-[var(--fl-onboarding-subtle)] focus-visible:!ring-0 focus-visible:!ring-offset-0";
-const FIELD_TEXTAREA =
-  "w-full resize-none !border-0 !bg-transparent !p-0 text-sm text-[var(--fl-onboarding-ink)] outline-none !shadow-none !ring-0 " +
-  "placeholder:text-[var(--fl-onboarding-subtle)] focus-visible:!ring-0 focus-visible:!ring-offset-0";
-
-const TOTAL_STEPS = 13;
-const PLAN_PREVIEW_LOADING_MS = 7400;
-
 function Field({
   label,
   hint,
@@ -94,22 +111,6 @@ function Field({
     </div>
   );
 }
-
-const STEP_META = [
-  { eyebrow: "Gancho emocional", label: "Etapa 01/13" },
-  { eyebrow: "Selecao de objetivo", label: "Etapa 02/13" },
-  { eyebrow: "Nivel atual", label: "Etapa 03/13" },
-  { eyebrow: "Genero", label: "Etapa 04/13" },
-  { eyebrow: "Idade", label: "Etapa 05/13" },
-  { eyebrow: "Altura", label: "Etapa 06/13" },
-  { eyebrow: "Peso", label: "Etapa 07/13" },
-  { eyebrow: "Capacidade inicial", label: "Etapa 08/13" },
-  { eyebrow: "Limitacoes", label: "Etapa 09/13" },
-  { eyebrow: "Equipamentos", label: "Etapa 10/13" },
-  { eyebrow: "Rotina semanal", label: "Etapa 11/13" },
-  { eyebrow: "Plano pronto", label: "Etapa 12/13" },
-  { eyebrow: "Criacao da conta", label: "Etapa 13/13" },
-] as const;
 
 function StepIntro({
   step,
@@ -383,45 +384,6 @@ function ExerciseValueRow({
   );
 }
 
-type CredentialsStep = { email: string; password: string; confirmPassword: string };
-type ProfileStep = {
-  username: string;
-  full_name: string;
-  weight: string;
-  height: string;
-  initial_conditioning: "sedentario" | "iniciante" | "intermediario" | "avancado";
-  initial_pushups: string;
-  initial_situps: string;
-  initial_squats: string;
-  injuries: string;
-  equipment: string;
-  main_goal: "perder_peso" | "ganhar_massa" | "resistencia" | "calistenia" | "saude_geral";
-  gender: "homem" | "mulher" | "outro";
-  age: string;
-};
-type GoalValue = ProfileStep["main_goal"];
-type AvailabilityState = {
-  status: "idle" | "checking" | "available" | "unavailable" | "invalid";
-  message?: string | undefined;
-};
-
-const INITIAL_CREDENTIALS: CredentialsStep = { email: "", password: "", confirmPassword: "" };
-const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const INITIAL_PROFILE: ProfileStep = {
-  username: "",
-  full_name: "",
-  weight: "70",
-  height: "170",
-  initial_conditioning: "iniciante",
-  initial_pushups: "0",
-  initial_situps: "0",
-  initial_squats: "0",
-  injuries: "",
-  equipment: "",
-  main_goal: "saude_geral",
-  gender: "homem",
-  age: "25",
-};
 const GENDER_OPTIONS = [
   {
     value: "homem" as const,
@@ -517,107 +479,6 @@ const INJURY_OPTIONS = [
   { id: "quadril", label: "Quadril" },
 ] as const;
 
-function availabilityMessage(state: AvailabilityState): { tone: "green" | "red" | "muted"; text: string } | null {
-  if (state.status === "available") return { tone: "green", text: "Disponivel" };
-  if (state.status === "unavailable") return { tone: "red", text: state.message || "Ja cadastrado" };
-  if (state.status === "invalid") return { tone: "red", text: state.message || "Valor invalido" };
-  if (state.status === "checking") return { tone: "muted", text: "Validando..." };
-  return null;
-}
-
-function parseDelimitedValues(value: string): string[] {
-  return value.split(",").map((item) => item.trim()).filter(Boolean);
-}
-
-function splitCatalogValues(
-  value: string,
-  catalog: readonly { id: string }[],
-): { selected: string[]; notes: string } {
-  const catalogIds = new Set(catalog.map((item) => item.id));
-  const selected: string[] = [];
-  const notes: string[] = [];
-
-  for (const token of parseDelimitedValues(value)) {
-    const normalizedToken = token.toLowerCase();
-    if (catalogIds.has(normalizedToken)) {
-      selected.push(normalizedToken);
-    } else {
-      notes.push(token);
-    }
-  }
-
-  return { selected, notes: notes.join(", ") };
-}
-
-function mergeCatalogValues(selected: string[], notes: string) {
-  return [...selected, ...parseDelimitedValues(notes)].join(", ");
-}
-
-function toneClass(tone: "green" | "red" | "muted") {
-  if (tone === "green") return "text-emerald-400";
-  if (tone === "red") return "text-red-400";
-  return "text-[var(--fl-onboarding-subtle)]";
-}
-
-function frequencyMessage(days: number) {
-  if (days <= 2) {
-    return "Plano leve e realista para criar consistencia sem estourar sua rotina.";
-  }
-  if (days <= 4) {
-    return "Volume equilibrado para progredir sem comprometer a recuperacao.";
-  }
-  if (days <= 6) {
-    return "Estrutura forte para evoluir rapido com distribuicao inteligente dos treinos.";
-  }
-  return "Rotina intensa para quem quer viver o jogo todos os dias com progressao maxima.";
-}
-
-function getPasswordMismatchMessage(password: string, confirmPassword: string): string | null {
-  if (!password && !confirmPassword) return null;
-  if (password === confirmPassword) return null;
-  return "As senhas nao coincidem";
-}
-
-function goalPlanCopy(goal: ProfileStep["main_goal"]) {
-  switch (goal) {
-    case "perder_peso":
-      return "missoes de gasto calorico, streaks de constancia e marcos de perda de gordura";
-    case "ganhar_massa":
-      return "blocos de forca, metas de progressao e recompensas por consistencia de volume";
-    case "resistencia":
-      return "desafios de ritmo, condicionamento e recuperacao cada vez mais forte";
-    case "calistenia":
-      return "desbloqueios de controle corporal, definicao e progressao tecnica";
-    default:
-      return "uma rotina equilibrada com missoes diarias, progresso e recompensas de bem-estar";
-  }
-}
-
-function conditioningPlanCopy(conditioning: ProfileStep["initial_conditioning"]) {
-  switch (conditioning) {
-    case "sedentario":
-      return "com um inicio leve para criar confianca desde a primeira semana";
-    case "iniciante":
-      return "com uma progressao simples e segura para os primeiros ganhos";
-    case "intermediario":
-      return "aproveitando sua base atual para acelerar a evolucao com controle";
-    default:
-      return "com intensidade alta sem perder consistencia nem controle";
-  }
-}
-
-function conditioningPlanNarrative(conditioning: ProfileStep["initial_conditioning"]) {
-  switch (conditioning) {
-    case "sedentario":
-      return "comecar leve e ganhar confianca desde a primeira semana";
-    case "iniciante":
-      return "guiar seus primeiros ganhos com uma estrutura simples e segura";
-    case "intermediario":
-      return "aproveitar sua base atual e acelerar a evolucao com controle";
-    default:
-      return "manter intensidade alta sem abrir mao de consistencia nem controle";
-  }
-}
 export default function Onboarding() {
   const { user, loading: authLoading, checkAuth } = useAuth();
   const navigate = useNavigate();

@@ -60,6 +60,7 @@ type MissionConfig = {
   titlePrefix: string;
 };
 
+// Shared mission-composition helpers keep planning, persistence, and presentation aligned on the same rules.
 function normalizeMatchText(value: string): string {
   return value
     .normalize("NFD")
@@ -96,6 +97,7 @@ export function normalizeExerciseCategory(
   name: string,
   muscle: string,
 ): MissionExerciseCategory {
+  // Category inference is the base routing layer that decides how each exercise should be framed downstream.
   const text = `${name} ${muscle}`.toLowerCase();
 
   if (text.includes("plank") || text.includes("prancha")) return "plank";
@@ -313,6 +315,7 @@ export function fallbackExercisesByFocus(
   focus: string,
   muscles: string[],
 ): string[] {
+  // Fallback exercise catalogs guarantee viable mission drafting when generated plans need recovery paths.
   const normalized = focus.toLowerCase();
   if (normalized.includes("push")) {
     return [
@@ -471,6 +474,7 @@ export function estimateMissionDuration(
 }
 
 function normalizeMissionCopy(value: string): string {
+  // Copy and circuit builders are reused by drafting, repair, and rendering flows to keep mission wording coherent.
   return repairKnownMojibakeString(localizeMissionText(value) ?? value)
     .replace(/\s+/g, " ")
     .trim();
@@ -783,6 +787,7 @@ export function applyMissionMetricContext<
     volumeMultiplier?: number | undefined;
   },
 ): TPayload {
+  // Applies the final metric payload shape expected by mission rows after all composition rules have run.
   const normalizedMetricType =
     period !== "weekly" && desiredMetricType === "circuit_tasks"
       ? "sets_reps"

@@ -1,8 +1,8 @@
 import type { ReactNode } from "react";
 import { Navigate, useLocation } from "react-router";
 
-import { ROUTE_PATHS } from "../constants/auth";
-import { useAuth } from "../contexts/auth";
+import { ROUTE_PATHS } from "../auth/constants";
+import { useAuth } from "../auth/context";
 import { hasPlanAccess, resolveAuthenticatedStartRoute } from "../services/authService";
 import RouteLoader from "./RouteLoader";
 

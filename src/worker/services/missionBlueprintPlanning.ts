@@ -184,6 +184,7 @@ const LEGACY_WEEKLY_CIRCUIT_NAMES = [
 
 const MISSION_GENERATION_AI_TIMEOUT_MS = 8_000;
 
+// Numeric helpers keep monthly target generation stable across conditioning and completion-rate adjustments.
 function roundToNearest(value: number, step: number): number {
   if (step <= 1) return Math.round(value);
   return Math.round(value / step) * step;
@@ -217,6 +218,7 @@ function summarizeRecentMissionHistory(
 export function createMissionBlueprintPlanningService(
   deps: MissionBlueprintPlanningDeps,
 ) {
+  // Monthly counter helpers translate profile context into long-cycle progress targets.
   function normalizeGoalKeyword(value: string): string {
     return deps.normalizeMatchText(value);
   }
@@ -449,6 +451,7 @@ export function createMissionBlueprintPlanningService(
     });
   }
 
+  // Compatibility terms are the bridge between generated plans and later auto-progress matching.
   function buildMissionCompatibilityTerms(
     name: string,
     muscle: string,
@@ -476,6 +479,7 @@ export function createMissionBlueprintPlanningService(
     );
   }
 
+  // The structured prompt preserves game rules while exposing enough profile context for the model to draft safely.
   function buildStructuredPlanPrompt(
     profile: MissionGenerationProfileLike,
     options: StructuredGenerationOptions,
@@ -572,6 +576,7 @@ export function createMissionBlueprintPlanningService(
     return parsed;
   }
 
+  // Fallback drafting guarantees a valid mission plan when AI output is missing, invalid, or times out.
   function buildFallbackStructuredPlan(
     profile: MissionGenerationProfileLike,
     options: StructuredGenerationOptions,

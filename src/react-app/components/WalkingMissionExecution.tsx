@@ -1,6 +1,6 @@
 /**
- * Modal de execução para missões de caminhada e corrida.
- * Mantém a UI sincronizada com saúde, rota e conclusão da missão.
+ * Modal de execucao para missoes de caminhada e corrida.
+ * Mantem a UI sincronizada com saude, rota e conclusao da missao.
  */
 
 import { memo, useCallback, useEffect, useState } from "react";
@@ -39,17 +39,17 @@ type ExecutionState = {
 };
 
 const WalkingMissionExecution = ({ mission, onComplete, onClose }: WalkingMissionExecutionProps) => {
-  const { healthData, isAuthenticated } = useHealthData({
+  const { healthData } = useHealthData({
     autoRefresh: true,
     refreshInterval: 1,
   });
 
-  const { 
-    getCurrentLocation, 
-    getDirections, 
-    addMarker, 
+  const {
+    getCurrentLocation,
+    getDirections,
+    addMarker,
     clearMarkers,
-    userLocation: mapUserLocation 
+    userLocation: mapUserLocation,
   } = useMapService();
 
   const [state, setState] = useState<ExecutionState>({
@@ -67,21 +67,45 @@ const WalkingMissionExecution = ({ mission, onComplete, onClose }: WalkingMissio
     error: null,
   });
 
-  // Resolve o tipo de métrica esperado para a missão ativa.
+  // Resolve o tipo de metrica esperado para a missao ativa.
   const metricType = mission.metric_type as MissionMetricType;
   const isStepsMission = metricType === "steps";
   const isDistanceMission = metricType === "distance_meters";
 
-  // Converte a meta para passos e distância a partir da configuração da missão.
+  // Finaliza a missao usando o valor confirmado pela fonte ativa.
+  const completeMission = useCallback(async (finalValue: number) => {
+    try {
+      setState((prev) => ({
+        ...prev,
+        isCompleted: true,
+        endTime: new Date(),
+        isRunning: false,
+        isPaused: false,
+      }));
+
+      const verified = healthData
+        ? healthData.source !== "api" && healthData.source !== "unavailable"
+        : false;
+      await onComplete(mission.id, finalValue, verified);
+    } catch (error) {
+      console.error("Erro ao completar missao:", error);
+      setState((prev) => ({
+        ...prev,
+        error: "Falha ao registrar conclusao da missao.",
+      }));
+    }
+  }, [healthData, mission.id, onComplete]);
+
+  // Converte a meta para passos e distancia a partir da configuracao da missao.
   useEffect(() => {
     if (isStepsMission) {
-      setState(prev => ({
+      setState((prev) => ({
         ...prev,
         targetSteps: mission.metric_value || 5000,
         targetDistance: (mission.metric_value || 5000) * 0.0007,
       }));
     } else if (isDistanceMission) {
-      setState(prev => ({
+      setState((prev) => ({
         ...prev,
         targetDistance: mission.metric_value || 3000,
         targetSteps: Math.ceil((mission.metric_value || 3000) / 0.0007),
@@ -89,36 +113,44 @@ const WalkingMissionExecution = ({ mission, onComplete, onClose }: WalkingMissio
     }
   }, [mission, isStepsMission, isDistanceMission]);
 
-  // Mantém o progresso local alinhado com a fonte de saúde ativa.
+  // Mantem o progresso local alinhado com a fonte de saude ativa.
   useEffect(() => {
     if (healthData && state.isRunning && !state.isCompleted) {
-      setState(prev => ({
+      setState((prev) => ({
         ...prev,
         currentSteps: healthData.steps,
-        currentDistance: healthData.distance * 1000, // Converter km para metros
+        currentDistance: healthData.distance * 1000,
       }));
 
-      // Fecha automaticamente a missão quando a meta é atingida.
       if (isStepsMission && healthData.steps >= state.targetSteps) {
-        completeMission(healthData.steps);
+        void completeMission(healthData.steps);
       } else if (isDistanceMission && healthData.distance * 1000 >= state.targetDistance) {
-        completeMission(Math.round(healthData.distance * 1000));
+        void completeMission(Math.round(healthData.distance * 1000));
       }
     }
-  }, [healthData, state.isRunning, state.isCompleted, isStepsMission, isDistanceMission, state.targetSteps, state.targetDistance]);
+  }, [
+    completeMission,
+    healthData,
+    isDistanceMission,
+    isStepsMission,
+    state.isCompleted,
+    state.isRunning,
+    state.targetDistance,
+    state.targetSteps,
+  ]);
 
-  // Gera uma rota sugerida a partir da posição atual e da meta calculada.
+  // Gera uma rota sugerida a partir da posicao atual e da meta calculada.
   const generateSafeRoute = useCallback(async () => {
     try {
-      setState(prev => ({ ...prev, error: null }));
+      setState((prev) => ({ ...prev, error: null }));
 
       const currentLocation = mapUserLocation || await getCurrentLocation();
       if (!currentLocation) {
-        setState(prev => ({ ...prev, error: "Não foi possível obter sua localização atual" }));
+        setState((prev) => ({ ...prev, error: "Nao foi possivel obter sua localizacao atual" }));
         return;
       }
 
-      setState(prev => ({ ...prev, userLocation: currentLocation }));
+      setState((prev) => ({ ...prev, userLocation: currentLocation }));
 
       const targetDistance = state.targetDistance;
       const angle = Math.random() * 2 * Math.PI;
@@ -127,46 +159,44 @@ const WalkingMissionExecution = ({ mission, onComplete, onClose }: WalkingMissio
         currentLocation[1] + (targetDistance / 111320) * Math.sin(angle),
       ];
 
-      const directions = await getDirections(currentLocation, destination, 'foot-walking');
+      const directions = await getDirections(currentLocation, destination, "foot-walking");
 
-      setState(prev => ({
+      setState((prev) => ({
         ...prev,
         route: directions,
       }));
 
-      // Recria os marcadores para a execução atual.
       clearMarkers();
       addMarker({
-        id: 'start',
+        id: "start",
         longitude: currentLocation[0],
         latitude: currentLocation[1],
-        title: 'Ponto de Partida',
-        description: 'Sua localização atual',
-        color: 'green',
+        title: "Ponto de Partida",
+        description: "Sua localizacao atual",
+        color: "green",
       });
 
       addMarker({
-        id: 'end',
+        id: "end",
         longitude: destination[0],
         latitude: destination[1],
-        title: 'Destino',
+        title: "Destino",
         description: `Meta: ${targetDistance}m`,
-        color: 'red',
+        color: "red",
       });
-
     } catch (error) {
-      console.error('Erro ao gerar rota:', error);
-      setState(prev => ({ 
-        ...prev, 
-        error: "Não foi possível gerar uma rota segura. Tente novamente." 
+      console.error("Erro ao gerar rota:", error);
+      setState((prev) => ({
+        ...prev,
+        error: "Nao foi possivel gerar uma rota segura. Tente novamente.",
       }));
     }
-  }, [mapUserLocation, getCurrentLocation, getDirections, addMarker, clearMarkers, state.targetDistance]);
+  }, [addMarker, clearMarkers, getCurrentLocation, getDirections, mapUserLocation, state.targetDistance]);
 
-  // Inicia a execução, prepara a rota e marca o relógio inicial.
+  // Inicia a execucao, prepara a rota e marca o relogio inicial.
   const startExecution = useCallback(async () => {
     try {
-      setState(prev => ({
+      setState((prev) => ({
         ...prev,
         isRunning: true,
         isPaused: false,
@@ -179,53 +209,27 @@ const WalkingMissionExecution = ({ mission, onComplete, onClose }: WalkingMissio
       if (import.meta.env.DEV && healthData && healthData.confidence !== "official") {
         console.warn(`Fonte de passos em fallback: ${formatStepsSourceLabel(healthData.source)}.`);
       }
-
     } catch (error) {
-      console.error('Erro ao iniciar execução:', error);
-      setState(prev => ({
+      console.error("Erro ao iniciar execucao:", error);
+      setState((prev) => ({
         ...prev,
         isRunning: false,
-        error: "Falha ao iniciar a missão. Tente novamente.",
+        error: "Falha ao iniciar a missao. Tente novamente.",
       }));
     }
-  }, [generateSafeRoute, healthData?.source, isAuthenticated]);
+  }, [generateSafeRoute, healthData]);
 
-  // Alterna entre execução ativa e pausada.
+  // Alterna entre execucao ativa e pausada.
   const togglePause = useCallback(() => {
-    setState(prev => ({
+    setState((prev) => ({
       ...prev,
       isPaused: !prev.isPaused,
     }));
   }, []);
 
-  // Finaliza a missão usando o valor confirmado pela fonte ativa.
-  const completeMission = useCallback(async (finalValue: number) => {
-    try {
-      setState(prev => ({
-        ...prev,
-        isCompleted: true,
-        endTime: new Date(),
-        isRunning: false,
-        isPaused: false,
-      }));
-
-      const verified = healthData
-        ? healthData.source !== "api" && healthData.source !== "unavailable"
-        : false;
-      await onComplete(mission.id, finalValue, verified);
-
-    } catch (error) {
-      console.error('Erro ao completar missão:', error);
-      setState(prev => ({
-        ...prev,
-        error: "Falha ao registrar conclusão da missão.",
-      }));
-    }
-  }, [mission.id, onComplete]);
-
-  // Cancela a execução, limpa o mapa e fecha o modal.
+  // Cancela a execucao, limpa o mapa e fecha o modal.
   const cancelExecution = useCallback(() => {
-    setState(prev => ({
+    setState((prev) => ({
       ...prev,
       isRunning: false,
       isPaused: false,
@@ -235,13 +239,13 @@ const WalkingMissionExecution = ({ mission, onComplete, onClose }: WalkingMissio
     onClose();
   }, [clearMarkers, onClose]);
 
-  // Deriva o percentual de progresso a partir da métrica da missão.
-  const progress = isStepsMission 
+  // Deriva o percentual de progresso a partir da metrica da missao.
+  const progress = isStepsMission
     ? Math.min(100, (state.currentSteps / state.targetSteps) * 100)
     : Math.min(100, (state.currentDistance / state.targetDistance) * 100);
 
-  // Calcula o tempo corrido desde o início da execução.
-  const elapsedSeconds = state.startTime 
+  // Calcula o tempo corrido desde o inicio da execucao.
+  const elapsedSeconds = state.startTime
     ? Math.floor((Date.now() - state.startTime.getTime()) / 1000)
     : 0;
 
@@ -249,14 +253,14 @@ const WalkingMissionExecution = ({ mission, onComplete, onClose }: WalkingMissio
     const hours = Math.floor(seconds / 3600);
     const minutes = Math.floor((seconds % 3600) / 60);
     const secs = seconds % 60;
-    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    return `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
   };
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <Card className="w-full max-w-2xl max-h-[90vh] overflow-y-auto">
         <div className="p-6 space-y-6">
-          {/* Cabeçalho da missão */}
+          {/* Cabecalho da missao */}
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div className="p-2 rounded-full bg-blue-100">
@@ -274,7 +278,7 @@ const WalkingMissionExecution = ({ mission, onComplete, onClose }: WalkingMissio
             </Button>
           </div>
 
-          {/* Erro operacional da execução */}
+          {/* Erro operacional da execucao */}
           {state.error && (
             <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-lg">
               <AlertCircle className="w-5 h-5 text-red-600" />
@@ -291,12 +295,12 @@ const WalkingMissionExecution = ({ mission, onComplete, onClose }: WalkingMissio
               </span>
             </div>
             <div className="w-full bg-gray-200 rounded-full h-3">
-              <div 
+              <div
                 className="bg-blue-600 h-3 rounded-full transition-all duration-500"
                 style={{ width: `${progress}%` }}
               />
             </div>
-            
+
             <div className="grid grid-cols-2 gap-4 text-sm">
               <div>
                 <span className="text-gray-600">Passos:</span>
@@ -305,7 +309,7 @@ const WalkingMissionExecution = ({ mission, onComplete, onClose }: WalkingMissio
                 </p>
               </div>
               <div>
-                <span className="text-gray-600">Distância:</span>
+                <span className="text-gray-600">Distancia:</span>
                 <p className="font-semibold">
                   {(state.currentDistance / 1000).toFixed(2)}km / {(state.targetDistance / 1000).toFixed(2)}km
                 </p>
@@ -322,7 +326,7 @@ const WalkingMissionExecution = ({ mission, onComplete, onClose }: WalkingMissio
               </h3>
               <div className="p-3 bg-gray-50 rounded-lg space-y-2">
                 <div className="flex items-center justify-between text-sm">
-                  <span className="text-gray-600">Distância da rota:</span>
+                  <span className="text-gray-600">Distancia da rota:</span>
                   <span className="font-medium">{(state.route.distance / 1000).toFixed(2)}km</span>
                 </div>
                 <div className="flex items-center justify-between text-sm">
@@ -332,14 +336,14 @@ const WalkingMissionExecution = ({ mission, onComplete, onClose }: WalkingMissio
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-gray-600">Status:</span>
                   <Badge variant={state.isCompleted ? "default" : "neutral"}>
-                    {state.isCompleted ? "Concluída" : state.isRunning ? "Em andamento" : "Pendente"}
+                    {state.isCompleted ? "Concluida" : state.isRunning ? "Em andamento" : "Pendente"}
                   </Badge>
                 </div>
               </div>
             </div>
           )}
 
-          {/* Cronômetro da execução */}
+          {/* Cronometro da execucao */}
           <div className="flex items-center justify-center">
             <div className="text-center">
               <Clock className="w-8 h-8 mx-auto mb-2 text-gray-600" />
@@ -350,7 +354,7 @@ const WalkingMissionExecution = ({ mission, onComplete, onClose }: WalkingMissio
             </div>
           </div>
 
-          {/* Origem e atualização dos dados de saúde */}
+          {/* Origem e atualizacao dos dados de saude */}
           <div className="p-3 bg-blue-50 rounded-lg">
             <div className="flex items-center justify-between text-sm">
               <span className="text-blue-700">Fonte de dados:</span>
@@ -360,12 +364,12 @@ const WalkingMissionExecution = ({ mission, onComplete, onClose }: WalkingMissio
             </div>
             {healthData?.lastUpdated && (
               <p className="text-xs text-blue-600 mt-1">
-                Última atualização: {new Date(healthData.lastUpdated).toLocaleTimeString()}
+                Ultima atualizacao: {new Date(healthData.lastUpdated).toLocaleTimeString()}
               </p>
             )}
           </div>
 
-          {/* Ações disponíveis conforme o estado da execução */}
+          {/* Acoes disponiveis conforme o estado da execucao */}
           <div className="flex gap-3">
             {!state.isRunning && !state.isCompleted && (
               <Button onClick={startExecution} className="flex-1">
@@ -377,10 +381,14 @@ const WalkingMissionExecution = ({ mission, onComplete, onClose }: WalkingMissio
             {state.isRunning && !state.isCompleted && (
               <>
                 <Button onClick={togglePause} variant="outline" className="flex-1">
-                  {state.isPaused ? 'Retomar' : 'Pausar'}
+                  {state.isPaused ? "Retomar" : "Pausar"}
                 </Button>
-                <Button 
-                  onClick={() => completeMission(isStepsMission ? state.currentSteps : Math.round(state.currentDistance))}
+                <Button
+                  onClick={() => {
+                    void completeMission(
+                      isStepsMission ? state.currentSteps : Math.round(state.currentDistance),
+                    );
+                  }}
                   className="flex-1"
                 >
                   <CheckCircle2 className="w-4 h-4 mr-2" />
@@ -393,7 +401,7 @@ const WalkingMissionExecution = ({ mission, onComplete, onClose }: WalkingMissio
               <div className="text-center">
                 <div className="flex items-center justify-center gap-2 text-green-600 mb-3">
                   <CheckCircle2 className="w-6 h-6" />
-                  <span className="font-semibold">Missão Concluída!</span>
+                  <span className="font-semibold">Missao Concluida!</span>
                 </div>
                 <Button onClick={cancelExecution} className="w-full">
                   Fechar

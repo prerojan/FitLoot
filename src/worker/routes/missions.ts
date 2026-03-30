@@ -263,6 +263,7 @@ export function registerMissionRoutes(
         clearMissionListCache(user.id);
       }
 
+      // Agenda reparos leves sem bloquear a entrega da lista principal.
       schedulePeriodicMissionsRefreshWithGuard(
         c.env,
         c.env.fitloot_db,
@@ -294,6 +295,7 @@ export function registerMissionRoutes(
         }
       }
 
+      // Busca missões ativas e histórico recente, com fallback para esquemas antigos sem coluna status.
       let missions;
       try {
         missions = await c.env.fitloot_db
@@ -343,6 +345,7 @@ export function registerMissionRoutes(
         >[],
       );
       const monthlyCounters = await getMonthlyCounters(c.env.fitloot_db, user.id);
+      // Completa o progresso das missões mensais quando ele depende de contadores agregados.
       const withProgress = missionList.map((row) => {
         const rawMission = row as Record<string, unknown>;
         const normalizedMission = normalizeMissionRow(
@@ -453,6 +456,7 @@ export function registerMissionRoutes(
           normalized.exercise_name.trim().length > 0
             ? normalized.exercise_name.trim()
             : deps.extractExerciseName(String(normalized.title ?? ""));
+        // Traduz os passos sob demanda e persiste a versão PT quando a missão ainda está sem localização.
         const ptTranslated = await deps.translateExerciseInstructionsToPt(
           enSteps,
           exerciseLabel,
@@ -666,6 +670,7 @@ export function registerMissionRoutes(
 
         completionPhase = "transaction";
         await deps.withTransaction(c.env.fitloot_db, async () => {
+          // Marca a missão como concluída respeitando esquemas antigos com ou sem coluna status.
           completionPhase = "mark_completed";
           if (missionsTableHasStatus) {
             await c.env.fitloot_db
@@ -701,6 +706,7 @@ export function registerMissionRoutes(
           );
           let newStreak = Number(progression?.current_streak || 0);
 
+          // Recalcula streak apenas quando a atividade do dia ainda não foi registrada.
           if (progression?.last_activity_date !== today) {
             completionPhase = "calculate_streak";
             const yesterday = assertString(
@@ -750,6 +756,7 @@ export function registerMissionRoutes(
           completionPhase = "update_event_counters_db";
           await deps.ensureUserCounterRow(c.env.fitloot_db, user.id);
           const currentHour = new Date().getHours();
+          // Atualiza contadores globais, preservando compatibilidade com bancos sem colunas de streak diário.
           if (countersHaveStreakDayColumns) {
             await c.env.fitloot_db
               .prepare(
@@ -775,6 +782,7 @@ export function registerMissionRoutes(
           }
 
           completionPhase = "lifecycle_mission_events";
+          // Dispara os hooks de progressão e gamificação sem quebrar a conclusão principal.
           await deps.runMissionLifecycleHookSafely(
             user.id,
             "mission_complete_event",
@@ -919,6 +927,7 @@ export function registerMissionRoutes(
 
           let appliedAttributeGainFromSkill = false;
 
+          // Credita progresso em skill e aplica ganhos de atributo tabelados quando existirem.
           if (skillIdValid && (repsForSkill > 0 || timeForSkill > 0)) {
             completionPhase = "update_skill_stats_db";
             await c.env.fitloot_db
@@ -959,6 +968,7 @@ export function registerMissionRoutes(
           }
 
           if (!appliedAttributeGainFromSkill) {
+            // Usa o perfil do exercício como fallback de atributos quando a skill não gera bônus próprios.
             completionPhase = "update_attributes_from_exercise_profile";
             const typeDelta = deps.computeMissionTypeAttributeDelta(
               mission,
@@ -977,6 +987,7 @@ export function registerMissionRoutes(
         });
 
         try {
+          // Limpa os caches dependentes da lista e do ranking logo após a conclusão confirmada.
           deps.invalidateRankingCache();
           deps.invalidateMissionListCache(user.id);
         } catch (cacheError) {
@@ -986,6 +997,7 @@ export function registerMissionRoutes(
           );
         }
 
+        // Reabastece missões periódicas em segundo plano depois da conclusão principal.
         c.executionCtx.waitUntil(
           deps.ensurePeriodicMissionsWithGuard(
             c.env,
@@ -1020,6 +1032,7 @@ export function registerMissionRoutes(
           message: errorMsg,
           stack: error instanceof Error ? error.stack : undefined,
         });
+        // Mantém a fase explícita para facilitar auditoria e suporte quando a conclusão falha.
         return c.json(
           {
             error: "Erro interno",

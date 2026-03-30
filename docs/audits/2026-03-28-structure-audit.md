@@ -1759,3 +1759,306 @@ Validation result:
 Suggested next patch:
 
 - continue the deeper mission-route sweep inside `src/worker/routes/missions.ts`, focusing on internal helper blocks and any remaining visible text cleanups
+
+### Repo patch 19 completed
+
+This patch stayed inside the mission route module and documented the most critical internal flows of mission listing and completion, which were the least obvious parts to maintain safely.
+
+Files covered in this patch:
+
+- `src/worker/routes/missions.ts`
+
+Changes completed:
+
+- documented the background repair scheduling, mission query fallback, and monthly-progress enrichment inside the mission list route
+- documented the on-demand translation persistence flow inside the mission detail route
+- documented the main phases of mission completion, including schema-aware completion updates, streak recalculation, reward calculation, lifecycle hooks, skill progression, attribute fallback, cache invalidation, and asynchronous mission refresh
+- preserved the current completion-phase tracing payload so production failures remain diagnosable without changing behavior
+
+Validation performed after repo patch 19:
+
+- `npm run build`
+- `npm run lint`
+- `npm run test:worker`
+
+Validation result:
+
+- build passed
+- lint reports only the same 9 pre-existing frontend warnings
+- worker dry-run deploy passed
+
+Suggested next patch:
+
+- continue in `src/worker/routes/missions.ts` only if needed for residual text cleanup, or move to the next large uncovered file outside the worker to keep the project-wide sweep balanced
+
+### Repo patch 20 completed
+
+This patch executed the first full pass of the new structural safety plan from March 30, 2026, preserving logic and visual behavior while establishing a reproducible regression baseline and removing dead compatibility layers that were no longer used inside the repository.
+
+Files covered in this patch:
+
+- `package.json`
+- `package-lock.json`
+- `vitest.config.ts`
+- `src/test/setup.ts`
+- `src/test/react/Onboarding.test.tsx`
+- `src/test/react/MissionCard.test.tsx`
+- `src/test/react/useMapService.test.tsx`
+- `src/test/react/useWalkingMission.test.tsx`
+- `src/test/worker/ai.routes.test.ts`
+- `src/test/worker/billing.routes.test.ts`
+- `src/test/worker/missions.routes.test.ts`
+- `src/test/worker/mockD1.ts`
+- `src/test/worker/testUtils.ts`
+- `.gitignore`
+- `docs/release-artifacts.md`
+- `src/react-app/routes/AppRoutes.tsx`
+- `src/react-app/routes/guards.tsx`
+- `src/worker/core/cors.ts`
+- `src/worker/services/missionPresentation.ts`
+- `src/worker/index.ts`
+
+Changes completed:
+
+- created a fresh backup snapshot and git bundle before new structural mutations on March 30, 2026
+- added the frontend and worker unit/integration test baseline with `vitest`, `jsdom`, and Testing Library
+- added regression coverage for onboarding, mission card behavior, walking mission tracking, map initialization, AI chat fallback, food-analysis fallback, checkout start, subscription status, mission list caching, and manual-completion guards
+- fixed the remaining hook/Fast Refresh lint issues so the repository now lints cleanly without the previous warnings
+- expanded `.gitignore` for Android Studio and generated worker artifacts, and removed tracked generated artifacts from the Git index
+- removed the unused compatibility wrappers under `src/react-app/constants/components` plus the obsolete auth/theme shims that no longer had internal references
+- migrated the last frontend route imports to the canonical `auth/` tree
+- extracted worker CORS/origin handling to `src/worker/core/cors.ts`
+- extracted worker mission presentation/normalization helpers to `src/worker/services/missionPresentation.ts`
+- reduced `src/worker/index.ts` to 3009 lines while keeping the same HTTP paths, payloads, error semantics, and UI behavior
+
+Validation performed after repo patch 20:
+
+- `npm run test:unit`
+- `npm run build`
+- `npm run lint`
+- `npm run test:worker`
+
+Validation result:
+
+- unit test suite passed with 10 tests green
+- build passed
+- lint passed with zero warnings and zero errors
+- worker dry-run deploy passed
+
+Notes:
+
+- the AI route tests still emit expected stderr from deliberate fallback-path simulations, but the assertions pass and the route behavior remains unchanged
+- the deleted compatibility files had zero internal references at the time of removal; the canonical trees now act as the only in-repo sources of truth for those modules
+
+Suggested next patch:
+
+- continue phase 5 by extracting the remaining mission state/cache and periodic refresh helpers from `src/worker/index.ts`
+- continue phase 4 by splitting the largest remaining frontend files (`Onboarding`, `MissionCard`, and `FoodAnalysis`) into domain-local modules without changing JSX output or CSS classes
+
+### Repo patch 21 completed
+
+This patch continued phase 5 of the March 30 structural plan by extracting the remaining mission runtime state and periodic refresh guards from the worker entrypoint into a dedicated service, while keeping the same cache semantics, debounce behavior, repair scheduling, and background refresh flow.
+
+Files covered in this patch:
+
+- `src/worker/services/missionRuntimeState.ts`
+- `src/worker/index.ts`
+
+Changes completed:
+
+- extracted mission-list cache reads, writes, invalidation, and cleanup logic to `src/worker/services/missionRuntimeState.ts`
+- extracted the guarded orchestration for periodic mission refresh, periodic progress recomputation, and legacy daily metadata repair to the same runtime-state service
+- preserved the existing debounce windows, lock maps, timeout cleanup rules, and refresh modes used by the worker
+- reduced `src/worker/index.ts` to 2837 lines while keeping the same HTTP behavior, background task timing, and mission-refresh triggers
+- kept `src/worker/index.ts` as the composition entrypoint by delegating to the new service through thin wrappers instead of inlining the runtime-state implementation
+
+Validation performed after repo patch 21:
+
+- `npm run build`
+- `npm run lint`
+- `npm run test:unit`
+- `npm run test:worker`
+
+Validation result:
+
+- build passed
+- lint passed with zero warnings and zero errors
+- unit test suite passed
+- worker dry-run deploy passed
+
+Notes:
+
+- the AI fallback tests still emit the same expected stderr during simulated upstream failures, but the assertions remain green and route behavior is unchanged
+- the extraction intentionally preserved the public wrapper names inside `src/worker/index.ts` so downstream route modules continue to use the same entrypoint-local contracts
+
+Suggested next patch:
+
+- begin the next safe frontend split in one of the largest remaining files, prioritizing `src/react-app/pages/Onboarding.tsx`, `src/react-app/components/MissionCard.tsx`, or `src/react-app/pages/FoodAnalysis.tsx`
+- keep the split domain-local, preserving JSX output, CSS class names, and visible text exactly as they currently render
+
+### Repo patch 22 completed
+
+This patch continued phase 4 on the frontend by splitting the `FoodAnalysis` page into domain-local support modules, while preserving the same scanner flow, the same saved-food library behavior, and the same visual structure of the screen.
+
+Files covered in this patch:
+
+- `src/react-app/pages/FoodAnalysis.tsx`
+- `src/react-app/pages/food-analysis/types.ts`
+- `src/react-app/pages/food-analysis/helpers.ts`
+- `src/react-app/pages/food-analysis/MacroCard.tsx`
+- `src/react-app/pages/food-analysis/SavedFoodsLibraryPanel.tsx`
+
+Changes completed:
+
+- extracted the page-local analysis types and MediaPipe contracts to `src/react-app/pages/food-analysis/types.ts`
+- extracted the pure classification, preview, and saved-food formatting helpers to `src/react-app/pages/food-analysis/helpers.ts`
+- extracted the macro summary card to `src/react-app/pages/food-analysis/MacroCard.tsx`
+- extracted the inline saved-food library panel to `src/react-app/pages/food-analysis/SavedFoodsLibraryPanel.tsx`
+- preserved the same scanner markup, CTA flow, loading states, saved-library count, and result rendering in `src/react-app/pages/FoodAnalysis.tsx`
+- kept imports local to the page domain so the separation remains isolated and easy to continue in later patches
+
+Validation performed after repo patch 22:
+
+- `npm run build`
+- `npm run lint`
+- `npm run test:unit`
+- `npm run test:worker`
+
+Validation result:
+
+- build passed
+- lint passed with zero warnings and zero errors
+- unit test suite passed
+- worker dry-run deploy passed
+
+Notes:
+
+- this patch intentionally stopped at support modules and one isolated UI block, which keeps the JSX output of the page stable while making the next cuts safer
+- the new page-local folder can now absorb future splits such as camera orchestration, upload handling, or result rendering without leaking responsibilities into the global component tree
+
+Suggested next patch:
+
+- continue phase 4 in `src/react-app/components/MissionCard.tsx` by extracting pure mission-display helpers and, if the props boundary stays clean, the execution modal to a domain-local module
+- keep the extraction scoped so that class names, rendered labels, and CTA behavior remain identical
+
+### Repo patch 23 completed
+
+This patch continued phase 4 on the frontend by extracting the first safe slice of `MissionCard`: the pure mission helpers that were feeding both the card shell and the execution flow. The inline execution modal remained in place on purpose so the CTA and interaction contract stayed unchanged while the helper layer moved out of the file.
+
+Files covered in this patch:
+
+- `src/react-app/components/MissionCard.tsx`
+- `src/react-app/components/mission-card/helpers.ts`
+
+Changes completed:
+
+- extracted the canonical mission-card helper layer to `src/react-app/components/mission-card/helpers.ts`
+- moved metric normalization, goal formatting, progress target resolution, display-title cleanup, media resolution, focus-label derivation, and auto-progress summarization into the helper module
+- rewired `src/react-app/components/MissionCard.tsx` to consume the new helper module while keeping the same JSX tree, CTA labels, badges, progress bars, and detail modal behavior
+- kept the inline execution modal temporarily inside `src/react-app/components/MissionCard.tsx` to avoid changing props boundaries before the helper split stabilized
+- reduced `src/react-app/components/MissionCard.tsx` to 1447 lines and `src/react-app/pages/FoodAnalysis.tsx` to 1062 lines after the two frontend patches in this cycle
+
+Validation performed after repo patch 23:
+
+- `npm run build`
+- `npm run lint`
+- `npm run test:unit`
+- `npm run test:worker`
+
+Validation result:
+
+- build passed
+- lint passed with zero warnings and zero errors
+- unit test suite passed
+- worker dry-run deploy passed
+
+Notes:
+
+- the `MissionCard` unit test kept passing after the helper split, which confirms that the default-card CTA path and detail modal opening flow remained stable
+- the execution modal is the next clear cut inside `src/react-app/components/MissionCard.tsx`, but leaving it inline for this patch kept the risk profile lower while the helper extraction settled
+
+Suggested next patch:
+
+- continue phase 4 by extracting the inline execution modal from `src/react-app/components/MissionCard.tsx` into `src/react-app/components/mission-card/`, reusing the helper layer that is now in place
+- after that cut, revisit `src/react-app/pages/Onboarding.tsx` with the same strategy used in `FoodAnalysis`: local types/helpers first, UI blocks second
+
+### Repo patch 24 completed
+
+This patch continued phase 4 on the frontend by extracting the mission execution modal from `MissionCard` into its own domain-local module, while preserving the same execution UX, CTA flow, timer behavior, media playback, and completion overlay.
+
+Files covered in this patch:
+
+- `src/react-app/components/MissionCard.tsx`
+- `src/react-app/components/mission-card/MissionExecutionModal.tsx`
+
+Changes completed:
+
+- extracted the inline mission execution experience to `src/react-app/components/mission-card/MissionExecutionModal.tsx`
+- kept the exact mission execution props contract already used by `MissionCard`
+- preserved the same modal layout, controls, timer flow, rest behavior, media playback, and mission completion transition
+- removed the now-obsolete inline modal implementation and its local state types from `src/react-app/components/MissionCard.tsx`
+- kept the card shell, details modal, badges, progress rendering, and CTA entrypoints unchanged
+
+Validation performed after repo patch 24:
+
+- `npm run build`
+- `npm run lint`
+- `npm run test:unit`
+- `npm run test:worker`
+
+Validation result:
+
+- build passed
+- lint passed with zero warnings and zero errors
+- unit test suite passed
+- worker dry-run deploy passed
+
+Notes:
+
+- this cut reduced the responsibility of `MissionCard` without changing its visual tree or interaction surface
+- the extracted modal now gives the `mission-card` domain a clean place for future execution-specific refinements that do not belong in the card shell
+
+Suggested next patch:
+
+- revisit `src/react-app/pages/Onboarding.tsx` and extract its stable page-local types, defaults, metadata, and pure copy helpers before moving any visual blocks
+
+### Repo patch 25 completed
+
+This patch continued phase 4 on the frontend by starting the safe decomposition of `Onboarding`. The page now delegates page-local state contracts, default values, step metadata, and pure helper functions to a dedicated folder, while keeping the same render flow and visual output in the page component.
+
+Files covered in this patch:
+
+- `src/react-app/pages/Onboarding.tsx`
+- `src/react-app/pages/onboarding/types.ts`
+- `src/react-app/pages/onboarding/constants.ts`
+- `src/react-app/pages/onboarding/helpers.ts`
+
+Changes completed:
+
+- extracted the onboarding state and draft types to `src/react-app/pages/onboarding/types.ts`
+- extracted onboarding field class constants, initial values, validation regex, preview timing, and step metadata to `src/react-app/pages/onboarding/constants.ts`
+- extracted pure helper functions for availability messaging, catalog value parsing, password validation, frequency copy, and plan copy generation to `src/react-app/pages/onboarding/helpers.ts`
+- rewired `src/react-app/pages/Onboarding.tsx` to consume the new page-local modules while preserving the same JSX, same step order, same copy, and same onboarding flow
+
+Validation performed after repo patch 25:
+
+- `npm run build`
+- `npm run lint`
+- `npm run test:unit`
+- `npm run test:worker`
+
+Validation result:
+
+- build passed
+- lint passed with zero warnings and zero errors
+- unit test suite passed
+- worker dry-run deploy passed
+
+Notes:
+
+- this patch intentionally stopped before moving the visual step sections, which keeps the current onboarding layout stable while reducing top-of-file clutter
+- the new `src/react-app/pages/onboarding/` folder now forms the canonical place for future page-local splits that should not leak into global component directories
+
+Suggested next patch:
+
+- continue phase 4 inside `src/react-app/pages/Onboarding.tsx` by extracting the next cohesive UI blocks such as the picker/row components or step-specific sections, while preserving the same class names, step transitions, and visible copy

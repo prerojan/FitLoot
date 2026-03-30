@@ -208,6 +208,7 @@ type MaterializedMissionEntry = {
   mission: MissionPayloadLike;
 };
 
+// Persists and repairs structured mission plans while keeping current-cycle rows compatible with legacy data.
 function buildPeriodicFallbackDraftsFromDailyBlueprints(
   profile: MissionPlanProfileLike,
   dailyBlueprints: readonly MissionBlueprintLike[],
@@ -289,6 +290,7 @@ function isCurrentMonthlyCounterMissionRow(
 export function createMissionPlanPersistenceService(
   deps: MissionPlanPersistenceDeps,
 ) {
+  // Rebuilds daily blueprints from stored mission rows so repair flows can reuse the same planning pipeline.
   function buildDailyBlueprintFromMissionPayload(
     mission: MissionPayloadLike,
     profile: MissionPlanProfileLike,
@@ -333,6 +335,7 @@ export function createMissionPlanPersistenceService(
     };
   }
 
+  // Materialization resolves generated blueprints into final mission payloads before they touch persistent storage.
   async function materializeMissionBlueprints(
     env: Env,
     profile: MissionPlanProfileLike,
@@ -418,6 +421,7 @@ export function createMissionPlanPersistenceService(
     });
   }
 
+  // Writes the whole structured plan atomically so daily, weekly, and monthly rows stay coherent together.
   async function persistGeneratedMissionPlan(
     env: Env,
     db: D1Database,
@@ -445,6 +449,7 @@ export function createMissionPlanPersistenceService(
       .filter((mission): mission is MissionBlueprintLike => mission !== null);
   }
 
+  // Rebuilds periodic wrappers from current daily blueprints when the cycle is valid but incomplete.
   async function ensureStructuredPeriodicMissionsFromExistingDailyBlueprints(
     env: Env,
     db: D1Database,
@@ -504,6 +509,7 @@ export function createMissionPlanPersistenceService(
     return blueprints.length;
   }
 
+  // Repairs legacy periodic rows in place without forcing users through a full mission regeneration.
   async function repairLegacyPeriodicMissions(
     _env: Env,
     db: D1Database,

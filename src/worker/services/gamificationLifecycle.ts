@@ -21,6 +21,7 @@ type GoalMissionRelevance = {
   userGoal: string;
 };
 
+// Concentrates post-mission gamification side effects: counters, titles, achievements, skills, and xp progression.
 function canonicalCatalogName(value: string): string {
   return repairKnownMojibakeString(value);
 }
@@ -54,6 +55,7 @@ async function findAchievementIdByName(
 export function createGamificationLifecycleService(
   deps: GamificationLifecycleDeps,
 ) {
+  // Baseline row helpers guarantee that later reward hooks always mutate an existing progression state.
   async function ensureUserCounterRow(
     db: D1Database,
     userId: string,
@@ -199,6 +201,7 @@ export function createGamificationLifecycleService(
       .run();
   }
 
+  // Mission-achievement evaluation translates accumulated counters into durable unlocks and titles.
   async function evaluateMissionAchievementsAndTitles(
     db: D1Database,
     userId: string,
@@ -280,6 +283,7 @@ export function createGamificationLifecycleService(
     }
   }
 
+  // Streak hooks isolate the retention mechanics that react to daily mission continuity changes.
   async function onStreakContinued(
     db: D1Database,
     userId: string,
@@ -463,6 +467,7 @@ export function createGamificationLifecycleService(
       .run();
   }
 
+  // Goal relevance hooks decide whether a mission meaningfully advanced the player's selected objective.
   async function getMissionContext(
     db: D1Database,
     missionId: number,
@@ -729,6 +734,7 @@ export function createGamificationLifecycleService(
     return { isGoalRelevant, missionGroup, missionType, userGoal };
   }
 
+  // Public lifecycle hooks are the integration surface consumed by mission, ranking, profile, and chat flows.
   async function onMissionComplete(
     db: D1Database,
     userId: string,
@@ -917,6 +923,7 @@ export function createGamificationLifecycleService(
     }
   }
 
+  // Skill unlock and level-resolution helpers keep xp gains synchronized with progression side effects.
   async function tryUnlockSkillsForLevel(
     db: D1Database,
     userId: string,

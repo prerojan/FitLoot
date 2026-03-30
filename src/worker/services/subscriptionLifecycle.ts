@@ -46,6 +46,7 @@ import {
 
 const encoder = new TextEncoder();
 
+// Centralizes the full subscription lifecycle: promo codes, checkout bootstrap, and webhook reconciliation.
 function toHex(buffer: ArrayBuffer): string {
   return Array.from(new Uint8Array(buffer))
     .map((byte) => byte.toString(16).padStart(2, "0"))
@@ -83,6 +84,7 @@ export function normalizePromoCodeValue(value: string | null | undefined): strin
   return typeof value === "string" ? value.trim() : "";
 }
 
+// Promo-code helpers normalize raw records and availability before any subscription mutation runs.
 function parsePromoCodeExpiryTimestamp(value: string | null): number | null {
   if (!value) return null;
   const normalizedValue = /[zZ]|[+-]\d{2}:\d{2}$/.test(value)
@@ -350,6 +352,7 @@ export async function applyPromoCodeForUser(
   };
 }
 
+// Serialization helpers preserve structured event and metadata state inside subscription rows.
 
 function parseSubscriptionEventLog(raw: string | null): SubscriptionEventLogEntry[] {
   if (!raw) return [];
@@ -707,6 +710,7 @@ export function resolveCheckoutProductId(planId: PublicPlanId): string {
   return CHECKOUT_PLAN_CATALOG[planId].product_id;
 }
 
+// Checkout bootstrap resolves the payable offer and persists the pending subscription anchor before redirecting out.
 export async function startCheckoutForUser(
   db: D1Database,
   env: Env,
@@ -813,6 +817,7 @@ export async function startCheckoutForUser(
 
 type CaktoUserSyncMode = "apply" | "preserve-active" | "keep-current";
 
+// Webhook helpers translate external payment events back into the local subscription and plan-access model.
 function resolveCaktoSyncMode(eventType: string): { status: PlanStatus; syncMode: CaktoUserSyncMode; paymentMethod: UserPaymentMethod | null } {
   switch (eventType) {
     case "purchase_approved":
