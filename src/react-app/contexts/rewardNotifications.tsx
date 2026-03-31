@@ -128,7 +128,7 @@ export function RewardNotificationsProvider({
     try {
       const response = await api("/api/reward-notifications/pending");
 
-      if (response.status === 401 || response.status === 403) {
+      if (response.status === 401 || response.status === 403 || response.status === 402) {
         return;
       }
 

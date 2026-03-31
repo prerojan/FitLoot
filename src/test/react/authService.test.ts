@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { hasPlanAccess, resolveAuthenticatedStartRoute } from "../../react-app/services/authService";
 
 describe("authService routing", () => {
-  it("routes users with paid access to dashboard", () => {
+  it("routes users with paid access to home", () => {
     const route = resolveAuthenticatedStartRoute({
       id: "u1",
       email: "user@example.com",
@@ -13,7 +13,7 @@ describe("authService routing", () => {
       payment_method: "card",
     });
 
-    expect(route).toBe("/dashboard");
+    expect(route).toBe("/home");
   });
 
   it("keeps checkout route when access is not granted", () => {

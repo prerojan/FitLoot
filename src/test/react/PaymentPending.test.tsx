@@ -47,7 +47,7 @@ describe("PaymentPending", () => {
     vi.clearAllMocks();
   });
 
-  it("checks auth and redirects to dashboard when payment is approved", async () => {
+  it("checks auth and redirects to home when payment is approved", async () => {
     apiMock.mockResolvedValueOnce(
       new Response(
         JSON.stringify({
@@ -80,7 +80,7 @@ describe("PaymentPending", () => {
     });
 
     await waitFor(() => {
-      expect(navigate).toHaveBeenCalledWith("/dashboard", { replace: true });
+      expect(navigate).toHaveBeenCalledWith("/home", { replace: true });
     });
   });
 });

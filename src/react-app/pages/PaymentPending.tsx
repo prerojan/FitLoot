@@ -7,6 +7,7 @@ import { useAuth } from "@/react-app/auth/context";
 import { hasPlanAccess } from "@/react-app/services/authService";
 import { api } from "@/react-app/utils/api";
 import { clearOnboardingDraft } from "@/react-app/utils/onboardingDraft";
+import { queueActivationNotice } from "@/react-app/utils/activationNotice";
 
 type PaymentMethod = "none" | "card" | "pix";
 
@@ -81,7 +82,7 @@ export default function PaymentPending() {
     if (hasPlanAccess(user)) {
       clearScheduledPoll();
       clearOnboardingDraft();
-      navigate(ROUTE_PATHS.dashboard, { replace: true });
+      navigate(ROUTE_PATHS.home, { replace: true });
       return;
     }
     if (user.plan_status !== "pending") {
@@ -150,14 +151,20 @@ export default function PaymentPending() {
       if (payload.has_access) {
         clearScheduledPoll();
         clearOnboardingDraft();
+        queueActivationNotice({
+          title: "Conta pronta para uso",
+          message: "Pagamento aprovado e acesso liberado. Bem-vindo(a) ao FitLoot.",
+          badge: "VIP ativo",
+          tone: "success",
+        });
         setStatusPopup({
           title: "Pagamento aprovado",
-          message: "Seu acesso foi liberado. Redirecionando para o painel...",
+          message: "Seu acesso foi liberado. Redirecionando para a Home...",
           tone: "success",
         });
         await checkAuth();
         window.setTimeout(() => {
-          navigate(ROUTE_PATHS.dashboard, { replace: true });
+          navigate(ROUTE_PATHS.home, { replace: true });
         }, silent ? 500 : 1200);
         return;
       }
