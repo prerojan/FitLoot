@@ -1,7 +1,14 @@
 import type { CSSProperties } from "react";
 import { formatMissionGoal } from "@/constants/missionMetrics";
-import { resolveExerciseMediaFallbackUrl } from "@/shared/exerciseCatalog";
-import { localizeMissionText, normalizeMissionMediaUrl } from "@/shared/missionLocalization";
+import {
+  resolveExerciseMediaFallbackUrl,
+  resolveExerciseMediaFallbackUrlById,
+} from "@/shared/exerciseCatalog";
+import {
+  buildMissionFallbackMediaDataUrl,
+  localizeMissionText,
+  normalizeMissionMediaUrl,
+} from "@/shared/missionLocalization";
 import type { CircuitTask, Mission, MissionMetricType } from "@/shared/types";
 
 // Normalizes mission metrics and goals before any card or modal rendering happens.
@@ -335,6 +342,11 @@ function resolveCatalogMissionMediaFallbackUrl(mission: Mission): string | null 
     return null;
   }
 
+  const fallbackByExerciseId = resolveExerciseMediaFallbackUrlById(mission.exercise_db_id ?? null);
+  if (fallbackByExerciseId) {
+    return normalizeMissionMediaUrl(fallbackByExerciseId);
+  }
+
   const candidates = [
     mission.exercise_name,
     resolveMissionDisplayTitle(mission.title),
@@ -358,7 +370,17 @@ export function resolveMissionMediaUrl(mission: Mission): string | null {
   const exerciseDbImage = normalizeMissionMediaUrl(mission.exercise_db_image_url);
   const videoUrl = normalizeMissionMediaUrl(mission.video_url);
   const thumbnail = normalizeMissionMediaUrl(mission.thumbnail_url);
+  const fallbackByExerciseId = normalizeMissionMediaUrl(
+    resolveExerciseMediaFallbackUrlById(mission.exercise_db_id ?? null),
+  );
   const catalogFallback = resolveCatalogMissionMediaFallbackUrl(mission);
+  const generatedFallback = buildMissionFallbackMediaDataUrl(
+    mission.exercise_name
+    ?? resolveMissionDisplayTitle(mission.title)
+    ?? mission.description
+    ?? mission.body_area
+    ?? null,
+  );
 
   return ascendGif
     ?? exerciseDbGif
@@ -366,7 +388,9 @@ export function resolveMissionMediaUrl(mission: Mission): string | null {
     ?? exerciseDbImage
     ?? primaryImage
     ?? thumbnail
+    ?? fallbackByExerciseId
     ?? catalogFallback
+    ?? generatedFallback
     ?? null;
 }
 

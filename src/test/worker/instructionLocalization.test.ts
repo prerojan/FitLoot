@@ -9,7 +9,7 @@ describe("instructionLocalization", () => {
   it("removes english residue from mixed instruction lines", () => {
     const localized = ensurePortugueseInstructionList([
       "Keep your core engaged and return to starting position",
-      "Mantenha o tronco estável durante o movimento",
+      "Mantenha o tronco estavel durante o movimento",
     ]);
 
     expect(localized.length).toBeGreaterThan(0);
@@ -30,12 +30,21 @@ describe("instructionLocalization", () => {
   it("falls back to a portuguese generic exercise label when no safe localization is available", () => {
     const label = ensurePortugueseExerciseLabel("Box jump over hurdle");
 
-    expect(label).toBe("exercício guiado");
+    expect(label).toBe("exerc\u00edcio guiado");
   });
 
   it("preserves portuguese exercise labels", () => {
     const label = ensurePortugueseExerciseLabel("Agachamento livre");
 
     expect(label).toBe("Agachamento livre");
+  });
+
+  it("translates known english labels fully to portuguese", () => {
+    const deadBugLabel = ensurePortugueseExerciseLabel("Dead Bug");
+    const hollowLabel = ensurePortugueseExerciseLabel("Hollow Body Hold");
+
+    expect(deadBugLabel).toBe("Abdominal alternado");
+    expect(hollowLabel).toBe("Isometria concava");
+    expect(/\b(?:dead|bug|hollow|hold)\b/i.test(`${deadBugLabel} ${hollowLabel}`)).toBe(false);
   });
 });

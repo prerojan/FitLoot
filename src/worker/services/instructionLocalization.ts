@@ -1,3 +1,7 @@
+import {
+  localizeExerciseCatalogText,
+  resolveExerciseDisplayNamePt,
+} from "../../shared/exerciseCatalog";
 import { localizeMissionText } from "../../shared/missionLocalization";
 
 const ENGLISH_RESIDUE_REGEX =
@@ -64,9 +68,22 @@ export function ensurePortugueseInstructionList(
 export function ensurePortugueseExerciseLabel(
   value: string | null | undefined,
 ): string {
-  const localized = normalizeWhitespace(localizeMissionText(value ?? "") ?? "");
-  if (localized.length === 0 || hasEnglishResidue(localized)) {
-    return "exercício guiado";
+  const rawValue = typeof value === "string" ? value : "";
+  const candidateLabels = [
+    resolveExerciseDisplayNamePt(rawValue),
+    localizeExerciseCatalogText(rawValue),
+    localizeMissionText(rawValue),
+  ];
+
+  for (const candidate of candidateLabels) {
+    const localized = normalizeWhitespace(String(candidate ?? ""));
+    if (localized.length === 0) {
+      continue;
+    }
+    if (!hasEnglishResidue(localized)) {
+      return localized;
+    }
   }
-  return localized;
+
+  return "exerc\u00edcio guiado";
 }

@@ -1,6 +1,7 @@
 import type { CircuitTask, MissionMetricType } from "../../shared/types";
 import {
   resolveExerciseDisplayNamePt,
+  resolvePreferredExerciseDbId,
 } from "../../shared/exerciseCatalog";
 import {
   buildMissionDisplayGoalFromTasks,
@@ -345,6 +346,17 @@ export function createMissionPresentationService({
         ? (localizeMissionText(rawMission.description) ?? rawMission.description)
         : rawMission.description;
     const localizedGoal = resolveMissionDisplayGoal(rawMission, circuitTasks);
+    const explicitExerciseDbId =
+      typeof rawMission.exercise_db_id === "string" &&
+      rawMission.exercise_db_id.trim().length > 0
+        ? rawMission.exercise_db_id.trim()
+        : null;
+    const fallbackExerciseDbId = resolvePreferredExerciseDbId(
+      typeof rawMission.exercise_name === "string" &&
+      rawMission.exercise_name.trim().length > 0
+        ? rawMission.exercise_name
+        : displayTitle,
+    );
     const progressValue =
       rawMission.progress_value === null || rawMission.progress_value === undefined
         ? (circuitTasks.length > 0
@@ -401,11 +413,7 @@ export function createMissionPresentationService({
               rawMission.exercise_name
             )
           : null,
-      exercise_db_id:
-        typeof rawMission.exercise_db_id === "string" &&
-        rawMission.exercise_db_id.trim().length > 0
-          ? rawMission.exercise_db_id.trim()
-          : null,
+      exercise_db_id: explicitExerciseDbId ?? fallbackExerciseDbId ?? null,
       exercise_equipment:
         typeof rawMission.exercise_equipment === "string"
           ? (localizeMissionText(rawMission.exercise_equipment) ?? rawMission.exercise_equipment)
@@ -476,6 +484,7 @@ export function createMissionPresentationService({
       exercise_instructions_en: mission.exercise_instructions_en,
       exercise_instructions_pt: mission.exercise_instructions_pt,
       image_url: mission.image_url,
+      exercise_db_id: mission.exercise_db_id,
       exercise_db_gif_url: mission.exercise_db_gif_url,
       exercise_db_image_url: mission.exercise_db_image_url,
       muscle_groups: mission.muscle_groups,

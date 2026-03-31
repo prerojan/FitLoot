@@ -52,6 +52,7 @@ const supplementalExerciseCatalog: SupplementalExerciseCatalogEntry[] = [
     slug: "air-squat",
     namePt: "Agachamento livre",
     searchTerms: ["air squat", "bodyweight squat"],
+    exerciseDbId: "QChZi3x",
     aliases: ["air squat", "bodyweight squat", "squat", "agachamento", "agachamento livre"],
     muscles: ["lower", "legs", "glutes", "quads", "full body"],
     supportedForMission: true,
@@ -77,6 +78,7 @@ const supplementalExerciseCatalog: SupplementalExerciseCatalogEntry[] = [
     slug: "wall-sit",
     namePt: "Cadeira isométrica",
     searchTerms: ["wall sit"],
+    exerciseDbId: "sVQCCeG",
     aliases: ["wall sit", "cadeira isométrica", "cadeira isometrica"],
     muscles: ["lower", "legs", "quads"],
     supportedForMission: true,
@@ -85,6 +87,7 @@ const supplementalExerciseCatalog: SupplementalExerciseCatalogEntry[] = [
     slug: "calf-raise",
     namePt: "Elevação de panturrilha",
     searchTerms: ["calf raise"],
+    exerciseDbId: "bJYHBIN",
     aliases: ["calf raise", "elevação de panturrilha", "elevacao de panturrilha"],
     muscles: ["lower", "legs", "calves"],
     supportedForMission: true,
@@ -126,10 +129,10 @@ const supplementalExerciseCatalog: SupplementalExerciseCatalogEntry[] = [
   },
   {
     slug: "dead-bug",
-    namePt: "Dead Bug",
+    namePt: "Abdominal alternado",
     searchTerms: ["dead bug"],
     exerciseDbId: "iny3m5y",
-    aliases: ["dead bug"],
+    aliases: ["dead bug", "abdominal alternado"],
     muscles: ["core", "waist", "abs"],
     supportedForMission: true,
   },
@@ -202,9 +205,9 @@ const supplementalExerciseCatalog: SupplementalExerciseCatalogEntry[] = [
   },
   {
     slug: "hollow-body-hold",
-    namePt: "Isometria Hollow",
+    namePt: "Isometria concava",
     searchTerms: ["hollow body hold", "hollow hold", "hollow body"],
-    aliases: ["hollow body hold", "hollow hold", "hollow body", "isometria hollow"],
+    aliases: ["hollow body hold", "hollow hold", "hollow body", "isometria hollow", "isometria concava"],
     muscles: ["core", "waist", "abs"],
     supportedForMission: false,
     replacementSlug: "plank-front",
@@ -431,16 +434,45 @@ export function resolvePreferredExerciseDbId(value: string | null | undefined): 
   return null;
 }
 
+function resolveCatalogEntryByExerciseDbId(
+  exerciseDbId: string | null | undefined,
+): SupplementalExerciseCatalogEntry | null {
+  if (typeof exerciseDbId !== "string" || exerciseDbId.trim().length === 0) {
+    return null;
+  }
+
+  const normalizedExerciseDbId = exerciseDbId.trim();
+  const matchingEntry = supplementalExerciseCatalog.find((entry) =>
+    entry.exerciseDbId === normalizedExerciseDbId
+    || entry.visualFallbackExerciseDbId === normalizedExerciseDbId,
+  );
+
+  return matchingEntry ?? null;
+}
+
+export function resolveExerciseMediaFallbackUrlById(exerciseDbId: string | null | undefined): string | null {
+  if (typeof exerciseDbId !== "string" || exerciseDbId.trim().length === 0) {
+    return null;
+  }
+
+  const normalizedExerciseDbId = exerciseDbId.trim();
+  const catalogEntry = resolveCatalogEntryByExerciseDbId(normalizedExerciseDbId);
+  const supportedEntry = resolveReplacementEntry(catalogEntry);
+  const resolvedExerciseDbId =
+    supportedEntry?.visualFallbackExerciseDbId
+    ?? supportedEntry?.exerciseDbId
+    ?? normalizedExerciseDbId;
+
+  return `https://static.exercisedb.dev/media/${resolvedExerciseDbId}.gif`;
+}
+
 export function resolveExerciseMediaFallbackUrl(value: string | null | undefined): string | null {
   const supplemental = resolveSupplementalExerciseCatalogEntry(value);
   const supportedSupplemental = resolveReplacementEntry(supplemental);
   const exerciseDbId = supportedSupplemental?.visualFallbackExerciseDbId
     ?? supportedSupplemental?.exerciseDbId
     ?? null;
-  if (!exerciseDbId) {
-    return null;
-  }
-  return `https://static.exercisedb.dev/media/${exerciseDbId}.gif`;
+  return resolveExerciseMediaFallbackUrlById(exerciseDbId);
 }
 
 export function listSupportedMissionExerciseNamesByMuscle(muscle: string | null | undefined): string[] {
