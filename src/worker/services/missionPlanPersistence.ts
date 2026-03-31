@@ -1,24 +1,13 @@
 import type { MissionMetricType } from "../../shared/types";
 import type { Env } from "../core/types";
+import type { MissionPayload } from "./missionMaterializationSupport";
 
 type MissionPeriod = "daily" | "weekly" | "monthly";
 
-type MissionPayloadLike = {
+type MissionPayloadLike = Partial<MissionPayload> & {
   type?: MissionPeriod | undefined;
   title: string;
-  description?: string | null | undefined;
-  goal?: string | null | undefined;
   metric_type: MissionMetricType;
-  metric_value?: number | null | undefined;
-  target_reps?: number | null | undefined;
-  target_time?: number | null | undefined;
-  xp_reward?: number | null | undefined;
-  points_reward?: number | null | undefined;
-  difficulty_level?: string | null | undefined;
-  exercise_name?: string | null | undefined;
-  exercise_target?: string | null | undefined;
-  muscle_groups?: string[] | null | undefined;
-  exercise_secondary_muscles?: string[] | null | undefined;
 };
 
 type MissionPlanProfileLike = {
