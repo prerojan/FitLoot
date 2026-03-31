@@ -7,6 +7,11 @@ type MissionListCacheEntry = {
   expiresAt: number;
 };
 
+type MissionDetailCacheEntry = {
+  payload: Record<string, unknown>;
+  expiresAt: number;
+};
+
 type MissionRuntimeStateDeps = {
   ensurePeriodicMissions: (
     env: Env,
@@ -37,6 +42,8 @@ type MissionRuntimeStateDeps = {
 
 const MISSION_LIST_CACHE_TTL_MS = 90_000;
 const MISSION_LIST_CACHE_MAX_ENTRIES = 400;
+const MISSION_DETAIL_CACHE_TTL_MS = 60_000;
+const MISSION_DETAIL_CACHE_MAX_ENTRIES = 2_000;
 const MISSION_REFRESH_DEBOUNCE_MS = 5 * 60 * 1000;
 const PERIODIC_PROGRESS_RECOMPUTE_DEBOUNCE_MS = 5 * 60 * 1000;
 const MISSION_REFRESH_TRACK_TTL_MS = 24 * 60 * 60 * 1000;
@@ -54,6 +61,7 @@ export function createMissionRuntimeStateService({
   updateMonthlyMissionProgress,
 }: MissionRuntimeStateDeps) {
   const missionListCache = new Map<string, MissionListCacheEntry>();
+  const missionDetailCache = new Map<string, MissionDetailCacheEntry>();
   const missionRefreshLocks = new Map<string, Promise<void>>();
   const missionRefreshLastRun = new Map<string, number>();
   const periodicProgressRecomputeLocks = new Map<string, Promise<void>>();
@@ -64,6 +72,10 @@ export function createMissionRuntimeStateService({
 
   function missionListCacheKey(userId: string): string {
     return `missions:${userId}`;
+  }
+
+  function missionDetailCacheKey(userId: string, missionId: number): string {
+    return `${userId}:${missionId}`;
   }
 
   function readMissionListCache(userId: string): Record<string, unknown>[] | null {
@@ -89,12 +101,58 @@ export function createMissionRuntimeStateService({
     }
   }
 
+  function readMissionDetailCache(
+    userId: string,
+    missionId: number,
+  ): Record<string, unknown> | null {
+    const key = missionDetailCacheKey(userId, missionId);
+    const entry = missionDetailCache.get(key);
+    if (!entry) return null;
+    if (entry.expiresAt <= Date.now()) {
+      missionDetailCache.delete(key);
+      return null;
+    }
+    return entry.payload;
+  }
+
+  function writeMissionDetailCache(
+    userId: string,
+    missionId: number,
+    payload: Record<string, unknown>,
+  ): void {
+    missionDetailCache.set(missionDetailCacheKey(userId, missionId), {
+      payload,
+      expiresAt: Date.now() + MISSION_DETAIL_CACHE_TTL_MS,
+    });
+
+    if (missionDetailCache.size <= MISSION_DETAIL_CACHE_MAX_ENTRIES) return;
+    const oldestKey = missionDetailCache.keys().next().value;
+    if (typeof oldestKey === "string") {
+      missionDetailCache.delete(oldestKey);
+    }
+  }
+
+  function clearMissionDetailCache(userId: string, missionId: number): void {
+    missionDetailCache.delete(missionDetailCacheKey(userId, missionId));
+  }
+
+  function clearMissionDetailCacheForUser(userId: string): void {
+    const userPrefix = `${userId}:`;
+    for (const cacheKey of missionDetailCache.keys()) {
+      if (cacheKey.startsWith(userPrefix)) {
+        missionDetailCache.delete(cacheKey);
+      }
+    }
+  }
+
   function clearMissionListCache(userId: string): void {
     missionListCache.delete(missionListCacheKey(userId));
   }
 
   function invalidateMissionListCache(userId: string): void {
     clearMissionListCache(userId);
+    // Mantém lista e detalhes consistentes após qualquer mutação de missão.
+    clearMissionDetailCacheForUser(userId);
     missionRefreshLastRun.delete(userId);
   }
 
@@ -341,13 +399,17 @@ export function createMissionRuntimeStateService({
   }
 
   return {
+    clearMissionDetailCache,
+    clearMissionDetailCacheForUser,
     clearMissionListCache,
     ensurePeriodicMissionsWithGuard,
     invalidateMissionListCache,
+    readMissionDetailCache,
     readMissionListCache,
     scheduleLegacyDailyMetadataRepairWithGuard,
     schedulePeriodicMissionsRefreshWithGuard,
     schedulePeriodicProgressRecomputeWithGuard,
+    writeMissionDetailCache,
     writeMissionListCache,
   };
 }

@@ -14,7 +14,7 @@ function createMissionDeps(overrides: Partial<Parameters<typeof registerMissionR
       levelsGained: 0,
     })),
     checkMissionRelevance: vi.fn(async () => ({ isGoalRelevant: true })),
-    clearMissionListCache: vi.fn(() => undefined),
+    clearMissionDetailCache: vi.fn(() => undefined),
     computeMissionTypeAttributeDelta: vi.fn(() => ({
       strength: 0,
       constitution: 0,
@@ -47,6 +47,7 @@ function createMissionDeps(overrides: Partial<Parameters<typeof registerMissionR
     onGoalProgress: vi.fn(async () => undefined),
     onMissionComplete: vi.fn(async () => undefined),
     onStreakContinued: vi.fn(async () => undefined),
+    readMissionDetailCache: vi.fn(() => null),
     readMissionListCache: vi.fn(() => null),
     runMissionLifecycleHookSafely: vi.fn(async (_userId: string, _label: string, action: () => Promise<void>) => {
       await action();
@@ -67,6 +68,7 @@ function createMissionDeps(overrides: Partial<Parameters<typeof registerMissionR
     updateMissionSubtaskProgress: vi.fn(async () => undefined),
     updateMonthlyMissionProgress: vi.fn(async () => undefined),
     withTransaction: vi.fn(async (_db: D1Database, action: () => Promise<unknown>) => await action()),
+    writeMissionDetailCache: vi.fn(() => undefined),
     writeMissionListCache: vi.fn(() => undefined),
     ...overrides,
   } satisfies Parameters<typeof registerMissionRoutes>[1];
@@ -106,6 +108,42 @@ describe("mission routes", () => {
     expect(deps.streamJsonArrayResponse).toHaveBeenCalledWith(cachedMissions);
   });
 
+  it("serves a cached mission detail payload without querying the mission detail path", async () => {
+    const cachedMissionDetail = {
+      id: 15,
+      title: "Missao detalhada em cache",
+      type: "daily",
+      exercise_instructions_en: [],
+      exercise_instructions_pt: [],
+      instructions: [],
+      circuit_tasks: [],
+    };
+    const { db } = createMockD1Database([]);
+    const env = createTestEnv(db);
+    const deps = createMissionDeps({
+      readMissionDetailCache: vi.fn(() => cachedMissionDetail),
+    });
+    const app = new Hono<AppContext>();
+    registerMissionRoutes(app, deps, createAuthMiddleware());
+    const { executionCtx } = createExecutionContext();
+
+    const response = await app.fetch(
+      new Request("http://localhost/api/missions/15"),
+      env,
+      executionCtx,
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload).toMatchObject({
+      id: 15,
+      title: "Missao detalhada em cache",
+      type: "daily",
+    });
+    expect(deps.hydrateMissionRowsWithSubtasks).not.toHaveBeenCalled();
+    expect(deps.writeMissionDetailCache).not.toHaveBeenCalled();
+  });
+
   it("runs heavier maintenance hooks only when refresh is explicitly requested", async () => {
     const { db } = createMockD1Database([
       {
@@ -139,9 +177,46 @@ describe("mission routes", () => {
     );
 
     expect(response.status).toBe(200);
+    expect(deps.invalidateMissionListCache).toHaveBeenCalledWith(TEST_USER.id);
     expect(deps.schedulePeriodicMissionsRefreshWithGuard).toHaveBeenCalledTimes(1);
     expect(deps.scheduleLegacyDailyMetadataRepairWithGuard).toHaveBeenCalledTimes(1);
     expect(deps.schedulePeriodicProgressRecomputeWithGuard).toHaveBeenCalledTimes(1);
+  });
+
+  it("invalidates mission caches after generating the regular mission plan", async () => {
+    const { db } = createMockD1Database([]);
+    const env = createTestEnv(db);
+    const deps = createMissionDeps();
+    const app = new Hono<AppContext>();
+    registerMissionRoutes(app, deps, createAuthMiddleware());
+    const { executionCtx } = createExecutionContext();
+
+    const response = await app.fetch(
+      new Request("http://localhost/api/missions/generate", { method: "POST" }),
+      env,
+      executionCtx,
+    );
+
+    expect(response.status).toBe(200);
+    expect(deps.invalidateMissionListCache).toHaveBeenCalledWith(TEST_USER.id);
+  });
+
+  it("invalidates mission caches after generating an AI special mission", async () => {
+    const { db } = createMockD1Database([]);
+    const env = createTestEnv(db);
+    const deps = createMissionDeps();
+    const app = new Hono<AppContext>();
+    registerMissionRoutes(app, deps, createAuthMiddleware());
+    const { executionCtx } = createExecutionContext();
+
+    const response = await app.fetch(
+      new Request("http://localhost/api/missions/generate/ai-special", { method: "POST" }),
+      env,
+      executionCtx,
+    );
+
+    expect(response.status).toBe(200);
+    expect(deps.invalidateMissionListCache).toHaveBeenCalledWith(TEST_USER.id);
   });
 
   it("blocks manual completion of weekly and monthly missions", async () => {

@@ -288,12 +288,6 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
     await loadMissionDetails();
   };
 
-  // Keeps detail data warm in the background once the card is mounted.
-  useEffect(() => {
-    if (hasInlineDetails || detailedMission || detailsLoading) return;
-    void loadMissionDetails({ silent: true });
-  }, [detailedMission, detailsLoading, hasInlineDetails, loadMissionDetails]);
-
   // Mirrors modal visibility into the shared chrome context.
   useEffect(() => {
     setMissionDetailsOpen(showDetails);

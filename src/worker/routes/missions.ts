@@ -77,7 +77,6 @@ type MissionRouteDeps = {
     db: D1Database,
     status: "completed" | "failed",
   ) => Promise<{ isGoalRelevant: boolean }>;
-  clearMissionListCache: (userId: string) => void;
   computeMissionTypeAttributeDelta: (
     missionRecord: Record<string, unknown>,
     missionMetricType: MissionMetricType,
@@ -166,6 +165,10 @@ type MissionRouteDeps = {
     timestamp: string,
   ) => Promise<void>;
   readMissionListCache: (userId: string) => Record<string, unknown>[] | null;
+  readMissionDetailCache: (
+    userId: string,
+    missionId: number,
+  ) => Record<string, unknown> | null;
   runMissionLifecycleHookSafely: (
     userId: string,
     label: string,
@@ -224,10 +227,16 @@ type MissionRouteDeps = {
     db: D1Database,
   ) => Promise<void>;
   withTransaction: WithTransaction;
+  writeMissionDetailCache: (
+    userId: string,
+    missionId: number,
+    payload: Record<string, unknown>,
+  ) => void;
   writeMissionListCache: (
     userId: string,
     payload: Record<string, unknown>[],
   ) => void;
+  clearMissionDetailCache: (userId: string, missionId: number) => void;
 };
 
 // Registra listagem, detalhes, geração e conclusão de missões.
@@ -237,18 +246,21 @@ export function registerMissionRoutes(
   authMiddleware: MiddlewareHandler<AppContext>,
 ): void {
   const {
-    clearMissionListCache,
+    clearMissionDetailCache,
     generateStructuredMissionPlanForUser,
     getMonthlyCounters,
     hydrateMissionRowsWithSubtasks,
+    invalidateMissionListCache,
     missionSummaryFromNormalized,
     monthlyMissionProgressValue,
     normalizeMissionRow,
+    readMissionDetailCache,
     readMissionListCache,
     scheduleLegacyDailyMetadataRepairWithGuard,
     schedulePeriodicMissionsRefreshWithGuard,
     schedulePeriodicProgressRecomputeWithGuard,
     streamJsonArrayResponse,
+    writeMissionDetailCache,
     writeMissionListCache,
   } = deps;
 
@@ -281,19 +293,12 @@ export function registerMissionRoutes(
     try {
       const forceRefresh = c.req.query("refresh") === "1";
       if (forceRefresh) {
-        clearMissionListCache(user.id);
+        invalidateMissionListCache(user.id);
       }
 
       const cached = !forceRefresh ? readMissionListCache(user.id) : null;
       if (!forceRefresh && cached) {
         return streamJsonArrayResponse(cached);
-      }
-
-      if (!forceRefresh) {
-        const refreshedCache = readMissionListCache(user.id);
-        if (refreshedCache) {
-          return streamJsonArrayResponse(refreshedCache);
-        }
       }
 
       // Mantém o endpoint de leitura leve e relega manutenção periódica ao fluxo com debounce.
@@ -405,15 +410,16 @@ export function registerMissionRoutes(
       return c.json({ error: "Mission id inválido" }, 400);
     }
 
+    const cachedMissionDetail = readMissionDetailCache(user.id, missionId);
+    if (cachedMissionDetail) {
+      return c.json(cachedMissionDetail);
+    }
+
     try {
-      const includeSkillJoin = await canJoinSkillsTable(c.env.fitloot_db);
-      const { selectSkillName, skillJoinClause } =
-        buildMissionSkillQueryParts(includeSkillJoin);
       const row = await c.env.fitloot_db
         .prepare(
-          `SELECT m.*, ${selectSkillName}
+          `SELECT m.*, NULL as skill_name
            FROM missions m
-           ${skillJoinClause}
            WHERE m.id = ? AND m.user_id = ?`,
         )
         .bind(missionId, user.id)
@@ -514,6 +520,9 @@ export function registerMissionRoutes(
                   user.id,
                 )
                 .run();
+
+              // A tradução em background altera o payload detalhado e precisa invalidar o cache de detalhe.
+              clearMissionDetailCache(user.id, missionId);
             } catch (persistErr) {
               console.error(
                 "[/api/missions/:id] persist translated instructions failed",
@@ -527,6 +536,11 @@ export function registerMissionRoutes(
         );
       }
 
+      writeMissionDetailCache(
+        user.id,
+        missionId,
+        normalized as Record<string, unknown>,
+      );
       return c.json(normalized);
     } catch (error) {
       console.error("[/api/missions/:id]", {
@@ -560,6 +574,9 @@ export function registerMissionRoutes(
           monthlyTarget: MISSION_LIMITS.monthly,
         },
       );
+
+      // A geração de plano altera o conjunto de missões ativas e deve invalidar os caches associados.
+      invalidateMissionListCache(user.id);
 
       return c.json({
         success: true,
@@ -595,6 +612,9 @@ export function registerMissionRoutes(
           monthlyTarget: 0,
         },
       );
+
+      // Mantém consistência de lista/detalhes após criação de missão especial por IA.
+      invalidateMissionListCache(user.id);
 
       return c.json({
         success: true,

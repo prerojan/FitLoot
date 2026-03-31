@@ -218,12 +218,31 @@ function readMissionListCache(userId: string): Record<string, unknown>[] | null 
   return requireMissionRuntimeStateService().readMissionListCache(userId);
 }
 
+function readMissionDetailCache(
+  userId: string,
+  missionId: number,
+): Record<string, unknown> | null {
+  return requireMissionRuntimeStateService().readMissionDetailCache(userId, missionId);
+}
+
 function writeMissionListCache(userId: string, payload: Record<string, unknown>[]): void {
   requireMissionRuntimeStateService().writeMissionListCache(userId, payload);
 }
 
-function clearMissionListCache(userId: string): void {
-  requireMissionRuntimeStateService().clearMissionListCache(userId);
+function writeMissionDetailCache(
+  userId: string,
+  missionId: number,
+  payload: Record<string, unknown>,
+): void {
+  requireMissionRuntimeStateService().writeMissionDetailCache(
+    userId,
+    missionId,
+    payload,
+  );
+}
+
+function clearMissionDetailCache(userId: string, missionId: number): void {
+  requireMissionRuntimeStateService().clearMissionDetailCache(userId, missionId);
 }
 
 function invalidateMissionListCache(userId: string): void {
@@ -2058,7 +2077,7 @@ registerMissionRoutes(
       applyMissionAttributeDeltaToUser(db, userId, delta as MissionAttributeDelta),
     applyXpPointsAndResolveLevels,
     checkMissionRelevance,
-    clearMissionListCache,
+    clearMissionDetailCache,
     computeMissionTypeAttributeDelta: (
       missionRecord,
       missionMetricType,
@@ -2105,6 +2124,7 @@ registerMissionRoutes(
     onGoalProgress,
     onMissionComplete,
     onStreakContinued,
+    readMissionDetailCache,
     readMissionListCache,
     runMissionLifecycleHookSafely,
     scheduleLegacyDailyMetadataRepairWithGuard,
@@ -2133,6 +2153,7 @@ registerMissionRoutes(
     updateMissionSubtaskProgress,
     updateMonthlyMissionProgress,
     withTransaction,
+    writeMissionDetailCache,
     writeMissionListCache,
   },
   authMiddleware,

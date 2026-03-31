@@ -49,3 +49,4 @@ secrets/
 # Projeto
 worker-configuration.d.ts
 !.dev.vars.example
+.vercel
