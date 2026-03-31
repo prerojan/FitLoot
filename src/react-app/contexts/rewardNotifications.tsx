@@ -10,6 +10,7 @@ import {
 } from "react";
 import { Award, Crown, Sparkles, X, Zap } from "lucide-react";
 import { useAuth } from "@/react-app/auth/context";
+import { hasPlanAccess } from "@/react-app/services/authService";
 import LevelUpModal from "@/react-app/components/LevelUpModal";
 import { api, clearJsonCache } from "@/react-app/utils/api";
 import type { RewardNotification } from "@/shared/types";
@@ -27,7 +28,6 @@ const RewardNotificationsContext =
     refreshRewardNotifications: async () => undefined,
   });
 
-const POLL_INTERVAL_MS = 20_000;
 const TOAST_DURATION_MS = 4_500;
 
 function sortIncomingNotifications(
@@ -78,6 +78,7 @@ export function RewardNotificationsProvider({
   const { user } = useAuth();
   const [queue, setQueue] = useState<RewardNotification[]>([]);
   const processedIdsRef = useRef<Set<number>>(new Set());
+  const hasUnlockedAccess = user ? hasPlanAccess(user) : false;
 
   const acknowledgeNotifications = useCallback(async (ids: number[]) => {
     if (ids.length === 0) return;
@@ -123,7 +124,7 @@ export function RewardNotificationsProvider({
   );
 
   const refreshRewardNotifications = useCallback(async () => {
-    if (!user) return;
+    if (!user || !hasUnlockedAccess) return;
 
     try {
       const response = await api("/api/reward-notifications/pending");
@@ -141,33 +142,28 @@ export function RewardNotificationsProvider({
     } catch (error) {
       console.error("Error loading reward notifications:", error);
     }
-  }, [pushRewardNotifications, user]);
+  }, [hasUnlockedAccess, pushRewardNotifications, user]);
 
   useEffect(() => {
-    if (!user) {
+    if (!user || !hasUnlockedAccess) {
       setQueue([]);
       processedIdsRef.current = new Set();
       return;
     }
 
     void refreshRewardNotifications();
-    const intervalId = window.setInterval(() => {
-      void refreshRewardNotifications();
-    }, POLL_INTERVAL_MS);
-
     const handleRefreshRequest = () => {
       void refreshRewardNotifications();
     };
 
     window.addEventListener("fitloot:refresh-rewards", handleRefreshRequest);
     return () => {
-      window.clearInterval(intervalId);
       window.removeEventListener(
         "fitloot:refresh-rewards",
         handleRefreshRequest,
       );
     };
-  }, [refreshRewardNotifications, user]);
+  }, [hasUnlockedAccess, refreshRewardNotifications, user]);
 
   const dismissCurrent = useCallback(() => {
     setQueue((current) => current.slice(1));

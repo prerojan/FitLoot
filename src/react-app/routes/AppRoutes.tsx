@@ -1,6 +1,7 @@
-import { Route, Routes } from "react-router";
+import { Outlet, Route, Routes } from "react-router";
 
 import { ROUTE_PATHS } from "../auth/constants";
+import { RewardNotificationsProvider } from "../contexts/rewardNotifications";
 import { AppEntryRoute, ProtectedRoute, PublicAuthRoute } from "./guards";
 import {
   Achievements,
@@ -21,6 +22,16 @@ import {
   Shop,
   Titles,
 } from "./lazyPages";
+
+function ProtectedAppArea() {
+  return (
+    <ProtectedRoute>
+      <RewardNotificationsProvider>
+        <Outlet />
+      </RewardNotificationsProvider>
+    </ProtectedRoute>
+  );
+}
 
 export default function AppRoutes() {
   return (
@@ -64,102 +75,20 @@ export default function AppRoutes() {
         }
       />
       {/* Area autenticada principal. */}
-      <Route
-        path={ROUTE_PATHS.home}
-        element={
-          <ProtectedRoute>
-            <Dashboard />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path={ROUTE_PATHS.dashboard}
-        element={
-          <ProtectedRoute>
-            <Dashboard />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path={ROUTE_PATHS.profile}
-        element={
-          <ProtectedRoute>
-            <Profile />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path={ROUTE_PATHS.titles}
-        element={
-          <ProtectedRoute>
-            <Titles />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path={ROUTE_PATHS.friends}
-        element={
-          <ProtectedRoute>
-            <Friends />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path={ROUTE_PATHS.shop}
-        element={
-          <ProtectedRoute>
-            <Shop />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path={ROUTE_PATHS.ranking}
-        element={
-          <ProtectedRoute>
-            <Ranking />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path={ROUTE_PATHS.achievements}
-        element={
-          <ProtectedRoute>
-            <Achievements />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path={ROUTE_PATHS.minigames}
-        element={
-          <ProtectedRoute>
-            <MiniGames />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path={ROUTE_PATHS.aiChat}
-        element={
-          <ProtectedRoute>
-            <AIChat />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path={ROUTE_PATHS.foodAnalysis}
-        element={
-          <ProtectedRoute>
-            <FoodAnalysis />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path={ROUTE_PATHS.healthTest}
-        element={
-          <ProtectedRoute>
-            <HealthTest />
-          </ProtectedRoute>
-        }
-      />
+      <Route element={<ProtectedAppArea />}>
+        <Route path={ROUTE_PATHS.home} element={<Dashboard />} />
+        <Route path={ROUTE_PATHS.dashboard} element={<Dashboard />} />
+        <Route path={ROUTE_PATHS.profile} element={<Profile />} />
+        <Route path={ROUTE_PATHS.titles} element={<Titles />} />
+        <Route path={ROUTE_PATHS.friends} element={<Friends />} />
+        <Route path={ROUTE_PATHS.shop} element={<Shop />} />
+        <Route path={ROUTE_PATHS.ranking} element={<Ranking />} />
+        <Route path={ROUTE_PATHS.achievements} element={<Achievements />} />
+        <Route path={ROUTE_PATHS.minigames} element={<MiniGames />} />
+        <Route path={ROUTE_PATHS.aiChat} element={<AIChat />} />
+        <Route path={ROUTE_PATHS.foodAnalysis} element={<FoodAnalysis />} />
+        <Route path={ROUTE_PATHS.healthTest} element={<HealthTest />} />
+      </Route>
       {/* Fallback final de navegacao. */}
       <Route path={ROUTE_PATHS.wildcard} element={<NotFoundPage />} />
     </Routes>
