@@ -16,7 +16,7 @@ import { Button } from "@/react-app/components/ui/button";
 import { Badge } from "@/react-app/components/ui/badge";
 import LoadingBall from "@/react-app/components/LoadingBall";
 import { shouldShowMissionDuration } from "@/constants/missionMetrics";
-import type { CircuitTask, Mission, MissionMetricType } from "@/shared/types";
+import type { Mission } from "@/shared/types";
 import { localizeMissionText, localizeMissionTextArray } from "@/shared/missionLocalization";
 import { api } from "@/react-app/utils/api";
 import { useAppChrome } from "@/react-app/contexts/appChrome";
@@ -24,15 +24,20 @@ import WalkingMissionExecution from "./WalkingMissionExecution";
 import { MissionExecutionModal } from "./mission-card/MissionExecutionModal";
 import {
   bodyAreaLabel,
+  formatDifficultyLabel,
   formatGoal,
-  formatDistanceAmount,
+  formatProgressAmount,
   normalizeMetricType,
-  normalizeLookupText,
   resolveCircuitTasks,
+  resolveMissionDisplayTitle,
+  resolveMissionFocusLabels,
+  resolveMissionGoalText,
   resolveMissionMediaStyle,
   resolveMissionMediaUrl,
   resolveMissionVideoUrl,
+  resolveProgressCounterParts,
   resolveProgressTarget,
+  summarizeAutoProgressLabel,
 } from "./mission-card/helpers";
 
 type MissionCardProps = {
@@ -40,149 +45,6 @@ type MissionCardProps = {
   onComplete: (id: number, reps: number, verified: boolean) => Promise<void> | void;
   layout?: "default" | "compact";
 };
-
-function resolveProgressCounterParts(
-  mission: Mission,
-  metricType: MissionMetricType,
-  current: number,
-  target: number,
-): { current: string; target: string; unitLabel: string | null } {
-  const title = normalizeLookupText(mission.title);
-  const goal = normalizeLookupText(mission.goal);
-
-  if (title.includes("consistencia mensal") || title.includes("volume mensal") || goal.includes("missoes concluidas")) {
-    return {
-      current: Math.round(current).toLocaleString("pt-BR"),
-      target: Math.round(target).toLocaleString("pt-BR"),
-      unitLabel: "missões",
-    };
-  }
-
-  if (title.includes("dias ativos") || title.includes("pratica ativa") || goal.includes("dias ativos")) {
-    return {
-      current: Math.round(current).toLocaleString("pt-BR"),
-      target: Math.round(target).toLocaleString("pt-BR"),
-      unitLabel: "dias",
-    };
-  }
-
-  if (title.includes("circuitos semanais") || goal.includes("circuitos semanais")) {
-    return {
-      current: Math.round(current).toLocaleString("pt-BR"),
-      target: Math.round(target).toLocaleString("pt-BR"),
-      unitLabel: "circuitos",
-    };
-  }
-
-  if (metricType === "steps" || goal.includes("passos") || title.includes("passos")) {
-    return {
-      current: Math.round(current).toLocaleString("pt-BR"),
-      target: Math.round(target).toLocaleString("pt-BR"),
-      unitLabel: "passos",
-    };
-  }
-
-  if (metricType === "distance_meters") {
-    return {
-      current: formatDistanceAmount(current),
-      target: formatDistanceAmount(target),
-      unitLabel: null,
-    };
-  }
-
-  return {
-    current: Math.round(current).toLocaleString("pt-BR"),
-    target: Math.round(target).toLocaleString("pt-BR"),
-    unitLabel: null,
-  };
-}
-
-function formatProgressAmount(
-  mission: Mission,
-  metricType: MissionMetricType,
-  current: number,
-  target: number,
-): string {
-  const parts = resolveProgressCounterParts(mission, metricType, current, target);
-  if (parts.unitLabel) {
-    return `${parts.current}/${parts.target} ${parts.unitLabel}`;
-  }
-  return `${parts.current}/${parts.target}`;
-}
-
-function resolveMissionGoalText(mission: Mission, metricType: MissionMetricType): string {
-  if (typeof mission.goal === "string" && mission.goal.trim().length > 0) {
-    return (localizeMissionText(mission.goal) ?? mission.goal).trim();
-  }
-  return localizeMissionText(formatGoal(mission, metricType)) ?? formatGoal(mission, metricType);
-}
-
-const MISSION_TITLE_PREFIX_PATTERN = /^(?:miss(?:\u00e3o|ao)\s+(?:di[a\u00e1]ria|semanal|mensal)|daily mission|weekly mission|monthly mission|meta\s+(?:di[a\u00e1]ria|semanal|mensal)|daily goal|weekly goal|monthly goal)\s*:\s*/i;
-
-// Cleans display copy and media choices so each card surfaces the best localized presentation.
-function resolveMissionDisplayTitle(value: string | null | undefined): string {
-  const localized = localizeMissionText(value ?? "") ?? "";
-  const stripped = localized.replace(MISSION_TITLE_PREFIX_PATTERN, "").trim();
-  return stripped.length > 0 ? stripped : localized.trim();
-}
-
-function formatDifficultyLabel(value: string | null | undefined): string {
-  if (typeof value !== "string" || value.trim().length === 0) {
-    return "Iniciante";
-  }
-  const localized = (localizeMissionText(value) ?? value).trim();
-  const normalized = localized
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase();
-  if (normalized.includes("advanced") || normalized.includes("avancado") || normalized.includes("avan")) return "Avançado";
-  if (normalized.includes("intermediate") || normalized.includes("intermedio") || normalized.includes("intermediar")) return "Intermediário";
-  return localized.charAt(0).toUpperCase() + localized.slice(1);
-}
-
-function summarizeCircuitTaskLabel(label: string): string {
-  const localized = localizeMissionText(label) ?? label;
-  return localized
-    .replace(/^Conclua\s+/i, "")
-    .replace(/^Complete\s+/i, "")
-    .replace(/^\d+\s+miss(?:\u00f5es|oes)\s+di[a\u00e1]rias\s+de\s+/i, "")
-    .replace(/^\d+\s+miss(?:\u00f5es|oes)\s+de\s+/i, "")
-    .trim();
-}
-
-function uniqueMissionLabels(values: ReadonlyArray<string | null | undefined>): string[] {
-  const seen = new Set<string>();
-  const labels: string[] = [];
-  for (const value of values) {
-    if (typeof value !== "string") continue;
-    const localized = (localizeMissionText(value) ?? value).trim();
-    if (localized.length === 0) continue;
-    const key = localized.toLocaleLowerCase("pt-BR");
-    if (seen.has(key)) continue;
-    seen.add(key);
-    labels.push(localized);
-  }
-  return labels;
-}
-
-function resolveMissionFocusLabels(mission: Mission): string[] {
-  const labels = uniqueMissionLabels([
-    ...(Array.isArray(mission.muscle_groups) ? mission.muscle_groups : []),
-    mission.exercise_target,
-    mission.exercise_body_part,
-    ...(Array.isArray(mission.exercise_secondary_muscles) ? mission.exercise_secondary_muscles.slice(0, 3) : []),
-  ]);
-  if (labels.length > 0) return labels.slice(0, 6);
-  return [bodyAreaLabel(mission.body_area)];
-}
-
-function summarizeAutoProgressLabel(tasks: readonly CircuitTask[]): string {
-  const taskLabels = uniqueMissionLabels(tasks.map((task) => summarizeCircuitTaskLabel(task.label)));
-  if (taskLabels.length === 0) return "Miss\u00f5es di\u00e1rias compat\u00edveis";
-  if (taskLabels.length === 1) return taskLabels[0] ?? "Miss\u00f5es di\u00e1rias compat\u00edveis";
-  if (taskLabels.length === 2) return `${taskLabels[0]} e ${taskLabels[1]}`;
-  return `${taskLabels[0]}, ${taskLabels[1]} e mais ${taskLabels.length - 2}`;
-}
 
 function MissionCardComponent({ mission, onComplete, layout = "default" }: MissionCardProps) {
   const { setMissionDetailsOpen, setMissionExecutionOpen } = useAppChrome();
@@ -961,3 +823,4 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
 
 const MissionCard = memo(MissionCardComponent);
 export default MissionCard;
+

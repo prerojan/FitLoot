@@ -21,6 +21,10 @@ import {
   enrichExercise,
   type EnrichedExercise,
 } from "./exerciseEnrichment";
+import {
+  ensurePortugueseExerciseLabel,
+  ensurePortugueseInstructionList,
+} from "./instructionLocalization";
 
 type MissionPeriod = "daily" | "weekly" | "monthly";
 
@@ -354,8 +358,12 @@ export function createMissionMaterializationService(deps: MissionMaterialization
   async function translateExerciseInstructionsToPt(instructionsEn: string[], exerciseName: string, env: Env): Promise<string[]> {
     const normalizedInstructions = deps.normalizeInstructionList(instructionsEn, 8);
     if (normalizedInstructions.length === 0) return [];
+    const fallbackInstructions = deps.normalizeInstructionList(
+      ensurePortugueseInstructionList(normalizedInstructions, 8),
+      8,
+    );
     const apiKey = getHuggingFaceApiKey(env);
-    if (!apiKey) return normalizedInstructions;
+    if (!apiKey) return fallbackInstructions;
 
     const prompt = [
       "Voce traduz passos de execucao de exercicios (ingles) para portugues brasileiro (PT-BR).",
@@ -374,7 +382,13 @@ export function createMissionMaterializationService(deps: MissionMaterialization
       const rawContent = await requestHuggingFaceStructuredContent(apiKey, [{ role: "user", content: prompt }], 900, "translateExerciseInstructionsToPt", timeoutMsByService.huggingface);
       const parsed = deps.parseJsonObjectFromModelContent<{ instructions_pt?: unknown }>(rawContent);
       const translated = deps.normalizeInstructionList(parsed?.instructions_pt ?? [], 8);
-      if (translated.length > 0) return translated;
+      if (translated.length > 0) {
+        const localizedTranslated = deps.normalizeInstructionList(
+          ensurePortugueseInstructionList(translated, 8),
+          8,
+        );
+        return localizedTranslated.length > 0 ? localizedTranslated : translated;
+      }
     } catch (error) {
       console.warn("[translateExerciseInstructionsToPt] model call failed", {
         exerciseName,
@@ -382,7 +396,7 @@ export function createMissionMaterializationService(deps: MissionMaterialization
         details: error instanceof ApiIntegrationError ? error.details : undefined,
       });
     }
-    return normalizedInstructions;
+    return fallbackInstructions;
   }
 
   async function getExerciseInstructionsFromAI(
@@ -395,13 +409,14 @@ export function createMissionMaterializationService(deps: MissionMaterialization
   ): Promise<ExerciseInstructionPayload> {
     const fallbackSets = deps.inferSets(metricType, period);
     const fallbackRestSeconds = deps.inferRestSeconds(metricType);
+    const exerciseLabelPt = ensurePortugueseExerciseLabel(exerciseName);
     const normalizedMetricType = metricType === "circuit_tasks" && period !== "weekly" ? "sets_reps" : metricType;
     const fallback: ExerciseInstructionPayload = {
       instructions: deps.ensureInstructionSteps([
-        `Prepare-se para executar ${exerciseName} com postura segura.`,
+        `Prepare-se para executar ${exerciseLabelPt} com postura segura.`,
         "Mantenha ritmo constante e respiracao controlada durante toda a execucao.",
         "Respeite a tecnica e interrompa em caso de dor aguda.",
-      ], exerciseName, normalizedMetricType, fallbackSets, fallbackRestSeconds),
+      ], exerciseLabelPt, normalizedMetricType, fallbackSets, fallbackRestSeconds),
       musclesAffected: [],
       attributesBenefited: [],
       safetyTips: ["Mantenha alinhamento corporal e evite compensacoes."],
@@ -457,7 +472,15 @@ export function createMissionMaterializationService(deps: MissionMaterialization
       const parsedSets = deps.inferSets(parsedMetricType, period);
       const parsedRestSeconds = deps.inferRestSeconds(parsedMetricType);
       return {
-        instructions: deps.ensureInstructionSteps(Array.isArray(parsed.instructions) && parsed.instructions.length > 0 ? parsed.instructions.map((item) => String(item)).slice(0, 6) : fallback.instructions, exerciseName, parsedMetricType, parsedSets, parsedRestSeconds),
+        instructions: deps.ensureInstructionSteps(
+          Array.isArray(parsed.instructions) && parsed.instructions.length > 0
+            ? parsed.instructions.map((item) => String(item)).slice(0, 6)
+            : fallback.instructions,
+          exerciseLabelPt,
+          parsedMetricType,
+          parsedSets,
+          parsedRestSeconds,
+        ),
         musclesAffected: Array.isArray(parsed.musclesAffected) ? parsed.musclesAffected.map((item) => String(item)).slice(0, 6) : fallback.musclesAffected,
         attributesBenefited: Array.isArray(parsed.attributesBenefited) ? parsed.attributesBenefited.map((item) => String(item)).slice(0, 6) : fallback.attributesBenefited,
         safetyTips: Array.isArray(parsed.safetyTips) && parsed.safetyTips.length > 0 ? parsed.safetyTips.map((item) => String(item)).slice(0, 4) : fallback.safetyTips,
@@ -531,16 +554,36 @@ export function createMissionMaterializationService(deps: MissionMaterialization
 
     if (blueprint.period === "daily") {
       const withMetric = deps.applyMissionMetricContext(baseMission, "daily", resolvedName, blueprint.metricType, blueprint.metricValue, { conditioning: profile.conditioning, volumeMultiplier: profile.volumeMultiplier });
-      withMetric.title = `${config.titlePrefix}: ${deps.resolveExerciseDisplayNamePt(enriched?.name ?? supportedExerciseName) ?? blueprint.name}`;
       withMetric.mission_origin = blueprint.missionOrigin;
       withMetric.is_ai_special = blueprint.isAiSpecial ? 1 : 0;
-      withMetric.instructions = deps.ensureInstructionSteps(apiInstructionsPt.length > 0 ? apiInstructionsPt : withMetric.instructions, resolvedName, withMetric.metric_type, withMetric.sets, withMetric.rest_seconds);
-      withMetric.description = deps.buildMissionDescriptionFromInstructions(withMetric.instructions, deps.toSafeString(blueprint.description, deps.buildMissionDescription(resolvedName, withMetric.metric_type, withMetric.metric_value, withMetric.sets)));
+      const resolvedExerciseDisplayName = ensurePortugueseExerciseLabel(
+        deps.resolveExerciseDisplayNamePt(enriched?.name ?? resolvedName) ?? resolvedName,
+      );
+      withMetric.title = `${config.titlePrefix}: ${resolvedExerciseDisplayName}`;
+      withMetric.instructions = deps.ensureInstructionSteps(
+        apiInstructionsPt.length > 0 ? apiInstructionsPt : withMetric.instructions,
+        resolvedExerciseDisplayName,
+        withMetric.metric_type,
+        withMetric.sets,
+        withMetric.rest_seconds,
+      );
+      withMetric.description = deps.buildMissionDescriptionFromInstructions(
+        withMetric.instructions,
+        deps.toSafeString(
+          blueprint.description,
+          deps.buildMissionDescription(
+            resolvedExerciseDisplayName,
+            withMetric.metric_type,
+            withMetric.metric_value,
+            withMetric.sets,
+          ),
+        ),
+      );
       withMetric.exercise_instructions_en = apiInstructionsEn;
       withMetric.exercise_instructions_pt = apiInstructionsPt;
       withMetric.safety_tips = aiContext?.safetyTips?.length ? aiContext.safetyTips.slice(0, 4) : withMetric.safety_tips;
       withMetric.difficulty_level = blueprint.difficultyLevel;
-      withMetric.exercise_name = deps.resolveExerciseDisplayNamePt(enriched?.name ?? resolvedName) ?? (enriched?.name ?? resolvedName);
+      withMetric.exercise_name = resolvedExerciseDisplayName;
       withMetric.exercise_db_id = enriched?.id ?? withMetric.exercise_db_id;
       withMetric.exercise_equipment = enriched?.equipment ?? null;
       withMetric.exercise_body_part = enriched?.bodyPart ?? null;

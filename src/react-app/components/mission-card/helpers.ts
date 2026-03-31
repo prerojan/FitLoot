@@ -237,9 +237,13 @@ const MISSION_TITLE_PREFIX_PATTERN = /^(?:miss(?:\u00e3o|ao)\s+(?:di[a\u00e1]ria
 
 // Cleans display copy and media choices so each card surfaces the best localized presentation.
 export function resolveMissionDisplayTitle(value: string | null | undefined): string {
-  const localized = localizeMissionText(value ?? "") ?? "";
-  const stripped = localized.replace(MISSION_TITLE_PREFIX_PATTERN, "").trim();
-  return stripped.length > 0 ? stripped : localized.trim();
+  const raw = typeof value === "string" ? value : "";
+  const stripped = raw.replace(MISSION_TITLE_PREFIX_PATTERN, "").trim();
+  if (stripped.length > 0) {
+    return stripped;
+  }
+  const fallback = raw.trim();
+  return fallback.length > 0 ? fallback : "Miss\u00e3o";
 }
 
 export function formatDifficultyLabel(value: string | null | undefined): string {

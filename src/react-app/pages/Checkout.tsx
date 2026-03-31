@@ -92,6 +92,20 @@ function buildPromoBenefitLabel(effect: PromoCodeEffect, effectValue: string | n
   }
 }
 
+function isVipPromoValidationMatch(
+  normalizedPromoCode: string,
+  promoValidationStatus: PromoValidationStatus,
+  promoValidationResult: PromoValidationResult | null,
+  validatedCode: string,
+): boolean {
+  return (
+    normalizedPromoCode.length > 0 &&
+    promoValidationStatus === "valid" &&
+    promoValidationResult?.effect === "activate_vip" &&
+    validatedCode === normalizedPromoCode
+  );
+}
+
 function buildOnboardingCheckoutPayload(
   draft: OnboardingDraft,
   planId: CheckoutPlanId,
@@ -238,12 +252,13 @@ export default function Checkout() {
   const [statusPopup, setStatusPopup] = useState<{
     title: string;
     message: string;
+    badge?: string;
     tone: "success" | "warning" | "error";
   } | null>(null);
   const [onboardingDraft, setOnboardingDraft] = useState<OnboardingDraft | null>(() => loadOnboardingDraft());
   const promoValidationRequestIdRef = useRef(0);
   const promoValidationCodeRef = useRef("");
-  const promoValidationPromiseRef = useRef<Promise<boolean> | null>(null);
+  const promoValidationPromiseRef = useRef<Promise<PromoValidationResult | null> | null>(null);
 
   const selectedPlan = useMemo(() => getCheckoutPlan(planId), [planId]);
   const pricing = useMemo(() => getPlanPricing(planId, billingCycle), [planId, billingCycle]);
@@ -253,6 +268,13 @@ export default function Checkout() {
         .map((currentPlanId) => CHECKOUT_PLANS.find((plan) => plan.id === currentPlanId))
         .filter((plan): plan is (typeof CHECKOUT_PLANS)[number] => Boolean(plan)),
     [],
+  );
+  const normalizedPromoCode = normalizePromoCode(promoCode);
+  const isVipPromoValidated = isVipPromoValidationMatch(
+    normalizedPromoCode,
+    promoValidationStatus,
+    promoValidationResult,
+    promoValidationCodeRef.current,
   );
 
   useEffect(() => {
@@ -330,21 +352,24 @@ export default function Checkout() {
     promoValidationPromiseRef.current = null;
   };
 
-  const validatePromoCode = async (rawCode = promoCode, options?: { force?: boolean }): Promise<boolean> => {
+  const validatePromoCode = async (
+    rawCode = promoCode,
+    options?: { force?: boolean },
+  ): Promise<PromoValidationResult | null> => {
     // Valida e memoriza o ultimo codigo promocional consultado.
     const normalizedCode = normalizePromoCode(rawCode);
 
     if (!normalizedCode) {
       resetPromoValidationState();
-      return true;
+      return null;
     }
 
     if (!options?.force && promoValidationCodeRef.current === normalizedCode) {
       if (promoValidationStatus === "valid") {
-        return true;
+        return promoValidationResult;
       }
       if (promoValidationStatus === "invalid") {
-        return false;
+        return null;
       }
       if (promoValidationStatus === "loading" && promoValidationPromiseRef.current) {
         return promoValidationPromiseRef.current;
@@ -372,30 +397,39 @@ export default function Checkout() {
           typeof promoEffect === "string";
 
         if (requestId !== promoValidationRequestIdRef.current) {
-          return isValidResponse;
+          return isValidResponse
+            ? {
+                code: normalizedCode,
+                description: promoDescription,
+                effect: promoEffect,
+                effectValue: typeof payload.effect_value === "string" ? payload.effect_value : null,
+                benefitLabel: buildPromoBenefitLabel(promoEffect, payload.effect_value),
+              }
+            : null;
         }
 
         if (isValidResponse) {
-          setPromoValidationStatus("valid");
-          setPromoValidationResult({
+          const result: PromoValidationResult = {
             code: normalizedCode,
             description: promoDescription,
             effect: promoEffect,
             effectValue: typeof payload.effect_value === "string" ? payload.effect_value : null,
             benefitLabel: buildPromoBenefitLabel(promoEffect, payload.effect_value),
-          });
-          return true;
+          };
+          setPromoValidationStatus("valid");
+          setPromoValidationResult(result);
+          return result;
         }
 
         setPromoValidationStatus("invalid");
         setPromoValidationResult(null);
-        return false;
+        return null;
       } catch {
         if (requestId === promoValidationRequestIdRef.current) {
           setPromoValidationStatus("invalid");
           setPromoValidationResult(null);
         }
-        return false;
+        return null;
       } finally {
         if (requestId === promoValidationRequestIdRef.current) {
           promoValidationPromiseRef.current = null;
@@ -420,27 +454,51 @@ export default function Checkout() {
       return;
     }
 
-    const normalizedPromoCode = normalizePromoCode(promoCode);
+    const normalizedPromoCodeForRequest = normalizePromoCode(promoCode);
+    let shouldActivateVipFlow = false;
 
-    if (normalizedPromoCode) {
-      const promoIsValid = await validatePromoCode(normalizedPromoCode, {
-        force: promoValidationStatus !== "valid" || promoValidationCodeRef.current !== normalizedPromoCode,
+    if (normalizedPromoCodeForRequest) {
+      const promoValidation = await validatePromoCode(normalizedPromoCodeForRequest, {
+        force: promoValidationStatus !== "valid" || promoValidationCodeRef.current !== normalizedPromoCodeForRequest,
       });
 
-      if (!promoIsValid) {
+      if (!promoValidation) {
         return;
       }
+      shouldActivateVipFlow = promoValidation.effect === "activate_vip";
     }
 
     setLoading(true);
     try {
+      const completeVipActivation = async (message?: string) => {
+        clearOnboardingDraft();
+        setOnboardingDraft(null);
+        setVipActivationInProgress(true);
+        setStatusPopup({
+          title: "Ativacao VIP iniciada",
+          message:
+            message ??
+            "Seu codigo VIP foi validado. Redirecionando sua conta para o dashboard...",
+          badge: "VIP ativo",
+          tone: "success",
+        });
+        await checkAuth();
+        if (vipRedirectTimerRef.current !== null) {
+          window.clearTimeout(vipRedirectTimerRef.current);
+        }
+        vipRedirectTimerRef.current = window.setTimeout(() => {
+          setVipActivationInProgress(false);
+          navigate(ROUTE_PATHS.dashboard, { replace: true });
+        }, 1500);
+      };
+
       const endpoint = requiresOnboardingCheckout ? "/api/onboarding" : "/api/checkout/start";
       const payloadBody = requiresOnboardingCheckout && currentOnboardingDraft
-        ? buildOnboardingCheckoutPayload(currentOnboardingDraft, planId, paymentMethod, normalizedPromoCode)
+        ? buildOnboardingCheckoutPayload(currentOnboardingDraft, planId, paymentMethod, normalizedPromoCodeForRequest)
         : {
             plan_id: planId,
             payment_method: paymentMethod,
-            promo_code: normalizedPromoCode || undefined,
+            promo_code: normalizedPromoCodeForRequest || undefined,
           };
 
       const response = await api(endpoint, {
@@ -460,24 +518,16 @@ export default function Checkout() {
       }
 
       if (payload?.checkout_status === "vip_active") {
-        clearOnboardingDraft();
-        setOnboardingDraft(null);
-        setVipActivationInProgress(true);
-        setStatusPopup({
-          title: "Ativacao VIP iniciada",
-          message:
-            payload?.message ??
-            "Seu codigo VIP foi validado. Redirecionando sua conta para o dashboard...",
-          tone: "success",
-        });
-        await checkAuth();
-        if (vipRedirectTimerRef.current !== null) {
-          window.clearTimeout(vipRedirectTimerRef.current);
+        await completeVipActivation(payload?.message);
+        return;
+      }
+
+      if (shouldActivateVipFlow) {
+        if (payload?.plan_status === "active") {
+          await completeVipActivation("Plano VIP ativado. Redirecionando sua conta para o dashboard...");
+          return;
         }
-        vipRedirectTimerRef.current = window.setTimeout(() => {
-          setVipActivationInProgress(false);
-          navigate(ROUTE_PATHS.dashboard, { replace: true });
-        }, 1500);
+        setError("Codigo VIP validado, mas a ativacao nao foi concluida. Tente novamente.");
         return;
       }
 
@@ -501,7 +551,11 @@ export default function Checkout() {
 
       window.location.assign(checkoutUrl);
     } catch {
-      setError("Erro de conexao ao iniciar o checkout.");
+      setError(
+        shouldActivateVipFlow
+          ? "Nao foi possivel confirmar a ativacao VIP agora. Tente novamente."
+          : "Erro de conexao ao iniciar o checkout.",
+      );
     } finally {
       setLoading(false);
     }
@@ -602,9 +656,11 @@ export default function Checkout() {
                   <div className="mt-6 space-y-4">
                     {/* Contexto do metodo e validacao do codigo promocional. */}
                     <div className="rounded-[1.5rem] border border-[var(--fl-auth-card-border)] bg-[rgba(var(--fl-color-accent-rgb),0.08)] p-5 text-sm text-[var(--fl-auth-muted)]">
-                      {paymentMethod === "pix"
-                        ? "O checkout Cakto sera aberto com o plano selecionado para concluir o PIX fora do app."
-                        : "O checkout Cakto sera aberto com o plano selecionado para concluir o pagamento com cartao fora do app."}
+                      {isVipPromoValidated
+                        ? "Codigo VIP validado: o checkout da Cakto sera ignorado e sua conta sera ativada automaticamente."
+                        : paymentMethod === "pix"
+                          ? "O checkout Cakto sera aberto com o plano selecionado para concluir o PIX fora do app."
+                          : "O checkout Cakto sera aberto com o plano selecionado para concluir o pagamento com cartao fora do app."}
                     </div>
 
                     <div className="space-y-3">
@@ -667,6 +723,11 @@ export default function Checkout() {
                         <div className="rounded-[1.2rem] border border-emerald-400/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-400">
                           <p className="font-semibold">{promoValidationResult.description}</p>
                           <p className="mt-1 text-emerald-300">{promoValidationResult.benefitLabel}</p>
+                          {promoValidationResult.effect === "activate_vip" ? (
+                            <span className="mt-2 inline-flex rounded-full border border-emerald-300/40 bg-emerald-400/10 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-200">
+                              VIP ativo imediato
+                            </span>
+                          ) : null}
                         </div>
                       ) : null}
 
@@ -730,10 +791,16 @@ export default function Checkout() {
                       className="flex h-14 w-full items-center justify-center gap-2 rounded-[1.2rem] bg-[var(--app-primary-color)] px-5 text-base font-black text-black transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       {loading
-                        ? "Abrindo checkout..."
-                        : requiresOnboardingCheckout
-                          ? "Concluir onboarding e abrir checkout"
-                          : "Continuar para o checkout"}
+                        ? isVipPromoValidated
+                          ? "Ativando VIP..."
+                          : "Abrindo checkout..."
+                        : isVipPromoValidated
+                          ? requiresOnboardingCheckout
+                            ? "Concluir onboarding e ativar VIP"
+                            : "Ativar VIP e entrar no dashboard"
+                          : requiresOnboardingCheckout
+                            ? "Concluir onboarding e abrir checkout"
+                            : "Continuar para o checkout"}
                       {!loading ? <ArrowRight className="h-4 w-4" /> : null}
                     </button>
 
@@ -773,6 +840,7 @@ export default function Checkout() {
         open={statusPopup !== null}
         title={statusPopup?.title ?? ""}
         message={statusPopup?.message ?? ""}
+        badge={statusPopup?.badge}
         tone={statusPopup?.tone ?? "warning"}
         onClose={() => setStatusPopup(null)}
       />

@@ -87,10 +87,13 @@ export function normalizeMissionMetricType(
 
 // Remove prefixos redundantes para a UI exibir nomes de missao limpos.
 export function stripMissionDisplayTitlePrefix(value: string): string {
-  const localized = localizeMissionText(value) ?? value;
-  const stripped = localized.replace(MISSION_TITLE_PREFIX_PATTERN, "").trim();
+  const stripped = value.replace(MISSION_TITLE_PREFIX_PATTERN, "").trim();
   const canonicalTitle = resolveExerciseDisplayNamePt(stripped) ?? stripped;
-  return canonicalTitle.length > 0 ? canonicalTitle : localized.trim();
+  if (canonicalTitle.length > 0) {
+    return canonicalTitle;
+  }
+  const fallback = value.trim();
+  return fallback.length > 0 ? fallback : "Miss\u00e3o";
 }
 
 function localizeDifficultyLabel(value: string | null | undefined): string | undefined {

@@ -316,4 +316,53 @@ describe("mission routes", () => {
       calls.some((call) => call.sql.includes("LEFT JOIN skills")),
     ).toBe(false);
   });
+
+  it("schedules localized instruction persistence for daily mission details even without external AI provider", async () => {
+    const { db } = createMockD1Database([
+      {
+        match: "SELECT m.*, NULL as skill_name",
+        first: {
+          id: 21,
+          user_id: TEST_USER.id,
+          title: "Missao diaria",
+          type: "daily",
+        },
+      },
+      {
+        match: "UPDATE missions SET exercise_instructions_pt_json = ?, instructions_json = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?",
+        run: { success: true, meta: {} },
+      },
+    ]);
+    const env = createTestEnv(db);
+    const deps = createMissionDeps({
+      normalizeMissionRow: vi.fn((row: Record<string, unknown>) => ({
+        ...row,
+        type: "daily",
+        metric_type: "repetitions",
+        sets: null,
+        rest_seconds: null,
+        title: "Missao diaria",
+        exercise_name: "Push-up",
+        exercise_instructions_en: ["Keep your core engaged."],
+        exercise_instructions_pt: [],
+        instructions: ["Keep your core engaged."],
+        circuit_tasks: [],
+      })),
+      translateExerciseInstructionsToPt: vi.fn(async () => ["Mantenha o core ativado."]),
+    });
+    const app = new Hono<AppContext>();
+    registerMissionRoutes(app, deps, createAuthMiddleware());
+    const { executionCtx, flush } = createExecutionContext();
+
+    const response = await app.fetch(
+      new Request("http://localhost/api/missions/21"),
+      env,
+      executionCtx,
+    );
+
+    expect(response.status).toBe(200);
+    await flush();
+    expect(deps.translateExerciseInstructionsToPt).toHaveBeenCalledTimes(1);
+    expect(deps.clearMissionDetailCache).toHaveBeenCalledWith(TEST_USER.id, 21);
+  });
 });

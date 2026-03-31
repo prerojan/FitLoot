@@ -15,9 +15,9 @@ import {
   isMissingSchemaError,
   schemaMismatchResponse,
 } from "../core/errors";
-import { getHuggingFaceApiKey } from "../core/providerConfig";
 import type { AppContext } from "../core/types";
 import type { WithTransaction } from "./contracts";
+import { ensurePortugueseExerciseLabel } from "../services/instructionLocalization";
 
 type StreamJsonArrayResponse = (
   items: readonly unknown[],
@@ -458,7 +458,6 @@ export function registerMissionRoutes(
       const ptSteps = normalized.exercise_instructions_pt;
       if (
         normalized.type === "daily" &&
-        getHuggingFaceApiKey(c.env) &&
         enSteps.length > 0 &&
         (ptSteps.length === 0 ||
           (ptSteps.length === enSteps.length &&
@@ -473,6 +472,7 @@ export function registerMissionRoutes(
           normalized.exercise_name.trim().length > 0
             ? normalized.exercise_name.trim()
             : deps.extractExerciseName(String(normalized.title ?? ""));
+        const exerciseLabelPt = ensurePortugueseExerciseLabel(exerciseLabel);
         // Dispara a traducao em background para nao bloquear a leitura de detalhes.
         const currentInstructions = deps.normalizeInstructionList(
           normalized.instructions,
@@ -492,7 +492,7 @@ export function registerMissionRoutes(
             try {
               const ptTranslated = await deps.translateExerciseInstructionsToPt(
                 enSteps,
-                exerciseLabel,
+                exerciseLabelPt,
                 c.env,
               );
               if (ptTranslated.length === 0) {
@@ -502,7 +502,7 @@ export function registerMissionRoutes(
               const nextInstructions = shouldRefreshMainInstructions
                 ? deps.ensureInstructionSteps(
                   deps.normalizeInstructionList(ptTranslated, 6),
-                  exerciseLabel,
+                  exerciseLabelPt,
                   normalized.metric_type as MissionMetricType,
                   normalized.sets,
                   normalized.rest_seconds,
