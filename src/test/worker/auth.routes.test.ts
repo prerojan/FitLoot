@@ -218,4 +218,53 @@ describe("auth routes", () => {
       usernameAvailable: null,
     });
   });
+
+  it("accepts login with mixed-case email and trims spaces", async () => {
+    const { db, calls } = createMockD1Database([
+      {
+        match: "SELECT COUNT(*) as count FROM sqlite_master",
+        first: { count: 2 },
+      },
+      {
+        match: "SELECT id, password_hash, password_salt FROM users WHERE lower(email) = ?",
+        first: {
+          id: "user-123",
+          password_hash: "hash-value",
+          password_salt: "salt-1",
+        },
+      },
+      {
+        match: "INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, ?)",
+        run: { success: true, meta: { changes: 1 } },
+      },
+    ]);
+
+    const env = createTestEnv(db);
+    const deps = createAuthDeps();
+    const app = new Hono<AppContext>();
+    registerAuthRoutes(app, deps);
+    const { executionCtx } = createExecutionContext();
+
+    const response = await app.fetch(
+      createJsonRequest("/api/auth/login", {
+        method: "POST",
+        body: {
+          email: "  LeGaCy@Example.com  ",
+          password: "senha-segura-123",
+        },
+      }),
+      env,
+      executionCtx,
+    );
+
+    expect(response.status).toBe(200);
+    expect(
+      calls.some(
+        (call) =>
+          call.sql.includes("SELECT id, password_hash, password_salt FROM users WHERE lower(email) = ?") &&
+          call.params[0] === "legacy@example.com",
+      ),
+    ).toBe(true);
+    expect(response.headers.get("Set-Cookie")).toBe("session=cookie");
+  });
 });

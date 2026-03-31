@@ -843,14 +843,20 @@ export default function Onboarding() {
 
       localStorage.setItem("fitloot_authenticated_hint", "1");
 
-      const patchRes = await api("/api/users/me", {
-        method: "PATCH",
-        body: JSON.stringify({ name: trimmedFullName }),
-      });
-
-      if (!patchRes.ok) {
-        setStepError("Erro ao atualizar perfil.");
-        return;
+      try {
+        const patchRes = await api("/api/users/me", {
+          method: "PATCH",
+          body: JSON.stringify({ name: trimmedFullName }),
+        });
+        if (!patchRes.ok) {
+          console.warn("[onboarding][profile-sync]", {
+            status: patchRes.status,
+          });
+        }
+      } catch (error) {
+        console.warn("[onboarding][profile-sync][network]", {
+          message: error instanceof Error ? error.message : String(error),
+        });
       }
 
       await checkAuth();

@@ -170,12 +170,13 @@ export function registerAuthRoutes(
       if (!schemaReady) return databaseNotInitializedResponse(c);
 
       const data = c.req.valid("json");
+      const normalizedEmail = data.email.trim().toLowerCase();
 
       const userRow = await c.env.fitloot_db
         .prepare(
-          "SELECT id, password_hash, password_salt FROM users WHERE email = ?",
+          "SELECT id, password_hash, password_salt FROM users WHERE lower(email) = ?",
         )
-        .bind(data.email)
+        .bind(normalizedEmail)
         .first<{
           id: string;
           password_hash: string | null;

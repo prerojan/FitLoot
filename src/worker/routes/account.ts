@@ -177,26 +177,47 @@ export function registerAccountRoutes(
       if (!user) return c.json({ error: "Unauthorized" }, 401);
       const data = c.req.valid("json");
 
-      if (data.name !== undefined) {
-        await c.env.fitloot_db
-          .prepare("UPDATE users SET name = ? WHERE id = ?")
-          .bind(data.name, user.id)
-          .run();
-      }
-      if (data.photo_url !== undefined) {
-        await c.env.fitloot_db
-          .prepare("UPDATE users SET avatar_url = ? WHERE id = ?")
-          .bind(data.photo_url || null, user.id)
-          .run();
-      }
+      try {
+        if (data.name !== undefined) {
+          await c.env.fitloot_db
+            .prepare("UPDATE users SET name = ? WHERE id = ?")
+            .bind(data.name, user.id)
+            .run();
+        }
+        if (data.photo_url !== undefined) {
+          await c.env.fitloot_db
+            .prepare("UPDATE users SET avatar_url = ? WHERE id = ?")
+            .bind(data.photo_url || null, user.id)
+            .run();
+        }
 
-      await onProfileCustomization(c.env.fitloot_db, user.id, {
-        name_changed: data.name !== undefined,
-        photo_changed: data.photo_url !== undefined,
-      });
+        // Falhas no hook de telemetria nao devem bloquear a atualizacao basica do perfil.
+        try {
+          await onProfileCustomization(c.env.fitloot_db, user.id, {
+            name_changed: data.name !== undefined,
+            photo_changed: data.photo_url !== undefined,
+          });
+        } catch (error) {
+          console.error("[/api/users/me][profile-hook]", {
+            message: getErrorMessage(error),
+            userId: user.id,
+          });
+        }
 
-      const updated = await getUserAuthRecordById(c.env.fitloot_db, user.id);
-      return c.json(updated ?? c.get("user"));
+        const updated = await getUserAuthRecordById(c.env.fitloot_db, user.id);
+        return c.json(updated ?? c.get("user"));
+      } catch (error) {
+        console.error("[/api/users/me][patch]", {
+          message: getErrorMessage(error),
+          userId: user.id,
+        });
+
+        if (isMissingSchemaError(error)) {
+          return schemaMismatchResponse(c);
+        }
+
+        return internalErrorResponse(c);
+      }
     },
   );
 

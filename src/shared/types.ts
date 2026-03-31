@@ -425,13 +425,13 @@ export type AiAnalyzeFoodRequest = z.infer<typeof AiAnalyzeFoodRequestSchema>;
 // Auth: login e registro por e-mail/senha
 export const AuthRegisterRequestSchema = z.object({
   name: z.string().min(1),
-  email: z.string().email(),
+  email: z.string().trim().email(),
   password: z.string().min(8),
 });
 export type AuthRegisterRequest = z.infer<typeof AuthRegisterRequestSchema>;
 
 export const LoginRequestSchema = z.object({
-  email: z.string().email(),
+  email: z.string().trim().email(),
   password: z.string().min(1),
 });
 export type LoginRequest = z.infer<typeof LoginRequestSchema>;
