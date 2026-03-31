@@ -252,6 +252,27 @@ export function registerMissionRoutes(
     writeMissionListCache,
   } = deps;
 
+  const canJoinSkillsTable = async (db: D1Database): Promise<boolean> => {
+    try {
+      const [hasMissionSkillId, hasSkillId, hasSkillName] = await Promise.all([
+        hasTableColumn(db, "missions", "skill_id"),
+        hasTableColumn(db, "skills", "id"),
+        hasTableColumn(db, "skills", "name"),
+      ]);
+      return hasMissionSkillId && hasSkillId && hasSkillName;
+    } catch (error) {
+      console.warn("[missions][schema-check][skills]", {
+        message: getErrorMessage(error),
+      });
+      return false;
+    }
+  };
+
+  const buildMissionSkillQueryParts = (includeSkillJoin: boolean) => ({
+    selectSkillName: includeSkillJoin ? "s.name as skill_name" : "NULL as skill_name",
+    skillJoinClause: includeSkillJoin ? "LEFT JOIN skills s ON m.skill_id = s.id" : "",
+  });
+
   // Lista as missões relevantes, reutilizando cache e agendando reparos leves em segundo plano.
   app.get("/api/missions", authMiddleware, async (c) => {
     const user = c.get("user");
@@ -296,46 +317,31 @@ export function registerMissionRoutes(
       }
 
       // Busca missões ativas e histórico recente, com fallback para esquemas antigos sem coluna status.
-      let missions;
-      try {
-        missions = await c.env.fitloot_db
-          .prepare(
-            `SELECT m.*, s.name as skill_name FROM missions m
-            LEFT JOIN skills s ON m.skill_id = s.id
-            WHERE m.user_id = ?
-            AND (
-              (m.is_completed = 0 AND (m.deadline IS NULL OR m.deadline > datetime('now')))
-              OR (m.is_completed = 1 AND datetime(COALESCE(m.completed_at, m.updated_at)) >= datetime('now', '-30 day'))
-              OR (COALESCE(m.status,'pending') IN ('failed', 'expired') AND date(m.updated_at) >= date('now', '-3 day'))
-            )
-            ORDER BY CASE m.type WHEN 'daily' THEN 1 WHEN 'weekly' THEN 2 WHEN 'monthly' THEN 3 ELSE 4 END, m.created_at DESC
-            LIMIT 240`,
-          )
-          .bind(user.id)
-          .all();
-      } catch (statusQueryError) {
-        const message = getErrorMessage(statusQueryError).toLowerCase();
-        const missingStatusColumn =
-          message.includes("no such column") && message.includes("status");
-        if (!missingStatusColumn) {
-          throw statusQueryError;
-        }
+      const [hasMissionStatus, includeSkillJoin] = await Promise.all([
+        hasTableColumn(c.env.fitloot_db, "missions", "status"),
+        canJoinSkillsTable(c.env.fitloot_db),
+      ]);
+      const { selectSkillName, skillJoinClause } =
+        buildMissionSkillQueryParts(includeSkillJoin);
+      const statusFilter = hasMissionStatus
+        ? "OR (COALESCE(m.status,'pending') IN ('failed', 'expired') AND date(m.updated_at) >= date('now', '-3 day'))"
+        : "";
 
-        missions = await c.env.fitloot_db
-          .prepare(
-            `SELECT m.*, s.name as skill_name FROM missions m
-            LEFT JOIN skills s ON m.skill_id = s.id
-            WHERE m.user_id = ?
-            AND (
-              (m.is_completed = 0 AND (m.deadline IS NULL OR m.deadline > datetime('now')))
-              OR (m.is_completed = 1 AND datetime(COALESCE(m.completed_at, m.updated_at)) >= datetime('now', '-30 day'))
-            )
-            ORDER BY CASE m.type WHEN 'daily' THEN 1 WHEN 'weekly' THEN 2 WHEN 'monthly' THEN 3 ELSE 4 END, m.created_at DESC
-            LIMIT 240`,
+      const missions = await c.env.fitloot_db
+        .prepare(
+          `SELECT m.*, ${selectSkillName} FROM missions m
+          ${skillJoinClause}
+          WHERE m.user_id = ?
+          AND (
+            (m.is_completed = 0 AND (m.deadline IS NULL OR m.deadline > datetime('now')))
+            OR (m.is_completed = 1 AND datetime(COALESCE(m.completed_at, m.updated_at)) >= datetime('now', '-30 day'))
+            ${statusFilter}
           )
-          .bind(user.id)
-          .all();
-      }
+          ORDER BY CASE m.type WHEN 'daily' THEN 1 WHEN 'weekly' THEN 2 WHEN 'monthly' THEN 3 ELSE 4 END, m.created_at DESC
+          LIMIT 240`,
+        )
+        .bind(user.id)
+        .all();
 
       const missionList = await hydrateMissionRowsWithSubtasks(
         c.env.fitloot_db,
@@ -398,11 +404,14 @@ export function registerMissionRoutes(
     }
 
     try {
+      const includeSkillJoin = await canJoinSkillsTable(c.env.fitloot_db);
+      const { selectSkillName, skillJoinClause } =
+        buildMissionSkillQueryParts(includeSkillJoin);
       const row = await c.env.fitloot_db
         .prepare(
-          `SELECT m.*, s.name as skill_name
+          `SELECT m.*, ${selectSkillName}
            FROM missions m
-           LEFT JOIN skills s ON m.skill_id = s.id
+           ${skillJoinClause}
            WHERE m.id = ? AND m.user_id = ?`,
         )
         .bind(missionId, user.id)

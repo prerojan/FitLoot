@@ -146,4 +146,61 @@ describe("mission routes", () => {
     expect(String(payload.error)).toContain("semanais");
     expect(deps.withTransaction).not.toHaveBeenCalled();
   });
+
+  it("serves mission details without skill join when skills schema is unavailable", async () => {
+    const { db, calls } = createMockD1Database([
+      {
+        match: "PRAGMA table_info('missions')",
+        all: [
+          { name: "id" },
+          { name: "user_id" },
+          { name: "title" },
+        ],
+      },
+      {
+        match: "PRAGMA table_info('skills')",
+        all: [],
+      },
+      {
+        match: "SELECT m.*, NULL as skill_name",
+        first: {
+          id: 13,
+          user_id: TEST_USER.id,
+          title: "Missao legado",
+          type: "daily",
+        },
+      },
+    ]);
+    const env = createTestEnv(db);
+    const deps = createMissionDeps({
+      normalizeMissionRow: vi.fn((row: Record<string, unknown>) => ({
+        ...row,
+        type: "daily",
+        circuit_tasks: [],
+        exercise_instructions_en: [],
+        exercise_instructions_pt: [],
+        instructions: [],
+      })),
+    });
+    const app = new Hono<AppContext>();
+    registerMissionRoutes(app, deps, createAuthMiddleware());
+    const { executionCtx } = createExecutionContext();
+
+    const response = await app.fetch(
+      new Request("http://localhost/api/missions/13"),
+      env,
+      executionCtx,
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload).toMatchObject({
+      id: 13,
+      title: "Missao legado",
+      type: "daily",
+    });
+    expect(
+      calls.some((call) => call.sql.includes("LEFT JOIN skills")),
+    ).toBe(false);
+  });
 });
