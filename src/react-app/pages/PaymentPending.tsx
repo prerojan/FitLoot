@@ -8,6 +8,7 @@ import { hasPlanAccess } from "@/react-app/services/authService";
 import { api } from "@/react-app/utils/api";
 import { clearOnboardingDraft } from "@/react-app/utils/onboardingDraft";
 import { queueActivationNotice } from "@/react-app/utils/activationNotice";
+import { scheduleReloadIntoAppEntry } from "@/react-app/utils/appEntryNavigation";
 
 type PaymentMethod = "none" | "card" | "pix";
 
@@ -41,7 +42,7 @@ function formatAmount(amountInCents: number | null): string | null {
 }
 
 export default function PaymentPending() {
-  const { user, checkAuth, logout } = useAuth();
+  const { user, logout } = useAuth();
   const navigate = useNavigate();
   const pollTimerRef = useRef<number | null>(null);
   const pollAttemptRef = useRef(0);
@@ -159,13 +160,10 @@ export default function PaymentPending() {
         });
         setStatusPopup({
           title: "Pagamento aprovado",
-          message: "Seu acesso foi liberado. Redirecionando para a Home...",
+          message: "Seu acesso foi liberado. Atualizando o app agora...",
           tone: "success",
         });
-        await checkAuth();
-        window.setTimeout(() => {
-          navigate(ROUTE_PATHS.home, { replace: true });
-        }, silent ? 500 : 1200);
+        scheduleReloadIntoAppEntry(silent ? 500 : 1200);
         return;
       }
 
@@ -206,7 +204,7 @@ export default function PaymentPending() {
         setChecking(false);
       }
     }
-  }, [checkAuth, clearScheduledPoll, navigate, scheduleNextPoll]);
+  }, [clearScheduledPoll, navigate, scheduleNextPoll]);
 
   useEffect(() => {
     // Mantem a referencia atualizada para o polling reagendado.

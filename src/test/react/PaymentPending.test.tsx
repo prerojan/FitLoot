@@ -1,12 +1,12 @@
 import React from "react";
 import { MemoryRouter } from "react-router";
-import { render, waitFor } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const navigate = vi.fn();
-const checkAuth = vi.fn(async () => undefined);
 const logout = vi.fn();
 const apiMock = vi.fn();
+const scheduleReloadIntoAppEntry = vi.fn(() => 123);
 
 vi.mock("react-router", async () => {
   const actual = await vi.importActual<typeof import("react-router")>("react-router");
@@ -27,7 +27,6 @@ vi.mock("../../react-app/auth/context", () => ({
       plan_status: "pending" as const,
       payment_method: "pix" as const,
     },
-    checkAuth,
     logout,
   }),
 }));
@@ -40,6 +39,11 @@ vi.mock("../../react-app/utils/onboardingDraft", () => ({
   clearOnboardingDraft: vi.fn(),
 }));
 
+vi.mock("../../react-app/utils/appEntryNavigation", () => ({
+  scheduleReloadIntoAppEntry: (...args: Parameters<typeof scheduleReloadIntoAppEntry>) =>
+    scheduleReloadIntoAppEntry(...args),
+}));
+
 import PaymentPending from "../../react-app/pages/PaymentPending";
 
 describe("PaymentPending", () => {
@@ -47,7 +51,7 @@ describe("PaymentPending", () => {
     vi.clearAllMocks();
   });
 
-  it("checks auth and redirects to home when payment is approved", async () => {
+  it("schedules an app reload when payment is approved", async () => {
     apiMock.mockResolvedValueOnce(
       new Response(
         JSON.stringify({
@@ -76,11 +80,12 @@ describe("PaymentPending", () => {
     });
 
     await waitFor(() => {
-      expect(checkAuth).toHaveBeenCalledTimes(1);
+      expect(scheduleReloadIntoAppEntry).toHaveBeenCalledWith(500);
     });
 
-    await waitFor(() => {
-      expect(navigate).toHaveBeenCalledWith("/home", { replace: true });
-    });
+    expect(
+      screen.getByText(/Seu acesso foi liberado. Atualizando o app agora/i),
+    ).toBeInTheDocument();
+    expect(navigate).not.toHaveBeenCalledWith("/home", { replace: true });
   });
 });

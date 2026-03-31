@@ -29,10 +29,12 @@ type TrainingPlanChatPreferences = {
 type TrainingPlanPreferencesDeps = {
   ApiIntegrationError: ApiIntegrationErrorConstructor;
   buildInitialTrainingPlan: (
+    env: AppContext["Bindings"],
     mainGoal: string | null | undefined,
     conditioning: ConditioningLevel,
     equipment: string | null | undefined,
     injuries: string | null | undefined,
+    trainingFrequency: number | null | undefined,
   ) => Promise<Record<string, unknown>>;
   callOpenAIChatWithFallback: (
     c: Context<AppContext>,
@@ -209,10 +211,12 @@ export function createTrainingPlanPreferencesService(
       const existingPlan =
         deps.parseStoredPlanRecord(params.existingPlanJson)
         ?? ((await deps.buildInitialTrainingPlan(
+          c.env,
           params.mainGoal,
           params.conditioning,
           params.equipment,
           params.injuries,
+          params.trainingFrequency,
         )) as Record<string, unknown>);
 
       const nextPlan: Record<string, unknown> = {

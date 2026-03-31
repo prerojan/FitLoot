@@ -23,10 +23,12 @@ type FeedbackEmailPayload = {
 type ProfileRouteDeps = {
   authMiddleware: MiddlewareHandler<AppContext>;
   buildInitialTrainingPlan: (
+    env: Env,
     mainGoal: string | null,
     conditioning: ConditioningLevel,
     equipment: string | null,
     injuries: string | null,
+    trainingFrequency: number | null | undefined,
   ) => Promise<Record<string, unknown>>;
   createMissionsForPeriod: (
     env: Env,
@@ -391,10 +393,12 @@ export function registerProfileRoutes(
       planForRegeneration?.training_frequency,
     );
     const refreshedPlan = await buildInitialTrainingPlan(
+      c.env,
       newGoal,
       conditioning,
       equipment,
       injuries,
+      trainingFrequency,
     );
     await upsertTrainingPlan(
       c.env.fitloot_db,

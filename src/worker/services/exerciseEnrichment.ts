@@ -1,9 +1,13 @@
 import { resolveExerciseSearchTerms, resolvePreferredExerciseDbId } from "../../shared/exerciseCatalog";
 import { normalizeMissionMediaUrl } from "../../shared/missionLocalization";
+import {
+  fetchWithTimeout,
+  rapidRequestJson,
+  resolveRapidApiKey,
+  type RapidApiKeyEnv,
+} from "./rapidApi";
 
-type RapidApiEnv = {
-  RAPID_API_KEY?: string | undefined;
-};
+type RapidApiEnv = RapidApiKeyEnv;
 
 type ExerciseDbExercise = {
   id: string;
@@ -301,45 +305,16 @@ function setCachedValue<T>(cache: Map<string, CacheEntry<T>>, key: string, value
   }
 }
 
-function resolveRapidApiKey(env: RapidApiEnv): string | null {
-  const apiKey = typeof env.RAPID_API_KEY === "string" ? env.RAPID_API_KEY.trim() : "";
-  return apiKey.length > 0 ? apiKey : null;
-}
-
-async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    return await fetch(url, { ...init, signal: controller.signal });
-  } catch (error) {
-    if (error instanceof Error && error.name === "AbortError") {
-      throw new Error("rapidapi-timeout");
-    }
-    throw error;
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
 async function rapidGet<T>(url: string, host: string, env: RapidApiEnv): Promise<T> {
-  const apiKey = resolveRapidApiKey(env);
-  if (!apiKey) {
-    throw new Error("rapidapi-key-missing");
-  }
-
-  const response = await fetchWithTimeout(url, {
-    method: "GET",
-    headers: {
-      "X-RapidAPI-Key": apiKey,
-      "X-RapidAPI-Host": host,
+  return rapidRequestJson<T>(
+    url,
+    host,
+    env,
+    {
+      method: "GET",
     },
-  }, RAPID_TIMEOUT_MS);
-
-  if (!response.ok) {
-    throw new Error(`rapidapi-request-failed:${host}:${response.status}`);
-  }
-
-  return (await response.json()) as T;
+    RAPID_TIMEOUT_MS,
+  );
 }
 
 async function publicExerciseDbGet<T>(path: string): Promise<T> {
@@ -348,7 +323,7 @@ async function publicExerciseDbGet<T>(path: string): Promise<T> {
     headers: {
       Accept: "application/json",
     },
-  }, RAPID_TIMEOUT_MS);
+  }, RAPID_TIMEOUT_MS, "exercisedb-public-timeout");
 
   if (!response.ok) {
     throw new Error(`exercisedb-public-request-failed:${response.status}`);

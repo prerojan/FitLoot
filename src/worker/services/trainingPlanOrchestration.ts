@@ -85,10 +85,12 @@ type TrainingPlanOrchestrationDeps = {
     options: StructuredGenerationOptions,
   ) => StructuredMissionPlanDraft;
   buildInitialTrainingPlan: (
+    env: Pick<Env, "RAPID_API_KEY">,
     mainGoal: string | null | undefined,
     conditioning: ConditioningLevel,
     equipment: string | null | undefined,
     injuries: string | null | undefined,
+    trainingFrequency: number | null | undefined,
   ) => Promise<Record<string, unknown>>;
   buildStructuredPlanPrompt: (
     profile: MissionGenerationProfileSnapshot,
@@ -323,6 +325,7 @@ export function createTrainingPlanOrchestrationService(
 ) {
   // Builds the canonical generation snapshot from profile, history, capacities, and stored training-plan context.
   async function loadMissionGenerationProfile(
+    env: Pick<Env, "RAPID_API_KEY">,
     db: D1Database,
     userId: string,
   ): Promise<MissionGenerationProfileSnapshot | null> {
@@ -450,10 +453,12 @@ export function createTrainingPlanOrchestrationService(
       completionRateValue,
     );
     const fallbackPlan = await deps.buildInitialTrainingPlan(
+      env,
       mainGoal,
       conditioning,
       equipment,
       injuries,
+      planRow?.training_frequency,
     );
     const fallbackWeekly =
       typeof fallbackPlan.weekly === "object" && fallbackPlan.weekly !== null
@@ -519,7 +524,7 @@ export function createTrainingPlanOrchestrationService(
     userId: string,
     requestedAmount: number,
   ): Promise<void> {
-    const profile = await loadMissionGenerationProfile(db, userId);
+    const profile = await loadMissionGenerationProfile(env, db, userId);
     if (!profile) return;
 
     const boundedRequestedAmount = Math.max(

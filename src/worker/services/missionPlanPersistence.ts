@@ -107,6 +107,7 @@ type MissionPlanPersistenceDeps = {
     scope: "regular" | "ai_special",
   ) => Promise<MissionPayloadLike[]>;
   loadMissionGenerationProfile: (
+    env: Env,
     db: D1Database,
     userId: string,
   ) => Promise<MissionPlanProfileLike | null>;
@@ -461,7 +462,7 @@ export function createMissionPlanPersistenceService(
       return 0;
     }
 
-    const profile = await deps.loadMissionGenerationProfile(db, userId);
+    const profile = await deps.loadMissionGenerationProfile(env, db, userId);
     if (!profile) return 0;
 
     const dailyBlueprints = await listCurrentCycleRegularDailyBlueprints(db, userId, profile);
@@ -543,7 +544,7 @@ export function createMissionPlanPersistenceService(
       return;
     }
 
-    const profile = await deps.loadMissionGenerationProfile(db, userId);
+    const profile = await deps.loadMissionGenerationProfile(_env, db, userId);
     if (!profile) return;
 
     const dailyBlueprints = await listCurrentCycleRegularDailyBlueprints(db, userId, profile);

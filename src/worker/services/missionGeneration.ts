@@ -77,6 +77,7 @@ type MissionGenerationDeps<TProfile, TPlanDraft, TBlueprint, TMission> = {
     missionOrigin: MissionOrigin,
   ) => Promise<TMission[]>;
   loadMissionGenerationProfile: (
+    env: Env,
     db: D1Database,
     userId: string,
   ) => Promise<TProfile | null>;
@@ -120,7 +121,7 @@ export function createMissionGenerationService<
     userId: string,
     options: StructuredGenerationOptions,
   ): Promise<GeneratedMissionPlanResult<TMission>> {
-    const profile = await deps.loadMissionGenerationProfile(db, userId);
+    const profile = await deps.loadMissionGenerationProfile(env, db, userId);
     if (!profile) {
       throw new Error("MISSION_GENERATION_PROFILE_INCOMPLETE");
     }

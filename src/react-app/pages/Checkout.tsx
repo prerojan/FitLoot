@@ -36,6 +36,7 @@ import {
   type OnboardingDraft,
 } from "@/react-app/utils/onboardingDraft";
 import { queueActivationNotice } from "@/react-app/utils/activationNotice";
+import { scheduleReloadIntoAppEntry } from "@/react-app/utils/appEntryNavigation";
 
 type CheckoutFlowResponse = {
   checkout_status?: "pending" | "vip_active" | undefined;
@@ -236,7 +237,7 @@ function PlanCard({
 
 export default function Checkout() {
   const navigate = useNavigate();
-  const { user, checkAuth, logout } = useAuth();
+  const { user, logout } = useAuth();
   const { themeMode, toggleThemeMode } = useTheme();
   const vipRedirectTimerRef = useRef<number | null>(null);
   const requiresOnboardingCheckout = user ? !hasStartedCheckoutFlow(user) && user.onboarding_completed !== 1 : false;
@@ -473,6 +474,35 @@ export default function Checkout() {
   const handleCheckout = async () => {
     setError(null);
     const currentOnboardingDraft = requiresOnboardingCheckout ? loadOnboardingDraft() : null;
+    const finalizeAccessTransition = (params: {
+      title: string;
+      message: string;
+      badge: string;
+      delayMs?: number;
+    }) => {
+      clearOnboardingDraft();
+      setOnboardingDraft(null);
+      setVipActivationInProgress(true);
+      setStatusPopup({
+        title: params.title,
+        message: params.message,
+        badge: params.badge,
+        tone: "success",
+      });
+      queueActivationNotice({
+        title: params.title,
+        message: params.message,
+        badge: params.badge,
+        tone: "success",
+      });
+      if (vipRedirectTimerRef.current !== null) {
+        window.clearTimeout(vipRedirectTimerRef.current);
+      }
+      vipRedirectTimerRef.current = scheduleReloadIntoAppEntry(params.delayMs ?? 1500);
+      if (vipRedirectTimerRef.current === null) {
+        setVipActivationInProgress(false);
+      }
+    };
     const completeVipActivation = async (message?: string) => {
       const activationTitle = requiresOnboardingCheckout
         ? "Conta criada com sucesso"
@@ -480,32 +510,15 @@ export default function Checkout() {
       const activationMessage =
         message ??
         (requiresOnboardingCheckout
-          ? "Sua conta foi criada e o VIP foi ativado. Voce sera direcionado para a Home."
-          : "Seu VIP foi ativado. Voce sera direcionado para a Home.");
+          ? "Sua conta foi criada e o VIP foi ativado. Atualizando seu acesso agora."
+          : "Seu VIP foi ativado. Atualizando seu acesso agora.");
 
-      clearOnboardingDraft();
-      setOnboardingDraft(null);
-      setVipActivationInProgress(true);
-      setStatusPopup({
+      finalizeAccessTransition({
         title: activationTitle,
         message: activationMessage,
         badge: "VIP ativo",
-        tone: "success",
+        delayMs: 1500,
       });
-      queueActivationNotice({
-        title: activationTitle,
-        message: activationMessage,
-        badge: "VIP ativo",
-        tone: "success",
-      });
-      await checkAuth();
-      if (vipRedirectTimerRef.current !== null) {
-        window.clearTimeout(vipRedirectTimerRef.current);
-      }
-      vipRedirectTimerRef.current = window.setTimeout(() => {
-        setVipActivationInProgress(false);
-        navigate(ROUTE_PATHS.home, { replace: true });
-      }, 1500);
     };
 
     if (requiresOnboardingCheckout) {
@@ -565,13 +578,13 @@ export default function Checkout() {
 
       if (shouldActivateVipFlow) {
         if (payload?.plan_status === "active") {
-          await completeVipActivation("Plano VIP ativado. Voce sera direcionado para a Home.");
+          await completeVipActivation("Plano VIP ativado. Atualizando seu acesso agora.");
           return;
         }
 
         const vipAccessConfirmed = await confirmVipActivationState();
         if (vipAccessConfirmed) {
-          await completeVipActivation("Plano VIP ativado. Voce sera direcionado para a Home.");
+          await completeVipActivation("Plano VIP ativado. Atualizando seu acesso agora.");
           return;
         }
 
@@ -579,12 +592,17 @@ export default function Checkout() {
         return;
       }
 
-      await checkAuth();
-
       if (payload?.plan_status === "active") {
-        clearOnboardingDraft();
-        setOnboardingDraft(null);
-        navigate(ROUTE_PATHS.home, { replace: true });
+        finalizeAccessTransition({
+          title: requiresOnboardingCheckout
+            ? "Conta criada com sucesso"
+            : "Pagamento aprovado",
+          message: requiresOnboardingCheckout
+            ? "Sua conta foi criada e o acesso foi liberado. Atualizando o app agora."
+            : "Seu acesso foi liberado. Atualizando o app agora.",
+          badge: "Acesso liberado",
+          delayMs: 1200,
+        });
         return;
       }
 
@@ -602,7 +620,7 @@ export default function Checkout() {
       if (shouldActivateVipFlow) {
         const vipAccessConfirmed = await confirmVipActivationState();
         if (vipAccessConfirmed) {
-          await completeVipActivation("Plano VIP ativado. Voce sera direcionado para a Home.");
+          await completeVipActivation("Plano VIP ativado. Atualizando seu acesso agora.");
           return;
         }
       }

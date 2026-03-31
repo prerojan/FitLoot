@@ -22,10 +22,12 @@ import type { WithTransaction } from "./contracts";
 type OnboardingRouteDeps = {
   authMiddleware: MiddlewareHandler<AppContext>;
   buildInitialTrainingPlan: (
+    env: Env,
     mainGoal: string | null,
     conditioning: ConditioningLevel,
     equipment: string | null,
     injuries: string | null,
+    trainingFrequency: number | null | undefined,
   ) => Promise<Record<string, unknown>>;
   conditioningOrder: (conditioning: ConditioningLevel) => number;
   ensureGamificationCatalog: (db: D1Database) => Promise<void>;
@@ -348,10 +350,12 @@ export function registerOnboardingRoutes(
           }
 
           const plan = await buildInitialTrainingPlan(
+            c.env,
             primaryGoal,
             conditioning,
             data.equipment ?? null,
             data.injuries ?? null,
+            trainingFrequency,
           );
           await upsertTrainingPlan(
             c.env.fitloot_db,

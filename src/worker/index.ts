@@ -2742,10 +2742,12 @@ function getWeekdayPtBr(now = new Date()) {
 
 // Reúne os adaptadores finais exigidos pela geração estruturada e pela IA.
 async function loadMissionGenerationProfile(
+  env: Env,
   db: D1Database,
   userId: string,
 ): Promise<MissionGenerationProfileSnapshot | null> {
   return trainingPlanOrchestrationService.loadMissionGenerationProfile(
+    env,
     db,
     userId,
   );
