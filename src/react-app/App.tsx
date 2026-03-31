@@ -5,6 +5,7 @@ import { SpeedInsights } from "@vercel/speed-insights/react";
 import { AUTHENTICATED_HINT_KEY } from "@/react-app/auth/constants";
 import { AuthContext } from "@/react-app/auth/context";
 import { AppChromeContext } from "@/react-app/contexts/appChrome";
+import { RewardNotificationsProvider } from "@/react-app/contexts/rewardNotifications";
 import { ThemeContext } from "@/react-app/contexts/theme";
 import { useAuthBootstrap } from "@/react-app/auth/hooks/useAuthBootstrap";
 import {
@@ -65,14 +66,16 @@ export default function App({ initialThemeMode = DEFAULT_APP_THEME_MODE }: AppPr
         }}
       >
         <AuthContext.Provider value={{ user, loading, checkAuth, logout }}>
-          <Router>
-            <Suspense fallback={<RouteLoader />}>
-              <AppRoutes />
-            </Suspense>
+          <RewardNotificationsProvider>
+            <Router>
+              <Suspense fallback={<RouteLoader />}>
+                <AppRoutes />
+              </Suspense>
 
-            <Analytics />
-            <SpeedInsights />
-          </Router>
+              <Analytics />
+              <SpeedInsights />
+            </Router>
+          </RewardNotificationsProvider>
         </AuthContext.Provider>
       </AppChromeContext.Provider>
     </ThemeContext.Provider>

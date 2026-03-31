@@ -5,6 +5,7 @@ import {
   CompleteMissionRequestSchema,
   type CircuitTask,
   type MissionMetricType,
+  type RewardNotification,
 } from "../../shared/types";
 import { MISSION_LIMITS } from "../../constants/missionMetrics";
 import { assertString, safeGet } from "../../utils/typeHelpers";
@@ -18,6 +19,10 @@ import {
 import type { AppContext } from "../core/types";
 import type { WithTransaction } from "./contracts";
 import { ensurePortugueseExerciseLabel } from "../services/instructionLocalization";
+import {
+  DEFAULT_SETTLED_MISSION_RETENTION_MODIFIER,
+  SETTLED_MISSION_RETENTION_MODIFIER_BY_PERIOD,
+} from "../constants/missionRetention";
 
 type StreamJsonArrayResponse = (
   items: readonly unknown[],
@@ -119,6 +124,10 @@ type MissionRouteDeps = {
     db: D1Database,
     userId: string,
   ) => Promise<unknown>;
+  getRewardNotificationCursor: (
+    db: D1Database,
+    userId: string,
+  ) => Promise<number>;
   hydrateMissionRowsWithSubtasks: (
     db: D1Database,
     rows: Record<string, unknown>[],
@@ -192,6 +201,15 @@ type MissionRouteDeps = {
     db: D1Database,
     executionCtx: ExecutionContext,
   ) => void;
+  listRewardNotifications: (
+    db: D1Database,
+    userId: string,
+    options?: {
+      afterId?: number | undefined;
+      pendingOnly?: boolean | undefined;
+      limit?: number | undefined;
+    },
+  ) => Promise<RewardNotification[]>;
   streamJsonArrayResponse: StreamJsonArrayResponse;
   totalSkillTableAttributeGain: (
     skill: Record<string, unknown>,
@@ -330,9 +348,28 @@ export function registerMissionRoutes(
       ]);
       const { selectSkillName, skillJoinClause } =
         buildMissionSkillQueryParts(includeSkillJoin);
-      const statusFilter = hasMissionStatus
-        ? "OR (COALESCE(m.status,'pending') IN ('failed', 'expired') AND date(m.updated_at) >= date('now', '-3 day'))"
+      const activePendingFilter = hasMissionStatus
+        ? "AND COALESCE(m.status,'pending') = 'pending'"
         : "";
+      const retentionThresholdByTypeSql = `CASE m.type
+        WHEN 'daily' THEN datetime('now', ?)
+        WHEN 'weekly' THEN datetime('now', ?)
+        WHEN 'monthly' THEN datetime('now', ?)
+        ELSE datetime('now', ?)
+      END`;
+      const statusFilter = hasMissionStatus
+        ? `OR (
+            COALESCE(m.status,'pending') IN ('failed', 'expired')
+            AND datetime(m.updated_at) >= ${retentionThresholdByTypeSql}
+          )`
+        : "";
+      const retentionParams = [
+        SETTLED_MISSION_RETENTION_MODIFIER_BY_PERIOD.daily,
+        SETTLED_MISSION_RETENTION_MODIFIER_BY_PERIOD.weekly,
+        SETTLED_MISSION_RETENTION_MODIFIER_BY_PERIOD.monthly,
+        DEFAULT_SETTLED_MISSION_RETENTION_MODIFIER,
+      ];
+      const completedRetentionFilter = `datetime(COALESCE(m.completed_at, m.updated_at)) >= ${retentionThresholdByTypeSql}`;
 
       const missions = await c.env.fitloot_db
         .prepare(
@@ -340,14 +377,18 @@ export function registerMissionRoutes(
           ${skillJoinClause}
           WHERE m.user_id = ?
           AND (
-            (m.is_completed = 0 AND (m.deadline IS NULL OR m.deadline > datetime('now')))
-            OR (m.is_completed = 1 AND datetime(COALESCE(m.completed_at, m.updated_at)) >= datetime('now', '-30 day'))
+            (m.is_completed = 0 AND (m.deadline IS NULL OR m.deadline > datetime('now')) ${activePendingFilter})
+            OR (m.is_completed = 1 AND ${completedRetentionFilter})
             ${statusFilter}
           )
           ORDER BY CASE m.type WHEN 'daily' THEN 1 WHEN 'weekly' THEN 2 WHEN 'monthly' THEN 3 ELSE 4 END, m.created_at DESC
           LIMIT 240`,
         )
-        .bind(user.id)
+        .bind(
+          user.id,
+          ...retentionParams,
+          ...(hasMissionStatus ? retentionParams : []),
+        )
         .all();
 
       const missionList = await hydrateMissionRowsWithSubtasks(
@@ -683,6 +724,7 @@ export function registerMissionRoutes(
         let xpGained = 0;
         let pointsGained = 0;
         let leveledUp = false;
+        let rewardNotificationCursor = 0;
 
         completionPhase = "schema_probe";
         const [
@@ -704,6 +746,12 @@ export function registerMissionRoutes(
         ]);
         const countersHaveStreakDayColumns =
           countersHaveConsecutiveDays && countersHaveLongestDays;
+
+        completionPhase = "reward_cursor";
+        rewardNotificationCursor = await deps.getRewardNotificationCursor(
+          c.env.fitloot_db,
+          user.id,
+        );
 
         completionPhase = "transaction";
         await deps.withTransaction(c.env.fitloot_db, async () => {
@@ -1053,11 +1101,23 @@ export function registerMissionRoutes(
           }),
         );
 
+        const rewardEvents = await deps.listRewardNotifications(
+          c.env.fitloot_db,
+          user.id,
+          {
+            afterId: rewardNotificationCursor,
+            pendingOnly: true,
+            limit: 25,
+          },
+        );
+        leveledUp = rewardEvents.some((event) => event.type === "level_up");
+
         return c.json({
           success: true,
           xpGained,
           pointsGained,
           leveledUp,
+          reward_events: rewardEvents,
           streakMultiplier: streakMultiplier.toFixed(1),
         });
       } catch (error) {

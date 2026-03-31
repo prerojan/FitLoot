@@ -46,6 +46,19 @@ function normalizeRarity(value: string | null | undefined): NormalizedRarity {
   return "COMUM";
 }
 
+function summarizeAchievementReward(
+  achievement: Pick<AchievementWithUnlock, "xp_reward" | "points_reward">,
+): string {
+  const xpReward = Math.max(0, Number(achievement.xp_reward ?? 0));
+  const pointsReward = Math.max(0, Number(achievement.points_reward ?? 0));
+  const rewardParts: string[] = [];
+
+  if (xpReward > 0) rewardParts.push(`+${xpReward} XP`);
+  if (pointsReward > 0) rewardParts.push(`+${pointsReward} Loot`);
+
+  return rewardParts.join(" • ") || "Sem recompensa extra";
+}
+
 export default function Achievements() {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -365,7 +378,7 @@ export default function Achievements() {
                   <span className="fl-theme-text-muted mb-1 block text-[9px] font-bold uppercase tracking-widest">Recompensa</span>
                   <div className="flex items-center justify-center gap-2">
                     <Zap className="h-4 w-4" style={{ color: "var(--app-primary-color)" }} />
-                    <span className="text-xl font-black">+50 XP</span>
+                    <span className="text-center text-sm font-black">{summarizeAchievementReward(selectedAchievement)}</span>
                   </div>
                 </div>
                 <div className="rounded-2xl border p-4" style={{ borderColor: "var(--fl-border-soft)", backgroundColor: "color-mix(in srgb, var(--fl-surface-muted) 70%, transparent)" }}>
@@ -536,7 +549,7 @@ function AchievementSection({
                 </span>
                 <div className="flex items-center gap-1">
                   <Zap className="h-3 w-3 animate-pulse" style={{ color: "var(--app-primary-color)" }} />
-                  <span className="text-xs font-black">+50 XP</span>
+                  <span className="text-xs font-black">{summarizeAchievementReward(achievement)}</span>
                 </div>
               </div>
             </button>

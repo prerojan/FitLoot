@@ -34,9 +34,11 @@ function createMissionDeps(overrides: Partial<Parameters<typeof registerMissionR
       missions: [],
     })),
     getMonthlyCounters: vi.fn(async () => ({})),
+    getRewardNotificationCursor: vi.fn(async () => 0),
     hydrateMissionRowsWithSubtasks: vi.fn(async (_db: D1Database, rows: Record<string, unknown>[]) => rows),
     invalidateMissionListCache: vi.fn(() => undefined),
     invalidateRankingCache: vi.fn(() => undefined),
+    listRewardNotifications: vi.fn(async () => []),
     logUserEvent: vi.fn(async () => undefined),
     missionSummaryFromNormalized: vi.fn((mission: Record<string, unknown>) => mission),
     monthlyMissionProgressValue: vi.fn(() => 0),
@@ -258,6 +260,121 @@ describe("mission routes", () => {
     });
     expect(String(payload.error)).toContain("semanais");
     expect(deps.withTransaction).not.toHaveBeenCalled();
+  });
+
+  it("returns the reward events generated during mission completion and derives leveledUp from them", async () => {
+    const { db } = createMockD1Database([
+      {
+        match: "SELECT * FROM missions WHERE id = ? AND user_id = ? AND is_completed = 0",
+        first: {
+          id: 77,
+          user_id: TEST_USER.id,
+          type: "daily",
+          is_completed: 0,
+          xp_reward: 120,
+          points_reward: 12,
+          metric_type: "repetitions",
+          target_time: null,
+          skill_id: null,
+        },
+      },
+      {
+        match: "PRAGMA table_info('missions')",
+        all: [
+          { name: "id" },
+          { name: "user_id" },
+          { name: "status" },
+        ],
+      },
+      {
+        match: "PRAGMA table_info('user_event_counters')",
+        all: [
+          { name: "user_id" },
+          { name: "consecutive_days_completed" },
+          { name: "longest_consecutive_days" },
+        ],
+      },
+      {
+        match: "UPDATE missions SET is_completed = 1, status = 'completed'",
+        run: { success: true, meta: { changes: 1 } },
+      },
+      {
+        match: "SELECT * FROM user_progression WHERE user_id = ?",
+        first: {
+          current_streak: 2,
+          last_activity_date: "2099-01-01",
+        },
+      },
+      {
+        match: "UPDATE user_progression SET current_streak = ?, best_streak = MAX(best_streak, ?)",
+        run: { success: true, meta: { changes: 1 } },
+      },
+      {
+        match: "UPDATE user_event_counters",
+        run: { success: true, meta: { changes: 1 } },
+      },
+      {
+        match: "SELECT COUNT(*) as c FROM missions WHERE user_id = ? AND is_completed = 1",
+        first: { c: 1 },
+      },
+    ]);
+    const env = createTestEnv(db);
+    const deps = createMissionDeps({
+      checkMissionRelevance: vi.fn(async () => ({ isGoalRelevant: false })),
+      listRewardNotifications: vi.fn(async () => [
+        {
+          id: 31,
+          type: "level_up",
+          level: 6,
+          xp_reward: 0,
+          points_reward: 0,
+          created_at: "2026-03-31T12:00:00.000Z",
+        },
+        {
+          id: 32,
+          type: "achievement_unlocked",
+          name: "Primeiro Passo",
+          xp_reward: 50,
+          points_reward: 0,
+          created_at: "2026-03-31T12:00:01.000Z",
+        },
+      ]),
+    });
+    const app = new Hono<AppContext>();
+    registerMissionRoutes(app, deps, createAuthMiddleware());
+    const { executionCtx } = createExecutionContext();
+
+    const response = await app.fetch(
+      createJsonRequest("/api/missions/complete", {
+        method: "POST",
+        body: {
+          mission_id: 77,
+          metric_completed: 12,
+          reps_completed: 12,
+          sensor_verified: true,
+        },
+      }),
+      env,
+      executionCtx,
+    );
+
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(deps.getRewardNotificationCursor).toHaveBeenCalledWith(db, TEST_USER.id);
+    expect(deps.listRewardNotifications).toHaveBeenCalledWith(db, TEST_USER.id, {
+      afterId: 0,
+      pendingOnly: true,
+      limit: 25,
+    });
+    expect(payload).toMatchObject({
+      success: true,
+      leveledUp: true,
+      reward_events: [
+        { id: 31, type: "level_up", level: 6 },
+        { id: 32, type: "achievement_unlocked", name: "Primeiro Passo" },
+      ],
+    });
   });
 
   it("serves mission details without skill join when skills schema is unavailable", async () => {

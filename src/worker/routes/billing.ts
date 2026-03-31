@@ -11,6 +11,7 @@ import {
   hasCoreSchema,
 } from "../core/database";
 import {
+  getErrorMessage,
   isInvalidPromoCodeError,
   isMissingSchemaError,
   schemaMismatchResponse,
@@ -65,6 +66,15 @@ type BillingRouteDeps = {
     rawBody: string,
     payload: Record<string, unknown>,
   ) => Promise<void>;
+  reconcilePendingSubscriptionForUser: (
+    db: D1Database,
+    env: Env,
+    params: {
+      userId: string;
+      customerEmail?: string | null;
+      latestSubscription?: SubscriptionRecord | null;
+    },
+  ) => Promise<void>;
   resolveCheckoutAmount: (planId: PublicPlanId) => number;
   resolveCheckoutProductId: (planId: PublicPlanId) => string;
   resolveCheckoutUrl: (planId: PublicPlanId) => string;
@@ -108,6 +118,7 @@ export function registerBillingRoutes(
     normalizePublicPlanIdFromValue,
     normalizeUserPaymentMethod,
     processCaktoWebhook,
+    reconcilePendingSubscriptionForUser,
     resolveCheckoutAmount,
     resolveCheckoutProductId,
     resolveCheckoutUrl,
@@ -267,7 +278,7 @@ export function registerBillingRoutes(
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
 
-    const [latestSubscription, refreshedUser] = await Promise.all([
+    let [latestSubscription, refreshedUser] = await Promise.all([
       getLatestSubscriptionByUser(c.env.fitloot_db, user.id),
       getUserAuthRecordById(c.env.fitloot_db, user.id),
     ]);
@@ -275,6 +286,33 @@ export function registerBillingRoutes(
     if (!refreshedUser) {
       return c.json(
         { error: "Usuário não encontrado", code: "USER_NOT_FOUND" },
+        404,
+      );
+    }
+
+    if (refreshedUser.plan_status === "pending") {
+      try {
+        await reconcilePendingSubscriptionForUser(c.env.fitloot_db, c.env, {
+          userId: user.id,
+          customerEmail: refreshedUser.email,
+          latestSubscription,
+        });
+
+        [latestSubscription, refreshedUser] = await Promise.all([
+          getLatestSubscriptionByUser(c.env.fitloot_db, user.id),
+          getUserAuthRecordById(c.env.fitloot_db, user.id),
+        ]);
+      } catch (error) {
+        console.error("[subscription-status][cakto-reconcile]", {
+          userId: user.id,
+          message: getErrorMessage(error),
+        });
+      }
+    }
+
+    if (!refreshedUser) {
+      return c.json(
+        { error: "Usuario nao encontrado", code: "USER_NOT_FOUND" },
         404,
       );
     }

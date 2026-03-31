@@ -306,6 +306,11 @@ export function createMissionPlanPersistenceService(
     const missionName = exerciseName.trim().length > 0
       ? exerciseName
       : deps.extractExerciseName(mission.title);
+    const exerciseDbId =
+      typeof mission.exercise_db_id === "string" &&
+      mission.exercise_db_id.trim().length > 0
+        ? deps.normalizeMatchText(mission.exercise_db_id.trim())
+        : "";
 
     return {
       period: "daily",
@@ -326,6 +331,7 @@ export function createMissionPlanPersistenceService(
         [
           ...deps.buildMissionCompatibilityTerms(missionName, muscle, mission.metric_type),
           mission.title,
+          exerciseDbId.length > 0 ? `exercise_db_id:${exerciseDbId}` : "",
           ...(Array.isArray(mission.muscle_groups) ? mission.muscle_groups : []),
           ...(Array.isArray(mission.exercise_secondary_muscles) ? mission.exercise_secondary_muscles : []),
         ],

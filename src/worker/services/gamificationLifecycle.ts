@@ -1,4 +1,7 @@
-import type { ConditioningLevel } from "../../shared/types";
+import type {
+  ConditioningLevel,
+  RewardNotification,
+} from "../../shared/types";
 import { repairKnownMojibakeString } from "../../shared/textEncoding";
 import {
   PARENT_SKILL_MAP,
@@ -21,35 +24,58 @@ type GoalMissionRelevance = {
   userGoal: string;
 };
 
+type CatalogRewardRow = {
+  id: number;
+  name: string;
+  xp_reward?: number | null;
+  points_reward?: number | null;
+};
+
+type RewardNotificationInsert = {
+  type: "level_up" | "achievement_unlocked" | "title_unlocked";
+  name?: string | null;
+  level?: number | null;
+  xpReward?: number;
+  pointsReward?: number;
+};
+
 // Concentrates post-mission gamification side effects: counters, titles, achievements, skills, and xp progression.
 function canonicalCatalogName(value: string): string {
   return repairKnownMojibakeString(value);
 }
 
-async function findTitleIdByName(
+async function findTitleRewardByName(
   db: D1Database,
   titleName: string,
-): Promise<number | null> {
+): Promise<CatalogRewardRow | null> {
   const canonical = canonicalCatalogName(titleName);
   const row = await db
-    .prepare("SELECT id FROM titles WHERE name = ? OR name = ? LIMIT 1")
+    .prepare(
+      `SELECT id, name, xp_reward, points_reward
+         FROM titles
+        WHERE name = ? OR name = ?
+        LIMIT 1`,
+    )
     .bind(canonical, titleName)
-    .first<{ id: number }>();
-  return row?.id ?? null;
+    .first<CatalogRewardRow>();
+  return row ?? null;
 }
 
-async function findAchievementIdByName(
+async function findAchievementRewardByName(
   db: D1Database,
   achievementName: string,
-): Promise<number | null> {
+): Promise<CatalogRewardRow | null> {
   const canonical = canonicalCatalogName(achievementName);
   const row = await db
     .prepare(
-      "SELECT id FROM achievements WHERE name = ? OR name = ? LIMIT 1",
+      `SELECT id, name, xp_reward, points_reward
+         FROM achievements
+        WHERE name = ? OR name = ?
+        LIMIT 1`,
     )
     .bind(canonical, achievementName)
-    .first<{ id: number }>();
-  return row?.id ?? null;
+    .first<CatalogRewardRow>();
+  return row ?? null;
 }
 
 export function createGamificationLifecycleService(
@@ -104,6 +130,125 @@ export function createGamificationLifecycleService(
       .run();
   }
 
+  async function queueRewardNotification(
+    db: D1Database,
+    userId: string,
+    notification: RewardNotificationInsert,
+  ): Promise<void> {
+    await db
+      .prepare(
+        `INSERT INTO user_reward_notifications (
+          user_id,
+          type,
+          entity_name,
+          level,
+          xp_reward,
+          points_reward
+        ) VALUES (?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(
+        userId,
+        notification.type,
+        notification.name ?? null,
+        notification.level ?? null,
+        Math.max(0, Math.floor(Number(notification.xpReward ?? 0))),
+        Math.max(0, Math.floor(Number(notification.pointsReward ?? 0))),
+      )
+      .run();
+  }
+
+  async function getRewardNotificationCursor(
+    db: D1Database,
+    userId: string,
+  ): Promise<number> {
+    const row = await db
+      .prepare(
+        `SELECT MAX(id) as last_id
+           FROM user_reward_notifications
+          WHERE user_id = ?`,
+      )
+      .bind(userId)
+      .first<{ last_id: number | null }>();
+    return Math.max(0, Number(row?.last_id ?? 0));
+  }
+
+  async function listRewardNotifications(
+    db: D1Database,
+    userId: string,
+    options?: {
+      afterId?: number | undefined;
+      pendingOnly?: boolean | undefined;
+      limit?: number | undefined;
+    },
+  ): Promise<RewardNotification[]> {
+    const afterId = Math.max(0, Math.floor(Number(options?.afterId ?? 0)));
+    const pendingOnly = options?.pendingOnly !== false;
+    const limit = Math.min(
+      50,
+      Math.max(1, Math.floor(Number(options?.limit ?? 25))),
+    );
+    const rows = await db
+      .prepare(
+        `SELECT id, type, entity_name, level, xp_reward, points_reward, created_at
+           FROM user_reward_notifications
+          WHERE user_id = ?
+            AND id > ?
+            ${pendingOnly ? "AND consumed_at IS NULL" : ""}
+          ORDER BY id ASC
+          LIMIT ?`,
+      )
+      .bind(userId, afterId, limit)
+      .all<{
+        id: number;
+        type: RewardNotification["type"];
+        entity_name: string | null;
+        level: number | null;
+        xp_reward: number | null;
+        points_reward: number | null;
+        created_at: string;
+      }>();
+
+    return (Array.isArray(rows.results) ? rows.results : []).map((row) => ({
+      id: Number(row.id),
+      type: row.type,
+      name:
+        typeof row.entity_name === "string"
+          ? repairKnownMojibakeString(row.entity_name)
+          : row.entity_name,
+      level:
+        row.level === null || typeof row.level === "undefined"
+          ? null
+          : Number(row.level),
+      xp_reward: Math.max(0, Number(row.xp_reward ?? 0)),
+      points_reward: Math.max(0, Number(row.points_reward ?? 0)),
+      created_at: String(row.created_at ?? new Date().toISOString()),
+    }));
+  }
+
+  async function consumeRewardNotifications(
+    db: D1Database,
+    userId: string,
+    ids: readonly number[],
+  ): Promise<void> {
+    const uniqueIds = [...new Set(ids)]
+      .map((value) => Math.floor(Number(value)))
+      .filter((value) => Number.isInteger(value) && value > 0)
+      .slice(0, 50);
+    if (uniqueIds.length === 0) return;
+
+    const placeholders = uniqueIds.map(() => "?").join(", ");
+    await db
+      .prepare(
+        `UPDATE user_reward_notifications
+            SET consumed_at = datetime('now')
+          WHERE user_id = ?
+            AND consumed_at IS NULL
+            AND id IN (${placeholders})`,
+      )
+      .bind(userId, ...uniqueIds)
+      .run();
+  }
+
   async function runMissionLifecycleHookSafely(
     userId: string,
     phase: string,
@@ -126,8 +271,31 @@ export function createGamificationLifecycleService(
     userId: string,
     titleName: string,
   ): Promise<void> {
-    const titleId = await findTitleIdByName(db, titleName);
-    if (!titleId) return;
+    const title = await findTitleRewardByName(db, titleName);
+    if (!title?.id) return;
+
+    const existing = await db
+      .prepare(
+        `SELECT id
+           FROM user_titles
+          WHERE user_id = ? AND title_id = ?
+          ORDER BY id ASC
+          LIMIT 1`,
+      )
+      .bind(userId, title.id)
+      .first<{ id: number }>();
+    if (existing?.id) {
+      await db
+        .prepare(
+          `UPDATE user_titles
+              SET updated_at = datetime('now')
+            WHERE id = ?`,
+        )
+        .bind(existing.id)
+        .run();
+      return;
+    }
+
     await db
       .prepare(
         `INSERT OR IGNORE INTO user_titles (
@@ -137,8 +305,25 @@ export function createGamificationLifecycleService(
           updated_at
         ) VALUES (?, ?, datetime('now'), datetime('now'))`,
       )
-      .bind(userId, titleId)
+      .bind(userId, title.id)
       .run();
+
+    const xpReward = Math.max(0, Math.floor(Number(title.xp_reward ?? 0)));
+    const pointsReward = Math.max(
+      0,
+      Math.floor(Number(title.points_reward ?? 0)),
+    );
+
+    await queueRewardNotification(db, userId, {
+      type: "title_unlocked",
+      name: title.name,
+      xpReward,
+      pointsReward,
+    });
+
+    if (xpReward > 0 || pointsReward > 0) {
+      await applyXpPointsAndResolveLevels(db, userId, xpReward, pointsReward);
+    }
   }
 
   async function unlockAchievementIfNeeded(
@@ -148,8 +333,8 @@ export function createGamificationLifecycleService(
     progressCurrent = 1,
     progressRequired = 1,
   ): Promise<void> {
-    const achievementId = await findAchievementIdByName(db, achievementName);
-    if (!achievementId) return;
+    const achievement = await findAchievementRewardByName(db, achievementName);
+    if (!achievement?.id) return;
 
     const normalizedCurrent = Math.max(1, Math.floor(progressCurrent));
     const normalizedRequired = Math.max(1, Math.floor(progressRequired));
@@ -161,7 +346,7 @@ export function createGamificationLifecycleService(
           ORDER BY id ASC
           LIMIT 1`,
       )
-      .bind(userId, achievementId)
+      .bind(userId, achievement.id)
       .first<{ id: number }>();
 
     if (existing?.id) {
@@ -181,7 +366,7 @@ export function createGamificationLifecycleService(
           `DELETE FROM user_achievements
             WHERE user_id = ? AND achievement_id = ? AND id <> ?`,
         )
-        .bind(userId, achievementId, existing.id)
+        .bind(userId, achievement.id, existing.id)
         .run();
       return;
     }
@@ -197,8 +382,28 @@ export function createGamificationLifecycleService(
           updated_at
         ) VALUES (?, ?, datetime('now'), ?, ?, datetime('now'))`,
       )
-      .bind(userId, achievementId, normalizedCurrent, normalizedRequired)
+      .bind(userId, achievement.id, normalizedCurrent, normalizedRequired)
       .run();
+
+    const xpReward = Math.max(
+      0,
+      Math.floor(Number(achievement.xp_reward ?? 50)),
+    );
+    const pointsReward = Math.max(
+      0,
+      Math.floor(Number(achievement.points_reward ?? 0)),
+    );
+
+    await queueRewardNotification(db, userId, {
+      type: "achievement_unlocked",
+      name: achievement.name,
+      xpReward,
+      pointsReward,
+    });
+
+    if (xpReward > 0 || pointsReward > 0) {
+      await applyXpPointsAndResolveLevels(db, userId, xpReward, pointsReward);
+    }
   }
 
   // Mission-achievement evaluation translates accumulated counters into durable unlocks and titles.
@@ -1189,6 +1394,10 @@ export function createGamificationLifecycleService(
     if (next.levelsGained > 0) {
       deps.invalidateRankingCache();
       for (let level = before.level + 1; level <= next.level; level += 1) {
+        await queueRewardNotification(db, userId, {
+          type: "level_up",
+          level,
+        });
         await runMissionLifecycleHookSafely(userId, "on_level_up", () =>
           onLevelUp(db, userId, level),
         );
@@ -1230,6 +1439,9 @@ export function createGamificationLifecycleService(
     onStreakRebuilt,
     parseProgressionXpLevel,
     runMissionLifecycleHookSafely,
+    consumeRewardNotifications,
+    getRewardNotificationCursor,
+    listRewardNotifications,
     tryUnlockSkillsForLevel,
     tryUnlockSkillsFromPerformance,
     unlockAchievementIfNeeded,

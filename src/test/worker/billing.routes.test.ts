@@ -26,6 +26,7 @@ function createBillingDeps(overrides: Record<string, unknown> = {}) {
     }),
     normalizeUserPaymentMethod: vi.fn((value: string | null | undefined) => value ?? "none"),
     processCaktoWebhook: vi.fn(async () => undefined),
+    reconcilePendingSubscriptionForUser: vi.fn(async () => undefined),
     resolveCheckoutAmount: vi.fn(() => 1990),
     resolveCheckoutProductId: vi.fn(() => "product-pro"),
     resolveCheckoutUrl: vi.fn(() => "https://checkout.example/pro"),
@@ -129,6 +130,89 @@ describe("billing routes", () => {
       checkout_url: "https://checkout.example/pro",
       product_id: "product-pro",
       subscription: null,
+    });
+  });
+
+  it("reconciles pending checkout against Cakto when status polling runs", async () => {
+    const { db } = createMockD1Database([]);
+    const env = createTestEnv(db);
+    const pendingSubscription = {
+      id: "sub_pending",
+      user_id: TEST_USER.id,
+      plan_id: "pro",
+      status: "pending",
+      payment_method: "pix",
+      amount: 1990,
+      external_order_id: "cakto_ord_1",
+      external_subscription_id: null,
+      customer_email: TEST_USER.email,
+      checkout_url: "https://checkout.example/pro",
+      product_id: "product-pro",
+      started_at: null,
+      expires_at: null,
+      metadata_json: null,
+      webhook_event_log: null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    const activeSubscription = {
+      ...pendingSubscription,
+      status: "active",
+      started_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    const reconcilePendingSubscriptionForUser = vi.fn(async () => undefined);
+    const getLatestSubscriptionByUser = vi
+      .fn()
+      .mockResolvedValueOnce(pendingSubscription)
+      .mockResolvedValueOnce(activeSubscription);
+    const getUserAuthRecordById = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ...TEST_USER,
+        avatar_url: null,
+        onboarding_completed: 1,
+        plan_status: "pending",
+      })
+      .mockResolvedValueOnce({
+        ...TEST_USER,
+        avatar_url: null,
+        onboarding_completed: 1,
+        plan_status: "active",
+      });
+    const deps = createBillingDeps({
+      getLatestSubscriptionByUser,
+      getUserAuthRecordById,
+      hasPlanAccess: vi.fn((planId: string, planStatus: string) => planId === "vip" || planStatus === "active"),
+      reconcilePendingSubscriptionForUser,
+    });
+    const app = new Hono<AppContext>();
+    registerBillingRoutes(app, deps);
+    const { executionCtx } = createExecutionContext();
+
+    const response = await app.fetch(
+      new Request("http://localhost/api/subscription/status"),
+      env,
+      executionCtx,
+    );
+
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(reconcilePendingSubscriptionForUser).toHaveBeenCalledWith(
+      db,
+      env,
+      expect.objectContaining({
+        userId: TEST_USER.id,
+        customerEmail: TEST_USER.email,
+      }),
+    );
+    expect(payload).toMatchObject({
+      plan_id: "pro",
+      plan_status: "active",
+      has_access: true,
+      checkout_url: "https://checkout.example/pro",
     });
   });
 });

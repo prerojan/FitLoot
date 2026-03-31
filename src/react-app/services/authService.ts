@@ -65,6 +65,6 @@ export function hasPlanAccess(user: User): boolean {
 
 export function resolveAuthenticatedStartRoute(user: User): string {
   // Escolhe o primeiro destino valido apos a restauracao da sessao.
-  if (hasPlanAccess(user)) return ROUTE_PATHS.home;
+  if (hasPlanAccess(user)) return ROUTE_PATHS.dashboard;
   return ROUTE_PATHS.checkout;
 }

@@ -23,6 +23,10 @@ import {
   shouldShowMissionDuration,
 } from "../constants/missionMetrics";
 import {
+  DEFAULT_SETTLED_MISSION_RETENTION_MODIFIER,
+  SETTLED_MISSION_RETENTION_MODIFIER_BY_PERIOD,
+} from "./constants/missionRetention";
+import {
   ApiIntegrationError,
   callOpenAIChatWithFallback,
   enforceRateLimit,
@@ -193,6 +197,7 @@ import {
   matchesVipActivationCode as matchesVipActivationCodeService,
   normalizePromoCodeValue as normalizePromoCodeValueService,
   processCaktoWebhook as processCaktoWebhookService,
+  reconcilePendingSubscriptionForUser as reconcilePendingSubscriptionForUserService,
   resolveCheckoutAmount as resolveCheckoutAmountService,
   resolveCheckoutProductId as resolveCheckoutProductIdService,
   resolveCheckoutUrl as resolveCheckoutUrlService,
@@ -202,7 +207,6 @@ import {
 
 const STREAK_REFRESH_DEBOUNCE_MS = 60_000;
 const STREAK_REFRESH_MAX_KEYS = 4_000;
-const SETTLED_MISSION_MAX_AGE_SQL_MODIFIER = "-2 minutes";
 const streakRefreshLocks = new Map<string, Promise<void>>();
 const streakRefreshLastRun = new Map<string, number>();
 let missionRuntimeStateService: ReturnType<typeof createMissionRuntimeStateService> | null = null;
@@ -318,6 +322,9 @@ const {
   ensureUserAttributesRow: ensureUserAttributesRowService,
   ensureUserCounterRow: ensureUserCounterRowService,
   evaluateLevelTitles: evaluateLevelTitlesService,
+  consumeRewardNotifications: consumeRewardNotificationsService,
+  getRewardNotificationCursor: getRewardNotificationCursorService,
+  listRewardNotifications: listRewardNotificationsService,
   logUserEvent: logUserEventService,
   onAppOpen: onAppOpenService,
   onChatMessage: onChatMessageService,
@@ -342,8 +349,11 @@ const ensureGamificationCatalog = ensureGamificationCatalogService;
 const applyXpPointsAndResolveLevels = applyXpPointsAndResolveLevelsService;
 const checkMissionRelevance = checkMissionRelevanceService;
 const computeXpAndLevelAfterGain = computeXpAndLevelAfterGainService;
+const consumeRewardNotifications = consumeRewardNotificationsService;
 const ensureUserAttributesRow = ensureUserAttributesRowService;
 const logUserEvent = logUserEventService;
+const getRewardNotificationCursor = getRewardNotificationCursorService;
+const listRewardNotifications = listRewardNotificationsService;
 const onFriendAdded = onFriendAddedService;
 const onGoalProgress = onGoalProgressService;
 const onMissionComplete = onMissionCompleteService;
@@ -383,6 +393,8 @@ const resolveCheckoutUrl = resolveCheckoutUrlService;
 const resolveCheckoutProductId = resolveCheckoutProductIdService;
 const startCheckoutForUser = startCheckoutForUserService;
 const processCaktoWebhook = processCaktoWebhookService;
+const reconcilePendingSubscriptionForUser =
+  reconcilePendingSubscriptionForUserService;
 
 // Constrói o middleware de sessão e plano usado pelas rotas protegidas.
 const authMiddleware = createAuthMiddleware({
@@ -730,6 +742,7 @@ const trainingPlanOrchestrationService = createTrainingPlanOrchestrationService(
   currentWeekKey,
   fallbackExercisesByFocus,
   getActiveCycleMissionCounts,
+  hasTableColumn,
   getErrorMessage,
   listCurrentCycleRegularDailyBlueprints:
     missionPlanPersistenceService.listCurrentCycleRegularDailyBlueprints,
@@ -812,6 +825,7 @@ const {
   ensureStructuredPeriodicMissionsFromExistingDailyBlueprints:
     missionPlanPersistenceService.ensureStructuredPeriodicMissionsFromExistingDailyBlueprints,
   getActiveCycleMissionCounts,
+  hasTableColumn,
   listCurrentCycleMissions,
   loadMissionGenerationProfile,
   missionCycleStartIso,
@@ -887,10 +901,21 @@ async function refreshMissionExpiryWithGuard(db: D1Database, userId: string): Pr
   await refreshPromise;
 }
 
+function settledMissionRetentionModifiers(): readonly [string, string, string, string] {
+  return [
+    SETTLED_MISSION_RETENTION_MODIFIER_BY_PERIOD.daily,
+    SETTLED_MISSION_RETENTION_MODIFIER_BY_PERIOD.weekly,
+    SETTLED_MISSION_RETENTION_MODIFIER_BY_PERIOD.monthly,
+    DEFAULT_SETTLED_MISSION_RETENTION_MODIFIER,
+  ] as const;
+}
+
 async function cleanupSettledMissions(
   db: D1Database,
   userId: string,
 ): Promise<void> {
+  const retentionModifiers = settledMissionRetentionModifiers();
+
   await db
     .prepare(
       `DELETE FROM missions
@@ -898,18 +923,54 @@ async function cleanupSettledMissions(
           AND (
             (
               COALESCE(status, 'pending') IN ('expired', 'failed')
-              AND datetime(updated_at) < datetime('now', '${SETTLED_MISSION_MAX_AGE_SQL_MODIFIER}')
+              AND datetime(updated_at) < CASE type
+                WHEN 'daily' THEN datetime('now', ?)
+                WHEN 'weekly' THEN datetime('now', ?)
+                WHEN 'monthly' THEN datetime('now', ?)
+                ELSE datetime('now', ?)
+              END
             )
             OR (
               COALESCE(status, 'pending') = 'completed'
-              AND (
-                (type = 'daily' AND date(COALESCE(completed_at, updated_at)) < date('now'))
-                OR (type != 'daily' AND datetime(updated_at) < datetime('now', '${SETTLED_MISSION_MAX_AGE_SQL_MODIFIER}'))
-              )
+              AND datetime(COALESCE(completed_at, updated_at)) < CASE type
+                WHEN 'daily' THEN datetime('now', ?)
+                WHEN 'weekly' THEN datetime('now', ?)
+                WHEN 'monthly' THEN datetime('now', ?)
+                ELSE datetime('now', ?)
+              END
             )
           )`,
     )
-    .bind(userId)
+    .bind(
+      userId,
+      ...retentionModifiers,
+      ...retentionModifiers,
+    )
+    .run();
+}
+
+async function cleanupSettledMissionsLegacy(
+  db: D1Database,
+  userId: string,
+): Promise<void> {
+  const retentionModifiers = settledMissionRetentionModifiers();
+
+  await db
+    .prepare(
+      `DELETE FROM missions
+        WHERE user_id = ?
+          AND is_completed = 1
+          AND datetime(COALESCE(completed_at, updated_at)) < CASE type
+            WHEN 'daily' THEN datetime('now', ?)
+            WHEN 'weekly' THEN datetime('now', ?)
+            WHEN 'monthly' THEN datetime('now', ?)
+            ELSE datetime('now', ?)
+          END`,
+    )
+    .bind(
+      userId,
+      ...retentionModifiers,
+    )
     .run();
 }
 
@@ -927,6 +988,7 @@ async function cleanupSettledMissionsWithGuard(
     const missingStatusColumn =
       message.includes("no such column") && message.includes("status");
     if (missingStatusColumn) {
+      await cleanupSettledMissionsLegacy(db, userId);
       return;
     }
     throw error;
@@ -1188,6 +1250,7 @@ registerBillingRoutes(app, {
   normalizePublicPlanIdFromValue,
   normalizeUserPaymentMethod,
   processCaktoWebhook,
+  reconcilePendingSubscriptionForUser,
   resolveCheckoutAmount,
   resolveCheckoutProductId,
   resolveCheckoutUrl,
@@ -1233,7 +1296,9 @@ registerProfileRoutes(app, {
 registerProgressionRoutes(app, {
   authMiddleware,
   applyXpPointsAndResolveLevels,
+  consumeRewardNotifications,
   computeXpAndLevelAfterGain,
+  listRewardNotifications,
   parseProgressionXpLevel,
   unlockAchievementIfNeeded,
   unlockTitleIfNeeded,
@@ -1656,6 +1721,9 @@ async function grantCircuitRewards(db: D1Database, userId: string, missionRow: R
 function buildCompletedMissionMatchCandidates(completedMission: Record<string, unknown>): string[] {
   const rawTitle = String(completedMission.title ?? "");
   const exerciseNameRaw = String(completedMission.exercise_name ?? "");
+  const exerciseDbIdRaw = String(completedMission.exercise_db_id ?? "").trim();
+  const exerciseDbId = normalizeMatchText(exerciseDbIdRaw);
+  const exerciseDbIdTerm = exerciseDbId.length > 0 ? `exercise_db_id:${exerciseDbId}` : "";
   const exerciseName = normalizeMatchText(exerciseNameRaw);
   const localizedExerciseName = normalizeMatchText(localizeMissionText(exerciseNameRaw) ?? exerciseNameRaw);
   const supportedExerciseNameRaw = resolveSupportedMissionExerciseName(exerciseNameRaw);
@@ -1671,26 +1739,48 @@ function buildCompletedMissionMatchCandidates(completedMission: Record<string, u
     || supportedExerciseName.length > 0;
   const title = hasResolvedExerciseName ? "" : normalizeMatchText(rawTitle);
   const strippedTitle = hasResolvedExerciseName ? "" : normalizeMatchText(stripMissionDisplayTitlePrefix(rawTitle));
-  const exerciseCategory = normalizeMatchText(String(completedMission.exercise_category ?? ""));
-  const skillName = normalizeMatchText(String(completedMission.skill_name ?? ""));
-  const metricType = normalizeMatchText(String(completedMission.metric_type ?? ""));
 
   return Array.from(
     new Set(
       [
         title,
         strippedTitle,
+        exerciseDbId,
+        exerciseDbIdTerm,
         exerciseName,
         localizedExerciseName,
         supportedExerciseName,
         supportedExerciseDisplay,
-        exerciseCategory,
-        skillName,
-        metricType,
       ]
         .filter((value) => value.length > 0),
     ),
   );
+}
+
+function splitMatchTokens(value: string): string[] {
+  return normalizeMatchText(value)
+    .split(/\s+/)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 2);
+}
+
+function candidateContainsNormalizedTerm(candidate: string, normalizedTerm: string): boolean {
+  return candidate === normalizedTerm
+    || candidate.startsWith(`${normalizedTerm} `)
+    || candidate.endsWith(` ${normalizedTerm}`)
+    || candidate.includes(` ${normalizedTerm} `);
+}
+
+function candidateContainsAllTermTokens(candidate: string, normalizedTerm: string): boolean {
+  const termTokens = splitMatchTokens(normalizedTerm);
+  if (termTokens.length < 2) return false;
+  const candidateTokens = new Set(splitMatchTokens(candidate));
+  return termTokens.every((token) => candidateTokens.has(token));
+}
+
+function candidateMatchesMissionTerm(candidate: string, normalizedTerm: string): boolean {
+  return candidateContainsNormalizedTerm(candidate, normalizedTerm)
+    || candidateContainsAllTermTokens(candidate, normalizedTerm);
 }
 
 function matchTermsAgainstCompletedMission(completedMission: Record<string, unknown>, terms: readonly string[]): boolean {
@@ -1702,11 +1792,7 @@ function matchTermsAgainstCompletedMission(completedMission: Record<string, unkn
     if (normalizedTerm.length === 0) return false;
 
     return candidates.some((candidate) =>
-      candidate === normalizedTerm
-      || candidate.startsWith(`${normalizedTerm} `)
-      || candidate.endsWith(` ${normalizedTerm}`)
-      || candidate.includes(` ${normalizedTerm} `)
-      || normalizedTerm.includes(candidate),
+      candidateMatchesMissionTerm(candidate, normalizedTerm),
     );
   });
 }
@@ -2109,9 +2195,11 @@ registerMissionRoutes(
     extractExerciseName,
     generateStructuredMissionPlanForUser,
     getMonthlyCounters,
+    getRewardNotificationCursor,
     hydrateMissionRowsWithSubtasks,
     invalidateMissionListCache,
     invalidateRankingCache,
+    listRewardNotifications,
     logUserEvent,
     missionSummaryFromNormalized: (mission) =>
       missionSummaryFromNormalized(mission as NormalizedMissionRow),
@@ -2448,6 +2536,10 @@ app.post("/api/mini-games/:id/complete", authMiddleware, zValidator("json", Mini
 
   const winnerUserId = user.id;
   const loserUserId = winnerUserId === game.challenger_user_id ? game.challenged_user_id : game.challenger_user_id;
+  const rewardNotificationCursor = await getRewardNotificationCursor(
+    c.env.fitloot_db,
+    winnerUserId,
+  );
 
   const completeUpdate = await c.env.fitloot_db.prepare(
     `UPDATE mini_games
@@ -2485,11 +2577,23 @@ app.post("/api/mini-games/:id/complete", authMiddleware, zValidator("json", Mini
   ]);
   invalidateRankingCache();
 
+  const rewardEvents = await listRewardNotifications(
+    c.env.fitloot_db,
+    winnerUserId,
+    {
+      afterId: rewardNotificationCursor,
+      pendingOnly: true,
+      limit: 25,
+    },
+  );
+
   return c.json({
     success: true,
     winner: winnerUserId,
     xp_gained: winnerXp,
     points_gained: winnerPoints,
+    leveledUp: rewardEvents.some((event) => event.type === "level_up"),
+    reward_events: rewardEvents,
   });
 });
 
@@ -2752,6 +2856,25 @@ async function replaceMissionSubtasks(
 
 type MissionGenerationScope = "regular" | "ai_special";
 
+function buildMissionCycleSqlFilters(
+  scope: MissionGenerationScope,
+  hasAiSpecialColumn: boolean,
+  hasMissionStatusColumn: boolean,
+): { scopeSql: string; pendingStatusSql: string } {
+  const scopeSql = scope === "ai_special"
+    ? (hasAiSpecialColumn
+      ? "AND COALESCE(is_ai_special, 0) = 1"
+      : "AND COALESCE(mission_origin, 'regular') = 'ai'")
+    : (hasAiSpecialColumn
+      ? "AND COALESCE(is_ai_special, 0) = 0 AND COALESCE(mission_origin, 'regular') = 'regular'"
+      : "AND COALESCE(mission_origin, 'regular') = 'regular'");
+  const pendingStatusSql = hasMissionStatusColumn
+    ? "AND COALESCE(status, 'pending') = 'pending'"
+    : "";
+
+  return { scopeSql, pendingStatusSql };
+}
+
 async function getActiveCycleMissionCounts(
   db: D1Database,
   userId: string,
@@ -2762,14 +2885,15 @@ async function getActiveCycleMissionCounts(
     weekly: 0,
     monthly: 0,
   };
-  const hasAiSpecialColumn = await hasTableColumn(db, "missions", "is_ai_special");
-  const scopeSql = scope === "ai_special"
-    ? (hasAiSpecialColumn
-      ? "AND COALESCE(is_ai_special, 0) = 1"
-      : "AND COALESCE(mission_origin, 'regular') = 'ai'")
-    : (hasAiSpecialColumn
-      ? "AND COALESCE(is_ai_special, 0) = 0 AND COALESCE(mission_origin, 'regular') = 'regular'"
-      : "AND COALESCE(mission_origin, 'regular') = 'regular'");
+  const [hasAiSpecialColumn, hasMissionStatusColumn] = await Promise.all([
+    hasTableColumn(db, "missions", "is_ai_special"),
+    hasTableColumn(db, "missions", "status"),
+  ]);
+  const { scopeSql, pendingStatusSql } = buildMissionCycleSqlFilters(
+    scope,
+    hasAiSpecialColumn,
+    hasMissionStatusColumn,
+  );
 
   for (const period of ["daily", "weekly", "monthly"] as const) {
     const cycleStart = missionCycleStartIso(period);
@@ -2780,6 +2904,7 @@ async function getActiveCycleMissionCounts(
          AND type = ?
          ${scopeSql}
          AND is_completed = 0
+         ${pendingStatusSql}
          AND datetime(created_at) >= datetime(?)
          AND (deadline IS NULL OR deadline > datetime('now'))`
     ).bind(userId, period, cycleStart).first<{ count: number }>();
@@ -2794,20 +2919,22 @@ async function listCurrentCycleMissions(
   userId: string,
   scope: MissionGenerationScope,
 ): Promise<Array<MissionPayload & { type: MissionPeriod }>> {
-  const hasAiSpecialColumn = await hasTableColumn(db, "missions", "is_ai_special");
-  const scopeSql = scope === "ai_special"
-    ? (hasAiSpecialColumn
-      ? "AND COALESCE(is_ai_special, 0) = 1"
-      : "AND COALESCE(mission_origin, 'regular') = 'ai'")
-    : (hasAiSpecialColumn
-      ? "AND COALESCE(is_ai_special, 0) = 0 AND COALESCE(mission_origin, 'regular') = 'regular'"
-      : "AND COALESCE(mission_origin, 'regular') = 'regular'");
+  const [hasAiSpecialColumn, hasMissionStatusColumn] = await Promise.all([
+    hasTableColumn(db, "missions", "is_ai_special"),
+    hasTableColumn(db, "missions", "status"),
+  ]);
+  const { scopeSql, pendingStatusSql } = buildMissionCycleSqlFilters(
+    scope,
+    hasAiSpecialColumn,
+    hasMissionStatusColumn,
+  );
   const rows = await db.prepare(
     `SELECT *
      FROM missions
      WHERE user_id = ?
        ${scopeSql}
        AND is_completed = 0
+       ${pendingStatusSql}
        AND (deadline IS NULL OR deadline > datetime('now'))
      ORDER BY CASE type WHEN 'daily' THEN 1 WHEN 'weekly' THEN 2 WHEN 'monthly' THEN 3 ELSE 4 END, created_at DESC`
   ).bind(userId).all<Record<string, unknown>>();

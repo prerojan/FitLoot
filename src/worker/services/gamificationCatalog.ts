@@ -180,6 +180,8 @@ async function upsertTitleSeed(
     title.description,
     title.reference,
     title.unlock_condition,
+    Math.max(0, Math.floor(Number(title.xp_reward ?? 0))),
+    Math.max(0, Math.floor(Number(title.points_reward ?? 0))),
   ];
 
   if (existing) {
@@ -193,6 +195,8 @@ async function upsertTitleSeed(
                 description = ?,
                 reference = ?,
                 unlock_condition = ?,
+                xp_reward = ?,
+                points_reward = ?,
                 updated_at = datetime('now')
           WHERE id = ?`,
       )
@@ -211,8 +215,10 @@ async function upsertTitleSeed(
         description,
         reference,
         unlock_condition,
+        xp_reward,
+        points_reward,
         updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
     )
     .bind(...bindings)
     .run();
@@ -242,6 +248,8 @@ async function upsertAchievementSeed(
     achievement.secret,
     achievement.condition,
     achievement.reference,
+    Math.max(0, Math.floor(Number(achievement.xp_reward ?? 50))),
+    Math.max(0, Math.floor(Number(achievement.points_reward ?? 0))),
   ];
 
   if (existing) {
@@ -259,6 +267,8 @@ async function upsertAchievementSeed(
                 secret = ?,
                 condition = ?,
                 reference = ?,
+                xp_reward = ?,
+                points_reward = ?,
                 updated_at = datetime('now')
           WHERE id = ?`,
       )
@@ -281,8 +291,10 @@ async function upsertAchievementSeed(
         secret,
         condition,
         reference,
+        xp_reward,
+        points_reward,
         updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
     )
     .bind(...bindings)
     .run();

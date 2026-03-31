@@ -1,5 +1,7 @@
 import { Hono, type MiddlewareHandler } from "hono";
+import { zValidator } from "@hono/zod-validator";
 
+import { ConsumeRewardNotificationsRequestSchema } from "../../shared/types";
 import {
   getErrorMessage,
   internalErrorResponse,
@@ -47,6 +49,20 @@ type ProgressionRouteDeps = {
     userId: string,
     titleName: string,
   ) => Promise<void>;
+  listRewardNotifications: (
+    db: D1Database,
+    userId: string,
+    options?: {
+      afterId?: number | undefined;
+      pendingOnly?: boolean | undefined;
+      limit?: number | undefined;
+    },
+  ) => Promise<unknown[]>;
+  consumeRewardNotifications: (
+    db: D1Database,
+    userId: string,
+    ids: readonly number[],
+  ) => Promise<void>;
 };
 
 // Route registration for progression, attributes, benchmarks, and skill stages.
@@ -59,6 +75,8 @@ export function registerProgressionRoutes(
     parseProgressionXpLevel,
     unlockAchievementIfNeeded,
     unlockTitleIfNeeded,
+    listRewardNotifications,
+    consumeRewardNotifications,
   }: ProgressionRouteDeps,
 ): void {
   app.get("/api/progression", authMiddleware, async (c) => {
@@ -136,6 +154,65 @@ export function registerProgressionRoutes(
       return internalErrorResponse(c);
     }
   });
+
+  app.get("/api/reward-notifications/pending", authMiddleware, async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    try {
+      const notifications = await listRewardNotifications(
+        c.env.fitloot_db,
+        user.id,
+        {
+          pendingOnly: true,
+          limit: 25,
+        },
+      );
+      return c.json(Array.isArray(notifications) ? notifications : []);
+    } catch (error) {
+      console.error("[/api/reward-notifications/pending]", {
+        message: getErrorMessage(error),
+        userId: user.id,
+      });
+
+      if (isMissingSchemaError(error)) {
+        return schemaMismatchResponse(c);
+      }
+
+      return internalErrorResponse(c);
+    }
+  });
+
+  app.post(
+    "/api/reward-notifications/consume",
+    authMiddleware,
+    zValidator("json", ConsumeRewardNotificationsRequestSchema),
+    async (c) => {
+      const user = c.get("user");
+      if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+      try {
+        const body = c.req.valid("json");
+        await consumeRewardNotifications(
+          c.env.fitloot_db,
+          user.id,
+          body.ids,
+        );
+        return c.json({ success: true });
+      } catch (error) {
+        console.error("[/api/reward-notifications/consume]", {
+          message: getErrorMessage(error),
+          userId: user.id,
+        });
+
+        if (isMissingSchemaError(error)) {
+          return schemaMismatchResponse(c);
+        }
+
+        return internalErrorResponse(c);
+      }
+    },
+  );
 
   app.get("/api/attributes", authMiddleware, async (c) => {
     const user = c.get("user");

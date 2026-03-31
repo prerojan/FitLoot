@@ -4,6 +4,8 @@ export type TitleSeed = {
   reference: string;
   unlock_condition: string;
   rarity: string;
+  xp_reward?: number;
+  points_reward?: number;
 };
 
 export type AchievementSeed = {
@@ -16,4 +18,6 @@ export type AchievementSeed = {
   condition: string;
   icon: string;
   reference: string;
+  xp_reward?: number;
+  points_reward?: number;
 };

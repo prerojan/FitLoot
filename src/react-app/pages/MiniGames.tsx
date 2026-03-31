@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/react-app/auth/context";
+import { useRewardNotifications } from "@/react-app/contexts/rewardNotifications";
 import { useNavigate, useSearchParams } from "react-router";
 import AppPageShell from "@/react-app/components/AppPageShell";
 import LoadingBall from "@/react-app/components/LoadingBall";
@@ -18,7 +19,8 @@ import {
   Info as InfoIcon,
   Plus as PlusIcon,
 } from "lucide-react";
-import { ApiRequestError, api, fetchAndCacheJson, readCachedJson } from "@/react-app/utils/api";
+import type { RewardNotification } from "@/shared/types";
+import { ApiRequestError, api, clearJsonCache, fetchAndCacheJson, readCachedJson } from "@/react-app/utils/api";
 import { Avatar } from "@/react-app/components/ui/avatar";
 import { Badge } from "@/react-app/components/ui/badge";
 
@@ -65,6 +67,7 @@ type SelectedOpponent = { userId: string; username: string } | null;
 
 export default function MiniGames() {
   const { user } = useAuth();
+  const { pushRewardNotifications } = useRewardNotifications();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const challengeUserId = searchParams.get("challenge");
@@ -288,6 +291,7 @@ export default function MiniGames() {
       setSearchQuery("");
       setSelectedSkill(null);
       setTargetReps(20);
+      clearJsonCache("/api/mini-games/active");
       await loadGames();
     } catch (challengeError) {
       console.error("Error creating challenge:", challengeError);
@@ -308,6 +312,7 @@ export default function MiniGames() {
         throw new Error("Accept failed");
       }
 
+      clearJsonCache("/api/mini-games/active");
       await loadGames();
     } catch (acceptError) {
       console.error("Error accepting challenge:", acceptError);
@@ -335,6 +340,11 @@ export default function MiniGames() {
         throw new Error("Complete failed");
       }
 
+      const payload = (await response.json()) as {
+        reward_events?: RewardNotification[] | undefined;
+      };
+      pushRewardNotifications(payload.reward_events);
+      clearJsonCache("/api/mini-games/active");
       await loadGames();
     } catch (completeError) {
       console.error("Error completing challenge:", completeError);

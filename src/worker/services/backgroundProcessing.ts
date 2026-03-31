@@ -1,6 +1,7 @@
 import { getErrorMessage } from "../core/errors";
 import type { Env, PhysicalBenchmarkRow } from "../core/types";
 import { processDailyResetForAllUsers } from "./dailyReset";
+import { CRON_WEEKLY_MISSION_RESET } from "../constants/scheduler";
 
 type BackgroundProcessingDeps = {
   cleanupSettledMissionsWithGuard: (
@@ -251,7 +252,7 @@ export function createBackgroundProcessingService(
     try {
       await processDailyReset(env);
 
-      if (event.cron === "0 0 * * 1") {
+      if (event.cron === CRON_WEEKLY_MISSION_RESET) {
         console.log("[worker][weekly-recalculation] Iniciando recálculo semanal de atributos");
         await processWeeklyRecalculation(env);
         console.log("[worker][weekly-recalculation] Recálculo semanal concluído");

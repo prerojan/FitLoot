@@ -793,15 +793,12 @@ export async function startCheckoutForUser(
     await attachPromoCodeUsageToSubscription(db, appliedPromo.promo_code_id, params.userId, pendingSubscription.id);
   }
 
-  const currentUser = await getUserAuthRecordById(db, params.userId);
-  if (!currentUser || !hasPlanAccess(currentUser.plan_id, currentUser.plan_status)) {
-    await updateUserPlanState(db, params.userId, {
-      planId: params.planId,
-      status: "pending",
-      paymentMethod: params.paymentMethod,
-      markOnboardingCompleted: false,
-    });
-  }
+  await updateUserPlanState(db, params.userId, {
+    planId: params.planId,
+    status: "pending",
+    paymentMethod: params.paymentMethod,
+    markOnboardingCompleted: false,
+  });
 
   return {
     checkout_status: "pending",
@@ -816,15 +813,12 @@ export async function startCheckoutForUser(
   };
 }
 
-type CaktoUserSyncMode = "apply" | "preserve-active" | "keep-current";
+type CaktoUserSyncMode = "apply";
 
 // Webhook helpers translate external payment events back into the local subscription and plan-access model.
 function resolveCaktoSyncMode(
   eventType: string,
-  options?: { isIncompleteOnboarding?: boolean | undefined },
 ): { status: PlanStatus; syncMode: CaktoUserSyncMode; paymentMethod: UserPaymentMethod | null } {
-  const isIncompleteOnboarding = options?.isIncompleteOnboarding === true;
-
   switch (eventType) {
     case "purchase_approved":
     case "subscription_created":
@@ -833,15 +827,247 @@ function resolveCaktoSyncMode(
     case "subscription_canceled":
       return { status: "cancelled", syncMode: "apply", paymentMethod: null };
     case "purchase_refused":
-      return {
-        status: "failed",
-        syncMode: isIncompleteOnboarding ? "apply" : "keep-current",
-        paymentMethod: null,
-      };
+      return { status: "failed", syncMode: "apply", paymentMethod: null };
     case "checkout_abandonment":
-      return { status: "pending", syncMode: "keep-current", paymentMethod: null };
+      return { status: "pending", syncMode: "apply", paymentMethod: null };
     default:
-      return { status: "pending", syncMode: "preserve-active", paymentMethod: null };
+      return { status: "pending", syncMode: "apply", paymentMethod: null };
+  }
+}
+
+function normalizeExternalStatusLabel(value: string | null | undefined): string {
+  if (typeof value !== "string") return "";
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase();
+}
+
+function statusIncludesAnyToken(
+  status: string,
+  tokens: readonly string[],
+): boolean {
+  return tokens.some((token) => status.includes(token));
+}
+
+function resolveCaktoEventTypeFromSnapshot(
+  snapshot: CaktoOrderSnapshot,
+): string | null {
+  if (snapshot.eventType) return snapshot.eventType;
+
+  const normalizedStatus = normalizeExternalStatusLabel(snapshot.externalStatus);
+
+  if (normalizedStatus) {
+    if (
+      statusIncludesAnyToken(normalizedStatus, [
+        "approved",
+        "aprovado",
+        "paid",
+        "pago",
+        "success",
+        "succeeded",
+        "completed",
+        "confirmed",
+        "confirmado",
+        "active",
+        "ativo",
+      ])
+    ) {
+      return "purchase_approved";
+    }
+
+    if (
+      statusIncludesAnyToken(normalizedStatus, [
+        "refused",
+        "recusado",
+        "declined",
+        "denied",
+        "rejected",
+        "failed",
+        "falha",
+        "error",
+        "erro",
+      ])
+    ) {
+      return "purchase_refused";
+    }
+
+    if (
+      statusIncludesAnyToken(normalizedStatus, [
+        "cancel",
+        "cancelado",
+        "cancelled",
+        "canceled",
+        "voided",
+      ])
+    ) {
+      return "subscription_canceled";
+    }
+
+    if (
+      statusIncludesAnyToken(normalizedStatus, [
+        "expired",
+        "expirado",
+        "abandon",
+        "abandoned",
+        "abandono",
+      ])
+    ) {
+      return "purchase_refused";
+    }
+
+    if (
+      statusIncludesAnyToken(normalizedStatus, [
+        "pending",
+        "pendente",
+        "processing",
+        "processando",
+        "waiting",
+        "aguardando",
+        "analysis",
+        "analise",
+      ])
+    ) {
+      return "checkout_abandonment";
+    }
+  }
+
+  if (snapshot.failureReason) {
+    return "purchase_refused";
+  }
+
+  return null;
+}
+
+export async function reconcilePendingSubscriptionForUser(
+  db: D1Database,
+  env: Env,
+  params: {
+    userId: string;
+    customerEmail?: string | null;
+    latestSubscription?: SubscriptionRecord | null;
+  },
+): Promise<void> {
+  const currentUser = await getUserAuthRecordById(db, params.userId);
+  if (!currentUser || currentUser.plan_status !== "pending") {
+    return;
+  }
+
+  const latestSubscription =
+    params.latestSubscription ?? (await getLatestSubscriptionByUser(db, params.userId));
+  const fallbackCustomerEmail =
+    (typeof params.customerEmail === "string" &&
+      params.customerEmail.trim().length > 0
+      ? params.customerEmail.trim()
+      : null) ??
+    latestSubscription?.customer_email ??
+    currentUser.email;
+
+  let snapshot: CaktoOrderSnapshot | null = null;
+
+  if (latestSubscription?.external_order_id) {
+    snapshot = await fetchCaktoOrderById(
+      env,
+      latestSubscription.external_order_id,
+      CAKTO_PLAN_CATALOG,
+    );
+  }
+
+  if (!snapshot && fallbackCustomerEmail) {
+    snapshot = await fetchLatestCaktoOrderByCustomer(
+      env,
+      fallbackCustomerEmail,
+      CAKTO_PLAN_CATALOG,
+    );
+  }
+
+  if (!snapshot) {
+    return;
+  }
+
+  const enrichedSnapshot = await enrichCaktoSnapshotFromApi(env, snapshot);
+  const eventType = resolveCaktoEventTypeFromSnapshot(enrichedSnapshot);
+  if (!eventType) {
+    return;
+  }
+
+  const syncRule = resolveCaktoSyncMode(eventType);
+  const effectivePlanId =
+    enrichedSnapshot.planId ??
+    (latestSubscription && isPublicPlanId(latestSubscription.plan_id)
+      ? latestSubscription.plan_id
+      : null);
+  const effectiveAmount =
+    enrichedSnapshot.amountCents ??
+    (latestSubscription ? Number(latestSubscription.amount) : null) ??
+    (effectivePlanId ? resolveCheckoutAmount(effectivePlanId) : null);
+  const paymentMethod =
+    syncRule.paymentMethod ??
+    (enrichedSnapshot.paymentMethod !== "none"
+      ? enrichedSnapshot.paymentMethod
+      : normalizeUserPaymentMethod(latestSubscription?.payment_method));
+
+  if (!effectivePlanId || effectiveAmount === null || paymentMethod === "none") {
+    return;
+  }
+
+  const subscription = await ensureSubscriptionRecord(db, {
+    id: latestSubscription?.id ?? enrichedSnapshot.tracking.checkoutId ?? null,
+    externalOrderId:
+      enrichedSnapshot.externalOrderId ??
+      latestSubscription?.external_order_id ??
+      null,
+    externalSubscriptionId:
+      enrichedSnapshot.externalSubscriptionId ??
+      latestSubscription?.external_subscription_id ??
+      null,
+    userId: params.userId,
+    planId: effectivePlanId,
+    status: syncRule.status,
+    paymentMethod,
+    amount: effectiveAmount,
+    customerEmail: enrichedSnapshot.customerEmail ?? fallbackCustomerEmail,
+    checkoutUrl:
+      enrichedSnapshot.checkoutUrl ?? latestSubscription?.checkout_url ?? null,
+    productId:
+      enrichedSnapshot.productId ?? latestSubscription?.product_id ?? null,
+    startedAt:
+      enrichedSnapshot.startedAt ??
+      latestSubscription?.started_at ??
+      (syncRule.status === "active" ? new Date().toISOString() : null),
+    expiresAt: enrichedSnapshot.expiresAt ?? latestSubscription?.expires_at ?? null,
+    eventType: `status.reconcile.${eventType}`,
+    source: "webhook",
+    metadata: {
+      customer_name: enrichedSnapshot.customerName ?? undefined,
+      external_status: enrichedSnapshot.externalStatus ?? undefined,
+      failure_reason: enrichedSnapshot.failureReason ?? undefined,
+      last_event_type: eventType,
+      checkout_tracking_id: enrichedSnapshot.tracking.checkoutId ?? undefined,
+      checkout_tracking_user_id: params.userId,
+      checkout_tracking_plan_id: effectivePlanId,
+    },
+  });
+
+  if (!subscription) {
+    return;
+  }
+
+  await syncUserPlanFromSubscription(db, subscription, {
+    markOnboardingCompleted: syncRule.status === "active",
+  });
+
+  const refreshedUser = await getUserAuthRecordById(db, params.userId);
+  const isIncompleteOnboarding =
+    Number(refreshedUser?.onboarding_completed ?? 0) !== 1;
+  if (
+    isIncompleteOnboarding &&
+    (syncRule.status === "failed" ||
+      syncRule.status === "cancelled" ||
+      syncRule.status === "expired")
+  ) {
+    await purgeIncompleteOnboardingData(db, params.userId);
   }
 }
 
@@ -1033,9 +1259,7 @@ export async function processCaktoWebhook(
       snapshot.amountCents ??
       (latestSubscription ? Number(latestSubscription.amount) : null) ??
       (effectivePlanId ? resolveCheckoutAmount(effectivePlanId) : null);
-    const syncRule = resolveCaktoSyncMode(eventType, {
-      isIncompleteOnboarding,
-    });
+    const syncRule = resolveCaktoSyncMode(eventType);
     const paymentMethod =
       syncRule.paymentMethod ??
       (snapshot.paymentMethod !== "none" ? snapshot.paymentMethod : normalizeUserPaymentMethod(latestSubscription?.payment_method));
@@ -1091,8 +1315,6 @@ export async function processCaktoWebhook(
     }
 
     await syncUserPlanFromSubscription(c.env.fitloot_db, subscription, {
-      keepCurrentState: syncRule.syncMode === "keep-current",
-      preserveActiveAccess: syncRule.syncMode === "preserve-active",
       markOnboardingCompleted: syncRule.status === "active",
     });
 

@@ -217,6 +217,8 @@ export const AchievementSchema = z.object({
   icon: z.string().nullable(),
   requirement_type: z.string(),
   requirement_value: z.number().nullable(),
+  xp_reward: z.number().optional(),
+  points_reward: z.number().optional(),
   category: z.string().optional(),
   color: z.string().optional(),
   secret: z.number().optional(),
@@ -235,6 +237,8 @@ export const TitleSchema = z.object({
   rarity: z.string(),
   requirement_type: z.string(),
   requirement_value: z.number().nullable(),
+  xp_reward: z.number().optional(),
+  points_reward: z.number().optional(),
   description: z.string().nullable().optional(),
   reference: z.string().nullable().optional(),
   unlock_condition: z.string().nullable().optional(),
@@ -299,6 +303,36 @@ export type RankingPlayer = {
   xp: number;
   current_streak: number;
 };
+
+export const RewardNotificationTypeSchema = z.enum([
+  "level_up",
+  "achievement_unlocked",
+  "title_unlocked",
+]);
+
+export type RewardNotificationType = z.infer<
+  typeof RewardNotificationTypeSchema
+>;
+
+export const RewardNotificationSchema = z.object({
+  id: z.number(),
+  type: RewardNotificationTypeSchema,
+  name: z.string().nullable().optional(),
+  level: z.number().nullable().optional(),
+  xp_reward: z.number().optional(),
+  points_reward: z.number().optional(),
+  created_at: z.string(),
+});
+
+export type RewardNotification = z.infer<typeof RewardNotificationSchema>;
+
+export const ConsumeRewardNotificationsRequestSchema = z.object({
+  ids: z.array(z.number().int().positive()).max(50),
+});
+
+export type ConsumeRewardNotificationsRequest = z.infer<
+  typeof ConsumeRewardNotificationsRequestSchema
+>;
 
 export const PromoCodeEffectSchema = z.enum([
   "activate_vip",

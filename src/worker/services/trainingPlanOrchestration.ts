@@ -8,6 +8,7 @@ import type {
   StructuredMissionPlanDraft,
 } from "./missionBlueprintPlanning";
 import type { TrainingPlanChatPreferences } from "./trainingPlan";
+import { requestValidatedStructuredPlanWithRetry } from "./structuredPlanRetry";
 
 type MissionPeriod = "daily" | "weekly" | "monthly";
 
@@ -101,6 +102,11 @@ type TrainingPlanOrchestrationDeps = {
     userId: string,
     scope: "regular" | "ai_special",
   ) => Promise<ActiveCycleMissionCounts>;
+  hasTableColumn: (
+    db: D1Database,
+    tableName: string,
+    columnName: string,
+  ) => Promise<boolean>;
   getErrorMessage: (error: unknown) => string;
   listCurrentCycleRegularDailyBlueprints: (
     db: D1Database,
@@ -320,6 +326,16 @@ export function createTrainingPlanOrchestrationService(
     db: D1Database,
     userId: string,
   ): Promise<MissionGenerationProfileSnapshot | null> {
+    const hasMissionStatusColumn = await deps.hasTableColumn(
+      db,
+      "missions",
+      "status",
+    );
+    const failedCountExpression = hasMissionStatusColumn
+      ? "COALESCE(SUM(CASE WHEN COALESCE(status,'pending') IN ('failed', 'expired') THEN 1 ELSE 0 END), 0)"
+      : "0";
+    const historyStatusSelect = hasMissionStatusColumn ? "status" : "NULL as status";
+
     const [
       profile,
       progression,
@@ -353,7 +369,7 @@ export function createTrainingPlanOrchestrationService(
         .prepare(
           `SELECT
              COALESCE(SUM(CASE WHEN is_completed = 1 THEN 1 ELSE 0 END), 0) as completed_count,
-             COALESCE(SUM(CASE WHEN COALESCE(status,'pending') IN ('failed', 'expired') THEN 1 ELSE 0 END), 0) as failed_count
+             ${failedCountExpression} as failed_count
            FROM missions
            WHERE user_id = ?
              AND datetime(created_at) >= datetime('now', '-7 day')`,
@@ -362,7 +378,7 @@ export function createTrainingPlanOrchestrationService(
         .first<{ completed_count: number; failed_count: number }>(),
       db
         .prepare(
-          `SELECT title, type, status, is_completed, metric_type, metric_value, created_at, completed_at
+          `SELECT title, type, ${historyStatusSelect}, is_completed, metric_type, metric_value, created_at, completed_at
            FROM missions
            WHERE user_id = ?
              AND datetime(created_at) >= datetime('now', '-7 day')
@@ -535,42 +551,28 @@ export function createTrainingPlanOrchestrationService(
       generationOptions,
     );
     const apiKey = getHuggingFaceApiKey(env);
-    let retryReason = "";
-
     if (apiKey) {
-      for (let attempt = 0; attempt < 2; attempt += 1) {
-        try {
-          const aiPlan = await deps.requestStructuredMissionPlanFromAI(
-            env,
-            deps.buildStructuredPlanPrompt(
-              profile,
-              generationOptions,
-              retryReason || undefined,
-            ),
-          );
-          const aiValidation = deps.validateStructuredMissionPlan(
-            aiPlan,
+      const aiResult = await requestValidatedStructuredPlanWithRetry({
+        buildPrompt: (retryReason?: string) =>
+          deps.buildStructuredPlanPrompt(
             profile,
             generationOptions,
-          );
-          const invalidRatio =
-            aiValidation.totalCount > 0
-              ? aiValidation.invalidCount / aiValidation.totalCount
-              : 0;
-          if (invalidRatio > 0.3 && attempt === 0) {
-            retryReason = `Mais de 30% das missões diárias vieram inválidas (${Math.round(invalidRatio * 100)}%). Corrija nomes canônicos, métricas e volume.`;
-            continue;
-          }
-          if (invalidRatio <= 0.3) {
-            validation = aiValidation;
-          }
-          break;
-        } catch (error) {
-          if (attempt === 0) {
-            retryReason = `A resposta anterior falhou: ${deps.getErrorMessage(error)}`;
-            continue;
-          }
-        }
+            retryReason,
+          ),
+        buildInvalidRatioRetryReason: (invalidRatio) =>
+          `Mais de 30% das missões diárias vieram inválidas (${Math.round(invalidRatio * 100)}%). Corrija nomes canônicos, métricas e volume.`,
+        getErrorMessage: deps.getErrorMessage,
+        requestPlan: (prompt) =>
+          deps.requestStructuredMissionPlanFromAI(env, prompt),
+        validatePlan: (planDraft) =>
+          deps.validateStructuredMissionPlan(
+            planDraft,
+            profile,
+            generationOptions,
+          ),
+      });
+      if (aiResult.accepted && aiResult.validation) {
+        validation = aiResult.validation;
       }
     }
 

@@ -81,7 +81,7 @@ export default function PaymentPending() {
     if (hasPlanAccess(user)) {
       clearScheduledPoll();
       clearOnboardingDraft();
-      navigate(ROUTE_PATHS.home, { replace: true });
+      navigate(ROUTE_PATHS.dashboard, { replace: true });
       return;
     }
     if (user.plan_status !== "pending") {
@@ -157,7 +157,7 @@ export default function PaymentPending() {
         });
         await checkAuth();
         window.setTimeout(() => {
-          navigate(ROUTE_PATHS.home, { replace: true });
+          navigate(ROUTE_PATHS.dashboard, { replace: true });
         }, silent ? 500 : 1200);
         return;
       }

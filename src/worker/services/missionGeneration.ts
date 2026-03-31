@@ -2,6 +2,7 @@ import { MISSION_LIMITS } from "../../constants/missionMetrics";
 import { getErrorMessage } from "../core/errors";
 import { getHuggingFaceApiKey } from "../core/providerConfig";
 import type { Env } from "../core/types";
+import { requestValidatedStructuredPlanWithRetry } from "./structuredPlanRetry";
 
 type MissionPeriod = "daily" | "weekly" | "monthly";
 type MissionOrigin = "regular" | "ai_special";
@@ -65,6 +66,11 @@ type MissionGenerationDeps<TProfile, TPlanDraft, TBlueprint, TMission> = {
     userId: string,
     missionOrigin: MissionOrigin,
   ) => Promise<ActiveCycleMissionCounts>;
+  hasTableColumn: (
+    db: D1Database,
+    tableName: string,
+    columnName: string,
+  ) => Promise<boolean>;
   listCurrentCycleMissions: (
     db: D1Database,
     userId: string,
@@ -143,33 +149,20 @@ export function createMissionGenerationService<
     let usedAi = false;
 
     if (getHuggingFaceApiKey(env)) {
-      let retryReason = "";
-      for (let attempt = 0; attempt < 2; attempt += 1) {
-        try {
-          const aiPlan = await deps.requestStructuredMissionPlanFromAI(
-            env,
-            deps.buildStructuredPlanPrompt(profile, options, retryReason || undefined),
-          );
-          const aiValidation = deps.validateStructuredMissionPlan(aiPlan, profile, options);
-          const invalidRatio = aiValidation.totalCount > 0
-            ? aiValidation.invalidCount / aiValidation.totalCount
-            : 0;
-          if (invalidRatio > 0.3 && attempt === 0) {
-            retryReason = `Mais de 30% das missoes vieram invalidas (${Math.round(invalidRatio * 100)}%). Corrija metricas, XP, subtasks e circuitos diarios.`;
-            continue;
-          }
-
-          if (invalidRatio <= 0.3) {
-            validation = aiValidation;
-            usedAi = true;
-          }
-          break;
-        } catch (error) {
-          if (attempt === 0) {
-            retryReason = `A resposta anterior falhou: ${getErrorMessage(error)}`;
-            continue;
-          }
-        }
+      const aiResult = await requestValidatedStructuredPlanWithRetry({
+        buildPrompt: (retryReason?: string) =>
+          deps.buildStructuredPlanPrompt(profile, options, retryReason),
+        buildInvalidRatioRetryReason: (invalidRatio) =>
+          `Mais de 30% das missoes vieram invalidas (${Math.round(invalidRatio * 100)}%). Corrija metricas, XP, subtasks e circuitos diarios.`,
+        getErrorMessage,
+        requestPlan: (prompt) =>
+          deps.requestStructuredMissionPlanFromAI(env, prompt),
+        validatePlan: (planDraft) =>
+          deps.validateStructuredMissionPlan(planDraft, profile, options),
+      });
+      if (aiResult.accepted && aiResult.validation) {
+        validation = aiResult.validation;
+        usedAi = true;
       }
     }
 
@@ -195,6 +188,7 @@ export function createMissionGenerationService<
     db: D1Database,
     userId: string,
   ): Promise<void> {
+    const hasMissionStatusColumn = await deps.hasTableColumn(db, "missions", "status");
     const activeRegularCounts = await deps.getActiveCycleMissionCounts(
       db,
       userId,
@@ -230,16 +224,29 @@ export function createMissionGenerationService<
 
     for (const period of periods) {
       const cycleStart = deps.missionCycleStartIso(period);
-      await db.prepare(
-        `UPDATE missions
-           SET status = 'expired', updated_at = datetime('now')
-         WHERE user_id = ?
-           AND type = ?
-           AND is_completed = 0
-           AND COALESCE(mission_origin, 'regular') = 'regular'
-           AND COALESCE(status, 'pending') = 'pending'
-           AND datetime(created_at) < datetime(?)`
-      ).bind(userId, period, cycleStart).run();
+      if (hasMissionStatusColumn) {
+        await db.prepare(
+          `UPDATE missions
+             SET status = 'expired', updated_at = datetime('now')
+           WHERE user_id = ?
+             AND type = ?
+             AND is_completed = 0
+             AND COALESCE(mission_origin, 'regular') = 'regular'
+             AND COALESCE(status, 'pending') = 'pending'
+             AND datetime(created_at) < datetime(?)`
+        ).bind(userId, period, cycleStart).run();
+      } else {
+        await db.prepare(
+          `UPDATE missions
+             SET deadline = datetime('now', '-1 second'),
+                 updated_at = datetime('now')
+           WHERE user_id = ?
+             AND type = ?
+             AND is_completed = 0
+             AND COALESCE(mission_origin, 'regular') = 'regular'
+             AND datetime(created_at) < datetime(?)`
+        ).bind(userId, period, cycleStart).run();
+      }
 
       const generatedInCycle = await db.prepare(
         `SELECT COUNT(*) as count

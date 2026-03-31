@@ -284,7 +284,7 @@ export default function Checkout() {
     if (hasPlanAccess(user)) {
       clearOnboardingDraft();
       setOnboardingDraft(null);
-      navigate(ROUTE_PATHS.home, { replace: true });
+      navigate(ROUTE_PATHS.dashboard, { replace: true });
       return;
     }
     if (user.plan_status === "pending") {
@@ -536,7 +536,7 @@ export default function Checkout() {
       if (payload?.plan_status === "active") {
         clearOnboardingDraft();
         setOnboardingDraft(null);
-        navigate(ROUTE_PATHS.home, { replace: true });
+        navigate(ROUTE_PATHS.dashboard, { replace: true });
         return;
       }
 

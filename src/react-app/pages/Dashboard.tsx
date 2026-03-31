@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { useAuth } from "@/react-app/auth/context";
+import { useRewardNotifications } from "@/react-app/contexts/rewardNotifications";
 import { useDailyMetrics } from "@/react-app/hooks/useDailyMetrics";
 import AppPageShell from "@/react-app/components/AppPageShell";
 import MissionCard from "@/react-app/components/MissionCard";
-import LevelUpModal from "@/react-app/components/LevelUpModal";
 import AIRecommendations from "@/react-app/components/AIRecommendations";
 import AIMissionGenerator from "@/react-app/components/AIMissionGenerator";
 import LoadingBall from "@/react-app/components/LoadingBall";
@@ -13,6 +13,7 @@ import { ROUTE_PATHS } from "@/react-app/auth/constants";
 import type {
   AchievementWithUnlock,
   Mission,
+  RewardNotification,
   Title,
   UserProfile,
   UserProgression,
@@ -99,6 +100,7 @@ function resolveMissionsApiPath(forceRefresh: boolean, cachedMissions: Mission[]
 
 export default function Dashboard() {
   const { user } = useAuth();
+  const { pushRewardNotifications } = useRewardNotifications();
   const navigate = useNavigate();
   const isExpiredMission = useCallback(
     (mission: Mission) => mission.status === "failed" || mission.status === "expired",
@@ -116,8 +118,6 @@ export default function Dashboard() {
   const [activeTitle, setActiveTitle] = useState<Title | null>(null);
   const [loadingState, setLoadingState] = useState<DashboardLoadingState>(DEFAULT_LOADING_STATE);
   const [error, setError] = useState<string | null>(null);
-  const [showLevelUp, setShowLevelUp] = useState(false);
-  const [newLevel, setNewLevel] = useState(0);
   const [quickActionsOpen, setQuickActionsOpen] = useState(false);
   const quickActionsRef = useRef<HTMLDivElement | null>(null);
   const { metrics: consolidatedMetrics, loading: metricsLoading, refreshMetrics } = useDailyMetrics({ syncRemote: true });
@@ -211,8 +211,7 @@ export default function Dashboard() {
           const { celebrate_level: celebrateLevel, ...clean } = payload;
           setProgression(clean);
           if (typeof celebrateLevel === "number" && celebrateLevel > 0) {
-            setNewLevel(celebrateLevel);
-            setShowLevelUp(true);
+            window.dispatchEvent(new Event("fitloot:refresh-rewards"));
           }
         },
       ),
@@ -329,19 +328,11 @@ export default function Dashboard() {
         return;
       }
 
-      const result = (await response.json()) as { leveledUp?: boolean | undefined };
+      const result = (await response.json()) as {
+        reward_events?: RewardNotification[] | undefined;
+      };
       setMissions((current) => current.filter((mission) => mission.id !== missionId));
-
-      if (result.leveledUp) {
-        clearJsonCache("/api/progression");
-        try {
-          const updatedProgression = await fetchAndCacheJson<UserProgression>("/api/progression");
-          setNewLevel(Number(updatedProgression.level ?? 0));
-          setShowLevelUp(true);
-        } catch {
-          // O refresh completo logo abaixo recompõe o estado.
-        }
-      }
+      pushRewardNotifications(result.reward_events);
 
       await refreshData();
     } catch {
@@ -784,9 +775,6 @@ export default function Dashboard() {
           <Zap className={`h-6 w-6 transition-transform duration-200 ${quickActionsOpen ? "rotate-12" : ""}`} />
         </button>
       </div>
-
-      {/* Modal de celebracao de nivel. */}
-      {showLevelUp ? <LevelUpModal level={newLevel} onClose={() => setShowLevelUp(false)} /> : null}
     </AppPageShell>
   );
 }

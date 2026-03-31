@@ -150,24 +150,130 @@ type MissionPlanValidationDeps = {
   toSafeString: (value: unknown, fallback: string) => string;
 };
 
+function splitNormalizedMatchTokens(normalizedValue: string): string[] {
+  return normalizedValue
+    .split(/\s+/)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 2);
+}
+
+function containsWholeNormalizedPhrase(
+  haystack: string,
+  needle: string,
+): boolean {
+  return haystack === needle
+    || haystack.startsWith(`${needle} `)
+    || haystack.endsWith(` ${needle}`)
+    || haystack.includes(` ${needle} `);
+}
+
+function scoreNormalizedSubtaskToCandidate(
+  normalizedSubtask: string,
+  normalizedCandidate: string,
+): number {
+  if (normalizedSubtask.length === 0 || normalizedCandidate.length === 0) {
+    return 0;
+  }
+  if (normalizedSubtask === normalizedCandidate) {
+    return 100;
+  }
+  if (containsWholeNormalizedPhrase(normalizedCandidate, normalizedSubtask)) {
+    return 92;
+  }
+
+  const subtaskTokens = splitNormalizedMatchTokens(normalizedSubtask);
+  const candidateTokens = splitNormalizedMatchTokens(normalizedCandidate);
+  const subtaskTokenSet = new Set(subtaskTokens);
+  const candidateTokenSet = new Set(candidateTokens);
+
+  if (
+    subtaskTokens.length >= 2 &&
+    subtaskTokens.every((token) => candidateTokenSet.has(token))
+  ) {
+    return 86;
+  }
+  if (containsWholeNormalizedPhrase(normalizedSubtask, normalizedCandidate)) {
+    if (candidateTokens.length >= 2) return 78;
+    if (
+      candidateTokens.length === 1 &&
+      candidateTokens[0].length >= 5
+    ) {
+      return 72;
+    }
+  }
+  if (
+    candidateTokens.length >= 2 &&
+    candidateTokens.every((token) => subtaskTokenSet.has(token))
+  ) {
+    return 74;
+  }
+  return 0;
+}
+
 function resolveDailyBlueprintForSubtask(
   normalizeMatchText: (value: string) => string,
   rawSubtask: string,
   dailyBlueprints: readonly MissionBlueprintLike[],
 ): MissionBlueprintLike | null {
   const normalizedSubtask = normalizeMatchText(rawSubtask);
+  if (normalizedSubtask.length === 0) return null;
+
+  let bestPrimaryMatch: { blueprint: MissionBlueprintLike; score: number } | null = null;
   for (const blueprint of dailyBlueprints) {
-    if (normalizeMatchText(blueprint.name).includes(normalizedSubtask)) return blueprint;
-    if (normalizedSubtask.includes(normalizeMatchText(blueprint.name))) return blueprint;
+    const primaryCandidates = [
+      normalizeMatchText(blueprint.compatibilityKey),
+      normalizeMatchText(blueprint.name),
+    ].filter((candidate) => candidate.length > 0);
+    const primaryScore = primaryCandidates.reduce(
+      (bestScore, candidate) =>
+        Math.max(
+          bestScore,
+          scoreNormalizedSubtaskToCandidate(normalizedSubtask, candidate),
+        ),
+      0,
+    );
+
     if (
-      blueprint.compatibilityTerms.some((term) =>
-        normalizeMatchText(term).includes(normalizedSubtask) ||
-        normalizedSubtask.includes(normalizeMatchText(term))
-      )
+      !bestPrimaryMatch ||
+      primaryScore > bestPrimaryMatch.score
     ) {
-      return blueprint;
+      bestPrimaryMatch = { blueprint, score: primaryScore };
     }
   }
+  if (bestPrimaryMatch && bestPrimaryMatch.score >= 70) {
+    return bestPrimaryMatch.blueprint;
+  }
+
+  let bestCompatibilityMatch: { blueprint: MissionBlueprintLike; score: number } | null = null;
+  for (const blueprint of dailyBlueprints) {
+    const compatibilityCandidates = Array.from(
+      new Set(
+        blueprint.compatibilityTerms
+          .map((term) => normalizeMatchText(term))
+          .filter((candidate) => candidate.length >= 5),
+      ),
+    );
+    const compatibilityScore = compatibilityCandidates.reduce(
+      (bestScore, candidate) =>
+        Math.max(
+          bestScore,
+          scoreNormalizedSubtaskToCandidate(normalizedSubtask, candidate),
+        ),
+      0,
+    );
+
+    if (
+      !bestCompatibilityMatch ||
+      compatibilityScore > bestCompatibilityMatch.score
+    ) {
+      bestCompatibilityMatch = { blueprint, score: compatibilityScore };
+    }
+  }
+
+  if (bestCompatibilityMatch && bestCompatibilityMatch.score >= 85) {
+    return bestCompatibilityMatch.blueprint;
+  }
+
   return null;
 }
 
