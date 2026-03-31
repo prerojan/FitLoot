@@ -173,7 +173,9 @@ export interface Env {
   fitloot_db: D1Database;
   ASSETS: Fetcher;
   HF_TOKEN?: string | undefined;
+  HF_CHAT_MODEL?: string | undefined;
   HUGGING_FACE_API_KEY?: string | undefined;
+  HUGGING_FACE_CHAT_MODEL?: string | undefined;
   USDA_API_KEY: string;
   RAPID_API_KEY?: string | undefined;
   RAPID_API_HOST?: string | undefined;

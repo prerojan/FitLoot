@@ -155,6 +155,98 @@ describe("ai routes", () => {
     expect(callOpenAIChatWithFallback).toHaveBeenCalledTimes(2);
   });
 
+  it("returns a degraded chat response instead of 502 when providers are temporarily unavailable", async () => {
+    const { db } = createMockD1Database([
+      {
+        match: "SELECT chat_messages, repeated_message_streak, last_chat_message FROM user_event_counters",
+        first: {
+          chat_messages: 2,
+          repeated_message_streak: 0,
+          last_chat_message: null,
+        },
+      },
+      {
+        match: "UPDATE user_event_counters SET",
+        run: { success: true, meta: {} },
+      },
+      {
+        match: "SELECT * FROM user_profiles WHERE user_id = ?",
+        first: {
+          full_name: "Ana",
+          main_goal: "ganhar_massa",
+          initial_conditioning: "iniciante",
+          equipment: "halteres",
+          injuries: "",
+        },
+      },
+      {
+        match: "SELECT * FROM user_progression WHERE user_id = ?",
+        first: {
+          level: 4,
+          xp: 120,
+          current_streak: 3,
+        },
+      },
+      {
+        match: "SELECT * FROM user_attributes WHERE user_id = ?",
+        first: {
+          strength: 12,
+        },
+      },
+      {
+        match: "SELECT weekly_plan_json, training_frequency FROM user_training_plans WHERE user_id = ?",
+        first: {
+          weekly_plan_json: null,
+          training_frequency: 3,
+        },
+      },
+    ]);
+    const env = createTestEnv(db);
+    const callOpenAIChatWithFallback = vi
+      .fn()
+      .mockRejectedValueOnce(new TestApiIntegrationError("UPSTREAM_ERROR", 502, "Falha upstream"))
+      .mockRejectedValueOnce(new TestApiIntegrationError("UPSTREAM_ERROR", 502, "Falha upstream"));
+    const logUserEvent = vi.fn(async () => undefined);
+    const deps = createAiDeps({
+      callOpenAIChatWithFallback,
+      logUserEvent,
+    });
+    const app = new Hono<AppContext>();
+    registerAiRoutes(app, deps);
+    const { executionCtx } = createExecutionContext();
+
+    const response = await app.fetch(
+      createJsonRequest("/api/ai/chat", {
+        method: "POST",
+        body: {
+          message: "Me ajuda com meu treino",
+          history: [],
+          mode: "suporte",
+          session_count: 3,
+        },
+      }),
+      env,
+      executionCtx,
+    );
+
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(typeof payload.message).toBe("string");
+    expect(payload.message).toContain("instabilidade temporaria no servico de IA externo");
+    expect(payload.message).toContain("modo de contingencia");
+    expect(callOpenAIChatWithFallback).toHaveBeenCalledTimes(2);
+    expect(logUserEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      "user-1",
+      "chat_provider_degraded",
+      expect.objectContaining({
+        code: "UPSTREAM_ERROR",
+        status: 502,
+      }),
+    );
+  });
+
   it("falls back from USDA to RapidAPI during food analysis when the primary lookup fails", async () => {
     const { db } = createMockD1Database([]);
     const env = createTestEnv(db);

@@ -59,7 +59,8 @@ class CameraActivity : AppCompatActivity() {
         setContentView(binding.root)
 
         cameraExecutor = Executors.newSingleThreadExecutor()
-        binding.viewFinder.implementationMode = PreviewView.ImplementationMode.PERFORMANCE
+        // COMPATIBLE usa TextureView, mais estavel com overlays do scanner em varios devices Android.
+        binding.viewFinder.implementationMode = PreviewView.ImplementationMode.COMPATIBLE
         binding.viewFinder.scaleType = PreviewView.ScaleType.FILL_CENTER
         setCaptureEnabled(false)
 

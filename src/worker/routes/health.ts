@@ -3,6 +3,7 @@ import { Hono, type MiddlewareHandler } from "hono";
 import { hasCoreSchema } from "../core/database";
 import {
   getHuggingFaceApiKey,
+  getHuggingFaceChatModel,
   getHuggingFaceVisionModel,
 } from "../core/providerConfig";
 import type { AppContext } from "../core/types";
@@ -26,6 +27,7 @@ export function registerHealthRoutes(
       ok: true,
       timestamp: new Date().toISOString(),
       hasHuggingFace: Boolean(getHuggingFaceApiKey(c.env)),
+      huggingFaceChatModel: getHuggingFaceChatModel(c.env),
       hasOpenAI: false,
       hasUSDA: Boolean(c.env.USDA_API_KEY),
       hasRapidAPI: Boolean(c.env.RAPID_API_KEY),
@@ -44,6 +46,7 @@ export function registerHealthRoutes(
       rapidapi: Boolean(c.env.RAPID_API_KEY),
       google_vision: false,
       huggingface_vision: Boolean(getHuggingFaceApiKey(c.env)),
+      huggingface_chat_model: getHuggingFaceChatModel(c.env),
       anthropic: Boolean(c.env.ANTHROPIC_API_KEY),
     });
   });

@@ -150,7 +150,7 @@ curl http://localhost:8787/health
 
 ### Pipeline de análise alimentar (atual)
 
-Modelo de IA usado no backend: `openai/gpt-oss-120b:groq` via Hugging Face Router.
+Modelo de IA usado no backend: `openai/gpt-oss-120b` via Hugging Face Router.
 
 - Detecção visual no frontend com MediaPipe Tasks Vision (Object Detector via `vision_bundle.mjs`).
 - Worker recebe `identified_items` e consulta nutricional com prioridade (com IA via Hugging Face):

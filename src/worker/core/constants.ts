@@ -97,6 +97,7 @@ export const WEBHOOK_SUPPORTED_EVENTS = new Set<string>([
   "checkout_abandonment",
 ]);
 
-export const HUGGING_FACE_CHAT_MODEL = "openai/gpt-oss-120b";
+export const DEFAULT_HUGGING_FACE_CHAT_MODEL = "openai/gpt-oss-120b";
+export const HUGGING_FACE_CHAT_MODEL = DEFAULT_HUGGING_FACE_CHAT_MODEL;
 export const DEFAULT_HUGGING_FACE_VISION_MODEL = "Qwen/Qwen3.5-9B:together";
 export const DEFAULT_ANTHROPIC_CHAT_MODEL = "claude-sonnet-4-20250514";

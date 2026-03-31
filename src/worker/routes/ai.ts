@@ -168,6 +168,78 @@ export function registerAiRoutes(
     unlockAchievementIfNeeded,
   } = deps;
 
+  const isRecoverableChatProviderError = (
+    error: unknown,
+  ): error is ApiIntegrationErrorLike =>
+    error instanceof ApiIntegrationError
+    && (
+      error.code === "TIMEOUT"
+      || error.code === "UPSTREAM_ERROR"
+      || error.code === "INVALID_RESPONSE"
+    );
+
+  const buildChatProviderFallbackMessage = (params: {
+    userMessage: string;
+    mode: string;
+    mainGoal: string;
+    conditioning: string;
+  }): string => {
+    const normalizedText = params.userMessage
+      .normalize("NFD")
+      .replace(/\p{Diacritic}/gu, "")
+      .toLowerCase();
+    const mainGoal = params.mainGoal.replaceAll("_", " ").trim();
+    const conditioning = params.conditioning.trim();
+
+    const contextParts: string[] = [];
+    if (mainGoal.length > 0) {
+      contextParts.push(`Seu foco atual e ${mainGoal}.`);
+    }
+    if (conditioning.length > 0) {
+      contextParts.push(`Seu nivel atual e ${conditioning}.`);
+    }
+
+    let actionGuidance =
+      "Me manda em uma frase o resultado que voce quer hoje e eu te devolvo um passo a passo objetivo.";
+
+    if (
+      normalizedText.includes("treino")
+      || normalizedText.includes("exercicio")
+      || normalizedText.includes("serie")
+    ) {
+      actionGuidance =
+        "Enquanto estabilizo a IA, priorize aquecimento de 5 minutos, 3 blocos principais com tecnica limpa e descanso curto entre series. Se quiser, eu monto um treino fechado em seguida.";
+    } else if (
+      normalizedText.includes("aliment")
+      || normalizedText.includes("dieta")
+      || normalizedText.includes("caloria")
+      || normalizedText.includes("nutri")
+    ) {
+      actionGuidance =
+        "Enquanto estabilizo a IA, mantenha uma refeicao com proteina magra, carboidrato simples de medir e agua suficiente. Se quiser, eu monto um ajuste alimentar por refeicao em seguida.";
+    } else if (
+      normalizedText.includes("dor")
+      || normalizedText.includes("lesao")
+      || normalizedText.includes("machuc")
+    ) {
+      actionGuidance =
+        "Como regra de seguranca, reduza intensidade, evite movimentos com dor aguda e procure avaliacao profissional se a dor persistir. Se quiser, eu te sugiro uma alternativa de baixo impacto.";
+    } else if (params.mode === "suporte") {
+      actionGuidance =
+        "Me diga o objetivo imediato desta conversa e a restricao principal (tempo, equipamento ou dor) que eu te passo uma orientacao direta agora.";
+    }
+
+    return [
+      "Estou com instabilidade temporaria no servico de IA externo, mas sigo te atendendo por aqui.",
+      ...contextParts,
+      actionGuidance,
+      "Se puder, tente reenviar a mesma mensagem em alguns segundos para eu te responder com a geracao completa.",
+    ]
+      .join(" ")
+      .replace(/\s+/g, " ")
+      .trim();
+  };
+
 type USDAResponse = {
   foods?: Array<{
     description?: string | undefined;
@@ -532,42 +604,78 @@ Contexto do usuário:
       { role: "user", content: userMessage },
     ];
 
-    let openaiData: OpenAIChatCompletionResponseLike;
-    try {
-      openaiData = await callOpenAIChatWithFallback(c, primaryMessages);
-    } catch (primaryError) {
-      console.warn("[ai-chat][primary]", {
-        userId: user.id,
-        message: getErrorMessage(primaryError),
-        details: primaryError instanceof ApiIntegrationError ? primaryError.details : undefined,
-      });
+    let content = "";
+    let usedDegradedFallback = false;
 
-      if (
-        !(primaryError instanceof ApiIntegrationError) ||
-        primaryError.code === "RATE_LIMITED" ||
-        primaryError.code === "SERVICE_NOT_CONFIGURED" ||
-        primaryError.code === "AUTH_FAILED"
-      ) {
-        throw primaryError;
+    try {
+      let openaiData: OpenAIChatCompletionResponseLike;
+      try {
+        openaiData = await callOpenAIChatWithFallback(c, primaryMessages);
+      } catch (primaryError) {
+        console.warn("[ai-chat][primary]", {
+          userId: user.id,
+          message: getErrorMessage(primaryError),
+          details: primaryError instanceof ApiIntegrationError ? primaryError.details : undefined,
+        });
+
+        if (
+          !(primaryError instanceof ApiIntegrationError) ||
+          primaryError.code === "RATE_LIMITED" ||
+          primaryError.code === "SERVICE_NOT_CONFIGURED" ||
+          primaryError.code === "AUTH_FAILED"
+        ) {
+          throw primaryError;
+        }
+
+        openaiData = await callOpenAIChatWithFallback(
+          c,
+          [
+            { role: "system", content: compactSystemPrompt },
+            ...dedupedHistory.slice(-8),
+            { role: "user", content: userMessage },
+          ],
+          700,
+        );
       }
 
-      openaiData = await callOpenAIChatWithFallback(
-        c,
-        [
-          { role: "system", content: compactSystemPrompt },
-          ...dedupedHistory.slice(-8),
-          { role: "user", content: userMessage },
-        ],
-        700,
-      );
-    }
+      content =
+        (
+          safeGet(openaiData.choices ?? [], 0) as
+            | { message?: { content?: string | null | undefined } | null | undefined }
+            | undefined
+        )?.message?.content ?? "";
+    } catch (chatProviderError) {
+      if (!isRecoverableChatProviderError(chatProviderError)) {
+        throw chatProviderError;
+      }
 
-    const content =
-      (
-        safeGet(openaiData.choices ?? [], 0) as
-          | { message?: { content?: string | null | undefined } | null | undefined }
-          | undefined
-      )?.message?.content ?? "";
+      usedDegradedFallback = true;
+      content = buildChatProviderFallbackMessage({
+        userMessage,
+        mode,
+        mainGoal: profileMainGoal,
+        conditioning: profileConditioning,
+      });
+
+      console.warn("[ai-chat][degraded-fallback]", {
+        userId: user.id,
+        code: chatProviderError.code,
+        status: chatProviderError.status,
+        details: chatProviderError.details,
+      });
+
+      try {
+        await logUserEvent(c.env.fitloot_db, user.id, "chat_provider_degraded", {
+          code: chatProviderError.code,
+          status: chatProviderError.status,
+        });
+      } catch (loggingError) {
+        console.warn("[ai-chat][degraded-fallback][log-failed]", {
+          userId: user.id,
+          message: getErrorMessage(loggingError),
+        });
+      }
+    }
     const appliedPlanPreference = await maybeApplyTrainingPlanPreferenceFromChat(c, {
       userId: user.id,
       userMessage,
@@ -583,7 +691,11 @@ Contexto do usuário:
       ? `\n\nAjuste salvo para as próximas missões: ${summarizeTrainingPlanChatPreferences(appliedPlanPreference)}.`
       : "";
 
-    return c.json({ message: `${content}${planPreferenceNotice}`.trim() });
+    const degradedFallbackNotice = usedDegradedFallback
+      ? "\n\nObservacao: resposta entregue em modo de contingencia devido a instabilidade temporaria do provedor de IA."
+      : "";
+
+    return c.json({ message: `${content}${planPreferenceNotice}${degradedFallbackNotice}`.trim() });
   } catch (error) {
     console.error("[ai-chat]", {
       userId: user.id,

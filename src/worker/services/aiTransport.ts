@@ -1,10 +1,11 @@
 import { safeGet } from "../../utils/typeHelpers";
-import { HUGGING_FACE_CHAT_MODEL } from "../core/constants";
+import { DEFAULT_HUGGING_FACE_CHAT_MODEL } from "../core/constants";
 import { getErrorMessage } from "../core/errors";
 import {
   getAnthropicApiKey,
   getAnthropicChatModel,
   getHuggingFaceApiKey,
+  getHuggingFaceChatModel,
 } from "../core/providerConfig";
 import type { AppContext } from "../core/types";
 
@@ -99,6 +100,62 @@ export function toFriendlyErrorResponse(error: unknown) {
   };
 }
 
+const MODEL_ERROR_HINTS = [
+  "model",
+  "unknown model",
+  "invalid model",
+  "does not exist",
+  "not found",
+  "unsupported model",
+];
+
+function truncateErrorDetails(details: string): string {
+  return details.slice(0, 500);
+}
+
+function parseProviderErrorCode(responseText: string): string | null {
+  try {
+    const parsed = JSON.parse(responseText) as Record<string, unknown>;
+    const nestedError =
+      parsed.error && typeof parsed.error === "object" && !Array.isArray(parsed.error)
+        ? parsed.error as Record<string, unknown>
+        : null;
+
+    const nestedCode = nestedError?.code;
+    if (typeof nestedCode === "string" && nestedCode.trim().length > 0) {
+      return nestedCode.trim();
+    }
+
+    const directCode = parsed.code;
+    if (typeof directCode === "string" && directCode.trim().length > 0) {
+      return directCode.trim();
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function isProviderModelConfigurationFailure(status: number, responseText: string): boolean {
+  if (status !== 400 && status !== 404 && status !== 422) {
+    return false;
+  }
+
+  const possibleCode = parseProviderErrorCode(responseText);
+  const normalized = `${possibleCode ?? ""} ${responseText}`.toLowerCase();
+  return MODEL_ERROR_HINTS.some((hint) => normalized.includes(hint));
+}
+
+function isLikelyProviderConfigError(error: unknown): boolean {
+  if (!(error instanceof ApiIntegrationError)) return false;
+  if (error.code === "SERVICE_NOT_CONFIGURED" || error.code === "AUTH_FAILED") return true;
+  if (error.code !== "INVALID_RESPONSE") return false;
+
+  const details = (error.details ?? "").toLowerCase();
+  return MODEL_ERROR_HINTS.some((hint) => details.includes(hint));
+}
+
 export async function fetchJsonWithTimeout<T>(
   url: string,
   init: RequestInit,
@@ -114,23 +171,37 @@ export async function fetchJsonWithTimeout<T>(
         "AUTH_FAILED",
         502,
         "Falha de autenticação com serviço externo.",
-        responseText.slice(0, 500),
+        truncateErrorDetails(responseText),
       );
     }
     if (response.status === 429) {
       throw new ApiIntegrationError(
         "RATE_LIMITED",
         429,
-        "Servi\u00e7o externo em limite tempor\u00e1rio. Tente novamente em instantes.",
-        responseText.slice(0, 500),
+        "Serviço externo em limite temporário. Tente novamente em instantes.",
+        truncateErrorDetails(responseText),
+      );
+    }
+    if (isProviderModelConfigurationFailure(response.status, responseText)) {
+      throw new ApiIntegrationError(
+        "SERVICE_NOT_CONFIGURED",
+        503,
+        "Modelo de IA externo invalido ou indisponivel.",
+        truncateErrorDetails(responseText),
       );
     }
     if (!response.ok) {
+      const code: ApiErrorCode =
+        response.status >= 500 ? "UPSTREAM_ERROR" : "INVALID_RESPONSE";
+      const message =
+        response.status >= 500
+          ? "Falha ao consultar serviço externo."
+          : "Servico externo rejeitou a solicitacao.";
       throw new ApiIntegrationError(
-        "UPSTREAM_ERROR",
+        code,
         502,
-        "Falha ao consultar serviço externo.",
-        responseText.slice(0, 500),
+        message,
+        truncateErrorDetails(responseText),
       );
     }
     try {
@@ -140,7 +211,7 @@ export async function fetchJsonWithTimeout<T>(
         "INVALID_RESPONSE",
         502,
         "Servi\u00e7o externo retornou resposta inv\u00e1lida.",
-        responseText.slice(0, 500),
+        truncateErrorDetails(responseText),
       );
     }
   } catch (error) {
@@ -148,7 +219,12 @@ export async function fetchJsonWithTimeout<T>(
     if ((error as Error).name === "AbortError") {
       throw new ApiIntegrationError("TIMEOUT", 504, "Tempo de resposta excedido em serviço externo.");
     }
-    throw new ApiIntegrationError("UPSTREAM_ERROR", 502, "Falha ao consultar serviço externo.");
+    throw new ApiIntegrationError(
+      "UPSTREAM_ERROR",
+      502,
+      "Falha ao consultar serviço externo.",
+      truncateErrorDetails(getErrorMessage(error)),
+    );
   } finally {
     clearTimeout(timeout);
   }
@@ -156,6 +232,7 @@ export async function fetchJsonWithTimeout<T>(
 
 function shouldRetryHuggingFaceError(error: unknown): boolean {
   return error instanceof ApiIntegrationError
+    && !isLikelyProviderConfigError(error)
     && (
       error.code === "RATE_LIMITED"
       || error.code === "TIMEOUT"
@@ -187,6 +264,7 @@ export async function requestHuggingFaceStructuredContent(
   maxTokens: number,
   logLabel: string,
   timeoutMs: number,
+  model = DEFAULT_HUGGING_FACE_CHAT_MODEL,
 ): Promise<string> {
   const attempts = [
     { responseFormat: true, requestMessages: messages, label: `${logLabel}:json-mode` },
@@ -209,7 +287,7 @@ export async function requestHuggingFaceStructuredContent(
             Authorization: `Bearer ${apiKey}`,
           },
           body: JSON.stringify({
-            model: HUGGING_FACE_CHAT_MODEL,
+            model,
             messages: attempt.requestMessages,
             max_tokens: maxTokens,
             ...(attempt.responseFormat ? { response_format: { type: "json_object" } } : {}),
@@ -232,6 +310,9 @@ export async function requestHuggingFaceStructuredContent(
         message: getErrorMessage(error),
         details: error instanceof ApiIntegrationError ? error.details : undefined,
       });
+      if (isLikelyProviderConfigError(error)) {
+        break;
+      }
     }
   }
 
@@ -245,6 +326,7 @@ async function requestHuggingFaceChatCompletion(
   messages: Array<{ role: string; content: string }>,
   maxTokens: number,
   timeoutMs: number,
+  model = DEFAULT_HUGGING_FACE_CHAT_MODEL,
 ): Promise<OpenAIChatCompletionResponse> {
   const attempts = [
     { maxTokens, label: "chat-primary" },
@@ -264,7 +346,7 @@ async function requestHuggingFaceChatCompletion(
             "Authorization": `Bearer ${apiKey}`,
           },
           body: JSON.stringify({
-            model: HUGGING_FACE_CHAT_MODEL,
+            model,
             messages,
             max_tokens: attempt.maxTokens,
           }),
@@ -452,8 +534,7 @@ async function requestAnthropicCompletion(
         error.code !== "RATE_LIMITED" &&
         error.code !== "TIMEOUT" &&
         error.code !== "UPSTREAM_ERROR" &&
-        error.code !== "INVALID_RESPONSE" &&
-        error.code !== "AUTH_FAILED"
+        error.code !== "INVALID_RESPONSE"
       ) {
         break;
       }
@@ -492,6 +573,7 @@ async function callHuggingFaceChat(
   jsonMode = false
 ) {
   const apiKey = getHuggingFaceApiKey(c.env);
+  const model = getHuggingFaceChatModel(c.env);
   if (!apiKey) {
     throw new ApiIntegrationError("SERVICE_NOT_CONFIGURED", 503, "Hugging Face não configurada.");
   }
@@ -503,6 +585,7 @@ async function callHuggingFaceChat(
       maxTokens,
       "callOpenAIChat",
       timeoutMsByService.huggingface,
+      model,
     );
     const structuredResponse: OpenAIChatCompletionResponse = {
       choices: [{ message: { content } }],
@@ -514,6 +597,7 @@ async function callHuggingFaceChat(
     messages,
     maxTokens,
     timeoutMsByService.huggingface,
+    model,
   );
 }
 
