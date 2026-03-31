@@ -247,6 +247,96 @@ describe("ai routes", () => {
     );
   });
 
+  it("keeps chat available in degraded mode when provider configuration is missing", async () => {
+    const { db } = createMockD1Database([
+      {
+        match: "SELECT chat_messages, repeated_message_streak, last_chat_message FROM user_event_counters",
+        first: {
+          chat_messages: 2,
+          repeated_message_streak: 0,
+          last_chat_message: null,
+        },
+      },
+      {
+        match: "UPDATE user_event_counters SET",
+        run: { success: true, meta: {} },
+      },
+      {
+        match: "SELECT * FROM user_profiles WHERE user_id = ?",
+        first: {
+          full_name: "Ana",
+          main_goal: "saude_geral",
+          initial_conditioning: "iniciante",
+          equipment: "",
+          injuries: "",
+        },
+      },
+      {
+        match: "SELECT * FROM user_progression WHERE user_id = ?",
+        first: {
+          level: 2,
+          xp: 40,
+          current_streak: 1,
+        },
+      },
+      {
+        match: "SELECT * FROM user_attributes WHERE user_id = ?",
+        first: {
+          strength: 4,
+          constitution: 5,
+          vitality: 6,
+          dexterity: 3,
+          focus: 4,
+        },
+      },
+      {
+        match: "SELECT weekly_plan_json, training_frequency FROM user_training_plans WHERE user_id = ?",
+        first: {
+          weekly_plan_json: null,
+          training_frequency: 2,
+        },
+      },
+    ]);
+    const env = createTestEnv(db);
+    const callOpenAIChatWithFallback = vi
+      .fn()
+      .mockRejectedValue(
+        new TestApiIntegrationError(
+          "SERVICE_NOT_CONFIGURED",
+          503,
+          "Nenhum provedor de IA configurado.",
+        ),
+      );
+    const deps = createAiDeps({
+      callOpenAIChatWithFallback,
+    });
+    const app = new Hono<AppContext>();
+    registerAiRoutes(app, deps);
+    const { executionCtx } = createExecutionContext();
+
+    const response = await app.fetch(
+      createJsonRequest("/api/ai/chat", {
+        method: "POST",
+        body: {
+          message: "como estao meus status",
+          history: [],
+          mode: "suporte",
+          session_count: 1,
+        },
+      }),
+      env,
+      executionCtx,
+    );
+
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(typeof payload.message).toBe("string");
+    expect(payload.message).toContain("instabilidade temporaria no servico de IA externo");
+    expect(payload.message).toContain("modo de contingencia");
+    expect(callOpenAIChatWithFallback).toHaveBeenCalledTimes(1);
+  });
+
   it("falls back from USDA to RapidAPI during food analysis when the primary lookup fails", async () => {
     const { db } = createMockD1Database([]);
     const env = createTestEnv(db);

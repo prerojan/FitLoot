@@ -100,10 +100,48 @@ describe("mission routes", () => {
 
     expect(response.status).toBe(200);
     expect(payload).toEqual(cachedMissions);
+    expect(deps.schedulePeriodicMissionsRefreshWithGuard).not.toHaveBeenCalled();
+    expect(deps.scheduleLegacyDailyMetadataRepairWithGuard).not.toHaveBeenCalled();
+    expect(deps.schedulePeriodicProgressRecomputeWithGuard).not.toHaveBeenCalled();
+    expect(deps.streamJsonArrayResponse).toHaveBeenCalledWith(cachedMissions);
+  });
+
+  it("runs heavier maintenance hooks only when refresh is explicitly requested", async () => {
+    const { db } = createMockD1Database([
+      {
+        match: "PRAGMA table_info('missions')",
+        all: [
+          { name: "id" },
+          { name: "user_id" },
+          { name: "status" },
+          { name: "skill_id" },
+        ],
+      },
+      {
+        match: "PRAGMA table_info('skills')",
+        all: [],
+      },
+      {
+        match: "SELECT m.*, NULL as skill_name FROM missions m",
+        all: [],
+      },
+    ]);
+    const env = createTestEnv(db);
+    const deps = createMissionDeps();
+    const app = new Hono<AppContext>();
+    registerMissionRoutes(app, deps, createAuthMiddleware());
+    const { executionCtx } = createExecutionContext();
+
+    const response = await app.fetch(
+      new Request("http://localhost/api/missions?refresh=1"),
+      env,
+      executionCtx,
+    );
+
+    expect(response.status).toBe(200);
     expect(deps.schedulePeriodicMissionsRefreshWithGuard).toHaveBeenCalledTimes(1);
     expect(deps.scheduleLegacyDailyMetadataRepairWithGuard).toHaveBeenCalledTimes(1);
     expect(deps.schedulePeriodicProgressRecomputeWithGuard).toHaveBeenCalledTimes(1);
-    expect(deps.streamJsonArrayResponse).toHaveBeenCalledWith(cachedMissions);
   });
 
   it("blocks manual completion of weekly and monthly missions", async () => {

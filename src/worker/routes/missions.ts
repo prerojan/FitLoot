@@ -284,26 +284,6 @@ export function registerMissionRoutes(
         clearMissionListCache(user.id);
       }
 
-      // Agenda reparos leves sem bloquear a entrega da lista principal.
-      schedulePeriodicMissionsRefreshWithGuard(
-        c.env,
-        c.env.fitloot_db,
-        user.id,
-        c.executionCtx,
-        "safe",
-      );
-      scheduleLegacyDailyMetadataRepairWithGuard(
-        c.env,
-        c.env.fitloot_db,
-        user.id,
-        c.executionCtx,
-      );
-      schedulePeriodicProgressRecomputeWithGuard(
-        user.id,
-        c.env.fitloot_db,
-        c.executionCtx,
-      );
-
       const cached = !forceRefresh ? readMissionListCache(user.id) : null;
       if (!forceRefresh && cached) {
         return streamJsonArrayResponse(cached);
@@ -314,6 +294,28 @@ export function registerMissionRoutes(
         if (refreshedCache) {
           return streamJsonArrayResponse(refreshedCache);
         }
+      }
+
+      // Mantém o endpoint de leitura leve e relega manutenção periódica ao fluxo com debounce.
+      schedulePeriodicMissionsRefreshWithGuard(
+        c.env,
+        c.env.fitloot_db,
+        user.id,
+        c.executionCtx,
+        "safe",
+      );
+      if (forceRefresh) {
+        scheduleLegacyDailyMetadataRepairWithGuard(
+          c.env,
+          c.env.fitloot_db,
+          user.id,
+          c.executionCtx,
+        );
+        schedulePeriodicProgressRecomputeWithGuard(
+          user.id,
+          c.env.fitloot_db,
+          c.executionCtx,
+        );
       }
 
       // Busca missões ativas e histórico recente, com fallback para esquemas antigos sem coluna status.
@@ -465,58 +467,64 @@ export function registerMissionRoutes(
           normalized.exercise_name.trim().length > 0
             ? normalized.exercise_name.trim()
             : deps.extractExerciseName(String(normalized.title ?? ""));
-        // Traduz os passos sob demanda e persiste a versão PT quando a missão ainda está sem localização.
-        const ptTranslated = await deps.translateExerciseInstructionsToPt(
-          enSteps,
-          exerciseLabel,
-          c.env,
+        // Dispara a traducao em background para nao bloquear a leitura de detalhes.
+        const currentInstructions = deps.normalizeInstructionList(
+          normalized.instructions,
+          8,
         );
-        if (ptTranslated.length > 0) {
-          normalized.exercise_instructions_pt = ptTranslated;
-          const mainSteps = deps.normalizeInstructionList(normalized.instructions, 8);
-          const refreshMain =
-            mainSteps.length === 0 ||
-            (mainSteps.length === enSteps.length &&
-              mainSteps.every(
-                (line, index) =>
-                  deps.normalizeMatchText(line) ===
-                  deps.normalizeMatchText(enSteps[index] ?? ""),
-              ));
-          if (refreshMain) {
-            normalized.instructions = deps.ensureInstructionSteps(
-              deps.normalizeInstructionList(ptTranslated, 6),
-              exerciseLabel,
-              normalized.metric_type as MissionMetricType,
-              normalized.sets,
-              normalized.rest_seconds,
-            );
-          }
-          c.executionCtx.waitUntil(
-            (async () => {
-              try {
-                await c.env.fitloot_db
-                  .prepare(
-                    `UPDATE missions SET exercise_instructions_pt_json = ?, instructions_json = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?`,
-                  )
-                  .bind(
-                    JSON.stringify(ptTranslated),
-                    JSON.stringify(normalized.instructions),
-                    missionId,
-                    user.id,
-                  )
-                  .run();
-              } catch (persistErr) {
-                console.error(
-                  "[/api/missions/:id] persist translated instructions failed",
-                  {
-                    missionId,
-                    message: getErrorMessage(persistErr),
-                  },
-                );
+        const shouldRefreshMainInstructions =
+          currentInstructions.length === 0 ||
+          (currentInstructions.length === enSteps.length &&
+            currentInstructions.every(
+              (line, index) =>
+                deps.normalizeMatchText(line) ===
+                deps.normalizeMatchText(enSteps[index] ?? ""),
+            ));
+
+        c.executionCtx.waitUntil(
+          (async () => {
+            try {
+              const ptTranslated = await deps.translateExerciseInstructionsToPt(
+                enSteps,
+                exerciseLabel,
+                c.env,
+              );
+              if (ptTranslated.length === 0) {
+                return;
               }
-            })(),
-          );
-        }
+
+              const nextInstructions = shouldRefreshMainInstructions
+                ? deps.ensureInstructionSteps(
+                  deps.normalizeInstructionList(ptTranslated, 6),
+                  exerciseLabel,
+                  normalized.metric_type as MissionMetricType,
+                  normalized.sets,
+                  normalized.rest_seconds,
+                )
+                : currentInstructions;
+
+              await c.env.fitloot_db
+                .prepare(
+                  `UPDATE missions SET exercise_instructions_pt_json = ?, instructions_json = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?`,
+                )
+                .bind(
+                  JSON.stringify(ptTranslated),
+                  JSON.stringify(nextInstructions),
+                  missionId,
+                  user.id,
+                )
+                .run();
+            } catch (persistErr) {
+              console.error(
+                "[/api/missions/:id] persist translated instructions failed",
+                {
+                  missionId,
+                  message: getErrorMessage(persistErr),
+                },
+              );
+            }
+          })(),
+        );
       }
 
       return c.json(normalized);

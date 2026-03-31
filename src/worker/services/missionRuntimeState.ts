@@ -35,14 +35,14 @@ type MissionRuntimeStateDeps = {
   ) => Promise<void>;
 };
 
-const MISSION_LIST_CACHE_TTL_MS = 20_000;
+const MISSION_LIST_CACHE_TTL_MS = 90_000;
 const MISSION_LIST_CACHE_MAX_ENTRIES = 400;
-const MISSION_REFRESH_DEBOUNCE_MS = 15_000;
-const PERIODIC_PROGRESS_RECOMPUTE_DEBOUNCE_MS = 15_000;
+const MISSION_REFRESH_DEBOUNCE_MS = 5 * 60 * 1000;
+const PERIODIC_PROGRESS_RECOMPUTE_DEBOUNCE_MS = 5 * 60 * 1000;
 const MISSION_REFRESH_TRACK_TTL_MS = 24 * 60 * 60 * 1000;
 const MISSION_REFRESH_TRACK_MAX_KEYS = 3_000;
 const MISSION_REFRESH_CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
-const DAILY_METADATA_REPAIR_DEBOUNCE_MS = 60_000;
+const DAILY_METADATA_REPAIR_DEBOUNCE_MS = 15 * 60 * 1000;
 
 // Mantem o estado efemero de cache e locks de missao fora do entrypoint.
 export function createMissionRuntimeStateService({

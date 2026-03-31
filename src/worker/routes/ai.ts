@@ -173,7 +173,10 @@ export function registerAiRoutes(
   ): error is ApiIntegrationErrorLike =>
     error instanceof ApiIntegrationError
     && (
-      error.code === "TIMEOUT"
+      error.code === "SERVICE_NOT_CONFIGURED"
+      || error.code === "AUTH_FAILED"
+      || error.code === "RATE_LIMITED"
+      || error.code === "TIMEOUT"
       || error.code === "UPSTREAM_ERROR"
       || error.code === "INVALID_RESPONSE"
     );
