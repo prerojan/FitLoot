@@ -109,6 +109,13 @@ const MODEL_ERROR_HINTS = [
   "unsupported model",
 ];
 
+const CREDIT_EXHAUSTION_HINTS = [
+  "depleted your monthly included credits",
+  "purchase pre-paid credits",
+  "insufficient credits",
+  "quota exceeded",
+];
+
 function truncateErrorDetails(details: string): string {
   return details.slice(0, 500);
 }
@@ -147,6 +154,11 @@ function isProviderModelConfigurationFailure(status: number, responseText: strin
   return MODEL_ERROR_HINTS.some((hint) => normalized.includes(hint));
 }
 
+function isProviderCreditsExhausted(responseText: string): boolean {
+  const normalized = responseText.toLowerCase();
+  return CREDIT_EXHAUSTION_HINTS.some((hint) => normalized.includes(hint));
+}
+
 function isLikelyProviderConfigError(error: unknown): boolean {
   if (!(error instanceof ApiIntegrationError)) return false;
   if (error.code === "SERVICE_NOT_CONFIGURED" || error.code === "AUTH_FAILED") return true;
@@ -154,6 +166,13 @@ function isLikelyProviderConfigError(error: unknown): boolean {
 
   const details = (error.details ?? "").toLowerCase();
   return MODEL_ERROR_HINTS.some((hint) => details.includes(hint));
+}
+
+function isLikelyProviderCreditsError(error: unknown): boolean {
+  if (!(error instanceof ApiIntegrationError)) return false;
+  if (error.code !== "RATE_LIMITED") return false;
+  const details = (error.details ?? "").toLowerCase();
+  return CREDIT_EXHAUSTION_HINTS.some((hint) => details.includes(hint));
 }
 
 export async function fetchJsonWithTimeout<T>(
@@ -179,6 +198,14 @@ export async function fetchJsonWithTimeout<T>(
         "RATE_LIMITED",
         429,
         "Serviço externo em limite temporário. Tente novamente em instantes.",
+        truncateErrorDetails(responseText),
+      );
+    }
+    if (isProviderCreditsExhausted(responseText)) {
+      throw new ApiIntegrationError(
+        "RATE_LIMITED",
+        429,
+        "Créditos mensais do provedor de IA esgotados. Recarregue os créditos no Hugging Face ou configure uma chave de provedor própria.",
         truncateErrorDetails(responseText),
       );
     }
@@ -233,6 +260,7 @@ export async function fetchJsonWithTimeout<T>(
 function shouldRetryHuggingFaceError(error: unknown): boolean {
   return error instanceof ApiIntegrationError
     && !isLikelyProviderConfigError(error)
+    && !isLikelyProviderCreditsError(error)
     && (
       error.code === "RATE_LIMITED"
       || error.code === "TIMEOUT"

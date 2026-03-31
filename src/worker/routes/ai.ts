@@ -183,6 +183,16 @@ export function registerAiRoutes(
     mode: string;
     mainGoal: string;
     conditioning: string;
+    level: number;
+    xp: number;
+    streakDays: number;
+    attributes: {
+      strength: number;
+      constitution: number;
+      vitality: number;
+      dexterity: number;
+      focus: number;
+    };
   }): string => {
     const normalizedText = params.userMessage
       .normalize("NFD")
@@ -197,6 +207,28 @@ export function registerAiRoutes(
     }
     if (conditioning.length > 0) {
       contextParts.push(`Seu nivel atual e ${conditioning}.`);
+    }
+
+    const asksForStatus =
+      normalizedText.includes("status")
+      || normalizedText.includes("stats")
+      || normalizedText.includes("atributo")
+      || normalizedText.includes("nivel")
+      || normalizedText.includes("xp")
+      || normalizedText.includes("streak")
+      || normalizedText.includes("evolucao");
+    if (asksForStatus) {
+      return [
+        "Estou com instabilidade temporaria no servico de IA externo, mas aqui vai seu status atual.",
+        `Nivel: ${params.level}.`,
+        `XP: ${params.xp}.`,
+        `Streak: ${params.streakDays} dias.`,
+        `Atributos -> Forca: ${params.attributes.strength}, Constituicao: ${params.attributes.constitution}, Vitalidade: ${params.attributes.vitality}, Destreza: ${params.attributes.dexterity}, Foco: ${params.attributes.focus}.`,
+        "Se quiser, te passo agora os 2 melhores ajustes para subir esses stats mais rapido.",
+      ]
+        .join(" ")
+        .replace(/\s+/g, " ")
+        .trim();
     }
 
     let actionGuidance =
@@ -655,6 +687,16 @@ Contexto do usuário:
         mode,
         mainGoal: profileMainGoal,
         conditioning: profileConditioning,
+        level: Number(progression?.level ?? 0),
+        xp: Number(progression?.xp ?? 0),
+        streakDays: Number(progression?.current_streak ?? 0),
+        attributes: {
+          strength: Number(attributes?.strength ?? 0),
+          constitution: Number(attributes?.constitution ?? 0),
+          vitality: Number(attributes?.vitality ?? 0),
+          dexterity: Number(attributes?.dexterity ?? 0),
+          focus: Number(attributes?.focus ?? 0),
+        },
       });
 
       console.warn("[ai-chat][degraded-fallback]", {
