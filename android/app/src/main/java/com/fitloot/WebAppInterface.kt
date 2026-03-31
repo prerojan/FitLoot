@@ -23,6 +23,7 @@ class WebAppInterface(
     private val stepCounter = StepCounter(context)
     private val eventDispatcher = WebEventDispatcher(webView)
     private val scope = CoroutineScope(Dispatchers.Main)
+    private var pendingStepTrackingStart = false
 
     @JavascriptInterface
     fun isNativeAvailable(): Boolean {
@@ -41,6 +42,13 @@ class WebAppInterface(
 
     @JavascriptInterface
     fun startStepTracking() {
+        if (!stepCounter.hasActivityRecognitionPermission()) {
+            pendingStepTrackingStart = true
+            onPermissionsRequest?.invoke()
+            return
+        }
+
+        pendingStepTrackingStart = false
         stepCounter.start()
     }
 
@@ -66,9 +74,19 @@ class WebAppInterface(
 
     @JavascriptInterface
     fun getStepMetrics() {
+        if (!stepCounter.hasActivityRecognitionPermission()) {
+            onPermissionsRequest?.invoke()
+        }
         scope.launch {
             val metrics = stepCounter.getDailyMetrics()
             sendEventToWebApp(NativeBridgeContract.EVENT_NATIVE_METRICS_UPDATED, metrics)
+        }
+    }
+
+    fun onRuntimePermissionsChanged() {
+        if (pendingStepTrackingStart && stepCounter.hasActivityRecognitionPermission()) {
+            pendingStepTrackingStart = false
+            stepCounter.start()
         }
     }
 

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useAuth } from "@/react-app/contexts/auth";
+import { useAuth } from "@/react-app/auth/context";
+import { useRewardNotifications } from "@/react-app/contexts/rewardNotifications";
 import { useNavigate, useSearchParams } from "react-router";
 import AppPageShell from "@/react-app/components/AppPageShell";
 import LoadingBall from "@/react-app/components/LoadingBall";
@@ -18,7 +19,8 @@ import {
   Info as InfoIcon,
   Plus as PlusIcon,
 } from "lucide-react";
-import { ApiRequestError, api, fetchAndCacheJson, readCachedJson } from "@/react-app/utils/api";
+import type { RewardNotification } from "@/shared/types";
+import { ApiRequestError, api, clearJsonCache, fetchAndCacheJson, readCachedJson } from "@/react-app/utils/api";
 import { Avatar } from "@/react-app/components/ui/avatar";
 import { Badge } from "@/react-app/components/ui/badge";
 
@@ -65,6 +67,7 @@ type SelectedOpponent = { userId: string; username: string } | null;
 
 export default function MiniGames() {
   const { user } = useAuth();
+  const { pushRewardNotifications } = useRewardNotifications();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const challengeUserId = searchParams.get("challenge");
@@ -95,6 +98,7 @@ export default function MiniGames() {
   const pendingGames = useMemo(() => liveGames.filter((game) => game.status === "pending"), [liveGames]);
 
   const loadGames = useCallback(async () => {
+    // Carrega duelos ativos e historico recente com preferencia por cache.
     setError(null);
     const cacheGames = readCachedJson<MiniGame[]>("/api/mini-games/active");
 
@@ -126,6 +130,7 @@ export default function MiniGames() {
   }, [navigate]);
 
   const loadSkills = useCallback(async () => {
+    // Carrega as habilidades disponiveis para criacao de duelos.
     const cacheSkills = readCachedJson<MiniGameSkill[]>("/api/skills");
 
     if (cacheSkills) {
@@ -149,6 +154,7 @@ export default function MiniGames() {
   }, [navigate]);
 
   const loadArenaData = useCallback(async () => {
+    // Recupera solicitacoes pendentes usadas no painel lateral da arena.
     try {
       const response = await api("/api/friends/requests");
 
@@ -245,6 +251,7 @@ export default function MiniGames() {
   };
 
   const createChallenge = async () => {
+    // Cria um novo duelo com rival definido ou fila aleatoria.
     if (!selectedSkill) {
       setError("Selecione uma habilidade antes de criar o duelo.");
       return;
@@ -284,6 +291,7 @@ export default function MiniGames() {
       setSearchQuery("");
       setSelectedSkill(null);
       setTargetReps(20);
+      clearJsonCache("/api/mini-games/active");
       await loadGames();
     } catch (challengeError) {
       console.error("Error creating challenge:", challengeError);
@@ -304,6 +312,7 @@ export default function MiniGames() {
         throw new Error("Accept failed");
       }
 
+      clearJsonCache("/api/mini-games/active");
       await loadGames();
     } catch (acceptError) {
       console.error("Error accepting challenge:", acceptError);
@@ -331,6 +340,11 @@ export default function MiniGames() {
         throw new Error("Complete failed");
       }
 
+      const payload = (await response.json()) as {
+        reward_events?: RewardNotification[] | undefined;
+      };
+      pushRewardNotifications(payload.reward_events);
+      clearJsonCache("/api/mini-games/active");
       await loadGames();
     } catch (completeError) {
       console.error("Error completing challenge:", completeError);
@@ -351,6 +365,7 @@ export default function MiniGames() {
   return (
     <AppPageShell bottomNavActive="arena" className="fl-theme-page">
       <div className="flex flex-1 flex-col overflow-y-auto p-6 sm:p-8">
+        {/* Hero da arena, modos e contadores resumidos. */}
         <section className="mb-12">
           <div className="mb-10 flex flex-col gap-6 sm:flex-row sm:items-center sm:justify-between">
             <div>
@@ -387,12 +402,14 @@ export default function MiniGames() {
           </div>
         </section>
 
+        {/* Estado de erro recuperavel da arena. */}
         {error ? (
           <div className="mb-8 rounded-3xl border px-5 py-4 text-[11px] font-bold uppercase tracking-widest" style={{ borderColor: "color-mix(in srgb, var(--app-primary-color) 24%, transparent)", backgroundColor: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)", color: "var(--app-primary-color)" }}>
             {error}
           </div>
         ) : null}
 
+        {/* Modal de criacao de duelo. */}
         {showCreateForm ? (
           <div className="fl-z-modal fixed inset-0 flex items-center justify-center bg-black/90 p-6 backdrop-blur-md">
             <div className="fl-theme-surface w-full max-w-xl rounded-[3rem] p-10 shadow-3xl">
@@ -506,6 +523,7 @@ export default function MiniGames() {
         <div className="grid grid-cols-1 items-start gap-10 lg:grid-cols-12">
           <div className="space-y-12 lg:col-span-8">
             <section>
+              {/* Busca e selecao de rivais. */}
               <div className="mb-8 flex items-center gap-3">
                 <SearchIcon className="h-5 w-5" style={{ color: "var(--app-primary-color)" }} />
                 <h3 className="text-xl font-bold uppercase tracking-[0.2em]">Encontrar Guerreiros</h3>
@@ -585,6 +603,7 @@ export default function MiniGames() {
             </section>
             {viewMode === "live" ? (
               <section>
+                {/* Duelos ativos e criacao rapida. */}
                 <div className="mb-8 flex items-center gap-3">
                   <Target className="h-5 w-5" style={{ color: "var(--app-primary-color)" }} />
                   <h3 className="text-xl font-bold uppercase tracking-[0.2em]">Duelos em Curso</h3>
@@ -627,6 +646,7 @@ export default function MiniGames() {
               </section>
             ) : (
               <section>
+                {/* Historico e agenda promocional de torneios. */}
                 <div className="mb-8 flex items-center gap-3">
                   <Check className="h-5 w-5" style={{ color: "var(--app-primary-color)" }} />
                   <h3 className="text-xl font-bold uppercase tracking-[0.2em]">Historico de Torneios</h3>
@@ -677,6 +697,7 @@ export default function MiniGames() {
 
           <div className="space-y-10 lg:col-span-4">
             <section>
+              {/* Painel lateral com convites e atalhos. */}
               <div className="mb-8 flex items-center gap-3">
                 <UserPlusIcon className="h-5 w-5" style={{ color: "var(--app-primary-color)" }} />
                 <h3 className="text-xl font-bold uppercase tracking-[0.2em]">Solicitacoes</h3>

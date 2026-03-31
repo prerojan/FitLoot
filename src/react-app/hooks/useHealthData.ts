@@ -37,12 +37,15 @@ const EMPTY_MANUAL_OVERRIDE: ManualHealthOverride = {
   activeMinutes: 0,
 };
 
-export const useHealthData = (_options: UseHealthDataOptions = {}) => {
+export const useHealthData = (options: UseHealthDataOptions = {}) => {
+  // Mantem a assinatura publica enquanto a origem real dos dados vem do store consolidado.
+  void options;
   const { metrics, loading, error: metricsError, refreshMetrics } = useDailyMetrics({ syncRemote: true });
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [localError, setLocalError] = useState<string | null>(null);
   const [manualOverride, setManualOverride] = useState<ManualHealthOverride>(EMPTY_MANUAL_OVERRIDE);
 
+  // Traduz o snapshot consolidado para o contrato historico do hook de saude.
   const baseHealthData = useMemo<HealthMetrics | null>(() => {
     if (!metrics) return null;
 
@@ -61,6 +64,7 @@ export const useHealthData = (_options: UseHealthDataOptions = {}) => {
     };
   }, [metrics]);
 
+  // Aplica os overrides manuais usados pela tela de teste sem tocar o store central.
   const healthData = useMemo<HealthMetrics | null>(() => {
     if (!baseHealthData) return null;
 
@@ -87,6 +91,7 @@ export const useHealthData = (_options: UseHealthDataOptions = {}) => {
   }, [baseHealthData, manualOverride]);
 
   const fetchHealthData = useCallback(async (): Promise<void> => {
+    // Forca uma sincronizacao nova das metricas e converte erros em mensagem local.
     try {
       setLocalError(null);
       await refreshMetrics({ forceApi: true, syncRemote: true });
@@ -96,6 +101,7 @@ export const useHealthData = (_options: UseHealthDataOptions = {}) => {
   }, [refreshMetrics]);
 
   const authenticate = useCallback(async (): Promise<boolean> => {
+    // Mantem compatibilidade com o fluxo antigo de autenticacao do Google Fit.
     try {
       setLocalError(null);
       const success = await googleFitService.authenticate();
@@ -114,6 +120,7 @@ export const useHealthData = (_options: UseHealthDataOptions = {}) => {
   }, [fetchHealthData]);
 
   const addSteps = useCallback(async (additionalSteps: number): Promise<void> => {
+    // Injeta passos artificiais no overlay local usado pelo HealthTest.
     if (!Number.isFinite(additionalSteps) || additionalSteps <= 0) return;
 
     setManualOverride((current) => ({
@@ -125,6 +132,7 @@ export const useHealthData = (_options: UseHealthDataOptions = {}) => {
   }, []);
 
   const addCalories = useCallback(async (additionalCalories: number): Promise<void> => {
+    // Injeta calorias artificiais no overlay local usado pelo HealthTest.
     if (!Number.isFinite(additionalCalories) || additionalCalories <= 0) return;
 
     setManualOverride((current) => ({
@@ -134,11 +142,13 @@ export const useHealthData = (_options: UseHealthDataOptions = {}) => {
   }, []);
 
   const resetDailyData = useCallback((): void => {
+    // Limpa apenas os incrementos locais sem alterar a origem consolidada.
     setManualOverride(EMPTY_MANUAL_OVERRIDE);
     setLocalError(null);
   }, []);
 
   const checkAuthStatus = useCallback(async (): Promise<void> => {
+    // Reconcilia no cliente se a integracao web continua autenticada.
     try {
       const status = await googleFitService.checkAuthStatus();
       setIsAuthenticated(!!status.oauthToken);
@@ -148,6 +158,7 @@ export const useHealthData = (_options: UseHealthDataOptions = {}) => {
   }, []);
 
   useEffect(() => {
+    // Resolve o estado inicial da autenticacao logo na primeira montagem.
     void checkAuthStatus();
   }, [checkAuthStatus]);
 

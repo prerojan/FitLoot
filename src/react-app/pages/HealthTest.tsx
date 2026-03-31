@@ -1,18 +1,15 @@
-/**
- * Página de teste para funcionalidades de saúde
- * Demonstra integração com Google Fit e cálculo de passos/calorias
- */
-
 import { useState } from 'react';
 import { useHealthData } from '../hooks/useHealthData';
 import { useMapService } from '../hooks/useMapService';
 import { formatStepsSourceLabel } from '../services/native/stepsService';
 
 export default function HealthTest() {
+  // Estados locais usados para os controles manuais do painel de teste.
   const [stepsInput, setStepsInput] = useState('');
   const [caloriesInput, setCaloriesInput] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
-  
+
+  // Exibe e exercita o fluxo de leitura/atualizacao dos dados de saude.
   const {
     healthData,
     loading,
@@ -30,6 +27,7 @@ export default function HealthTest() {
     refreshInterval: 1, // 1 minute for testing
   });
 
+  // Exibe e exercita o fluxo de busca e geolocalizacao do mapa.
   const {
     mapState,
     userLocation,
@@ -41,6 +39,7 @@ export default function HealthTest() {
     enableGeolocation: true,
   });
 
+  // Injeta passos artificiais para validar o ciclo de atualizacao da UI.
   const handleAddSteps = async () => {
     const steps = parseInt(stepsInput);
     if (!isNaN(steps) && steps > 0) {
@@ -49,6 +48,7 @@ export default function HealthTest() {
     }
   };
 
+  // Injeta calorias artificiais para validar o ciclo de atualizacao da UI.
   const handleAddCalories = async () => {
     const calories = parseInt(caloriesInput);
     if (!isNaN(calories) && calories > 0) {
@@ -57,6 +57,7 @@ export default function HealthTest() {
     }
   };
 
+  // Busca um endereco e cria um marcador de validacao no mapa.
   const handleSearch = async () => {
     if (searchQuery.trim()) {
       try {
@@ -88,7 +89,7 @@ export default function HealthTest() {
           <p className="text-gray-600">Teste de integração Google Fit e OpenStreetMap</p>
         </header>
 
-        {/* Google Fit Authentication */}
+        {/* Bloco de autenticacao e sincronizacao com a fonte de saude. */}
         <section className="bg-white rounded-lg shadow p-6">
           <h2 className="text-xl font-semibold mb-4">Google Fit Status</h2>
           
@@ -139,13 +140,13 @@ export default function HealthTest() {
           )}
         </section>
 
-        {/* Health Data Display */}
+        {/* Resumo das metricas carregadas a partir da fonte atual. */}
         {healthData && (
           <section className="bg-white rounded-lg shadow p-6">
             <h2 className="text-xl font-semibold mb-4">Dados de Saúde</h2>
             
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* Steps */}
+              {/* Bloco de passos com progresso contra a meta diaria. */}
               <div className="space-y-2">
                 <div className="flex justify-between items-center">
                   <span className="font-medium">Passos:</span>
@@ -162,7 +163,7 @@ export default function HealthTest() {
                 <p className="text-sm text-gray-600">{stepsProgress.toFixed(1)}% da meta (10.000)</p>
               </div>
 
-              {/* Calories */}
+              {/* Bloco de calorias com o mesmo padrao visual de progresso. */}
               <div className="space-y-2">
                 <div className="flex justify-between items-center">
                   <span className="font-medium">Calorias:</span>
@@ -179,7 +180,7 @@ export default function HealthTest() {
                 <p className="text-sm text-gray-600">{caloriesProgress.toFixed(1)}% da meta (500)</p>
               </div>
 
-              {/* Distance */}
+              {/* Distancia consolidada retornada pela integracao. */}
               <div>
                 <div className="flex justify-between items-center">
                   <span className="font-medium">Distância:</span>
@@ -189,7 +190,7 @@ export default function HealthTest() {
                 </div>
               </div>
 
-              {/* Active Minutes */}
+              {/* Tempo de atividade consolidado pela integracao. */}
               <div>
                 <div className="flex justify-between items-center">
                   <span className="font-medium">Minutos Ativos:</span>
@@ -208,7 +209,7 @@ export default function HealthTest() {
           </section>
         )}
 
-        {/* Manual Input */}
+        {/* Controles de injecao manual para testar mutacoes locais. */}
         <section className="bg-white rounded-lg shadow p-6">
           <h2 className="text-xl font-semibold mb-4">Adicionar Dados Manualmente</h2>
           
@@ -247,7 +248,7 @@ export default function HealthTest() {
           </div>
         </section>
 
-        {/* Map Test */}
+        {/* Painel de validacao do fluxo de mapa e geolocalizacao. */}
         <section className="bg-white rounded-lg shadow p-6">
           <h2 className="text-xl font-semibold mb-4">Teste de Mapa (OpenStreetMap)</h2>
           
@@ -311,7 +312,7 @@ export default function HealthTest() {
           </div>
         </section>
 
-        {/* Status */}
+        {/* Estado bruto do sistema para depuracao rapida do ambiente. */}
         <section className="bg-white rounded-lg shadow p-6">
           <h2 className="text-xl font-semibold mb-4">Status do Sistema</h2>
           

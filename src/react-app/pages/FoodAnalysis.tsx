@@ -1,154 +1,31 @@
-import { useMemo, useRef, useState, useEffect, type ChangeEventHandler } from "react";
+import { useCallback, useMemo, useRef, useState, useEffect, type ChangeEventHandler } from "react";
 import { useNavigate } from "react-router";
-import { Camera, AlertTriangle, CheckCircle2, Bolt, ShieldCheck, ImageIcon, ArrowLeft } from "lucide-react";
+import { Camera, AlertTriangle, CheckCircle2, Bolt, ShieldCheck, ImageIcon, ArrowLeft, BookOpen } from "lucide-react";
 import AppPageShell from "@/react-app/components/AppPageShell";
 import LoadingBall from "@/react-app/components/LoadingBall";
+import { isAndroidNativeAvailable } from "@/react-app/services/native/androidBridge";
 import { cameraService, type NormalizedCameraImage } from "@/react-app/services/native/cameraService";
 import { ApiRequestError, clearJsonCache, fetchJson } from "@/react-app/utils/api";
 import { safeGet } from "@/utils/typeHelpers";
-
-type AnalysisItem = {
-  food_name: string;
-  portion_description: string;
-  calories: number | null;
-  protein: number | null;
-  carbs: number | null;
-  fats: number | null;
-  energy_kj: number | null;
-  source: "usda" | "rapidapi" | "estimate" | "ocr_label";
-  warning?: string | undefined;
-};
-
-type AnalysisResult = {
-  success: boolean;
-  items: AnalysisItem[];
-  totals: {
-    calories: number;
-    energy_kj: number;
-    protein: number;
-    carbs: number;
-    fats: number;
-    macro_percentages: { protein: number; carbs: number; fats: number };
-  };
-  has_estimates?: boolean | undefined;
-  estimation_warning?: string | undefined;
-};
-
-type IdentifiedItem = {
-  food_name: string;
-  portion_description: string;
-  portion_multiplier: number;
-};
-
-type MediaPipeClassifier = {
-  classify: (image: HTMLImageElement) => {
-    classifications?: Array<{
-      categories?: Array<{ categoryName?: string | undefined; score?: number | undefined }>;
-    }>;
-  };
-  close: () => void;
-};
-
-type MediaPipeVisionModule = {
-  FilesetResolver: {
-    forVisionTasks: (wasmRootPath: string) => Promise<unknown>;
-  };
-  ImageClassifier: {
-    createFromOptions: (vision: unknown, options: Record<string, unknown>) => Promise<MediaPipeClassifier>;
-  };
-};
-
-type ClassificationCandidate = {
-  label: string;
-  score: number;
-};
-
-type FoodClassificationResult = {
-  identifiedItems: IdentifiedItem[];
-  foodDescription?: string | undefined;
-};
-
-type PreviewSource = "camera" | "gallery";
-
-const STRICT_CLASSIFICATION_SCORE = 0.12;
-const RELAXED_CLASSIFICATION_SCORE = 0.04;
-const MAX_IDENTIFIED_ITEMS = 3;
-const MAX_DESCRIPTION_LABELS = 6;
-
-async function loadVisionModule(): Promise<MediaPipeVisionModule> {
-  const moduleUrl = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/+esm";
-  return (await import(/* @vite-ignore */ moduleUrl)) as MediaPipeVisionModule;
-}
-
-function toIdentifiedItems(result: { classifications?: Array<{ categories?: Array<{ categoryName?: string | undefined; score?: number | undefined }> }> }): IdentifiedItem[] {
-  const categories = safeGet(result.classifications ?? [], 0)?.categories ?? [];
-  return categories
-    .filter((category) => Number(category.score ?? 0) >= 0.2)
-    .slice(0, 3)
-    .map((category) => ({
-      food_name: String(category.categoryName || "alimento"),
-      portion_description: "porção média",
-      portion_multiplier: 1,
-    }));
-}
-
-function normalizeCategoryLabel(rawLabel?: string | undefined): string {
-  return String(rawLabel || "")
-    .trim()
-    .replace(/[_-]+/g, " ")
-    .replace(/\s+/g, " ");
-}
-
-function extractClassificationCandidates(
-  result: { classifications?: Array<{ categories?: Array<{ categoryName?: string | undefined; score?: number | undefined }> }> },
-): ClassificationCandidate[] {
-  const seen = new Set<string>();
-
-  return (result.classifications ?? [])
-    .flatMap((classification) => classification.categories ?? [])
-    .map((category) => ({
-      label: normalizeCategoryLabel(category.categoryName),
-      score: Number(category.score ?? 0),
-    }))
-    .filter((category) => category.label.length > 0 && Number.isFinite(category.score) && category.score > 0)
-    .sort((left, right) => right.score - left.score)
-    .filter((category) => {
-      const key = category.label.toLowerCase();
-      if (seen.has(key)) {
-        return false;
-      }
-      seen.add(key);
-      return true;
-    });
-}
-
-function toIdentifiedItemsFromCandidates(candidates: ClassificationCandidate[]): IdentifiedItem[] {
-  return candidates
-    .filter((candidate) => candidate.score >= STRICT_CLASSIFICATION_SCORE)
-    .slice(0, MAX_IDENTIFIED_ITEMS)
-    .map((candidate) => ({
-      food_name: candidate.label,
-      portion_description: "porcao media",
-      portion_multiplier: 1,
-    }));
-}
-
-function toFoodDescription(candidates: ClassificationCandidate[]): string | undefined {
-  const preferredLabels = candidates
-    .filter((candidate) => candidate.score >= RELAXED_CLASSIFICATION_SCORE)
-    .slice(0, MAX_DESCRIPTION_LABELS)
-    .map((candidate) => candidate.label);
-
-  const fallbackLabels = preferredLabels.length > 0
-    ? preferredLabels
-    : candidates.slice(0, Math.min(3, candidates.length)).map((candidate) => candidate.label);
-
-  return fallbackLabels.length > 0 ? fallbackLabels.join(", ") : undefined;
-}
-
-function toPreviewSource(source: NormalizedCameraImage["source"]): PreviewSource {
-  return source === "android-gallery" || source === "web-file" ? "gallery" : "camera";
-}
+import MacroCard from "./food-analysis/MacroCard";
+import SavedFoodsLibraryPanel from "./food-analysis/SavedFoodsLibraryPanel";
+import {
+  extractClassificationCandidates,
+  loadVisionModule,
+  toFoodDescription,
+  toIdentifiedItems,
+  toIdentifiedItemsFromCandidates,
+  toPreviewSource,
+} from "./food-analysis/helpers";
+import type {
+  AnalysisResult,
+  FoodClassificationResult,
+  IdentifiedItem,
+  MediaPipeClassifier,
+  PreviewSource,
+  SavedFoodEntry,
+  WebCameraStartResult,
+} from "./food-analysis/types";
 
 export default function FoodAnalysis() {
   const navigate = useNavigate();
@@ -161,6 +38,7 @@ export default function FoodAnalysis() {
   const processNormalizedImageRef = useRef<(image: NormalizedCameraImage) => void>(() => undefined);
   const classifierClosingRef = useRef(false);
   const lastNormalizedImageRef = useRef<NormalizedCameraImage | null>(null);
+  const previewWatchdogRef = useRef<number | null>(null);
 
   const [streamActive, setStreamActive] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
@@ -171,12 +49,26 @@ export default function FoodAnalysis() {
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [savedFoods, setSavedFoods] = useState<SavedFoodEntry[]>([]);
+  const [savedFoodsLoading, setSavedFoodsLoading] = useState(false);
+  const [savedFoodsError, setSavedFoodsError] = useState<string | null>(null);
+  const [libraryOpen, setLibraryOpen] = useState(false);
 
   const [mediaPipeReady, setMediaPipeReady] = useState(false);
   const [mediaPipeLoading, setMediaPipeLoading] = useState(true);
   const [mediaPipeError, setMediaPipeError] = useState<string | null>(null);
+  const androidNativeAvailable = isAndroidNativeAvailable();
+  const reduceInlineCameraEffects = androidNativeAvailable && streamActive && !preview;
 
-  const stopCamera = (updateState = true) => {
+  const clearPreviewWatchdog = useCallback(() => {
+    if (previewWatchdogRef.current !== null) {
+      window.clearTimeout(previewWatchdogRef.current);
+      previewWatchdogRef.current = null;
+    }
+  }, []);
+
+  const stopCamera = useCallback((updateState = true) => {
+    clearPreviewWatchdog();
     const stream = videoRef.current?.srcObject as MediaStream | null;
     stream?.getTracks().forEach((track) => track.stop());
     if (videoRef.current) {
@@ -185,7 +77,7 @@ export default function FoodAnalysis() {
     if (updateState && mountedRef.current) {
       setStreamActive(false);
     }
-  };
+  }, [clearPreviewWatchdog]);
 
   const destroyMediaPipe = () => {
     if (classifierClosingRef.current) return;
@@ -195,7 +87,7 @@ export default function FoodAnalysis() {
       try {
         classifier.close();
       } catch {
-        // no-op: evita crash em desmontagem concorrente
+        // Evita falha durante desmontagem concorrente.
       }
       classifierRef.current = null;
     }
@@ -204,6 +96,29 @@ export default function FoodAnalysis() {
     }
     classifierClosingRef.current = false;
   };
+
+  const loadSavedFoods = useCallback(async () => {
+    setSavedFoodsLoading(true);
+    setSavedFoodsError(null);
+
+    try {
+      const foods = await fetchJson<SavedFoodEntry[]>("/api/food/today?limit=8");
+      if (!mountedRef.current) return;
+      setSavedFoods(Array.isArray(foods) ? foods : []);
+    } catch (foodsError) {
+      if (foodsError instanceof ApiRequestError && (foodsError.status === 401 || foodsError.status === 403)) {
+        navigate("/app");
+        return;
+      }
+
+      if (!mountedRef.current) return;
+      setSavedFoodsError("Nao foi possivel carregar a biblioteca agora.");
+    } finally {
+      if (mountedRef.current) {
+        setSavedFoodsLoading(false);
+      }
+    }
+  }, [navigate]);
 
   const initializeMediaPipe = async () => {
     if (classifierRef.current) {
@@ -263,14 +178,16 @@ export default function FoodAnalysis() {
   useEffect(() => {
     mountedRef.current = true;
     void initializeMediaPipe();
+    void loadSavedFoods();
 
     return () => {
       mountedRef.current = false;
+      clearPreviewWatchdog();
       stopCamera(false);
       destroyMediaPipe();
       classifierInitRef.current = null;
     };
-  }, []);
+  }, [clearPreviewWatchdog, loadSavedFoods, stopCamera]);
 
   useEffect(() => {
     const handleCaptureError = (captureError: Error) => {
@@ -327,7 +244,7 @@ export default function FoodAnalysis() {
 
     const classifier = classifierRef.current;
     if (!classifier) {
-      throw new Error("MediaPipe nÃ£o estÃ¡ disponÃ­vel para anÃ¡lise no momento.");
+      throw new Error("MediaPipe não está disponível para análise no momento.");
     }
 
     const prediction = classifier.classify(image);
@@ -377,9 +294,88 @@ export default function FoodAnalysis() {
     setPreviewSource(null);
     setLoading(false);
     setSaveSuccess(false);
+    setLibraryOpen(false);
   };
 
-  const startWebCamera = async () => {
+  const waitForInlinePreview = (video: HTMLVideoElement): Promise<boolean> => {
+    return new Promise((resolve) => {
+      let settled = false;
+      let intervalId: number | null = null;
+      let frameRequestId: number | null = null;
+
+      const isReady = () =>
+        video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA &&
+        video.videoWidth > 0 &&
+        video.videoHeight > 0;
+
+      const cleanup = () => {
+        video.removeEventListener("loadeddata", handleReadyCheck);
+        video.removeEventListener("canplay", handleReadyCheck);
+        if (intervalId !== null) {
+          window.clearInterval(intervalId);
+        }
+        if (frameRequestId !== null && "cancelVideoFrameCallback" in video) {
+          (video as HTMLVideoElement & { cancelVideoFrameCallback: (handle: number) => void }).cancelVideoFrameCallback(frameRequestId);
+        }
+        clearPreviewWatchdog();
+      };
+
+      const finish = (ready: boolean) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve(ready);
+      };
+
+      const handleReadyCheck = () => {
+        if (isReady()) {
+          finish(true);
+        }
+      };
+
+      const scheduleFrameProbe = () => {
+        if (!("requestVideoFrameCallback" in video)) {
+          return;
+        }
+
+        frameRequestId = (
+          video as HTMLVideoElement & {
+            requestVideoFrameCallback: (callback: () => void) => number;
+          }
+        ).requestVideoFrameCallback(() => {
+          if (isReady()) {
+            finish(true);
+            return;
+          }
+
+          if (!settled) {
+            scheduleFrameProbe();
+          }
+        });
+      };
+
+      if (isReady()) {
+        finish(true);
+        return;
+      }
+
+      video.addEventListener("loadeddata", handleReadyCheck);
+      video.addEventListener("canplay", handleReadyCheck);
+      intervalId = window.setInterval(handleReadyCheck, 120);
+      scheduleFrameProbe();
+
+      previewWatchdogRef.current = window.setTimeout(() => {
+        finish(isReady());
+      }, androidNativeAvailable ? 1400 : 2200);
+    });
+  };
+
+  const startWebCamera = async (): Promise<WebCameraStartResult> => {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setCameraError("A camera inline nao esta disponivel neste ambiente.");
+      return "unsupported";
+    }
+
     try {
       setCameraError(null);
       
@@ -387,10 +383,10 @@ export default function FoodAnalysis() {
         console.log("[Camera] Iniciando camera...");
       }
       
-      // Configurações otimizadas para mobile
+      // Usa constraints tolerantes para mobile e WebView.
       const constraints = {
         video: {
-          facingMode: { ideal: "environment" }, // Evita exact para melhor compatibilidade
+          facingMode: { ideal: "environment" },
           width: { ideal: 1280, max: 1920 },
           height: { ideal: 720, max: 1080 }
         },
@@ -409,33 +405,34 @@ export default function FoodAnalysis() {
       }
       
       if (videoRef.current) {
-        videoRef.current.srcObject = stream;
+        const currentVideo = videoRef.current;
+        currentVideo.srcObject = stream;
         
-        // Adiciona eventos para debug
-        videoRef.current.onloadedmetadata = () => {
+        // Instrumenta o video apenas em desenvolvimento.
+        currentVideo.onloadedmetadata = () => {
           if (import.meta.env.DEV) {
             console.log("[Camera] Video metadata loaded");
             console.log("[Camera] Video dimensions:", {
-              videoWidth: videoRef.current?.videoWidth,
-              videoHeight: videoRef.current?.videoHeight,
-              readyState: videoRef.current?.readyState,
+              videoWidth: currentVideo.videoWidth,
+              videoHeight: currentVideo.videoHeight,
+              readyState: currentVideo.readyState,
             });
           }
         };
         
-        videoRef.current.onplay = () => {
+        currentVideo.onplay = () => {
           if (import.meta.env.DEV) {
             console.log("[Camera] Video started playing");
           }
         };
         
-        videoRef.current.onerror = (e) => {
-          console.error('[Camera] Video error:', e);
+        currentVideo.onerror = (event) => {
+          console.error("[Camera] Video error:", event);
         };
         
-        // Tenta reproduzir o vídeo
+        // Garante a inicializacao do video antes da captura.
         try {
-          await videoRef.current.play();
+          await currentVideo.play();
           if (import.meta.env.DEV) {
             console.log("[Camera] Video play() chamado com sucesso");
           }
@@ -443,13 +440,31 @@ export default function FoodAnalysis() {
           console.error('[Camera] Erro ao reproduzir vídeo:', playError);
           throw playError;
         }
+
+        const previewReady = await waitForInlinePreview(currentVideo);
+        if (!previewReady) {
+          stream.getTracks().forEach((track) => track.stop());
+          currentVideo.srcObject = null;
+          setStreamActive(false);
+
+          if (androidNativeAvailable) {
+            if (import.meta.env.DEV) {
+              console.warn("[Camera] Preview inline indisponivel no Android WebView. Abrindo camera nativa.");
+            }
+            return "fallback-native";
+          }
+
+          setCameraError("Nao foi possivel renderizar o preview da camera neste dispositivo.");
+          return "blocked";
+        }
       }
       
       setStreamActive(true);
       if (import.meta.env.DEV) {
         console.log("[Camera] Stream ativo definido como true");
       }
-      
+
+      return "started";
     } catch (error) {
       console.error('[Camera] Erro ao iniciar câmera:', error);
       let errorMessage = "Permissão de câmera negada ou indisponível neste dispositivo.";
@@ -469,6 +484,7 @@ export default function FoodAnalysis() {
       }
       
       setCameraError(errorMessage);
+      return error instanceof Error && error.name === "NotSupportedError" ? "unsupported" : "blocked";
     }
   };
 
@@ -481,7 +497,23 @@ export default function FoodAnalysis() {
     setPreview(null);
     setPreviewSource(null);
     setSaveSuccess(false);
-    await cameraService.openCamera(startWebCamera);
+    setLibraryOpen(false);
+
+    if (androidNativeAvailable) {
+      await cameraService.openCamera();
+      return;
+    }
+
+    const startResult = await startWebCamera();
+    if (startResult === "fallback-native") {
+      setCameraError(null);
+      await cameraService.openCamera();
+      return;
+    }
+
+    if (startResult === "unsupported" && androidNativeAvailable) {
+      await cameraService.openCamera();
+    }
   };
 
   const openGallery = async () => {
@@ -493,6 +525,7 @@ export default function FoodAnalysis() {
     setPreview(null);
     setPreviewSource(null);
     setSaveSuccess(false);
+    setLibraryOpen(false);
     await cameraService.openGallery(() => {
       galleryInputRef.current?.click();
     });
@@ -611,6 +644,7 @@ export default function FoodAnalysis() {
       });
 
       clearJsonCache("/api/food/today");
+      void loadSavedFoods();
       setSaveSuccess(true);
       setError(null);
     } catch (saveError) {
@@ -627,6 +661,18 @@ export default function FoodAnalysis() {
 
   const macroBars = useMemo(() => result?.totals.macro_percentages ?? { protein: 0, carbs: 0, fats: 0 }, [result]);
   const handleBack = () => navigate(-1);
+  const scannerControlSurfaceClass = reduceInlineCameraEffects
+    ? "bg-black/70"
+    : "bg-white/10 backdrop-blur-md";
+  const scannerStatusSurfaceClass = reduceInlineCameraEffects
+    ? "bg-black/82"
+    : "bg-black/60 backdrop-blur-md";
+  const scannerLibrarySurfaceClass = reduceInlineCameraEffects
+    ? "bg-black/88"
+    : "bg-black/45 backdrop-blur-xl";
+  const scannerCaptureButtonSurfaceClass = reduceInlineCameraEffects
+    ? "bg-black/70"
+    : "bg-white/10";
 
   return (
     <AppPageShell bottomNavActive="missions" className="fl-theme-page overflow-hidden w-full flex flex-col font-display antialiased">
@@ -670,10 +716,10 @@ export default function FoodAnalysis() {
         .custom-scrollbar::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--app-primary-color) 20%, transparent); border-radius: 10px; }
       `}</style>
 
-      {/* Welcome Screen (Initial State) */}
+      {/* Estado inicial */}
       {(!streamActive && !preview && !result) ? (
         <div className="flex-1 flex flex-col relative z-20 overflow-y-auto custom-scrollbar pb-4 min-w-0">
-          {/* Header */}
+          {/* Cabecalho */}
           <header className="sticky top-0 z-10 flex items-center justify-between border-b p-3 sm:p-4 lg:p-6 backdrop-blur-md" style={{ borderColor: "var(--fl-border-soft)", backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 84%, transparent)" }}>
             <button 
               onClick={handleBack}
@@ -683,10 +729,10 @@ export default function FoodAnalysis() {
               <ArrowLeft className="h-5 w-5" />
             </button>
             <h1 className="text-[0.68rem] font-bold uppercase tracking-[0.2em] sm:text-xs" style={{ color: "var(--fl-color-text)" }}>Scanner de Alimentos</h1>
-            <div className="w-10 h-10" /> {/* Spacer */}
+            <div className="w-10 h-10" aria-hidden="true" />
           </header>
 
-          {/* Hero Section */}
+          {/* Introducao */}
           <div className="px-4 py-6 text-center sm:px-6 sm:py-10 min-w-0">
             <h2 className="mb-1 text-2xl sm:text-4xl font-bold tracking-tight">Scanner IA</h2>
             <p className="text-[11px] sm:text-sm font-medium" style={{ color: 'var(--app-primary-color)' }}>
@@ -694,9 +740,9 @@ export default function FoodAnalysis() {
             </p>
           </div>
 
-          {/* Cards Section */}
+          {/* Entradas principais */}
           <div className="flex-1 space-y-6 px-4 sm:space-y-8 sm:px-6">
-            {/* Primary Card - Camera */}
+            {/* Atalho da camera */}
             <div className="group relative">
               <div className="absolute -inset-1 bg-primary rounded-3xl blur opacity-10 card-glow-bg group-hover:opacity-30 transition-opacity" style={{ backgroundColor: 'var(--app-primary-color)' }}></div>
               <div className="fl-theme-surface relative flex flex-col items-center overflow-hidden rounded-[1.5rem] sm:rounded-3xl p-5 sm:p-6 lg:p-8 min-w-0">
@@ -724,7 +770,7 @@ export default function FoodAnalysis() {
               </div>
             </div>
 
-            {/* Secondary Card - Gallery */}
+            {/* Atalho da galeria */}
             <button 
               onClick={() => { void openGallery(); }}
               className="fl-theme-surface-soft group relative flex w-full items-center justify-between overflow-hidden rounded-3xl border-l-4 p-4 transition-all sm:p-6"
@@ -741,7 +787,7 @@ export default function FoodAnalysis() {
             </button>
           </div>
 
-          {/* Footer Badge */}
+          {/* Selo inferior */}
           <div className="mt-auto flex justify-center px-4 pb-6 pt-8 sm:px-6 sm:pb-8">
             <div className="fl-theme-surface-soft inline-flex items-center gap-2 rounded-full px-4 py-2 backdrop-blur-sm">
               <ShieldCheck className="w-4 h-4" style={{ color: 'var(--app-primary-color)' }} />
@@ -749,10 +795,10 @@ export default function FoodAnalysis() {
             </div>
           </div>
         </div>
-      ) : result ? (
-        /* Results Screen (Full screen, no black void) */
+      ) : result && !preview ? (
+        /* Tela de resultado sem preview */
         <div className="custom-scrollbar flex flex-1 flex-col overflow-y-auto p-3 pb-4 sm:p-4 sm:pb-5 lg:p-6 animate-in fade-in slide-in-from-bottom-5 duration-500 min-w-0" style={{ backgroundColor: "var(--app-bg-color)" }}>
-          {/* Header */}
+          {/* Cabecalho */}
           <div className="flex items-center justify-between mb-8">
             <button 
               onClick={handleBack}
@@ -765,7 +811,7 @@ export default function FoodAnalysis() {
             <div className="w-10 h-10" />
           </div>
 
-          {/* Energy Display */}
+          {/* Totais energeticos */}
           <div className="flex justify-between items-start mb-8">
             <div>
               <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.2em]" style={{ color: "var(--fl-color-text-muted)" }}>Energia Estimada</p>
@@ -779,7 +825,7 @@ export default function FoodAnalysis() {
             </div>
           </div>
 
-          {/* Macros Grid */}
+          {/* Grade de macros */}
           <div className="mb-8 grid grid-cols-3 gap-2 sm:mb-10 sm:gap-3">
             <MacroCard label="Proteínas" value={`${result.totals.protein}g`} percentage={macroBars.protein} />
             <MacroCard label="Carbs" value={`${result.totals.carbs}g`} percentage={macroBars.carbs} />
@@ -797,7 +843,7 @@ export default function FoodAnalysis() {
             </div>
           </div>
 
-          {/* Ingredients Section */}
+          {/* Lista detalhada */}
           <div className="mb-10 sm:mb-12">
             <h4 className="mb-4 text-[10px] font-bold uppercase tracking-[0.2em]" style={{ color: "var(--fl-color-text-muted)" }}>Ingredientes Detectados</h4>
             <div className="space-y-3">
@@ -831,7 +877,7 @@ export default function FoodAnalysis() {
             </div>
           ) : null}
 
-          {/* Action Buttons (Fixed or scroll end) */}
+          {/* Acoes finais */}
           <div className="mt-auto grid grid-cols-2 gap-3 pt-4 sm:gap-4">
             <button 
               onClick={() => { void openCamera(); }}
@@ -870,7 +916,7 @@ export default function FoodAnalysis() {
             <img src={preview} alt="Previa do alimento" className="aspect-[4/5] w-full object-cover" />
           </div>
 
-          <div className="mb-6 flex justify-center">
+          <div className="mb-6">
             {loading ? (
               <div className="inline-flex items-center gap-3 rounded-full border px-4 py-2" style={{ borderColor: "var(--fl-border-soft)", backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 80%, transparent)" }}>
                 <LoadingBall size="sm" />
@@ -882,6 +928,57 @@ export default function FoodAnalysis() {
               <div className="inline-flex items-center gap-3 rounded-full border border-red-500/30 bg-red-950/40 px-4 py-2">
                 <AlertTriangle className="w-4 h-4 text-red-500" />
                 <span className="text-xs font-bold uppercase tracking-widest text-red-400">{error}</span>
+              </div>
+            ) : result ? (
+              <div className="space-y-4">
+                <div className="fl-theme-surface rounded-[1.75rem] border p-4" style={{ borderColor: "var(--fl-border-soft)" }}>
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <p className="text-[10px] font-bold uppercase tracking-[0.22em]" style={{ color: "var(--fl-color-text-muted)" }}>
+                        Resultado da Busca
+                      </p>
+                      <h3 className="mt-2 text-3xl font-bold tracking-tight" style={{ color: "var(--app-primary-color)" }}>
+                        {result.totals.calories} <span className="text-base font-medium" style={{ color: "var(--fl-color-text-soft)" }}>kcal</span>
+                      </h3>
+                    </div>
+                    <div className="rounded-full border px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.18em]" style={{ borderColor: "color-mix(in srgb, var(--app-primary-color) 24%, transparent)", backgroundColor: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)", color: "var(--app-primary-color)" }}>
+                      {result.has_estimates ? "Com estimativa" : "Dados detectados"}
+                    </div>
+                  </div>
+
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    {result.items.map((item) => (
+                      <span
+                        key={`${item.food_name}-${item.portion_description}`}
+                        className="rounded-full border px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.18em]"
+                        style={{ borderColor: "color-mix(in srgb, var(--app-primary-color) 24%, transparent)", backgroundColor: "color-mix(in srgb, var(--app-primary-color) 8%, transparent)", color: "var(--app-primary-color)" }}
+                      >
+                        {item.food_name}
+                      </span>
+                    ))}
+                  </div>
+
+                  <div className="mt-4 space-y-2">
+                    {result.items.slice(0, 3).map((item) => (
+                      <div key={`${item.food_name}-${item.portion_description}-summary`} className="flex items-center justify-between rounded-2xl border px-3 py-2.5" style={{ borderColor: "var(--fl-border-soft)", backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 65%, transparent)" }}>
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-bold" style={{ color: "var(--fl-color-text)" }}>{item.food_name}</p>
+                          <p className="text-[10px] uppercase tracking-[0.16em]" style={{ color: "var(--fl-color-text-muted)" }}>{item.portion_description}</p>
+                        </div>
+                        <span className="ml-3 text-xs font-bold uppercase tracking-[0.18em]" style={{ color: "var(--app-primary-color)" }}>
+                          {item.calories ?? 0} kcal
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {saveSuccess ? (
+                  <div className="inline-flex items-center gap-3 rounded-full border px-4 py-2" style={{ borderColor: "color-mix(in srgb, var(--app-primary-color) 24%, transparent)", backgroundColor: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)", color: "var(--app-primary-color)" }}>
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span className="text-[11px] font-bold uppercase tracking-widest">Refeicao salva no historico</span>
+                  </div>
+                ) : null}
               </div>
             ) : null}
           </div>
@@ -900,21 +997,32 @@ export default function FoodAnalysis() {
             >
               {previewSource === "gallery" ? "Outra Imagem" : "Novo Scan"}
             </button>
-            <button
-              onClick={() => { void retryAnalysis(); }}
-              disabled={loading}
-              className="neon-glow h-14 rounded-2xl text-xs font-bold uppercase tracking-widest transition-all active:scale-95 disabled:opacity-50"
-              style={{ backgroundColor: 'var(--app-primary-color)', color: 'var(--fl-nav-item-active-text)' }}
-            >
-              {loading ? "Analisando..." : "Tentar Novamente"}
-            </button>
+            {result ? (
+              <button
+                onClick={saveMeal}
+                disabled={saving || saveSuccess}
+                className="neon-glow h-14 rounded-2xl text-xs font-bold uppercase tracking-widest transition-all active:scale-95 disabled:opacity-50"
+                style={{ backgroundColor: 'var(--app-primary-color)', color: 'var(--fl-nav-item-active-text)' }}
+              >
+                {saving ? "Registrando..." : saveSuccess ? "Salvo" : "Confirmar e Salvar"}
+              </button>
+            ) : (
+              <button
+                onClick={() => { void retryAnalysis(); }}
+                disabled={loading}
+                className="neon-glow h-14 rounded-2xl text-xs font-bold uppercase tracking-widest transition-all active:scale-95 disabled:opacity-50"
+                style={{ backgroundColor: 'var(--app-primary-color)', color: 'var(--fl-nav-item-active-text)' }}
+              >
+                {loading ? "Analisando..." : "Tentar Novamente"}
+              </button>
+            )}
           </div>
         </div>
       ) : (
         <>
-          {/* Camera Viewfinder Section (Active Scanner) */}
+          {/* Scanner ativo */}
           <main className="relative flex-1 overflow-hidden">
-            {/* Simulated Camera Feed / Video Source */}
+            {/* Fonte visual */}
             <div className="absolute inset-0 z-0 overflow-hidden flex items-center justify-center bg-black">
               {!preview && streamActive ? (
                 <video 
@@ -924,7 +1032,7 @@ export default function FoodAnalysis() {
                   playsInline 
                   muted 
                   style={{ 
-                    transform: 'scaleX(-1)', // Espelha para melhor experiência
+                    transform: 'scaleX(-1)',
                     objectFit: 'cover',
                     width: '100%',
                     height: '100%'
@@ -939,20 +1047,21 @@ export default function FoodAnalysis() {
                 </div>
               )}
 
-              {/* Scanning Overlay Effects */}
+              {/* Overlay do scanner */}
               <div className="absolute inset-0 bg-black/20"></div>
 
-              {/* Scanner Frame Corners */}
-              <div className="absolute inset-10 border-2 border-transparent pointer-events-none" style={{ animation: "pulse-border 2s infinite" }}>
-                <div className="absolute top-0 left-0 w-8 h-8 border-t-4 border-l-4 rounded-tl-xl" style={{ borderColor: 'var(--app-primary-color)' }}></div>
-                <div className="absolute top-0 right-0 w-8 h-8 border-t-4 border-r-4 rounded-tr-xl" style={{ borderColor: 'var(--app-primary-color)' }}></div>
-                <div className="absolute bottom-0 left-0 w-8 h-8 border-b-4 border-l-4 rounded-bl-xl" style={{ borderColor: 'var(--app-primary-color)' }}></div>
-                <div className="absolute bottom-0 right-0 w-8 h-8 border-b-4 border-r-4 rounded-br-xl" style={{ borderColor: 'var(--app-primary-color)' }}></div>
+              {/* Moldura ativa */}
+              <div className="absolute left-6 right-6 top-24 bottom-8 pointer-events-none" style={{ animation: "pulse-border 2s infinite" }}>
+                <div className="absolute inset-0 rounded-[2.5rem] border border-white/10 bg-white/[0.02]"></div>
+                <div className="absolute top-0 left-0 w-9 h-9 border-t-4 border-l-4 rounded-tl-[1.5rem]" style={{ borderColor: 'var(--app-primary-color)' }}></div>
+                <div className="absolute top-0 right-0 w-9 h-9 border-t-4 border-r-4 rounded-tr-[1.5rem]" style={{ borderColor: 'var(--app-primary-color)' }}></div>
+                <div className="absolute bottom-0 left-0 w-9 h-9 border-b-4 border-l-4 rounded-bl-[1.5rem]" style={{ borderColor: 'var(--app-primary-color)' }}></div>
+                <div className="absolute bottom-0 right-0 w-9 h-9 border-b-4 border-r-4 rounded-br-[1.5rem]" style={{ borderColor: 'var(--app-primary-color)' }}></div>
                 <div className="scanner-line"></div>
               </div>
             </div>
 
-            {/* Header Overlay (In Scanner) */}
+            {/* Cabecalho do scanner */}
             <header className="absolute top-0 left-0 right-0 p-6 flex justify-between items-center z-10 bg-gradient-to-b from-black/70 to-transparent">
               <button 
                 onClick={() => {
@@ -965,47 +1074,80 @@ export default function FoodAnalysis() {
                   }
                   stopCamera();
                   setStreamActive(false);
+                  setLibraryOpen(false);
                   handleBack();
                 }}
-                className="w-10 h-10 rounded-full bg-white/10 backdrop-blur-md flex items-center justify-center border border-white/20 transition-all hover:bg-white/20"
+                className={`w-10 h-10 rounded-full flex items-center justify-center border border-white/20 transition-all hover:bg-white/20 ${scannerControlSurfaceClass}`}
                 aria-label="Voltar"
               >
                 <ArrowLeft className="w-5 h-5 text-white" />
               </button>
               <h1 className="text-sm font-bold tracking-widest uppercase text-white/90">AI Vision ACTIVE</h1>
-              <div className="w-10 h-10" />
+              <button
+                type="button"
+                onClick={() => setLibraryOpen((current) => !current)}
+                className={`flex h-10 min-w-10 items-center justify-center rounded-full px-3 border border-white/20 transition-all hover:bg-white/20 ${scannerControlSurfaceClass}`}
+                aria-label="Abrir biblioteca de alimentos"
+              >
+                <BookOpen className="h-4 w-4 text-white" />
+                <span className="ml-2 text-[10px] font-bold uppercase tracking-[0.18em] text-white/80">
+                  {savedFoods.length}
+                </span>
+              </button>
             </header>
 
-            {/* Status Messages */}
-            <div className="absolute bottom-32 left-0 right-0 px-6 z-10 text-center pointer-events-none">
+            <div className="absolute inset-x-0 bottom-0 z-10 h-52 bg-gradient-to-t from-black/85 via-black/40 to-transparent pointer-events-none"></div>
+
+            {/* Mensagens de estado */}
+            <div className="absolute bottom-32 left-0 right-0 px-6 z-20 text-center pointer-events-none">
               {cameraError && (
-                <div className="inline-flex items-center gap-3 bg-red-950/60 backdrop-blur-md px-4 py-2 rounded-full border border-red-500/30">
+                <div className={`inline-flex items-center gap-3 px-4 py-2 rounded-full border border-red-500/30 ${reduceInlineCameraEffects ? "bg-red-950/90" : "bg-red-950/60 backdrop-blur-md"}`}>
                     <AlertTriangle className="w-4 h-4 text-red-500" />
                     <span className="text-xs font-bold uppercase tracking-widest text-red-400">{cameraError}</span>
                 </div>
               )}
               {loading && (
-                <div className="inline-flex items-center gap-3 bg-black/60 backdrop-blur-md px-4 py-2 rounded-full border border-white/10">
+                <div className={`inline-flex items-center gap-3 px-4 py-2 rounded-full border border-white/10 ${scannerStatusSurfaceClass}`}>
                     <LoadingBall size="sm" />
                     <span className="text-xs font-bold uppercase tracking-widest text-white/80">Sincronizando Macros...</span>
                 </div>
               )}
               {error && (
-                <div className="inline-flex items-center gap-3 bg-red-950/60 backdrop-blur-md px-4 py-2 rounded-full border border-red-500/30">
+                <div className={`inline-flex items-center gap-3 px-4 py-2 rounded-full border border-red-500/30 ${reduceInlineCameraEffects ? "bg-red-950/90" : "bg-red-950/60 backdrop-blur-md"}`}>
                     <AlertTriangle className="w-4 h-4 text-red-500" />
                     <span className="text-xs font-bold uppercase tracking-widest text-red-400">{error}</span>
                 </div>
               )}
             </div>
 
-            {/* Capture Control (Visible when in scanner but no result) */}
+            {!preview && streamActive && (
+              <>
+                {/* Biblioteca inline */}
+                <SavedFoodsLibraryPanel
+                  libraryOpen={libraryOpen}
+                  savedFoods={savedFoods}
+                  savedFoodsLoading={savedFoodsLoading}
+                  savedFoodsError={savedFoodsError}
+                  scannerLibrarySurfaceClass={scannerLibrarySurfaceClass}
+                  onRefresh={loadSavedFoods}
+                />
+              </>
+            )}
+
+            {/* Disparo da captura */}
             {!preview && streamActive && !loading && (
-               <div className="absolute bottom-10 left-0 right-0 flex justify-center z-20">
+               <div className="absolute bottom-8 left-0 right-0 flex flex-col items-center justify-center gap-3 z-30">
+                 <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-white/65">
+                   Centralize o alimento no quadro
+                 </p>
                  <button 
                   onClick={captureFromCamera}
-                  className="w-20 h-20 rounded-full border-4 border-white/20 flex items-center justify-center bg-white/10 active:scale-95 transition-all p-1"
+                  className={`relative flex h-20 w-20 items-center justify-center rounded-full border-4 border-white/20 p-1 transition-all active:scale-95 ${scannerCaptureButtonSurfaceClass}`}
                 >
-                  <div className="w-full h-full rounded-full bg-white opacity-80 shadow-lg"></div>
+                  {!reduceInlineCameraEffects ? (
+                    <div className="absolute inset-0 rounded-full bg-white/10 blur-md"></div>
+                  ) : null}
+                  <div className="relative h-full w-full rounded-full bg-white opacity-85 shadow-lg"></div>
                 </button>
                </div>
             )}
@@ -1014,20 +1156,5 @@ export default function FoodAnalysis() {
       )}
       <canvas ref={canvasRef} className="hidden" />
     </AppPageShell>
-  );
-}
-
-function MacroCard({ label, value, percentage }: { label: string; value: string; percentage: number }) {
-  return (
-    <div className="fl-theme-surface p-3 rounded-2xl flex flex-col items-center">
-      <span className="text-[10px] fl-theme-text-muted uppercase font-medium">{label}</span>
-      <span className="text-xl font-bold tracking-tight">{value}</span>
-      <div className="mt-2 h-1 w-full overflow-hidden rounded-full" style={{ backgroundColor: "color-mix(in srgb, var(--fl-color-text) 8%, transparent)" }}>
-        <div 
-          className="h-full transition-all duration-1000" 
-          style={{ backgroundColor: 'var(--app-primary-color)', width: `${Math.min(100, Math.max(0, percentage))}%` }}
-        />
-      </div>
-    </div>
   );
 }

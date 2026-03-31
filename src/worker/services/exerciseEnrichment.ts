@@ -85,6 +85,7 @@ type CacheEntry<T> = {
   expiresAt: number;
 };
 
+// Resolves exercise catalog, media, and search fallbacks without changing mission semantics for consumers.
 const RAPID_TIMEOUT_MS = 3_000;
 const CACHE_TTL_MS = 15 * 60_000;
 const CACHE_MAX_ENTRIES = 250;
@@ -269,6 +270,7 @@ const searchCache = new Map<string, CacheEntry<ExerciseDbExercise[]>>();
 const mediaCache = new Map<string, CacheEntry<AscendExercise | null>>();
 const videoCache = new Map<string, CacheEntry<AscendVideoExercise | null>>();
 
+// Cache and transport helpers keep third-party lookups bounded and reusable during enrichment bursts.
 function getCachedValue<T>(cache: Map<string, CacheEntry<T>>, key: string): T | null {
   const current = cache.get(key);
   if (!current) return null;
@@ -493,6 +495,7 @@ async function getExerciseCatalog(env: RapidApiEnv): Promise<ExerciseDbExercise[
   return normalized;
 }
 
+// Query-building helpers normalize mission titles so search remains stable across aliases and localized names.
 function normalizeExerciseNameToken(value: string): string {
   return value
     .normalize("NFD")
@@ -814,6 +817,7 @@ export async function searchExerciseDB(exerciseName: string, env: RapidApiEnv): 
   return [];
 }
 
+// Media fetchers isolate the Ascend lookups used to complement catalog metadata.
 export async function fetchExerciseMedia(exerciseId: string, env: RapidApiEnv): Promise<AscendExercise | null> {
   if (hasFreshCacheEntry(mediaCache, exerciseId)) {
     return getCachedValue(mediaCache, exerciseId);
@@ -852,6 +856,7 @@ export async function fetchExerciseVideo(exerciseId: string, env: RapidApiEnv): 
   }
 }
 
+// Final enrichment merges catalog, media, and instruction sources into the payload expected by mission consumers.
 async function resolveEnrichedExerciseCandidate(
   baseExercise: ExerciseDbExercise,
   env: RapidApiEnv,

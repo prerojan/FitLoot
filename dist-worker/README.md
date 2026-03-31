@@ -1,1 +1,0 @@
-This folder contains the built output assets for the worker "fitloot-worker" generated at 2026-03-01T01:03:01.902Z.

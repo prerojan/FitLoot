@@ -1,18 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
-import { useAuth } from "@/react-app/contexts/auth";
+import { useAuth } from "@/react-app/auth/context";
+import { useRewardNotifications } from "@/react-app/contexts/rewardNotifications";
 import { useDailyMetrics } from "@/react-app/hooks/useDailyMetrics";
 import AppPageShell from "@/react-app/components/AppPageShell";
 import MissionCard from "@/react-app/components/MissionCard";
-import LevelUpModal from "@/react-app/components/LevelUpModal";
 import AIRecommendations from "@/react-app/components/AIRecommendations";
 import AIMissionGenerator from "@/react-app/components/AIMissionGenerator";
 import LoadingBall from "@/react-app/components/LoadingBall";
 import { Award, Bot, CalendarDays, Camera, Cloud, Flame, Zap } from "lucide-react";
-import { ROUTE_PATHS } from "@/react-app/constants/auth";
+import { ROUTE_PATHS } from "@/react-app/auth/constants";
 import type {
   AchievementWithUnlock,
   Mission,
+  RewardNotification,
   Title,
   UserProfile,
   UserProgression,
@@ -63,7 +64,7 @@ const DEFAULT_LOADING_STATE: DashboardLoadingState = {
 
 const EXPIRED_MISSION_AUTO_CLEANUP_MS = 2 * 60_000;
 
-/** Alinhado ao worker: XP na barra do nível atual ≥ meta ⇒ estado inconsistente; forçar refetch de /api/progression. */
+// Detecta progresso inconsistente para forcar reconciliacao com o worker.
 function progressionHasXpOverflow(p: Pick<UserProgression, "xp" | "level">): boolean {
   const level = Math.max(1, Math.floor(Number(p.level ?? 1)));
   const xp = Math.max(0, Math.floor(Number(p.xp ?? 0)));
@@ -99,6 +100,7 @@ function resolveMissionsApiPath(forceRefresh: boolean, cachedMissions: Mission[]
 
 export default function Dashboard() {
   const { user } = useAuth();
+  const { pushRewardNotifications } = useRewardNotifications();
   const navigate = useNavigate();
   const isExpiredMission = useCallback(
     (mission: Mission) => mission.status === "failed" || mission.status === "expired",
@@ -116,8 +118,6 @@ export default function Dashboard() {
   const [activeTitle, setActiveTitle] = useState<Title | null>(null);
   const [loadingState, setLoadingState] = useState<DashboardLoadingState>(DEFAULT_LOADING_STATE);
   const [error, setError] = useState<string | null>(null);
-  const [showLevelUp, setShowLevelUp] = useState(false);
-  const [newLevel, setNewLevel] = useState(0);
   const [quickActionsOpen, setQuickActionsOpen] = useState(false);
   const quickActionsRef = useRef<HTMLDivElement | null>(null);
   const { metrics: consolidatedMetrics, loading: metricsLoading, refreshMetrics } = useDailyMetrics({ syncRemote: true });
@@ -211,8 +211,7 @@ export default function Dashboard() {
           const { celebrate_level: celebrateLevel, ...clean } = payload;
           setProgression(clean);
           if (typeof celebrateLevel === "number" && celebrateLevel > 0) {
-            setNewLevel(celebrateLevel);
-            setShowLevelUp(true);
+            window.dispatchEvent(new Event("fitloot:refresh-rewards"));
           }
         },
       ),
@@ -248,6 +247,7 @@ export default function Dashboard() {
   }, [navigate, setSectionLoading]);
 
   useEffect(() => {
+    // Fecha o menu rapido ao clicar fora da area flutuante.
     if (!quickActionsOpen) return;
 
     const handlePointerDown = (event: PointerEvent) => {
@@ -264,6 +264,7 @@ export default function Dashboard() {
   }, [quickActionsOpen]);
 
   useEffect(() => {
+    // Carrega o dashboard somente com sessao valida.
     if (!user) {
       navigate("/app");
       return;
@@ -272,6 +273,7 @@ export default function Dashboard() {
   }, [user, navigate, loadData]);
 
   useEffect(() => {
+    // Antecipa rotas e caches usados com mais frequencia no dashboard.
     void import("@/react-app/pages/Profile");
     void import("@/react-app/pages/MiniGames");
     void import("@/react-app/pages/Friends");
@@ -326,19 +328,11 @@ export default function Dashboard() {
         return;
       }
 
-      const result = (await response.json()) as { leveledUp?: boolean | undefined };
+      const result = (await response.json()) as {
+        reward_events?: RewardNotification[] | undefined;
+      };
       setMissions((current) => current.filter((mission) => mission.id !== missionId));
-
-      if (result.leveledUp) {
-        clearJsonCache("/api/progression");
-        try {
-          const updatedProgression = await fetchAndCacheJson<UserProgression>("/api/progression");
-          setNewLevel(Number(updatedProgression.level ?? 0));
-          setShowLevelUp(true);
-        } catch {
-          // Dashboard refresh right below reconciles the state.
-        }
-      }
+      pushRewardNotifications(result.reward_events);
 
       await refreshData();
     } catch {
@@ -484,6 +478,7 @@ export default function Dashboard() {
     <AppPageShell bottomNavActive="missions" profile={profile} progression={progression}>
       <main className="mx-auto w-full max-w-[48rem] px-4 pb-[98px] pt-4 sm:px-5 md:px-8 md:pt-8 min-w-0">
         <div className="space-y-2 sm:space-y-4 md:space-y-6 min-w-0">
+          {/* Identificacao rapida do usuario e titulo ativo. */}
           <div className="flex w-full items-start justify-between gap-4 px-1">
             <div className="flex min-w-0 flex-1 flex-col">
               <p className="text-xs sm:text-sm md:text-base font-bold truncate" style={{ color: "var(--fl-color-text)" }}>{displayName}</p>
@@ -515,6 +510,7 @@ export default function Dashboard() {
             </div>
           </div>
 
+          {/* Estado de erro recuperavel do dashboard. */}
           {error ? (
             <div className="flex flex-col gap-2 rounded-2xl p-3 sm:flex-row sm:items-center sm:justify-between sm:p-4 min-w-0" style={SUBTLE_PANEL_STYLE}>
               <span className="text-xs sm:text-sm truncate" style={{ color: "var(--fl-color-text)" }}>{error}</span>
@@ -526,6 +522,7 @@ export default function Dashboard() {
 
 
           <section className="space-y-2 sm:space-y-4 min-w-0">
+            {/* Hero com XP, streak e conquista em destaque. */}
             <div className="rounded-[1.5rem] sm:rounded-[2rem] px-3 py-4 sm:px-4 sm:py-5 md:px-8 md:py-6 min-w-0" style={PRIMARY_GLOW_STYLE}>
               <div className="flex min-h-[7.5rem] sm:min-h-[9.5rem] md:min-h-[10rem] flex-row items-center justify-between gap-1 sm:gap-2 min-w-0">
                 <div className="flex flex-col justify-center gap-2 sm:gap-3 md:gap-4 pl-1 min-w-0">
@@ -598,6 +595,7 @@ export default function Dashboard() {
             </div>
 
             <div className="grid grid-cols-2 gap-1.5 sm:gap-2 md:gap-3 min-w-0">
+              {/* Cards de metricas do dia. */}
               <div className="min-w-0">
               <MetricCard
                 label="Passos"
@@ -627,6 +625,7 @@ export default function Dashboard() {
           </section>
 
           <section className="px-1 pt-1 sm:px-2 min-w-0">
+            {/* Navegacao compacta da semana atual. */}
             <div className="flex w-full gap-1.5 sm:gap-2 justify-center min-w-0 overflow-x-auto pb-1">
               {calendarDates.map((date) => {
                 const dateKey = formatDateKey(date);
@@ -656,6 +655,7 @@ export default function Dashboard() {
           </section>
 
           <section>
+            {/* Resumo das missoes diarias prioritarias. */}
             <SectionHeader title="Missões de Hoje" actionLabel="Ver todas" onAction={() => scrollToSection("mission-feed")} />
             <div className="rounded-[2rem] p-3 md:p-5" style={SUBTLE_PANEL_STYLE}>
               <div className="mb-5 inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-[0.68rem] font-bold" style={{ background: "color-mix(in srgb, var(--fl-surface-strong) 86%, transparent)", color: "var(--fl-color-text-muted)", border: "1px solid var(--fl-border-soft)" }}>
@@ -695,6 +695,7 @@ export default function Dashboard() {
             </div>
           </section>
 
+          {/* Feed completo por categoria de missao. */}
           {missionFeedSections.length > 0 ? (
             <section id="mission-feed" className="space-y-6">
               <SectionHeader title="Explorar Missões" />
@@ -716,6 +717,7 @@ export default function Dashboard() {
             </section>
           ) : null}
 
+          {/* Ferramentas auxiliares baseadas em IA. */}
           <section id="assistant-tools" className="space-y-2 sm:space-y-4 min-w-0">
             <AIRecommendations />
             <AIMissionGenerator onMissionsGenerated={() => { void refreshData(); }} />
@@ -723,6 +725,7 @@ export default function Dashboard() {
         </div>
       </main>
 
+      {/* Atalhos flutuantes para fluxos secundarios. */}
       <div
         ref={quickActionsRef}
         className="fl-z-fab fixed bottom-24 right-4 flex flex-col items-end gap-3 md:bottom-8 md:right-8"
@@ -772,8 +775,6 @@ export default function Dashboard() {
           <Zap className={`h-6 w-6 transition-transform duration-200 ${quickActionsOpen ? "rotate-12" : ""}`} />
         </button>
       </div>
-
-      {showLevelUp ? <LevelUpModal level={newLevel} onClose={() => setShowLevelUp(false)} /> : null}
     </AppPageShell>
   );
 }

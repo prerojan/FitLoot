@@ -27,6 +27,7 @@ export type CameraResultInput =
 
 type CameraCapturedHandler = (image: NormalizedCameraImage) => void | Promise<void>;
 
+// Normaliza caminhos nativos em URIs seguras para o navegador.
 function toFileUri(path: string): string {
   if (/^(content|data):/i.test(path)) return path;
   if (/^file:\/\//i.test(path)) return path;
@@ -36,6 +37,7 @@ function toFileUri(path: string): string {
     : `file:///${normalizedPath}`;
 }
 
+// Converte blobs vindos do navegador em data URLs reutilizáveis.
 function blobToDataUrl(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -45,6 +47,7 @@ function blobToDataUrl(blob: Blob): Promise<string> {
   });
 }
 
+// Gera o payload único de imagem reutilizado por câmera nativa, galeria e web.
 function dataUrlToImagePayload(
   dataUrl: string,
   source: CameraInputSource,
@@ -68,6 +71,7 @@ function dataUrlToImagePayload(
   };
 }
 
+// Lê uma imagem nativa por caminho e a transforma em data URL.
 async function loadImageAsDataUrl(path: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const image = new Image();
@@ -80,23 +84,24 @@ async function loadImageAsDataUrl(path: string): Promise<string> {
 
         const context = canvas.getContext("2d");
         if (!context) {
-          reject(new Error("Falha ao preparar a imagem da camera nativa."));
+          reject(new Error("Falha ao preparar a imagem da câmera nativa."));
           return;
         }
 
         context.drawImage(image, 0, 0);
         resolve(canvas.toDataURL("image/jpeg", 0.9));
       } catch (error) {
-        reject(error instanceof Error ? error : new Error("Falha ao ler a imagem da camera nativa."));
+        reject(error instanceof Error ? error : new Error("Falha ao ler a imagem da câmera nativa."));
       }
     };
 
-    image.onerror = () => reject(new Error("Falha ao carregar a imagem da camera nativa."));
+    image.onerror = () => reject(new Error("Falha ao carregar a imagem da câmera nativa."));
     image.src = toFileUri(path);
   });
 }
 
 class CameraService {
+  // Prioriza a câmera nativa e cai para o fluxo web apenas quando necessário.
   async openCamera(fallback?: () => Promise<void> | void): Promise<"android-native" | "web-fallback"> {
     if (isAndroidNativeAvailable()) {
       const bridge = getAndroidBridge();
@@ -114,6 +119,7 @@ class CameraService {
     return "web-fallback";
   }
 
+  // Prioriza a galeria nativa e cai para o seletor web apenas quando necessário.
   async openGallery(fallback?: () => Promise<void> | void): Promise<"android-native" | "web-fallback"> {
     if (isAndroidNativeAvailable()) {
       const bridge = getAndroidBridge();
@@ -131,6 +137,7 @@ class CameraService {
     return "web-fallback";
   }
 
+  // Normaliza qualquer origem de imagem no formato único consumido pela UI.
   async handleCameraResult(input: CameraResultInput): Promise<NormalizedCameraImage> {
     if ("path" in input) {
       return this.handleAndroidPath(input.path, input.source ?? "android-native");
@@ -157,6 +164,7 @@ class CameraService {
     return dataUrlToImagePayload(dataUrl, input.source ?? "web-file");
   }
 
+  // Escuta capturas da câmera nativa e entrega o payload já normalizado.
   subscribeToCameraCaptured(
     onCaptured: CameraCapturedHandler,
     onError?: (error: Error) => void,
@@ -186,7 +194,7 @@ class CameraService {
       void this.handleCameraResult(input)
         .then((image) => onCaptured(image))
         .catch((error) => {
-          onError?.(error instanceof Error ? error : new Error("Falha ao processar a captura da camera nativa."));
+          onError?.(error instanceof Error ? error : new Error("Falha ao processar a captura da câmera nativa."));
         });
     };
 
@@ -197,6 +205,7 @@ class CameraService {
     };
   }
 
+  // Escuta seleções da galeria nativa e reaproveita a mesma normalização.
   subscribeToGallerySelected(
     onSelected: CameraCapturedHandler,
     onError?: (error: Error) => void,
@@ -239,13 +248,14 @@ class CameraService {
     };
   }
 
+  // Escuta falhas nativas da câmera e as converte em Error padrão.
   subscribeToNativeCameraErrors(onError: (error: Error) => void): () => void {
     if (typeof window === "undefined") {
       return () => undefined;
     }
 
     const handleEvent = (event: CustomEvent<AndroidNativeMediaErrorDetail>) => {
-      const message = event.detail?.message?.trim() || "Falha ao abrir a camera nativa.";
+      const message = event.detail?.message?.trim() || "Falha ao abrir a câmera nativa.";
       onError(new Error(message));
     };
 
@@ -256,6 +266,7 @@ class CameraService {
     };
   }
 
+  // Tenta carregar o arquivo nativo e, se necessário, preserva um fallback mínimo.
   private async handleAndroidPath(path: string, source: CameraInputSource): Promise<NormalizedCameraImage> {
     const fileUri = toFileUri(path);
 

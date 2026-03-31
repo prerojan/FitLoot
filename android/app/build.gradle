@@ -24,6 +24,13 @@ android {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            signingConfig signingConfigs.debug
+        }
+        internal {
+            initWith release
+            debuggable true
+            matchingFallbacks = ['release']
+            versionNameSuffix "-internal"
         }
     }
     compileOptions {

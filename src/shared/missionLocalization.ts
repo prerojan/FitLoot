@@ -46,7 +46,7 @@ const PHRASE_REPLACEMENTS: ReadonlyArray<readonly [RegExp, string]> = [
   [/\bSingle-?Leg Glute Bridge\b/gi, "Ponte de Gl\u00fateo Unilateral"],
   [/\bSingle-?Leg Romanian Deadlift\b/gi, "Levantamento Terra Romeno Unilateral"],
   [/\bBird Dog\b/gi, "Extens\u00e3o alternada em quatro apoios"],
-  [/\bDead Bug\b/gi, "Dead Bug"],
+  [/\bDead Bug\b/gi, "Abdominal alternado"],
   [/\bCalf Raise\b/gi, "Eleva\u00e7\u00e3o de Panturrilha"],
   [/\bTriceps Dip\b/gi, "Mergulho de Tr\u00edceps"],
   [/\bPike Push-?up\b/gi, "Flex\u00e3o Pike"],
@@ -62,9 +62,9 @@ const PHRASE_REPLACEMENTS: ReadonlyArray<readonly [RegExp, string]> = [
   [/\bLunge\b/gi, "Avan\u00e7o"],
   [/\bWall Sit\b/gi, "Cadeira Isom\u00e9trica"],
   [/\bDead Hang\b/gi, "Suspens\u00e3o na Barra"],
-  [/\bHollow Body Hold\b/gi, "Isometria Hollow"],
-  [/\bHollow Hold\b/gi, "Isometria Hollow"],
-  [/\bHollow Body\b/gi, "Hollow Body"],
+  [/\bHollow Body Hold\b/gi, "Isometria concava"],
+  [/\bHollow Hold\b/gi, "Isometria concava"],
+  [/\bHollow Body\b/gi, "Isometria concava"],
   [/\bStretching\b/gi, "Alongamento"],
   [/\bMobility\b/gi, "Mobilidade"],
   [/\bRecovery\b/gi, "Recupera\u00e7\u00e3o"],
@@ -608,7 +608,6 @@ export function localizeMissionText(value: string | null | undefined): string | 
   localized = localizeExerciseCatalogText(localized) ?? localized;
 
   localized = collapseRepeatedWords(localized)
-    .replace(/\b(Hollow Body)\s+(Isometria Hollow)\b/gi, "$2")
     .replace(/\s+:/g, ":")
     .replace(/\s+,/g, ",")
     .replace(/\s+\./g, ".")

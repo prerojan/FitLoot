@@ -1,6 +1,5 @@
-import React from "react";
 import { Shield, TrendingUp, Target, Activity, AlertTriangle } from "lucide-react";
-import type { TrainingRankSnapshot, UserProgression, UserSkill } from "@/shared/types";
+import type { TrainingRankSnapshot } from "@/shared/types";
 
 interface TrainingRankDisplayProps {
   snapshot: TrainingRankSnapshot | null;
@@ -44,6 +43,7 @@ export function TrainingRankDisplay({
   showDetails = false,
   compact = false,
 }: TrainingRankDisplayProps) {
+  // Renderiza o rank em formato compacto ou expandido a partir do snapshot atual.
   if (isLoading) {
     return (
       <div className="animate-pulse">
@@ -156,6 +156,7 @@ export function TrainingRankDisplay({
         </div>
       </div>
 
+      {/* Avisa quando o rank foi estimado com dados incompletos. */}
       {snapshot.fallbackUsed ? (
         <div
           className="mb-3 rounded border p-2"
@@ -176,6 +177,7 @@ export function TrainingRankDisplay({
         </div>
       ) : null}
 
+      {/* Detalha os fatores usados no calculo do rank atual. */}
       {showDetails ? (
         <div className="space-y-2">
           <h4 className="text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--fl-color-text)" }}>
@@ -244,65 +246,4 @@ export function TrainingRankDisplay({
       </div>
     </div>
   );
-}
-
-export function useTrainingRank(
-  userProgression: UserProgression | null,
-  userSkills: UserSkill[],
-  benchmarkResults?: {
-    pushUpMaxReps?: number;
-    squatMaxReps?: number;
-    plankMaxSeconds?: number;
-    sitUpMaxReps?: number;
-    skillStageScore?: number;
-  }
-) {
-  const [snapshot, setSnapshot] = React.useState<TrainingRankSnapshot | null>(null);
-  const [isLoading, setIsLoading] = React.useState(true);
-  const [error, setError] = React.useState<string | null>(null);
-
-  React.useEffect(() => {
-    const calculateRank = async () => {
-      try {
-        setIsLoading(true);
-        setError(null);
-
-        const { getOrCalculateRankSnapshot } = await import("@/shared/trainingLevels");
-
-        const rankSnapshot = getOrCalculateRankSnapshot(
-          userProgression
-            ? {
-                xp: userProgression.xp,
-                level: userProgression.level,
-                current_streak: userProgression.current_streak,
-                best_streak: userProgression.best_streak,
-                training_rank_snapshot: userProgression.training_rank_snapshot || null,
-              }
-            : {
-                xp: 0,
-                level: 1,
-                current_streak: 0,
-                best_streak: 0,
-                training_rank_snapshot: null,
-              },
-          userSkills,
-          benchmarkResults
-        );
-
-        setSnapshot(rankSnapshot);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Erro desconhecido");
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    if (userProgression && userSkills) {
-      calculateRank();
-    } else {
-      setIsLoading(false);
-    }
-  }, [userProgression, userSkills, benchmarkResults]);
-
-  return { snapshot, isLoading, error };
 }

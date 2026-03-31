@@ -15,6 +15,7 @@ type RefreshMetricsOptions = {
 };
 
 export function useDailyMetrics(options: UseDailyMetricsOptions = {}) {
+  // Espelha no React o estado consolidado do store nativo de metricas.
   const { syncRemote = true } = options;
   const [state, setState] = useState<MetricsStoreState>(() => metricsService.getState());
 
@@ -23,6 +24,7 @@ export function useDailyMetrics(options: UseDailyMetricsOptions = {}) {
   }, []);
 
   const refreshMetrics = (refreshOptions: RefreshMetricsOptions = {}): Promise<ConsolidatedMetrics> => {
+    // Permite refresh manual reaproveitando a mesma politica do service central.
     return metricsService.refresh({
       ...(typeof refreshOptions.forceApi === "boolean" ? { forceApi: refreshOptions.forceApi } : {}),
       syncRemote: refreshOptions.syncRemote ?? syncRemote,

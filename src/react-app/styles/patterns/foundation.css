@@ -1,0 +1,318 @@
+/* Foundation: font imports, Tailwind layers, theme tokens and base document styles. */
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Rajdhani:wght@400;500;600;700&family=Orbitron:wght@400;500;700;800;900&family=Exo+2:wght@400;500;600;700;800&family=Bebas+Neue&family=Teko:wght@400;500;600;700&family=Russo+One&family=Audiowide&family=Press+Start+2P&family=Cinzel:wght@400;500;600;700&family=Bangers&family=Space+Grotesk:wght@400;500;700&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  font-family: var(--fl-font-sans);
+  --app-primary-color: #10b981;
+  --app-secondary-color: #14b8a6;
+  --app-primary-color-rgb: 16 185 129;
+  --app-secondary-color-rgb: 20 184 166;
+  --app-bg-color: var(--fl-body-bg);
+  --app-bg-image: none;
+  --fl-font-sans: "Inter", system-ui, Avenir, Helvetica, Arial, sans-serif;
+  --fl-font-display: "Space Grotesk", var(--fl-font-sans);
+  --fl-color-accent: var(--app-primary-color);
+  --fl-color-accent-secondary: var(--app-secondary-color);
+  --fl-color-accent-rgb: var(--app-primary-color-rgb);
+  --fl-color-accent-secondary-rgb: var(--app-secondary-color-rgb);
+  --fl-bottom-nav-clearance: calc(env(safe-area-inset-bottom, 0px) + 5.25rem);
+  --fl-noise-pattern: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160' viewBox='0 0 160 160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='0.32'/%3E%3C/svg%3E");
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+:root,
+[data-theme="light"] {
+  --fl-body-bg: #f5fbf8;
+  --app-bg-color: #f5fbf8;
+  --app-bg-image:
+    radial-gradient(circle at 12% 16%, rgba(var(--fl-color-accent-rgb), 0.1), transparent 34%),
+    radial-gradient(circle at 86% 12%, rgba(var(--fl-color-accent-secondary-rgb), 0.08), transparent 28%),
+    linear-gradient(180deg, #f7fcf9, #e7f7f1);
+  --fl-auth-bg-start: #f7fcf9;
+  --fl-auth-bg-end: #e7f7f1;
+  --fl-surface-glass: rgba(255, 255, 255, 0.78);
+  --fl-surface-strong: rgba(255, 255, 255, 0.94);
+  --fl-surface-muted: rgba(244, 248, 246, 0.82);
+  --fl-border-soft: rgba(15, 23, 42, 0.08);
+  --fl-border-strong: rgba(15, 23, 42, 0.14);
+  --fl-color-text: #0f172a;
+  --fl-color-text-muted: #5d6977;
+  --fl-color-text-soft: #88939f;
+  --fl-shadow-glass: 0 24px 70px rgba(15, 23, 42, 0.16);
+  --fl-auth-noise-opacity: 0.05;
+  --fl-auth-input-bg: rgba(248, 250, 252, 0.9);
+  --fl-auth-input-border: rgba(15, 23, 42, 0.08);
+  --fl-auth-input-ring: rgba(var(--fl-color-accent-rgb), 0.16);
+  --fl-auth-chip-bg: rgba(255, 255, 255, 0.72);
+  --fl-auth-chip-border: rgba(var(--fl-color-accent-rgb), 0.18);
+  --fl-nav-shell-bg: rgba(255, 255, 255, 0.92);
+  --fl-nav-shell-border: rgba(15, 23, 42, 0.08);
+  --fl-nav-item-muted: rgba(15, 23, 42, 0.62);
+  --fl-nav-item-active-text: #04100b;
+  --fl-nav-shadow: 0 18px 46px rgba(15, 23, 42, 0.16);
+  --fl-page-orb-primary: rgba(var(--fl-color-accent-rgb), 0.12);
+  --fl-page-orb-secondary: rgba(var(--fl-color-accent-secondary-rgb), 0.1);
+  --fl-page-orb-tertiary: rgba(var(--fl-color-accent-rgb), 0.07);
+  --fl-surface-gradient-top: rgba(255, 255, 255, 0.92);
+  --fl-surface-gradient-bottom: rgba(236, 245, 241, 0.88);
+  --fl-surface-soft-gradient-top: rgba(255, 255, 255, 0.82);
+  --fl-surface-soft-gradient-bottom: rgba(239, 246, 242, 0.74);
+  --fl-surface-accent-wash: rgba(var(--fl-color-accent-rgb), 0.06);
+  --fl-nav-ambient: rgba(var(--fl-color-accent-rgb), 0.08);
+}
+
+[data-theme="dark"] {
+  --fl-body-bg: #060b08;
+  --app-bg-color: #060b08;
+  --app-bg-image:
+    radial-gradient(circle at 12% 16%, rgba(var(--fl-color-accent-rgb), 0.16), transparent 34%),
+    radial-gradient(circle at 84% 14%, rgba(var(--fl-color-accent-secondary-rgb), 0.08), transparent 28%),
+    linear-gradient(180deg, #050806, #111a15);
+  --fl-auth-bg-start: #050806;
+  --fl-auth-bg-end: #111a15;
+  --fl-surface-glass: rgba(15, 22, 19, 0.82);
+  --fl-surface-strong: rgba(10, 15, 13, 0.94);
+  --fl-surface-muted: rgba(22, 31, 27, 0.7);
+  --fl-border-soft: rgba(255, 255, 255, 0.06);
+  --fl-border-strong: rgba(255, 255, 255, 0.12);
+  --fl-color-text: #f3f8f5;
+  --fl-color-text-muted: #a2b1aa;
+  --fl-color-text-soft: #74817b;
+  --fl-shadow-glass: 0 28px 80px rgba(0, 0, 0, 0.46);
+  --fl-auth-noise-opacity: 0.16;
+  --fl-auth-input-bg: rgba(0, 0, 0, 0.26);
+  --fl-auth-input-border: rgba(255, 255, 255, 0.08);
+  --fl-auth-input-ring: rgba(var(--fl-color-accent-rgb), 0.2);
+  --fl-auth-chip-bg: rgba(255, 255, 255, 0.05);
+  --fl-auth-chip-border: rgba(var(--fl-color-accent-rgb), 0.22);
+  --fl-nav-shell-bg: rgba(3, 7, 5, 0.84);
+  --fl-nav-shell-border: rgba(255, 255, 255, 0.08);
+  --fl-nav-item-muted: rgba(148, 163, 184, 0.72);
+  --fl-nav-item-active-text: #04100b;
+  --fl-nav-shadow: 0 22px 56px rgba(0, 0, 0, 0.42);
+  --fl-page-orb-primary: rgba(var(--fl-color-accent-rgb), 0.16);
+  --fl-page-orb-secondary: rgba(var(--fl-color-accent-secondary-rgb), 0.11);
+  --fl-page-orb-tertiary: rgba(var(--fl-color-accent-rgb), 0.08);
+  --fl-surface-gradient-top: rgba(18, 28, 23, 0.92);
+  --fl-surface-gradient-bottom: rgba(7, 12, 10, 0.96);
+  --fl-surface-soft-gradient-top: rgba(18, 28, 23, 0.78);
+  --fl-surface-soft-gradient-bottom: rgba(10, 16, 13, 0.72);
+  --fl-surface-accent-wash: rgba(var(--fl-color-accent-rgb), 0.08);
+  --fl-nav-ambient: rgba(var(--fl-color-accent-rgb), 0.12);
+}
+
+:root.fitloot-auth-light {
+  --app-bg-color: #f5fbf8;
+  --app-bg-image:
+    radial-gradient(circle at 12% 18%, rgba(var(--fl-color-accent-rgb), 0.18), transparent 34%),
+    radial-gradient(circle at 82% 14%, rgba(var(--fl-color-accent-secondary-rgb), 0.16), transparent 28%),
+    radial-gradient(circle at 70% 86%, rgba(var(--fl-color-accent-rgb), 0.12), transparent 30%),
+    linear-gradient(135deg, #f7fcf9, #e7f7f1);
+}
+
+:root.fitloot-auth-dark {
+  --app-bg-color: #060b08;
+  --app-bg-image:
+    radial-gradient(circle at 12% 18%, rgba(var(--fl-color-accent-rgb), 0.18), transparent 34%),
+    radial-gradient(circle at 82% 14%, rgba(var(--fl-color-accent-secondary-rgb), 0.12), transparent 28%),
+    radial-gradient(circle at 70% 86%, rgba(var(--fl-color-accent-rgb), 0.1), transparent 30%),
+    linear-gradient(135deg, #060b08, #040705);
+}
+
+.fl-auth-page.fl-auth-funnel-page {
+  --fl-auth-primary-soft: rgba(var(--fl-color-accent-rgb), 0.18);
+  --fl-auth-secondary-soft: rgba(var(--fl-color-accent-secondary-rgb), 0.16);
+  --fl-auth-ink: var(--fl-color-text);
+  --fl-auth-muted: var(--fl-color-text-muted);
+  --fl-auth-subtle: var(--fl-color-text-soft);
+  --fl-auth-panel-strong: var(--fl-surface-strong);
+  --fl-auth-panel: var(--fl-surface-strong);
+  --fl-auth-surface: var(--fl-surface-muted);
+  --fl-auth-card: var(--fl-surface-muted);
+  --fl-auth-card-border: var(--fl-border-soft);
+  --fl-auth-card-selected: color-mix(in srgb, var(--fl-color-accent) 12%, var(--fl-surface-strong));
+  --fl-auth-input: var(--fl-auth-input-bg);
+  --fl-auth-toggle-bg: var(--fl-surface-muted);
+  --fl-auth-toggle-border: var(--fl-border-soft);
+  --fl-auth-track: rgba(15, 23, 42, 0.08);
+  --fl-auth-logo-bg: linear-gradient(
+    135deg,
+    rgba(var(--fl-color-accent-rgb), 0.24),
+    rgba(var(--fl-color-accent-secondary-rgb), 0.2)
+  );
+  --fl-auth-logo-ink: #052e23;
+  --fl-onboarding-ink: var(--fl-auth-ink);
+  --fl-onboarding-muted: var(--fl-auth-muted);
+  --fl-onboarding-subtle: var(--fl-auth-subtle);
+  --fl-onboarding-surface: var(--fl-auth-card);
+  --fl-onboarding-surface-strong: var(--fl-auth-panel-strong);
+  --fl-onboarding-border: var(--fl-auth-card-border);
+  --fl-onboarding-ruler: color-mix(in srgb, var(--app-primary-color) 30%, transparent);
+  --fl-onboarding-indicator: color-mix(in srgb, var(--app-primary-color) 18%, transparent);
+  color: var(--fl-auth-ink);
+  font-family: var(--fl-font-display);
+  isolation: isolate;
+  background:
+    radial-gradient(circle at 14% 18%, color-mix(in srgb, var(--fl-auth-primary-soft) 92%, transparent), transparent 26%),
+    radial-gradient(circle at 86% 14%, color-mix(in srgb, var(--fl-auth-secondary-soft) 88%, transparent), transparent 24%),
+    radial-gradient(circle at 50% 100%, color-mix(in srgb, var(--fl-auth-primary-soft) 56%, transparent), transparent 34%),
+    linear-gradient(180deg, var(--fl-auth-bg-start), var(--fl-auth-bg-end));
+}
+
+:root.fitloot-auth-light .fl-auth-page.fl-auth-funnel-page,
+[data-theme="light"] .fl-auth-page.fl-auth-funnel-page {
+  --fl-body-bg: #f5fbf8;
+  --fl-auth-bg-start: #f7fcf9;
+  --fl-auth-bg-end: #e7f7f1;
+  --fl-surface-glass: rgba(255, 255, 255, 0.78);
+  --fl-surface-strong: rgba(255, 255, 255, 0.94);
+  --fl-surface-muted: rgba(244, 248, 246, 0.82);
+  --fl-border-soft: rgba(15, 23, 42, 0.08);
+  --fl-border-strong: rgba(15, 23, 42, 0.14);
+  --fl-color-text: #0f172a;
+  --fl-color-text-muted: #5d6977;
+  --fl-color-text-soft: #88939f;
+  --fl-shadow-glass: 0 24px 70px rgba(15, 23, 42, 0.16);
+  --fl-auth-noise-opacity: 0.05;
+  --fl-auth-input-bg: rgba(248, 250, 252, 0.9);
+  --fl-auth-input-border: rgba(15, 23, 42, 0.08);
+  --fl-auth-input-ring: rgba(var(--fl-color-accent-rgb), 0.16);
+  --fl-auth-chip-bg: rgba(255, 255, 255, 0.72);
+  --fl-auth-chip-border: rgba(var(--fl-color-accent-rgb), 0.18);
+  --fl-auth-primary-soft: rgba(var(--fl-color-accent-rgb), 0.18);
+  --fl-auth-secondary-soft: rgba(var(--fl-color-accent-secondary-rgb), 0.16);
+  --fl-auth-track: rgba(15, 23, 42, 0.08);
+  --fl-auth-toggle-bg: var(--fl-surface-muted);
+  --fl-auth-toggle-border: var(--fl-border-soft);
+  --fl-auth-logo-bg: linear-gradient(
+    135deg,
+    rgba(var(--fl-color-accent-rgb), 0.24),
+    rgba(var(--fl-color-accent-secondary-rgb), 0.2)
+  );
+  --fl-auth-logo-ink: #052e23;
+}
+
+:root.fitloot-auth-dark .fl-auth-page.fl-auth-funnel-page,
+[data-theme="dark"] .fl-auth-page.fl-auth-funnel-page {
+  --fl-body-bg: #060b08;
+  --fl-auth-bg-start: #060b08;
+  --fl-auth-bg-end: #040705;
+  --fl-surface-glass: rgba(13, 21, 17, 0.9);
+  --fl-surface-strong: rgba(13, 21, 17, 0.98);
+  --fl-surface-muted: rgba(13, 21, 17, 0.8);
+  --fl-border-soft: rgba(26, 38, 32, 0.92);
+  --fl-border-strong: rgba(57, 224, 121, 0.18);
+  --fl-color-text: #f7fbf8;
+  --fl-color-text-muted: #97a49d;
+  --fl-color-text-soft: #68756e;
+  --fl-shadow-glass: 0 28px 80px rgba(0, 0, 0, 0.54);
+  --fl-auth-noise-opacity: 0.12;
+  --fl-auth-input-bg: rgba(13, 21, 17, 0.88);
+  --fl-auth-input-border: rgba(26, 38, 32, 0.96);
+  --fl-auth-input-ring: rgba(var(--fl-color-accent-rgb), 0.18);
+  --fl-auth-chip-bg: rgba(255, 255, 255, 0.03);
+  --fl-auth-chip-border: rgba(var(--fl-color-accent-rgb), 0.18);
+  --fl-auth-primary-soft: rgba(var(--fl-color-accent-rgb), 0.14);
+  --fl-auth-secondary-soft: rgba(var(--fl-color-accent-secondary-rgb), 0.08);
+  --fl-auth-card-selected: color-mix(in srgb, var(--fl-color-accent) 8%, rgba(13, 21, 17, 0.98));
+  --fl-auth-toggle-bg: rgba(13, 21, 17, 0.94);
+  --fl-auth-toggle-border: rgba(26, 38, 32, 0.96);
+  --fl-auth-track: rgba(255, 255, 255, 0.05);
+  --fl-auth-logo-bg: linear-gradient(
+    135deg,
+    rgba(var(--fl-color-accent-rgb), 0.18),
+    rgba(var(--fl-color-accent-rgb), 0.08)
+  );
+  --fl-auth-logo-ink: #f8fafc;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  min-height: 100vh;
+  margin: 0;
+  padding: 0;
+  overflow-x: hidden;
+  font-family: var(--fl-font-sans);
+  color: var(--fl-color-text);
+  background-color: var(--app-bg-color);
+  background-image: var(--app-bg-image);
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  transition:
+    background-color 0.28s ease,
+    background-image 0.28s ease,
+    color 0.28s ease;
+}
+
+#root {
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+.loading {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 0;
+  color: color-mix(in srgb, var(--fl-color-text-muted) 48%, transparent);
+}
+
+.loading svg {
+  display: block;
+}
+
+.loading.is-sm svg {
+  width: 1.25rem;
+  height: 1.25rem;
+}
+
+.loading.is-md svg {
+  width: 1.75rem;
+  height: 1.75rem;
+}
+
+.loading.is-lg svg {
+  width: 2.5rem;
+  height: 2.5rem;
+}
+
+.loading svg polyline {
+  fill: none;
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.loading svg polyline#back {
+  fill: none;
+}
+
+.loading svg polyline#front {
+  fill: none;
+  stroke: #26bf8c;
+  stroke-dasharray: 48, 145;
+  stroke-dashoffset: 195;
+  animation: dash_682 1.4s linear infinite;
+}
+
+@keyframes dash_682 {
+  85.5% {
+    opacity: 0;
+  }
+
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+

@@ -18,14 +18,15 @@ import {
   Sun,
   X
 } from "lucide-react";
-import { useAuth } from "@/react-app/contexts/auth";
+import { useAuth } from "@/react-app/auth/context";
 import { useTheme } from "@/react-app/contexts/theme";
 import AppPageShell from "@/react-app/components/AppPageShell";
 import LoadingBall from "@/react-app/components/LoadingBall";
 import PageLoader from "@/react-app/components/PageLoader";
 import { Avatar } from "@/react-app/components/ui/avatar";
-import { ROUTE_PATHS } from "@/react-app/constants/auth";
-import { TrainingRankDisplay, useTrainingRank } from "@/react-app/components/TrainingRankDisplay";
+import { ROUTE_PATHS } from "@/react-app/auth/constants";
+import { TrainingRankDisplay } from "@/react-app/components/TrainingRankDisplay";
+import { useTrainingRank } from "@/react-app/hooks/useTrainingRank";
 
 import type {
   AchievementWithUnlock,
@@ -38,7 +39,7 @@ import type {
 } from "@/shared/types";
 import { ApiRequestError, api, clearJsonCache, fetchAndCacheJson, readCachedJson } from "@/react-app/utils/api";
 import { getAchievementShowcaseStyle, resolveShowcasedAchievement, sanitizeAchievementsForDisplay } from "@/react-app/utils/achievementShowcase";
-import { applyProfileTheme } from "@/react-app/utils/theme";
+import { applyProfileTheme } from "@/react-app/theme/profileTheme";
 
 const FEEDBACK_TYPES = ["Sugestao", "Bug", "Elogio", "Outro"] as const;
 type FeedbackType = (typeof FEEDBACK_TYPES)[number];
@@ -103,17 +104,16 @@ export default function Profile() {
   const [feedbackSending, setFeedbackSending] = useState(false);
   const [feedbackStatus, setFeedbackStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
-  // Função para converter benchmarks da API para o formato esperado pelo sistema de rank
+  // Adapta benchmarks para o calculo de rank de treino.
   const getBenchmarkResults = useCallback(() => {
     if (!benchmarks || benchmarks.length === 0) return undefined;
     
-    // Pega o benchmark mais recente
+    // Usa sempre o benchmark mais recente.
     const latest = benchmarks[0];
     if (!latest) return undefined;
     
-    // Calcula skillStageScore baseado nos skills
+    // Converte o progresso das habilidades em score auxiliar.
     const skillStageScore = skills.reduce((score, skill) => {
-      // Adiciona pontos baseados no progresso do skill
       if (skill.total_reps >= 100) score += 2;
       else if (skill.total_reps >= 50) score += 1;
       else if (skill.total_reps >= 10) score += 0.5;
@@ -137,7 +137,7 @@ export default function Profile() {
     return result;
   }, [benchmarks, skills]);
 
-  // Combina habilidades desbloqueadas com todas as disponíveis
+  // Mescla habilidades desbloqueadas e bloqueadas para exibicao.
   const getAllSkillsWithProgress = useCallback(() => {
     if (availableSkills.length === 0) return skills;
 
@@ -153,7 +153,7 @@ export default function Profile() {
     return [...skills, ...lockedAvailableSkills];
   }, [availableSkills, skills]);
 
-  // NOVO: Hook para calcular rank de treinamento (read-only, seguro)
+  // Calcula o rank de treino sem alterar o estado do perfil.
   const { snapshot: trainingRank, isLoading: rankLoading, error: rankError } = useTrainingRank(
     progression,
     skills.map(skill => ({
@@ -365,10 +365,10 @@ export default function Profile() {
           </div>
         ) : null}
         
-        {/* Sidebar Identity Column */}
+        {/* Coluna de identidade */}
         <aside className="w-full lg:w-[360px] flex flex-col gap-6 shrink-0">
           
-          {/* Identity Card */}
+          {/* Cartao principal do perfil */}
           <section className="fl-theme-surface rounded-3xl p-8 flex flex-col items-center text-center relative overflow-hidden group">
             {error ? (
               <div className="mb-6 w-full rounded-2xl border px-4 py-3 text-[10px] font-bold uppercase tracking-widest" style={{ borderColor: "color-mix(in srgb, var(--app-primary-color) 24%, transparent)", backgroundColor: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)", color: "var(--app-primary-color)" }}>
@@ -442,7 +442,7 @@ export default function Profile() {
             </div>
           </section>
 
-          {/* NOVO: Training Rank Card */}
+          {/* Rank de treinamento */}
           <section className="fl-theme-surface rounded-3xl p-6 sm:p-8">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-[10px] font-bold uppercase tracking-[0.2em]" style={{ color: "var(--fl-color-text-muted)" }}>Rank de Treinamento</h3>
@@ -461,7 +461,7 @@ export default function Profile() {
             />
           </section>
 
-          {/* XP Progress Card */}
+          {/* Progresso de XP */}
           <section className="fl-theme-surface rounded-3xl p-6 sm:p-8">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-[10px] font-bold uppercase tracking-[0.2em]" style={{ color: "var(--fl-color-text-muted)" }}>Experiência (XP)</h3>
@@ -477,7 +477,7 @@ export default function Profile() {
             </div>
           </section>
 
-          {/* Quick Actions */}
+          {/* Atalhos rapidos */}
           <div className="flex flex-col gap-3">
              <button 
                 onClick={() => setSettingsOpen(true)}
@@ -488,10 +488,10 @@ export default function Profile() {
            </div>
         </aside>
 
-        {/* Main Content Area */}
+        {/* Conteudo principal */}
         <section className="flex-1 flex flex-col gap-8">
           
-          {/* Tab Navigation */}
+          {/* Abas */}
           <nav className="flex items-center gap-6 border-b sm:gap-8" style={{ borderColor: "var(--fl-border-soft)" }}>
             <button 
               onClick={() => setTab("attributes")}
@@ -511,12 +511,12 @@ export default function Profile() {
             </button>
           </nav>
 
-          {/* Conditional Rendering Area */}
+          {/* Conteudo da aba ativa */}
           <div className="flex-1 min-h-0">
             {tab === 'attributes' ? (
               <div className="grid grid-cols-1 xl:grid-cols-2 gap-8 items-start">
                 
-                {/* Core Stats List */}
+                {/* Lista de atributos */}
                 <div className="flex flex-col gap-6">
                   <header className="flex items-center gap-3 mb-2">
                     <div className="size-8 rounded-lg bg-primary/10 flex items-center justify-center text-primary" style={{ color: 'var(--app-primary-color)' }}>
@@ -550,13 +550,13 @@ export default function Profile() {
                   </div>
                 </div>
 
-                {/* Radar Chart Visualizer */}
+                {/* Radar de atributos */}
                 <div className="fl-theme-surface-muted flex flex-col items-center justify-center rounded-3xl p-10 backdrop-blur-sm relative overflow-hidden group">
                    <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(var(--app-primary-color-rgb),0.05)_0%,transparent_70%)]"></div>
                    
                    <div className="relative size-60 sm:size-72">
                       <svg viewBox="0 0 100 100" className="w-full h-full drop-shadow-2xl overflow-visible">
-                        {/* Grids */}
+                        {/* Grades de referencia */}
                         {[20, 40, 60, 80, 100].map(r => (
                           <polygon 
                             key={r}
@@ -570,13 +570,13 @@ export default function Profile() {
                           />
                         ))}
                         
-                        {/* Axis */}
+                        {/* Eixos */}
                         {ATTRIBUTE_META.map((_, i) => {
                            const angle = (i * 2 * Math.PI) / 5 - Math.PI / 2;
                            return <line key={i} x1="50" y1="50" x2={50 + 50 * Math.cos(angle)} y2={50 + 50 * Math.sin(angle)} stroke="var(--fl-border-soft)" strokeWidth="0.5" />
                         })}
 
-                        {/* Data Polygon */}
+                        {/* Poligono de dados */}
                         <polygon 
                           points={radarPoints}
                           fill="rgba(var(--app-primary-color-rgb), 0.15)"
@@ -585,7 +585,7 @@ export default function Profile() {
                           className="transition-all duration-1000"
                         />
                         
-                        {/* Labels */}
+                        {/* Rotulos */}
                         {ATTRIBUTE_META.map((attr, i) => {
                            const angle = (i * 2 * Math.PI) / 5 - Math.PI / 2;
                            const r = 62;
@@ -675,7 +675,7 @@ export default function Profile() {
 
       </main>
 
-      {/* Settings Modal */}
+      {/* Modal de configuracoes */}
       {settingsOpen && (
         <div className="fl-z-modal fixed inset-0 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 sm:p-6 animate-fadeIn">
           <div className="fl-theme-surface w-full max-w-2xl rounded-[2.5rem] overflow-hidden shadow-2xl animate-scaleIn max-h-[90vh] flex flex-col">
@@ -690,7 +690,7 @@ export default function Profile() {
             </header>
 
             <div className="p-8 overflow-y-auto custom-scrollbar flex-1 space-y-8">
-              {/* Account Info */}
+              {/* Conta */}
               <section className="space-y-4">
                 <h3 className="text-[10px] font-bold text-primary uppercase tracking-[0.3em]" style={{ color: 'var(--app-primary-color)' }}>Sua Conta</h3>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -705,7 +705,7 @@ export default function Profile() {
                 </div>
               </section>
 
-              {/* Training Focus */}
+              {/* Foco de treino */}
               <section className="space-y-4">
                 <h3 className="text-[10px] font-bold text-primary uppercase tracking-[0.3em]" style={{ color: 'var(--app-primary-color)' }}>Foco de Treinamento</h3>
                 <div className="grid grid-cols-2 gap-4">
@@ -763,7 +763,7 @@ export default function Profile() {
                 </div>
               </section>
 
-              {/* Feedback Section */}
+              {/* Feedback */}
               <section className="space-y-4">
                 <h3 className="text-[10px] font-bold text-primary uppercase tracking-[0.3em]" style={{ color: 'var(--app-primary-color)' }}>Feedback do Atleta</h3>
                 <div className="space-y-3">

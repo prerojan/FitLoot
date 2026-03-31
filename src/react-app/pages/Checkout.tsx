@@ -12,9 +12,10 @@ import {
 } from "lucide-react";
 import BillingCycleSwitch from "@/react-app/components/BillingCycleSwitch";
 import LoadingBall from "@/react-app/components/LoadingBall";
-import { AuthThemeHeader } from "@/react-app/components/AuthThemeHeader";
+import PaymentStatusPopup from "@/react-app/components/PaymentStatusPopup";
+import { AuthThemeHeader } from "@/react-app/theme/AuthThemeHeader";
 import { Input } from "@/react-app/components/ui/input";
-import { ROUTE_PATHS } from "@/react-app/constants/auth";
+import { ROUTE_PATHS } from "@/react-app/auth/constants";
 import {
   CHECKOUT_PLAN_DISPLAY_ORDER,
   CHECKOUT_PLANS,
@@ -25,7 +26,7 @@ import {
   type CheckoutPaymentMethod,
   type CheckoutPlanId,
 } from "@/react-app/constants/checkout";
-import { useAuth } from "@/react-app/contexts/auth";
+import { useAuth } from "@/react-app/auth/context";
 import { useTheme } from "@/react-app/contexts/theme";
 import { hasPlanAccess } from "@/react-app/services/authService";
 import { api } from "@/react-app/utils/api";
@@ -91,12 +92,27 @@ function buildPromoBenefitLabel(effect: PromoCodeEffect, effectValue: string | n
   }
 }
 
+function isVipPromoValidationMatch(
+  normalizedPromoCode: string,
+  promoValidationStatus: PromoValidationStatus,
+  promoValidationResult: PromoValidationResult | null,
+  validatedCode: string,
+): boolean {
+  return (
+    normalizedPromoCode.length > 0 &&
+    promoValidationStatus === "valid" &&
+    promoValidationResult?.effect === "activate_vip" &&
+    validatedCode === normalizedPromoCode
+  );
+}
+
 function buildOnboardingCheckoutPayload(
   draft: OnboardingDraft,
   planId: CheckoutPlanId,
   paymentMethod: CheckoutPaymentMethod,
   promoCode: string,
 ) {
+  // Reaproveita os dados do onboarding para iniciar o checkout final.
   const equipment = [...draft.selectedEquipment, draft.equipment].filter(Boolean).join(", ");
   const normalizedPromoCode = normalizePromoCode(promoCode);
 
@@ -216,6 +232,7 @@ export default function Checkout() {
   const navigate = useNavigate();
   const { user, checkAuth, logout } = useAuth();
   const { themeMode, toggleThemeMode } = useTheme();
+  const vipRedirectTimerRef = useRef<number | null>(null);
   const requiresOnboardingCheckout = user ? !hasStartedCheckoutFlow(user) && user.onboarding_completed !== 1 : false;
   const [planId, setPlanId] = useState<CheckoutPlanId>(
     requiresOnboardingCheckout
@@ -231,10 +248,17 @@ export default function Checkout() {
   const [promoValidationResult, setPromoValidationResult] = useState<PromoValidationResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const onboardingDraft = useMemo(() => loadOnboardingDraft(), []);
+  const [vipActivationInProgress, setVipActivationInProgress] = useState(false);
+  const [statusPopup, setStatusPopup] = useState<{
+    title: string;
+    message: string;
+    badge?: string;
+    tone: "success" | "warning" | "error";
+  } | null>(null);
+  const [onboardingDraft, setOnboardingDraft] = useState<OnboardingDraft | null>(() => loadOnboardingDraft());
   const promoValidationRequestIdRef = useRef(0);
   const promoValidationCodeRef = useRef("");
-  const promoValidationPromiseRef = useRef<Promise<boolean> | null>(null);
+  const promoValidationPromiseRef = useRef<Promise<PromoValidationResult | null> | null>(null);
 
   const selectedPlan = useMemo(() => getCheckoutPlan(planId), [planId]);
   const pricing = useMemo(() => getPlanPricing(planId, billingCycle), [planId, billingCycle]);
@@ -245,31 +269,77 @@ export default function Checkout() {
         .filter((plan): plan is (typeof CHECKOUT_PLANS)[number] => Boolean(plan)),
     [],
   );
+  const normalizedPromoCode = normalizePromoCode(promoCode);
+  const isVipPromoValidated = isVipPromoValidationMatch(
+    normalizedPromoCode,
+    promoValidationStatus,
+    promoValidationResult,
+    promoValidationCodeRef.current,
+  );
 
   useEffect(() => {
+    // Redireciona usuarios que ja possuem acesso ou pagamento pendente.
     if (!user) return;
+    if (vipActivationInProgress) return;
     if (hasPlanAccess(user)) {
-      navigate(ROUTE_PATHS.home, { replace: true });
+      clearOnboardingDraft();
+      setOnboardingDraft(null);
+      navigate(ROUTE_PATHS.dashboard, { replace: true });
       return;
     }
     if (user.plan_status === "pending") {
       navigate(ROUTE_PATHS.paymentPending, { replace: true });
     }
-  }, [navigate, user]);
+  }, [navigate, user, vipActivationInProgress]);
 
   useEffect(() => {
-    if (requiresOnboardingCheckout && !onboardingDraft) {
+    return () => {
+      if (vipRedirectTimerRef.current !== null) {
+        window.clearTimeout(vipRedirectTimerRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!requiresOnboardingCheckout) return;
+
+    const refreshDraft = () => {
+      setOnboardingDraft(loadOnboardingDraft());
+    };
+
+    refreshDraft();
+    window.addEventListener("focus", refreshDraft);
+    window.addEventListener("storage", refreshDraft);
+
+    return () => {
+      window.removeEventListener("focus", refreshDraft);
+      window.removeEventListener("storage", refreshDraft);
+    };
+  }, [requiresOnboardingCheckout]);
+
+  useEffect(() => {
+    if (!requiresOnboardingCheckout) return;
+
+    if (!onboardingDraft) {
       setError("Nao encontramos os dados do onboarding. Saia e recomece a criacao da conta.");
+      return;
     }
+
+    setError((currentError) =>
+      currentError === "Nao encontramos os dados do onboarding. Saia e recomece a criacao da conta."
+        ? null
+        : currentError,
+    );
   }, [onboardingDraft, requiresOnboardingCheckout]);
 
   const handleLogoutAndReset = async () => {
     try {
       await api("/api/logout");
     } catch {
-      // Local cleanup still needs to happen.
+      // A limpeza local ainda precisa acontecer.
     } finally {
       clearOnboardingDraft();
+      setOnboardingDraft(null);
       logout();
       navigate(ROUTE_PATHS.login, { replace: true });
     }
@@ -282,20 +352,24 @@ export default function Checkout() {
     promoValidationPromiseRef.current = null;
   };
 
-  const validatePromoCode = async (rawCode = promoCode, options?: { force?: boolean }): Promise<boolean> => {
+  const validatePromoCode = async (
+    rawCode = promoCode,
+    options?: { force?: boolean },
+  ): Promise<PromoValidationResult | null> => {
+    // Valida e memoriza o ultimo codigo promocional consultado.
     const normalizedCode = normalizePromoCode(rawCode);
 
     if (!normalizedCode) {
       resetPromoValidationState();
-      return true;
+      return null;
     }
 
     if (!options?.force && promoValidationCodeRef.current === normalizedCode) {
       if (promoValidationStatus === "valid") {
-        return true;
+        return promoValidationResult;
       }
       if (promoValidationStatus === "invalid") {
-        return false;
+        return null;
       }
       if (promoValidationStatus === "loading" && promoValidationPromiseRef.current) {
         return promoValidationPromiseRef.current;
@@ -323,30 +397,39 @@ export default function Checkout() {
           typeof promoEffect === "string";
 
         if (requestId !== promoValidationRequestIdRef.current) {
-          return isValidResponse;
+          return isValidResponse
+            ? {
+                code: normalizedCode,
+                description: promoDescription,
+                effect: promoEffect,
+                effectValue: typeof payload.effect_value === "string" ? payload.effect_value : null,
+                benefitLabel: buildPromoBenefitLabel(promoEffect, payload.effect_value),
+              }
+            : null;
         }
 
         if (isValidResponse) {
-          setPromoValidationStatus("valid");
-          setPromoValidationResult({
+          const result: PromoValidationResult = {
             code: normalizedCode,
             description: promoDescription,
             effect: promoEffect,
             effectValue: typeof payload.effect_value === "string" ? payload.effect_value : null,
             benefitLabel: buildPromoBenefitLabel(promoEffect, payload.effect_value),
-          });
-          return true;
+          };
+          setPromoValidationStatus("valid");
+          setPromoValidationResult(result);
+          return result;
         }
 
         setPromoValidationStatus("invalid");
         setPromoValidationResult(null);
-        return false;
+        return null;
       } catch {
         if (requestId === promoValidationRequestIdRef.current) {
           setPromoValidationStatus("invalid");
           setPromoValidationResult(null);
         }
-        return false;
+        return null;
       } finally {
         if (requestId === promoValidationRequestIdRef.current) {
           promoValidationPromiseRef.current = null;
@@ -360,44 +443,62 @@ export default function Checkout() {
 
   const handleCheckout = async () => {
     setError(null);
+    const currentOnboardingDraft = requiresOnboardingCheckout ? loadOnboardingDraft() : null;
 
-    if (requiresOnboardingCheckout && !onboardingDraft) {
+    if (requiresOnboardingCheckout) {
+      setOnboardingDraft(currentOnboardingDraft);
+    }
+
+    if (requiresOnboardingCheckout && !currentOnboardingDraft) {
       setError("Nao encontramos os dados do onboarding. Saia e recomece a criacao da conta.");
       return;
     }
 
-    const normalizedPromoCode = normalizePromoCode(promoCode);
-    const checkoutWindow = window.open("about:blank", "_blank");
-    if (checkoutWindow) {
-      try {
-        checkoutWindow.opener = null;
-      } catch {
-        // Browsers may block access to opener assignment.
-      }
-    }
+    const normalizedPromoCodeForRequest = normalizePromoCode(promoCode);
+    let shouldActivateVipFlow = false;
 
-    if (normalizedPromoCode) {
-      const promoIsValid = await validatePromoCode(normalizedPromoCode, {
-        force: promoValidationStatus !== "valid" || promoValidationCodeRef.current !== normalizedPromoCode,
+    if (normalizedPromoCodeForRequest) {
+      const promoValidation = await validatePromoCode(normalizedPromoCodeForRequest, {
+        force: promoValidationStatus !== "valid" || promoValidationCodeRef.current !== normalizedPromoCodeForRequest,
       });
 
-      if (!promoIsValid) {
-        if (checkoutWindow && !checkoutWindow.closed) {
-          checkoutWindow.close();
-        }
+      if (!promoValidation) {
         return;
       }
+      shouldActivateVipFlow = promoValidation.effect === "activate_vip";
     }
 
     setLoading(true);
     try {
+      const completeVipActivation = async (message?: string) => {
+        clearOnboardingDraft();
+        setOnboardingDraft(null);
+        setVipActivationInProgress(true);
+        setStatusPopup({
+          title: "Ativacao VIP iniciada",
+          message:
+            message ??
+            "Seu codigo VIP foi validado. Redirecionando sua conta para o dashboard...",
+          badge: "VIP ativo",
+          tone: "success",
+        });
+        await checkAuth();
+        if (vipRedirectTimerRef.current !== null) {
+          window.clearTimeout(vipRedirectTimerRef.current);
+        }
+        vipRedirectTimerRef.current = window.setTimeout(() => {
+          setVipActivationInProgress(false);
+          navigate(ROUTE_PATHS.dashboard, { replace: true });
+        }, 1500);
+      };
+
       const endpoint = requiresOnboardingCheckout ? "/api/onboarding" : "/api/checkout/start";
-      const payloadBody = requiresOnboardingCheckout && onboardingDraft
-        ? buildOnboardingCheckoutPayload(onboardingDraft, planId, paymentMethod, normalizedPromoCode)
+      const payloadBody = requiresOnboardingCheckout && currentOnboardingDraft
+        ? buildOnboardingCheckoutPayload(currentOnboardingDraft, planId, paymentMethod, normalizedPromoCodeForRequest)
         : {
             plan_id: planId,
             payment_method: paymentMethod,
-            promo_code: normalizedPromoCode || undefined,
+            promo_code: normalizedPromoCodeForRequest || undefined,
           };
 
       const response = await api(endpoint, {
@@ -406,33 +507,36 @@ export default function Checkout() {
       });
 
       if (response.status === 401 || response.status === 403) {
-        if (checkoutWindow && !checkoutWindow.closed) {
-          checkoutWindow.close();
-        }
         navigate(ROUTE_PATHS.app, { replace: true });
         return;
       }
 
       const payload = (await response.json().catch(() => null)) as CheckoutFlowResponse | null;
       if (!response.ok) {
-        if (checkoutWindow && !checkoutWindow.closed) {
-          checkoutWindow.close();
-        }
         setError(payload?.error ?? "Nao foi possivel iniciar o checkout.");
         return;
       }
 
-      if (requiresOnboardingCheckout) {
-        clearOnboardingDraft();
+      if (payload?.checkout_status === "vip_active") {
+        await completeVipActivation(payload?.message);
+        return;
+      }
+
+      if (shouldActivateVipFlow) {
+        if (payload?.plan_status === "active") {
+          await completeVipActivation("Plano VIP ativado. Redirecionando sua conta para o dashboard...");
+          return;
+        }
+        setError("Codigo VIP validado, mas a ativacao nao foi concluida. Tente novamente.");
+        return;
       }
 
       await checkAuth();
 
-      if (payload?.checkout_status === "vip_active" || payload?.plan_status === "active") {
-        if (checkoutWindow && !checkoutWindow.closed) {
-          checkoutWindow.close();
-        }
-        navigate(ROUTE_PATHS.home, { replace: true });
+      if (payload?.plan_status === "active") {
+        clearOnboardingDraft();
+        setOnboardingDraft(null);
+        navigate(ROUTE_PATHS.dashboard, { replace: true });
         return;
       }
 
@@ -440,21 +544,18 @@ export default function Checkout() {
         (typeof payload?.checkout_url === "string" && payload.checkout_url) ||
         selectedPlan.checkoutUrl;
 
-      if (checkoutUrl) {
-        if (checkoutWindow && !checkoutWindow.closed) {
-          checkoutWindow.location.replace(checkoutUrl);
-        } else {
-          window.location.assign(checkoutUrl);
-          return;
-        }
+      if (!checkoutUrl) {
+        setError("Nao foi possivel obter a URL de checkout da Cakto.");
+        return;
       }
 
-      navigate(ROUTE_PATHS.paymentPending, { replace: true });
+      window.location.assign(checkoutUrl);
     } catch {
-      if (checkoutWindow && !checkoutWindow.closed) {
-        checkoutWindow.close();
-      }
-      setError("Erro de conexao ao iniciar o checkout.");
+      setError(
+        shouldActivateVipFlow
+          ? "Nao foi possivel confirmar a ativacao VIP agora. Tente novamente."
+          : "Erro de conexao ao iniciar o checkout.",
+      );
     } finally {
       setLoading(false);
     }
@@ -462,6 +563,7 @@ export default function Checkout() {
 
   return (
     <div className="fl-auth-page fl-auth-funnel-page">
+      {/* Backdrop tematico do checkout. */}
       <div className="pointer-events-none absolute inset-0 -z-10 overflow-hidden">
         <div className="absolute -left-24 top-16 h-72 w-72 rounded-full bg-[var(--fl-auth-primary-soft)] blur-3xl" />
         <div className="absolute right-[-4rem] top-[18%] h-96 w-96 rounded-full bg-[var(--fl-auth-secondary-soft)] blur-3xl" />
@@ -474,6 +576,7 @@ export default function Checkout() {
         <main className="flex flex-1 items-center justify-center py-4 lg:py-8">
           <div className="w-full rounded-[2.4rem] border border-[var(--fl-auth-card-border)] bg-[var(--fl-auth-panel)] p-6 shadow-[0_32px_90px_-48px_rgba(16,185,129,0.45)] sm:p-8 lg:p-10">
             <div className="mx-auto max-w-5xl space-y-8">
+              {/* Introducao do plano e contexto do fluxo. */}
               <div className="space-y-5 text-center">
                 <span className="mx-auto inline-flex items-center gap-2 rounded-full border border-[var(--app-primary-color)]/35 bg-[rgba(var(--fl-color-accent-rgb),0.12)] px-4 py-2 text-xs font-semibold uppercase tracking-[0.26em] text-[var(--app-primary-color)]">
                   <Sparkles className="h-4 w-4" />
@@ -491,10 +594,12 @@ export default function Checkout() {
                 </div>
               </div>
 
+              {/* Seletor de ciclo de cobranca. */}
               <div className="flex justify-center">
                 <BillingCycleSwitch value={billingCycle} onChange={setBillingCycle} />
               </div>
 
+              {/* Grade de planos disponiveis. */}
               <div className="grid gap-5 lg:grid-cols-3">
                 {checkoutPlansInDisplayOrder.map((plan) => (
                   <PlanCard
@@ -507,6 +612,7 @@ export default function Checkout() {
                 ))}
               </div>
 
+              {/* Blocos de pagamento, promocao e resumo final. */}
               <section className="grid gap-6 lg:grid-cols-[1.05fr_0.95fr]">
                 <div className="rounded-[2rem] border border-[var(--fl-auth-card-border)] bg-[var(--fl-auth-surface)] p-6">
                   <div className="space-y-3">
@@ -548,10 +654,13 @@ export default function Checkout() {
                   </div>
 
                   <div className="mt-6 space-y-4">
+                    {/* Contexto do metodo e validacao do codigo promocional. */}
                     <div className="rounded-[1.5rem] border border-[var(--fl-auth-card-border)] bg-[rgba(var(--fl-color-accent-rgb),0.08)] p-5 text-sm text-[var(--fl-auth-muted)]">
-                      {paymentMethod === "pix"
-                        ? "O checkout Cakto sera aberto com o plano selecionado para concluir o PIX fora do app."
-                        : "O checkout Cakto sera aberto com o plano selecionado para concluir o pagamento com cartao fora do app."}
+                      {isVipPromoValidated
+                        ? "Codigo VIP validado: o checkout da Cakto sera ignorado e sua conta sera ativada automaticamente."
+                        : paymentMethod === "pix"
+                          ? "O checkout Cakto sera aberto com o plano selecionado para concluir o PIX fora do app."
+                          : "O checkout Cakto sera aberto com o plano selecionado para concluir o pagamento com cartao fora do app."}
                     </div>
 
                     <div className="space-y-3">
@@ -614,6 +723,11 @@ export default function Checkout() {
                         <div className="rounded-[1.2rem] border border-emerald-400/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-400">
                           <p className="font-semibold">{promoValidationResult.description}</p>
                           <p className="mt-1 text-emerald-300">{promoValidationResult.benefitLabel}</p>
+                          {promoValidationResult.effect === "activate_vip" ? (
+                            <span className="mt-2 inline-flex rounded-full border border-emerald-300/40 bg-emerald-400/10 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-200">
+                              VIP ativo imediato
+                            </span>
+                          ) : null}
                         </div>
                       ) : null}
 
@@ -626,6 +740,7 @@ export default function Checkout() {
 
                 <div className="rounded-[2rem] border border-[var(--fl-auth-card-border)] bg-[var(--fl-auth-surface)] p-6">
                   <div className="space-y-4">
+                    {/* Resumo final antes de abrir o checkout externo. */}
                     <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[var(--fl-auth-subtle)]">
                       Resumo
                     </p>
@@ -676,10 +791,16 @@ export default function Checkout() {
                       className="flex h-14 w-full items-center justify-center gap-2 rounded-[1.2rem] bg-[var(--app-primary-color)] px-5 text-base font-black text-black transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       {loading
-                        ? "Abrindo checkout..."
-                        : requiresOnboardingCheckout
-                          ? "Concluir onboarding e abrir checkout"
-                          : "Continuar para o checkout"}
+                        ? isVipPromoValidated
+                          ? "Ativando VIP..."
+                          : "Abrindo checkout..."
+                        : isVipPromoValidated
+                          ? requiresOnboardingCheckout
+                            ? "Concluir onboarding e ativar VIP"
+                            : "Ativar VIP e entrar no dashboard"
+                          : requiresOnboardingCheckout
+                            ? "Concluir onboarding e abrir checkout"
+                            : "Continuar para o checkout"}
                       {!loading ? <ArrowRight className="h-4 w-4" /> : null}
                     </button>
 
@@ -715,6 +836,14 @@ export default function Checkout() {
           </div>
         </main>
       </div>
+      <PaymentStatusPopup
+        open={statusPopup !== null}
+        title={statusPopup?.title ?? ""}
+        message={statusPopup?.message ?? ""}
+        badge={statusPopup?.badge}
+        tone={statusPopup?.tone ?? "warning"}
+        onClose={() => setStatusPopup(null)}
+      />
     </div>
   );
 }

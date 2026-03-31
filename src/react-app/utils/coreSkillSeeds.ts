@@ -1,5 +1,6 @@
 import { variantSkillSeeds, macroSkillSeeds, type VariantSkillSeed } from "../../shared/coreSkillSeeds";
 
+// Reexporta os seeds compartilhados para os consumidores legados do frontend.
 export {
   variantSkillSeeds,
   macroSkillSeeds,
@@ -10,5 +11,5 @@ export {
 
 export type SkillSeed = VariantSkillSeed;
 
-/** Todas as variantes + macros para UI/visualização. */
+// Junta variantes e macros em uma lista unica para UI e exibicao.
 export const coreSkillSeeds: VariantSkillSeed[] = [...variantSkillSeeds, ...macroSkillSeeds];

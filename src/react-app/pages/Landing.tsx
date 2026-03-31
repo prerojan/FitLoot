@@ -22,7 +22,7 @@ import {
   Zap,
   type LucideIcon,
 } from "lucide-react";
-import { ROUTE_PATHS } from "@/react-app/constants/auth";
+import { ROUTE_PATHS } from "@/react-app/auth/constants";
 import { useTheme } from "@/react-app/contexts/theme";
 
 type NavItem = {
@@ -220,6 +220,7 @@ export default function Landing() {
   const navigate = useNavigate();
   const { themeMode, toggleThemeMode } = useTheme();
 
+  // Faz a navegacao suave para secoes internas da landing.
   const scrollToSection =
     (sectionId: string) =>
     (event: MouseEvent<HTMLAnchorElement | HTMLButtonElement>) => {
@@ -230,6 +231,7 @@ export default function Landing() {
       });
     };
 
+  // Reusa a entrada de autenticacao como CTA principal da pagina.
   const goToLogin = () => {
     navigate(ROUTE_PATHS.login);
   };
@@ -246,6 +248,7 @@ export default function Landing() {
 
       <header className="fixed inset-x-0 top-0 z-50 border-b border-[var(--fl-border-soft)] bg-[color-mix(in_srgb,var(--fl-surface-strong)_88%,transparent)] backdrop-blur-2xl">
         <div className="mx-auto max-w-[1280px] px-4 sm:px-6 lg:px-8">
+          {/* Barra superior com marca, navegacao e alternancia de tema. */}
           <div className="flex h-20 items-center justify-between gap-2 sm:gap-4">
             <button
               type="button"
@@ -298,6 +301,7 @@ export default function Landing() {
             </div>
           </div>
 
+          {/* Navegacao compacta para telas menores. */}
           <nav className="flex gap-2 overflow-x-auto pb-4 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden lg:hidden">
             {navItems.map((item) => (
               <a
@@ -314,6 +318,7 @@ export default function Landing() {
       </header>
 
       <main className="relative pt-36 sm:pt-40 lg:pt-28">
+        {/* Hero principal com proposta de valor e mockup do produto. */}
         <section className="relative overflow-hidden px-4 pb-14 pt-8 sm:px-6 lg:px-8 lg:pb-24 lg:pt-12">
           <div
             className="pointer-events-none absolute right-[-10rem] top-[-8rem] h-[28rem] w-[28rem] rounded-full blur-3xl"
@@ -481,6 +486,7 @@ export default function Landing() {
           id="metricas"
           className="scroll-mt-40 border-y border-[var(--fl-border-soft)] bg-[color-mix(in_srgb,var(--fl-surface-muted)_78%,transparent)] px-4 py-9 sm:px-6 lg:scroll-mt-28 lg:px-8"
         >
+          {/* Faixa de metricas sociais e de escala do produto. */}
           <div className="mx-auto grid max-w-[1280px] grid-cols-2 gap-y-8 md:grid-cols-4">
             {metrics.map((metric) => (
               <div key={metric.label} className="text-center">
@@ -494,6 +500,7 @@ export default function Landing() {
         </section>
 
         <section id="atributos" className="scroll-mt-40 px-4 py-20 sm:px-6 lg:scroll-mt-28 lg:px-8 lg:py-24">
+          {/* Explica os atributos que estruturam a fantasia de progressao. */}
           <div className="mx-auto max-w-[1280px]">
             <div className="mx-auto max-w-3xl text-center">
               <h2 className="fl-auth-display text-4xl font-black tracking-[-0.05em] sm:text-5xl">
@@ -546,6 +553,7 @@ export default function Landing() {
           </div>
         </section>
         <section id="funcionalidades" className="scroll-mt-40 px-4 py-20 sm:px-6 lg:scroll-mt-28 lg:px-8 lg:py-24">
+          {/* Grade de funcionalidades que detalha o ecossistema do produto. */}
           <div className="mx-auto max-w-[1280px]">
             <div className="max-w-3xl">
               <h2 className="fl-auth-display text-4xl font-black tracking-[-0.05em] sm:text-5xl">
@@ -583,6 +591,7 @@ export default function Landing() {
         </section>
 
         <section id="comparativo" className="scroll-mt-40 px-4 py-20 sm:px-6 lg:scroll-mt-28 lg:px-8 lg:py-24">
+          {/* Tabela comparativa que ancora custo e valor percebido. */}
           <div className="mx-auto max-w-5xl">
             <div className="text-center">
               <h2 className="fl-auth-display text-4xl font-black tracking-[-0.05em] sm:text-5xl">
@@ -627,6 +636,7 @@ export default function Landing() {
           id="planos"
           className="scroll-mt-40 border-y border-[var(--fl-border-soft)] bg-[rgba(var(--fl-color-accent-rgb),0.05)] px-4 py-20 sm:px-6 lg:scroll-mt-28 lg:px-8 lg:py-24"
         >
+          {/* Tabela de planos com foco em conversao para login/checkout. */}
           <div className="mx-auto max-w-[1280px]">
             <div className="mx-auto max-w-3xl text-center">
               <h2 className="fl-auth-display text-4xl font-black tracking-[-0.05em] sm:text-5xl">Planos de Batalha</h2>
@@ -704,6 +714,7 @@ export default function Landing() {
         </section>
 
         <section id="comunidade" className="scroll-mt-40 px-4 py-20 sm:px-6 lg:scroll-mt-28 lg:px-8 lg:py-24">
+          {/* Prova social com reviews tematicos dos usuarios. */}
           <div className="mx-auto max-w-[1280px]">
             <div className="text-center">
               <h2 className="fl-auth-display text-4xl font-black tracking-[-0.05em] sm:text-5xl">
@@ -748,6 +759,7 @@ export default function Landing() {
       </main>
 
       <footer className="border-t border-[var(--fl-border-soft)] bg-[color-mix(in_srgb,var(--fl-surface-strong)_100%,transparent)] px-4 py-16 sm:px-6 lg:px-8">
+        {/* Rodape institucional com atalhos de navegacao e suporte. */}
         <div className="mx-auto max-w-[1280px]">
           <div className="grid gap-12 md:grid-cols-4">
             <div className="md:col-span-2">

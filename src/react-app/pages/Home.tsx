@@ -11,7 +11,7 @@ import {
   SunMedium,
   Zap,
 } from "lucide-react";
-import { useAuth } from "@/react-app/contexts/auth";
+import { useAuth } from "@/react-app/auth/context";
 import { useTheme } from "@/react-app/contexts/theme";
 import LoadingBall from "@/react-app/components/LoadingBall";
 import { api } from "@/react-app/utils/api";
@@ -102,6 +102,7 @@ const Home: FC = () => {
   return (
     <div className="fl-auth-page">
       <div className="relative z-10 flex min-h-screen flex-col">
+        {/* Cabecalho institucional e alternancia de tema. */}
         <header className="px-5 pt-5 md:px-8 md:pt-8">
           <div className="mx-auto flex w-full max-w-6xl items-center justify-between">
             <div className="flex items-center gap-3">
@@ -130,6 +131,7 @@ const Home: FC = () => {
 
         <main className="flex-1 px-5 pb-10 pt-6 md:px-8 md:pb-12 md:pt-8">
           <div className="mx-auto grid w-full max-w-6xl gap-4 lg:grid-cols-[1.02fr_minmax(0,0.92fr)]">
+            {/* Painel visual da proposta do produto. */}
             <section className="hidden lg:block">
               <div className="fl-auth-hero-panel rounded-[1.5rem] p-7 xl:p-8">
                 <div className="absolute inset-0">
@@ -159,8 +161,10 @@ const Home: FC = () => {
               </div>
             </section>
 
+            {/* Painel de autenticacao. */}
             <section className="fl-auth-panel rounded-[1.5rem] p-5 md:p-6 lg:p-7">
               <div className="space-y-6">
+                {/* Hero resumido no mobile. */}
                 <div className="space-y-4 lg:hidden">
                   <span className="fl-auth-chip">
                     <Shield className="h-4 w-4" />
@@ -191,6 +195,7 @@ const Home: FC = () => {
                   </div>
                 </div>
 
+                {/* Mensagens de retorno do fluxo de login. */}
                 {successMessage && (
                   <div className="fl-auth-message fl-auth-message-success">
                     {successMessage}
@@ -213,6 +218,7 @@ const Home: FC = () => {
                   </div>
                 )}
 
+                {/* Formulario principal de autenticacao. */}
                 <form onSubmit={handleSubmit} noValidate className="space-y-5">
                   <div className="space-y-2">
                     <label
@@ -292,6 +298,7 @@ const Home: FC = () => {
                   </button>
                 </form>
 
+                {/* CTA secundario para cadastro e trial. */}
                 <div className="space-y-4 border-t border-[var(--fl-border-soft)] pt-5 text-center">
                   <p className="text-sm text-[var(--fl-color-text-muted)]">
                     Nao tem uma conta?{" "}
