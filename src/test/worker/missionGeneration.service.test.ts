@@ -167,3 +167,65 @@ describe("missionGeneration.ensurePeriodicMissions", () => {
     ).not.toHaveBeenCalled();
   });
 });
+
+describe("missionGeneration.generateStructuredMissionPlanForUser", () => {
+  it("returns the current-cycle mission snapshot after persistence so the UI can render immediately", async () => {
+    const persistedMissions = [
+      { id: 10, type: "daily", title: "Persistida sem normalizacao" },
+    ];
+    const displayReadyMissions = [
+      { id: 10, type: "daily", title: "Agachamento livre" },
+      { id: 11, type: "weekly", title: "Fluxo semanal" },
+    ];
+    const listCurrentCycleMissions = vi
+      .fn()
+      .mockResolvedValueOnce(displayReadyMissions);
+    const persistGeneratedMissionPlan = vi
+      .fn()
+      .mockResolvedValue(persistedMissions);
+
+    const service = createMissionGenerationService({
+      buildFallbackStructuredPlan: () => ({ source: "fallback" }),
+      buildStructuredPlanPrompt: () => "",
+      createMissionsForPeriod: vi.fn(async () => undefined),
+      ensureStructuredPeriodicMissionsFromExistingDailyBlueprints: vi.fn(async () => undefined),
+      getActiveCycleMissionCounts: vi.fn(async () => ({
+        daily: 0,
+        weekly: 0,
+        monthly: 0,
+      })),
+      hasTableColumn: vi.fn(async () => true),
+      listCurrentCycleMissions,
+      loadMissionGenerationProfile: vi.fn(async () => ({ userId: "user-1" })),
+      missionCycleStartIso: vi.fn(() => "2026-03-31T00:00:00.000Z"),
+      persistGeneratedMissionPlan,
+      repairLegacyPeriodicMissions: vi.fn(async () => undefined),
+      requestStructuredMissionPlanFromAI: vi.fn(async () => ({ source: "ai" })),
+      validateStructuredMissionPlan: vi.fn(() => ({
+        blueprints: [],
+        invalidCount: 0,
+        totalCount: 0,
+      })),
+    });
+
+    const result = await service.generateStructuredMissionPlanForUser(
+      {} as Env,
+      {} as D1Database,
+      "user-1",
+      {
+        isAiSpecial: false,
+        dailyTarget: MISSION_LIMITS.daily,
+        weeklyTarget: MISSION_LIMITS.weekly,
+        monthlyTarget: MISSION_LIMITS.monthly,
+      },
+    );
+
+    expect(persistGeneratedMissionPlan).toHaveBeenCalledTimes(1);
+    expect(listCurrentCycleMissions).toHaveBeenCalledWith(
+      expect.anything(),
+      "user-1",
+      "regular",
+    );
+    expect(result.missions).toEqual(displayReadyMissions);
+  });
+});

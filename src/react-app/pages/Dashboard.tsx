@@ -25,6 +25,7 @@ import {
   fetchAndCacheJson,
   prefetchJson,
   readCachedJson,
+  writeCachedJson,
 } from "@/react-app/utils/api";
 import { getAchievementShowcaseStyle, resolveShowcasedAchievement } from "@/react-app/utils/achievementShowcase";
 import {
@@ -304,6 +305,18 @@ export default function Dashboard() {
       refreshMetrics({ forceApi: true, syncRemote: true }),
     ]);
   }, [loadData, refreshMetrics]);
+
+  const hydrateGeneratedMissions = useCallback((nextMissions: Mission[]) => {
+    if (nextMissions.length > 0) {
+      writeCachedJson("/api/missions", nextMissions);
+      setMissions(nextMissions);
+      setError(null);
+      setSectionLoading("missions", false);
+      return;
+    }
+
+    void refreshData();
+  }, [refreshData, setSectionLoading]);
 
   const handleMissionComplete = async (missionId: number, metricValue: number, verified: boolean) => {
     try {
@@ -726,7 +739,7 @@ export default function Dashboard() {
           {/* Ferramentas auxiliares baseadas em IA. */}
           <section id="assistant-tools" className="space-y-2 sm:space-y-4 min-w-0">
             <AIRecommendations />
-            <AIMissionGenerator onMissionsGenerated={() => { void refreshData(); }} />
+            <AIMissionGenerator onMissionsGenerated={hydrateGeneratedMissions} />
           </section>
         </div>
       </main>

@@ -237,3 +237,12 @@ export function clearJsonCache(path?: string): void {
 
   requestCache.delete(buildCacheKey(path));
 }
+
+export function writeCachedJson<T>(path: string, data: T): void {
+  // Permite hidratar o cache do cliente com payloads autoritativos recebidos fora do GET principal.
+  requestCache.set(buildCacheKey(path), {
+    data,
+    timestamp: Date.now(),
+    inflight: null,
+  });
+}

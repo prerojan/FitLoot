@@ -2,10 +2,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { CheckCircle, Wand2, XCircle } from "lucide-react";
 import LoadingBall from "@/react-app/components/LoadingBall";
 import type { Mission } from "@/shared/types";
-import { api, clearJsonCache } from "@/react-app/utils/api";
+import { api, clearJsonCache, writeCachedJson } from "@/react-app/utils/api";
 
 type AIMissionGeneratorProps = {
-  onMissionsGenerated?: () => void;
+  onMissionsGenerated?: (missions: Mission[]) => void;
 };
 
 type MissionGenerationResponse = {
@@ -13,6 +13,7 @@ type MissionGenerationResponse = {
   generated?: boolean | undefined;
   code?: string | undefined;
   error?: string | undefined;
+  missions?: Mission[] | undefined;
 };
 
 type NoticeState = {
@@ -35,12 +36,20 @@ export default function AIMissionGenerator({ onMissionsGenerated }: AIMissionGen
   const baselineMissionIdsRef = useRef<Set<number>>(new Set());
   const refreshTriggeredRef = useRef(false);
 
-  // Dispara a atualizacao do dashboard apenas uma vez por ciclo de geracao.
+  // Hidrata o dashboard usando o proprio snapshot retornado pela API de geracao.
+  const hydrateDashboardMissions = useCallback((missions: Mission[]) => {
+    if (refreshTriggeredRef.current) return;
+    refreshTriggeredRef.current = true;
+    writeCachedJson("/api/missions", missions);
+    onMissionsGenerated?.(missions);
+  }, [onMissionsGenerated]);
+
+  // Revalida o dashboard quando o backend ainda nao devolve um snapshot de exibicao.
   const triggerDashboardRefresh = useCallback(() => {
     if (refreshTriggeredRef.current) return;
     refreshTriggeredRef.current = true;
     clearJsonCache("/api/missions");
-    onMissionsGenerated?.();
+    onMissionsGenerated?.([]);
   }, [onMissionsGenerated]);
 
   // Le o conjunto atual de missoes para comparar antes e depois da geracao.
@@ -84,7 +93,7 @@ export default function AIMissionGenerator({ onMissionsGenerated }: AIMissionGen
           );
 
           if (hasNewMission) {
-            triggerDashboardRefresh();
+            hydrateDashboardMissions(Array.isArray(payload) ? payload : []);
           }
         } catch {
           // Polling is best-effort while the backend is generating missions.
@@ -95,7 +104,7 @@ export default function AIMissionGenerator({ onMissionsGenerated }: AIMissionGen
     return () => {
       window.clearInterval(intervalId);
     };
-  }, [loading, triggerDashboardRefresh]);
+  }, [hydrateDashboardMissions, loading]);
 
   // Limpa automaticamente o aviso visual depois da confirmacao.
   useEffect(() => {
@@ -128,13 +137,17 @@ export default function AIMissionGenerator({ onMissionsGenerated }: AIMissionGen
       if (!response.ok) {
         throw new Error(payload?.error ?? "Não foi possível gerar missões agora.");
       }
-
-      triggerDashboardRefresh();
+      const resolvedMissions = Array.isArray(payload?.missions) ? payload.missions : [];
+      if (resolvedMissions.length > 0) {
+        hydrateDashboardMissions(resolvedMissions);
+      } else {
+        triggerDashboardRefresh();
+      }
       setNotice({
         tone: payload?.generated === false ? "info" : "success",
         message: payload?.generated === false
-          ? "Você já possui missões ativas neste ciclo."
-          : "Missões geradas e adicionadas ao dashboard.",
+          ? "Voce ja possui missoes ativas neste ciclo. O dashboard foi sincronizado."
+          : "Missoes geradas e adicionadas ao dashboard.",
       });
     } catch (generationError) {
       console.error("[AIMissionGenerator]", generationError);
@@ -146,7 +159,7 @@ export default function AIMissionGenerator({ onMissionsGenerated }: AIMissionGen
     } finally {
       setLoading(false);
     }
-  }, [readCurrentRegularMissionIds, triggerDashboardRefresh]);
+  }, [hydrateDashboardMissions, readCurrentRegularMissionIds, triggerDashboardRefresh]);
 
   return (
     <div

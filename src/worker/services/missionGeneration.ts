@@ -173,9 +173,14 @@ export function createMissionGenerationService<
       profile,
       validation.blueprints,
     );
+    const currentCycleMissions = await deps.listCurrentCycleMissions(
+      db,
+      userId,
+      missionOrigin,
+    );
 
     return {
-      missions,
+      missions: currentCycleMissions.length > 0 ? currentCycleMissions : missions,
       used_ai: usedAi,
       invalid_ratio: validation.totalCount > 0
         ? validation.invalidCount / validation.totalCount
