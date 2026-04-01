@@ -17,7 +17,7 @@ import { useAuth } from "@/react-app/auth/context";
 import { useTheme } from "@/react-app/contexts/theme";
 import { resolveAuthenticatedStartRoute } from "@/react-app/services/authService";
 import { api } from "@/react-app/utils/api";
-import { saveOnboardingDraft } from "@/react-app/utils/onboardingDraft";
+import { saveOnboardingDraft, type OnboardingDraft } from "@/react-app/utils/onboardingDraft";
 import { Input } from "@/react-app/components/ui/input";
 import {
   EMAIL_REGEX,
@@ -479,6 +479,31 @@ const INJURY_OPTIONS = [
   { id: "quadril", label: "Quadril" },
 ] as const;
 
+function buildOnboardingProfileSeedPayload(draft: OnboardingDraft) {
+  const equipment = [...draft.selectedEquipment, draft.equipment]
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .join(", ");
+
+  return {
+    username: draft.username.trim(),
+    full_name: draft.full_name.trim(),
+    weight: Number(draft.weight),
+    height: Number(draft.height),
+    age: Number(draft.age),
+    gender: draft.gender,
+    initial_conditioning: draft.initial_conditioning,
+    initial_pushups: Number(draft.initial_pushups) || 0,
+    initial_situps: Number(draft.initial_situps) || 0,
+    initial_squats: Number(draft.initial_squats) || 0,
+    injuries: draft.injuries || undefined,
+    equipment: equipment || undefined,
+    main_goal: draft.main_goal,
+    goals: [draft.main_goal],
+    training_frequency: draft.weeklyFrequency,
+  };
+}
+
 export default function Onboarding() {
   const { user, loading: authLoading, checkAuth } = useAuth();
   const navigate = useNavigate();
@@ -829,7 +854,7 @@ export default function Onboarding() {
         return;
       }
 
-      saveOnboardingDraft({
+      const onboardingDraft: OnboardingDraft = {
         username: trimmedUsername,
         full_name: trimmedFullName,
         weight: profile.weight,
@@ -845,31 +870,38 @@ export default function Onboarding() {
         main_goal: profile.main_goal,
         weeklyFrequency,
         selectedEquipment,
-      });
+      };
+
+      saveOnboardingDraft(onboardingDraft);
 
       localStorage.setItem("fitloot_authenticated_hint", "1");
-      try {
-        const patchRes = await api("/api/users/me", {
-          method: "PATCH",
-          body: JSON.stringify({ name: trimmedFullName }),
-        });
-        if (!patchRes.ok) {
-          console.warn("[onboarding][profile-sync]", {
-            status: patchRes.status,
-          });
-        }
-      } catch (error) {
-        console.warn("[onboarding][profile-sync][network]", {
-          message: error instanceof Error ? error.message : String(error),
-        });
-      }
-
       accountBootstrapRedirectRef.current = true;
       await checkAuth();
+
+      const profileSeedRes = await api("/api/onboarding/profile", {
+        method: "POST",
+        body: JSON.stringify(buildOnboardingProfileSeedPayload(onboardingDraft)),
+      });
+
+      if (!profileSeedRes.ok) {
+        const payload = (await profileSeedRes.json().catch(() => null)) as
+          | { error?: string | undefined }
+          | null;
+
+        setStepError(
+          payload?.error ??
+            "Conta criada e sessao iniciada, mas nao foi possivel preparar seu onboarding para o checkout. Tente novamente em instantes.",
+        );
+        return;
+      }
+
       navigate(ROUTE_PATHS.checkout, { replace: true });
     } catch {
-      accountBootstrapRedirectRef.current = false;
-      setStepError("Nao foi possivel conectar ao servidor.");
+      setStepError(
+        accountBootstrapRedirectRef.current
+          ? "Conta criada e sessao iniciada, mas nao foi possivel preparar seu onboarding para o checkout. Tente novamente em instantes."
+          : "Nao foi possivel conectar ao servidor.",
+      );
     } finally {
       setStepLoading(false);
     }

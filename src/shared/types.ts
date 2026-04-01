@@ -351,7 +351,7 @@ export const PromoCodeRequestSchema = z.object({
 export type PromoCodeRequest = z.infer<typeof PromoCodeRequestSchema>;
 
 // Onboarding Request Schema
-export const OnboardingRequestSchema = z.object({
+export const OnboardingProfileSeedRequestSchema = z.object({
   username: z.string().min(3).max(20),
   full_name: z.string().min(1),
   weight: z.number().positive(),
@@ -367,6 +367,11 @@ export const OnboardingRequestSchema = z.object({
   main_goal: z.enum(['perder_peso', 'ganhar_massa', 'resistencia', 'calistenia', 'saude_geral']),
   goals: z.array(z.enum(['perder_peso', 'ganhar_massa', 'resistencia', 'calistenia', 'saude_geral'])).min(1),
   training_frequency: z.number().int().min(1).max(7),
+});
+
+export type OnboardingProfileSeedRequest = z.infer<typeof OnboardingProfileSeedRequestSchema>;
+
+export const OnboardingRequestSchema = OnboardingProfileSeedRequestSchema.extend({
   plan_id: z.enum(["basic", "pro", "annual"]),
   payment_method: z.enum(["card", "pix"]),
   card_number: z.string().min(8).max(32).optional(),
