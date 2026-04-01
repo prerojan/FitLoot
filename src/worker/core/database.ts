@@ -7,33 +7,58 @@ import {
 import type { AppContext } from "./types";
 
 let cachedSchemaState: { ready: boolean; checkedAt: number } | null = null;
-const SCHEMA_CACHE_TTL_MS = 10_000;
+const SCHEMA_CACHE_TTL_MS = 60_000;
 const TABLE_COLUMN_CACHE_TTL_MS = 60_000;
 const tableColumnCache = new Map<string, { checkedAt: number; columns: Set<string> }>();
 
+function isConnectionTimeoutLike(error: unknown): boolean {
+  const message = (error instanceof Error ? error.message : String(error))
+    .toLowerCase()
+    .trim();
+  return (
+    message.includes("timeout exceeded when trying to connect") ||
+    message.includes("query read timeout") ||
+    message.includes("connection terminated") ||
+    message.includes("connect etimedout") ||
+    message.includes("connection timeout")
+  );
+}
+
 export async function hasCoreSchema(db: D1Database) {
+  const runtimeDb = db as D1Database & { __backend?: string };
+  if (runtimeDb.__backend === "supabase") {
+    return true;
+  }
+
   const now = Date.now();
   if (cachedSchemaState && now - cachedSchemaState.checkedAt < SCHEMA_CACHE_TTL_MS) {
     return cachedSchemaState.ready;
   }
 
   try {
-    // Prefer a real table probe that works for D1 and compat views on Supabase.
-    await db.prepare("SELECT 1 FROM users LIMIT 1").first();
-    await db.prepare("SELECT 1 FROM sessions LIMIT 1").first();
-    cachedSchemaState = { ready: true, checkedAt: now };
-    return true;
-  } catch {
-    // Fall back to explicit core schema probe for Supabase deployments
-    // where search_path may not include compat/core.
-  }
-
-  try {
+    // Prefer direct schema-qualified probes to avoid compat-view indirection on Supabase.
     await db.prepare("SELECT 1 FROM core.users LIMIT 1").first();
     await db.prepare("SELECT 1 FROM core.sessions LIMIT 1").first();
     cachedSchemaState = { ready: true, checkedAt: now };
     return true;
-  } catch {
+  } catch (error) {
+    if (isConnectionTimeoutLike(error)) {
+      cachedSchemaState = { ready: false, checkedAt: now };
+      return false;
+    }
+    // Fall back to unqualified tables for D1/local sqlite environments.
+  }
+
+  try {
+    await db.prepare("SELECT 1 FROM users LIMIT 1").first();
+    await db.prepare("SELECT 1 FROM sessions LIMIT 1").first();
+    cachedSchemaState = { ready: true, checkedAt: now };
+    return true;
+  } catch (error) {
+    if (isConnectionTimeoutLike(error)) {
+      cachedSchemaState = { ready: false, checkedAt: now };
+      return false;
+    }
     // Fall back to metadata checks for partially bootstrapped environments.
   }
 

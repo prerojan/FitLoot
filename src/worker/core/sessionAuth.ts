@@ -195,13 +195,21 @@ export function createAuthMiddleware({
     );
   }
 
+  function shouldRunBackgroundMaintenance(path: string): boolean {
+    // Lightweight auth/bootstrap endpoints should not compete with mission/catalog jobs.
+    return !shouldBypassPlanGuard(path);
+  }
+
   return async function authMiddleware(c, next) {
     const schemaReady = await hasCoreSchema(c.env.fitloot_db);
     if (!schemaReady) {
       return databaseNotInitializedResponse(c);
     }
 
-    scheduleCatalogInitialization(c.env.fitloot_db, c.executionCtx);
+    const shouldRunHeavyBackground = shouldRunBackgroundMaintenance(c.req.path);
+    if (shouldRunHeavyBackground) {
+      scheduleCatalogInitialization(c.env.fitloot_db, c.executionCtx);
+    }
 
     try {
       const sessionId = getSessionIdFromCookieHeader(c.req.header("Cookie"));
@@ -214,7 +222,7 @@ export function createAuthMiddleware({
 
       const session = await c.env.fitloot_db
         .prepare(
-          "SELECT id, user_id FROM sessions WHERE id = ? AND expires_at > datetime('now')",
+          "SELECT id, user_id FROM sessions WHERE id = ? AND expires_at > CURRENT_TIMESTAMP",
         )
         .bind(sessionId)
         .first<SessionCookieUser>();
@@ -270,56 +278,58 @@ export function createAuthMiddleware({
         payment_method: userRecord.payment_method,
       });
 
-      c.executionCtx.waitUntil(
-        (async () => {
-          try {
-            await cleanupSettledMissionsWithGuard(
-              c.env.fitloot_db,
-              userRecord.id,
-            );
-          } catch (cleanupError) {
-            console.error("[authMiddleware][cleanupSettledMissions]", {
-              message:
-                cleanupError instanceof Error
-                  ? cleanupError.message
-                  : String(cleanupError),
-              userId: userRecord.id,
-            });
-          }
+      if (shouldRunHeavyBackground) {
+        c.executionCtx.waitUntil(
+          (async () => {
+            try {
+              await cleanupSettledMissionsWithGuard(
+                c.env.fitloot_db,
+                userRecord.id,
+              );
+            } catch (cleanupError) {
+              console.error("[authMiddleware][cleanupSettledMissions]", {
+                message:
+                  cleanupError instanceof Error
+                    ? cleanupError.message
+                    : String(cleanupError),
+                userId: userRecord.id,
+              });
+            }
 
-          try {
-            await refreshMissionExpiryWithGuard(
-              c.env.fitloot_db,
-              userRecord.id,
-            );
-          } catch (streakError) {
-            console.error("[authMiddleware][refreshMissionExpiryWithGuard]", {
-              message:
-                streakError instanceof Error
-                  ? streakError.message
-                  : String(streakError),
-              userId: userRecord.id,
-            });
-          }
-        })(),
-      );
+            try {
+              await refreshMissionExpiryWithGuard(
+                c.env.fitloot_db,
+                userRecord.id,
+              );
+            } catch (streakError) {
+              console.error("[authMiddleware][refreshMissionExpiryWithGuard]", {
+                message:
+                  streakError instanceof Error
+                    ? streakError.message
+                    : String(streakError),
+                userId: userRecord.id,
+              });
+            }
+          })(),
+        );
 
-      c.executionCtx.waitUntil(
-        (async () => {
-          try {
-            await ensureCaminhadaLeveUserSkill(c.env.fitloot_db, userRecord.id);
-            await tryUnlockSkillsFromPerformance(
-              c.env.fitloot_db,
-              userRecord.id,
-            );
-          } catch (error) {
-            console.error("[authMiddleware][skillConsistency]", {
-              userId: userRecord.id,
-              message: error instanceof Error ? error.message : String(error),
-            });
-          }
-        })(),
-      );
+        c.executionCtx.waitUntil(
+          (async () => {
+            try {
+              await ensureCaminhadaLeveUserSkill(c.env.fitloot_db, userRecord.id);
+              await tryUnlockSkillsFromPerformance(
+                c.env.fitloot_db,
+                userRecord.id,
+              );
+            } catch (error) {
+              console.error("[authMiddleware][skillConsistency]", {
+                userId: userRecord.id,
+                message: error instanceof Error ? error.message : String(error),
+              });
+            }
+          })(),
+        );
+      }
 
       await next();
     } catch (error) {

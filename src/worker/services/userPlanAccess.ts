@@ -101,7 +101,21 @@ export function normalizePublicPlanIdFromValue(
   return null;
 }
 
-export async function getUserAuthRecordById(
+let authRecordQueryMode: "unknown" | "modern" | "legacy" = "unknown";
+let planUpdateMode: "unknown" | "modern" | "legacy" = "unknown";
+
+function isMissingColumnError(error: unknown): boolean {
+  const message = (error instanceof Error ? error.message : String(error))
+    .toLowerCase()
+    .trim();
+  return (
+    (message.includes("column") && message.includes("does not exist")) ||
+    message.includes("no such column") ||
+    message.includes("missing plan columns")
+  );
+}
+
+async function getUserAuthRecordByIdLegacy(
   db: D1Database,
   userId: string,
 ): Promise<UserAuthRecord | null> {
@@ -158,7 +172,73 @@ export async function getUserAuthRecordById(
   };
 }
 
-export async function updateUserPlanState(
+async function getUserAuthRecordByIdModern(
+  db: D1Database,
+  userId: string,
+): Promise<UserAuthRecord | null> {
+  const userRecord = await db
+    .prepare(
+      `SELECT
+        id,
+        email,
+        name,
+        avatar_url,
+        COALESCE(onboarding_completed, 0) as onboarding_completed,
+        COALESCE(plan_id, 'basic') as plan_id,
+        COALESCE(plan_status, 'failed') as plan_status,
+        COALESCE(payment_method, 'none') as payment_method
+      FROM users
+      WHERE id = ?`,
+    )
+    .bind(userId)
+    .first<{
+      id: string;
+      email: string;
+      name: string;
+      avatar_url: string | null;
+      onboarding_completed: number;
+      plan_id: string;
+      plan_status: string;
+      payment_method: string;
+    }>();
+
+  if (!userRecord) return null;
+
+  return {
+    id: userRecord.id,
+    email: userRecord.email,
+    name: userRecord.name,
+    avatar_url: userRecord.avatar_url,
+    onboarding_completed:
+      Number(userRecord.onboarding_completed) === 1 ? 1 : 0,
+    plan_id: normalizePlanId(userRecord.plan_id),
+    plan_status: normalizePlanStatus(userRecord.plan_status),
+    payment_method: normalizeUserPaymentMethod(userRecord.payment_method),
+  };
+}
+
+export async function getUserAuthRecordById(
+  db: D1Database,
+  userId: string,
+): Promise<UserAuthRecord | null> {
+  if (authRecordQueryMode === "legacy") {
+    return getUserAuthRecordByIdLegacy(db, userId);
+  }
+
+  try {
+    const result = await getUserAuthRecordByIdModern(db, userId);
+    authRecordQueryMode = "modern";
+    return result;
+  } catch (error) {
+    if (!isMissingColumnError(error)) {
+      throw error;
+    }
+    authRecordQueryMode = "legacy";
+    return getUserAuthRecordByIdLegacy(db, userId);
+  }
+}
+
+async function updateUserPlanStateLegacy(
   db: D1Database,
   userId: string,
   params: {
@@ -202,4 +282,57 @@ export async function updateUserPlanState(
     .prepare(`UPDATE users SET ${assignments.join(", ")} WHERE id = ?`)
     .bind(...values, userId)
     .run();
+}
+
+async function updateUserPlanStateModern(
+  db: D1Database,
+  userId: string,
+  params: {
+    planId: PlanId;
+    status: PlanStatus;
+    paymentMethod: UserPaymentMethod;
+    markOnboardingCompleted: boolean;
+  },
+): Promise<void> {
+  const assignments = [
+    "plan_id = ?",
+    "plan_status = ?",
+    "payment_method = ?",
+  ];
+  const values: Array<string> = [params.planId, params.status, params.paymentMethod];
+
+  if (params.markOnboardingCompleted) {
+    assignments.push("onboarding_completed = 1");
+  }
+
+  await db
+    .prepare(`UPDATE users SET ${assignments.join(", ")} WHERE id = ?`)
+    .bind(...values, userId)
+    .run();
+}
+
+export async function updateUserPlanState(
+  db: D1Database,
+  userId: string,
+  params: {
+    planId: PlanId;
+    status: PlanStatus;
+    paymentMethod: UserPaymentMethod;
+    markOnboardingCompleted: boolean;
+  },
+): Promise<void> {
+  if (planUpdateMode === "legacy") {
+    return updateUserPlanStateLegacy(db, userId, params);
+  }
+
+  try {
+    await updateUserPlanStateModern(db, userId, params);
+    planUpdateMode = "modern";
+  } catch (error) {
+    if (!isMissingColumnError(error)) {
+      throw error;
+    }
+    planUpdateMode = "legacy";
+    await updateUserPlanStateLegacy(db, userId, params);
+  }
 }

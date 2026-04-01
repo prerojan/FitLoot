@@ -71,37 +71,36 @@ export function registerAccountRoutes(
 
     try {
       if (!user?.id) {
-        return c.json(
-          { error: "Usuário não encontrado", code: "USER_NOT_FOUND" },
-          404,
-        );
+        return c.json({ error: "Unauthorized", code: "UNAUTHORIZED" }, 401);
       }
 
-      const userRecord = await getUserAuthRecordById(c.env.fitloot_db, user.id);
-      const profileRecord = await c.env.fitloot_db
-        .prepare(
-          "SELECT showcased_achievements FROM user_profiles WHERE user_id = ?",
-        )
-        .bind(user.id)
-        .first<{ showcased_achievements?: string | null }>();
-
-      if (!userRecord) {
-        return c.json(
-          { error: "Usuário não encontrado", code: "USER_NOT_FOUND" },
-          404,
-        );
+      let showcasedAchievements: string | null = null;
+      try {
+        const profileRecord = await c.env.fitloot_db
+          .prepare(
+            "SELECT showcased_achievements FROM user_profiles WHERE user_id = ?",
+          )
+          .bind(user.id)
+          .first<{ showcased_achievements?: string | null }>();
+        showcasedAchievements = profileRecord?.showcased_achievements ?? null;
+      } catch (profileError) {
+        // Session bootstrap should stay responsive even when optional profile decoration fails.
+        console.error("[/api/users/me][profile-read]", {
+          message: getErrorMessage(profileError),
+          userId: user.id,
+        });
       }
 
       return c.json({
-        id: userRecord.id,
-        email: userRecord.email,
-        name: userRecord.name,
-        avatar_url: userRecord.avatar_url ?? undefined,
-        showcased_achievements: profileRecord?.showcased_achievements ?? null,
-        onboarding_completed: userRecord.onboarding_completed,
-        plan_id: userRecord.plan_id,
-        plan_status: userRecord.plan_status,
-        payment_method: userRecord.payment_method,
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        avatar_url: user.avatar_url ?? undefined,
+        showcased_achievements: showcasedAchievements,
+        onboarding_completed: user.onboarding_completed,
+        plan_id: user.plan_id,
+        plan_status: user.plan_status,
+        payment_method: user.payment_method,
       });
     } catch (err) {
       console.error("[/api/users/me] Erro interno:", {

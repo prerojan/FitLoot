@@ -1,4 +1,10 @@
-import { Pool, type PoolClient, type QueryResult, type QueryResultRow } from "pg";
+import {
+  Pool,
+  type PoolClient,
+  type PoolConfig,
+  type QueryResult,
+  type QueryResultRow,
+} from "pg";
 import { getErrorMessage } from "./errors";
 import type { Env } from "./types";
 
@@ -17,7 +23,13 @@ type CompiledSql = {
   params: readonly unknown[];
 };
 
-const DEFAULT_POOL_MAX = 6;
+// Cloudflare Workers isolates scale horizontally, so large per-isolate pools
+// can exhaust upstream connection limits. Keep this very small.
+const DEFAULT_POOL_MAX = 1;
+const DEFAULT_POOL_IDLE_TIMEOUT_MS = 30_000;
+const DEFAULT_POOL_CONNECT_TIMEOUT_MS = 4_000;
+const DEFAULT_POOL_QUERY_TIMEOUT_MS = 12_000;
+const DEFAULT_POOL_STATEMENT_TIMEOUT_MS = 12_000;
 const SEARCH_PATH = "compat,core,missions,gameplay,catalog,billing,social,telemetry,public";
 const TABLE_SCHEMA_MAP: Readonly<Record<string, string>> = {
   users: "core",
@@ -72,25 +84,37 @@ function nextSavepointName() {
 }
 
 function normalizeConnectionUrl(connectionUrl: string): string {
-  const parsed = new URL(connectionUrl);
+  try {
+    const parsed = new URL(connectionUrl);
 
-  const currentOptions = parsed.searchParams.get("options");
-  const searchPathOption = `-c search_path=${SEARCH_PATH}`;
-  if (!currentOptions) {
-    parsed.searchParams.set("options", searchPathOption);
-  } else if (!currentOptions.includes("search_path")) {
-    parsed.searchParams.set("options", `${currentOptions} ${searchPathOption}`.trim());
+    const isSupabasePooler = parsed.hostname.includes("pooler.supabase.com");
+    if (isSupabasePooler) {
+      // Supabase pooler (PgBouncer) can terminate connections when startup
+      // `options` are present. Keep startup params minimal in that mode.
+      parsed.searchParams.delete("options");
+    } else {
+      const currentOptions = parsed.searchParams.get("options");
+      const searchPathOption = `-c search_path=${SEARCH_PATH}`;
+      if (!currentOptions) {
+        parsed.searchParams.set("options", searchPathOption);
+      } else if (!currentOptions.includes("search_path")) {
+        parsed.searchParams.set("options", `${currentOptions} ${searchPathOption}`.trim());
+      }
+    }
+
+    // Enforce TLS behavior through the explicit `ssl` config below instead of `sslmode`.
+    // This avoids parser-specific `sslmode` semantics drift across pg versions.
+    parsed.searchParams.delete("sslmode");
+    parsed.searchParams.delete("sslrootcert");
+    parsed.searchParams.delete("sslcert");
+    parsed.searchParams.delete("sslkey");
+    parsed.searchParams.delete("uselibpqcompat");
+
+    return parsed.toString();
+  } catch {
+    // Keep the original URL when WHATWG parsing fails (for provider-specific DSNs).
+    return connectionUrl.trim();
   }
-
-  // Enforce TLS behavior through the explicit `ssl` config below instead of `sslmode`.
-  // This avoids parser-specific `sslmode` semantics drift across pg versions.
-  parsed.searchParams.delete("sslmode");
-  parsed.searchParams.delete("sslrootcert");
-  parsed.searchParams.delete("sslcert");
-  parsed.searchParams.delete("sslkey");
-  parsed.searchParams.delete("uselibpqcompat");
-
-  return parsed.toString();
 }
 
 function toNumeric(value: unknown): number | null {
@@ -222,6 +246,22 @@ function replaceQuestionMarkParams(sql: string): string {
   return output;
 }
 
+function isRetryableReadError(error: unknown): boolean {
+  const message = getErrorMessage(error).toLowerCase();
+  return (
+    message.includes("query read timeout") ||
+    message.includes("connection terminated") ||
+    message.includes("connection terminated unexpectedly") ||
+    message.includes("timeout exceeded when trying to connect") ||
+    message.includes("read etimedout") ||
+    message.includes("socket hang up")
+  );
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function extractInsertTarget(sql: string): TableRef | null {
   const match = /^\s*insert\s+into\s+([^\s(]+)/iu.exec(sql);
   if (!match?.[1]) return null;
@@ -278,20 +318,46 @@ function resolveLastRowId<T extends QueryResultRow>(result: QueryResult<T>): num
   return toNumeric(firstValue);
 }
 
+function readHyperdriveConnectionString(binding: unknown): string | null {
+  if (!binding || typeof binding !== "object") return null;
+  const candidate = binding as {
+    connectionString?: string | (() => string);
+  };
+  const rawValue =
+    typeof candidate.connectionString === "function"
+      ? candidate.connectionString()
+      : candidate.connectionString;
+  if (typeof rawValue !== "string") return null;
+  const value = rawValue.trim();
+  return value.length > 0 ? value : null;
+}
+
 function getPgPool(dbUrlRaw: string, useSsl: boolean): Pool {
   const normalized = normalizeConnectionUrl(dbUrlRaw);
   const cacheKey = `${normalized}::ssl=${useSsl ? "1" : "0"}`;
   const cached = poolCache.get(cacheKey);
   if (cached) return cached;
 
-  const pool = new Pool({
+  const poolConfig: PoolConfig = {
     connectionString: normalized,
     max: DEFAULT_POOL_MAX,
+    connectionTimeoutMillis: DEFAULT_POOL_CONNECT_TIMEOUT_MS,
+    idleTimeoutMillis: DEFAULT_POOL_IDLE_TIMEOUT_MS,
+    query_timeout: DEFAULT_POOL_QUERY_TIMEOUT_MS,
+    statement_timeout: DEFAULT_POOL_STATEMENT_TIMEOUT_MS,
     ssl: useSsl
       ? {
           rejectUnauthorized: false,
         }
       : undefined,
+  };
+
+  const pool = new Pool(poolConfig);
+
+  pool.on("error", (error) => {
+    console.error("[supabase-compat-db][pool-error]", {
+      message: getErrorMessage(error),
+    });
   });
 
   poolCache.set(cacheKey, pool);
@@ -402,7 +468,7 @@ class SupabaseCompatDatabase {
     throw new Error("dump is not available for Supabase compatibility backend.");
   }
 
-  async __transaction<T>(run: () => Promise<T>): Promise<T> {
+  async runInTransaction<T>(run: () => Promise<T>): Promise<T> {
     if (this.transactionClient) {
       const savepoint = nextSavepointName();
       await this.transactionClient.query(`SAVEPOINT ${savepoint}`);
@@ -428,6 +494,7 @@ class SupabaseCompatDatabase {
     this.transactionClient = client;
     this.transactionDepth = 0;
 
+    let shouldDestroyClient = false;
     try {
       await client.query("BEGIN");
       await client.query(`SET LOCAL search_path TO ${SEARCH_PATH}`);
@@ -435,6 +502,7 @@ class SupabaseCompatDatabase {
       await client.query("COMMIT");
       return result;
     } catch (error) {
+      shouldDestroyClient = true;
       try {
         await client.query("ROLLBACK");
       } catch {
@@ -444,7 +512,7 @@ class SupabaseCompatDatabase {
     } finally {
       this.transactionClient = null;
       this.transactionDepth = 0;
-      client.release(true);
+      client.release(shouldDestroyClient);
     }
   }
 
@@ -452,40 +520,29 @@ class SupabaseCompatDatabase {
     const cached = this.tableIdColumnCache.get(target.cacheKey);
     if (typeof cached === "boolean") return cached;
 
-    let queryTarget: QueryTarget = this.currentQueryTarget();
-    let transientClient: PoolClient | null = null;
-    if (!this.transactionClient) {
-      transientClient = await this.pool.connect();
-      queryTarget = transientClient;
-    }
+    const queryTarget: QueryTarget = this.currentQueryTarget();
     let result: QueryResult<Record<string, unknown>>;
 
-    try {
-      if (target.schema) {
-        result = await queryTarget.query(
-          `SELECT 1
-             FROM information_schema.columns
-            WHERE table_schema = $1
-              AND table_name = $2
-              AND column_name = 'id'
-            LIMIT 1`,
-          [target.schema, target.table],
-        );
-      } else {
-        result = await queryTarget.query(
-          `SELECT 1
-             FROM information_schema.columns
-            WHERE table_name = $1
-              AND column_name = 'id'
-              AND table_schema NOT IN ('pg_catalog', 'information_schema')
-            LIMIT 1`,
-          [target.table],
-        );
-      }
-    } finally {
-      if (transientClient) {
-        transientClient.release(true);
-      }
+    if (target.schema) {
+      result = await queryTarget.query(
+        `SELECT 1
+           FROM information_schema.columns
+          WHERE table_schema = $1
+            AND table_name = $2
+            AND column_name = 'id'
+          LIMIT 1`,
+        [target.schema, target.table],
+      );
+    } else {
+      result = await queryTarget.query(
+        `SELECT 1
+           FROM information_schema.columns
+          WHERE table_name = $1
+            AND column_name = 'id'
+            AND table_schema NOT IN ('pg_catalog', 'information_schema')
+          LIMIT 1`,
+        [target.table],
+      );
     }
 
     const hasColumn = (result.rowCount ?? 0) > 0;
@@ -534,38 +591,55 @@ class SupabaseCompatDatabase {
     mode: "first" | "all" | "run",
   ): Promise<{ rows: T[]; rowCount: number; lastRowId: number | null }> {
     const compiled = await this.compileSql(sql, params, mode);
-    let queryTarget: QueryTarget = this.currentQueryTarget();
-    let transientClient: PoolClient | null = null;
+    const maxAttempts =
+      !this.transactionClient && mode !== "run" ? 2 : 1;
 
-    if (this.transactionClient) {
-      queryTarget = this.transactionClient;
-    } else {
-      transientClient = await this.pool.connect();
-      queryTarget = transientClient;
-    }
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      try {
+        let result: QueryResult<T>;
+        if (this.transactionClient) {
+          result = await this.transactionClient.query<T>(compiled.sql, [...compiled.params]);
+        } else {
+          // Use single-query clients outside explicit transactions and always
+          // destroy them afterward to avoid reusing stale sockets from poolers.
+          const client = await this.pool.connect();
+          try {
+            result = await client.query<T>(compiled.sql, [...compiled.params]);
+          } finally {
+            client.release(true);
+          }
+        }
+        const rows = Array.isArray(result.rows) ? result.rows : [];
+        const rowCount = Number(result.rowCount ?? rows.length ?? 0);
+        const normalizedRows = mode === "first" ? (rows.slice(0, 1) as T[]) : rows;
+        const lastRowId = resolveLastRowId(result);
+        return {
+          rows: normalizedRows,
+          rowCount,
+          lastRowId,
+        };
+      } catch (error) {
+        const shouldRetry =
+          attempt < maxAttempts && isRetryableReadError(error);
+        if (shouldRetry) {
+          console.warn("[supabase-compat-db][query-retry]", {
+            attempt,
+            message: getErrorMessage(error),
+            sql: stripTrailingSemicolon(sql).slice(0, 120),
+          });
+          await sleep(75 * attempt);
+          continue;
+        }
 
-    try {
-      const result = await queryTarget.query<T>(compiled.sql, [...compiled.params]);
-      const rows = Array.isArray(result.rows) ? result.rows : [];
-      const rowCount = Number(result.rowCount ?? rows.length ?? 0);
-      const normalizedRows = mode === "first" ? (rows.slice(0, 1) as T[]) : rows;
-      const lastRowId = resolveLastRowId(result);
-      return {
-        rows: normalizedRows,
-        rowCount,
-        lastRowId,
-      };
-    } catch (error) {
-      console.error("[supabase-compat-db][query]", {
-        message: getErrorMessage(error),
-        sql: stripTrailingSemicolon(sql).slice(0, 200),
-      });
-      throw error;
-    } finally {
-      if (transientClient) {
-        transientClient.release(true);
+        console.error("[supabase-compat-db][query]", {
+          message: getErrorMessage(error),
+          sql: stripTrailingSemicolon(sql).slice(0, 200),
+        });
+        throw error;
       }
     }
+
+    throw new Error("Unreachable query execution state.");
   }
 }
 
@@ -577,19 +651,23 @@ export type RuntimeDatabase = D1Database & {
 function resolveSupabaseConnection(
   env: Pick<Env, "SUPABASE_DB_URL" | "SUPABASE_HYPERDRIVE">,
 ): { connectionUrl: string; useSsl: boolean } {
-  const hyperdriveValue = env.SUPABASE_HYPERDRIVE?.connectionString?.trim();
+  const hyperdriveValue = readHyperdriveConnectionString(env.SUPABASE_HYPERDRIVE);
   if (hyperdriveValue) {
     // Hyperdrive exposes a local proxy endpoint; SSL should not be forced here.
     return { connectionUrl: hyperdriveValue, useSsl: false };
   }
 
-  const value = env.SUPABASE_DB_URL?.trim();
-  if (!value) {
+  const directUrl = env.SUPABASE_DB_URL?.trim();
+  if (directUrl) {
+    return { connectionUrl: directUrl, useSsl: true };
+  }
+
+  if (!directUrl) {
     throw new Error(
       "DB_BACKEND=supabase requires SUPABASE_HYPERDRIVE binding or SUPABASE_DB_URL in Worker secrets.",
     );
   }
-  return { connectionUrl: value, useSsl: true };
+  return { connectionUrl: directUrl, useSsl: true };
 }
 
 export function createSupabaseCompatDatabase(
@@ -597,9 +675,9 @@ export function createSupabaseCompatDatabase(
 ): RuntimeDatabase {
   const { connectionUrl, useSsl } = resolveSupabaseConnection(env);
   const pool = getPgPool(connectionUrl, useSsl);
-  const db = new SupabaseCompatDatabase(pool) as unknown as RuntimeDatabase;
+  const compatDb = new SupabaseCompatDatabase(pool);
+  const db = compatDb as unknown as RuntimeDatabase;
   db.__backend = "supabase";
-  db.__transaction = <T>(run: () => Promise<T>) =>
-    (db as unknown as SupabaseCompatDatabase).__transaction(run);
+  db.__transaction = <T>(run: () => Promise<T>) => compatDb.runInTransaction(run);
   return db;
 }

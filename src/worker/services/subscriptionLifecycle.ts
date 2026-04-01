@@ -469,7 +469,7 @@ async function getUserIdByEmail(db: D1Database, email: string): Promise<string |
   if (!normalizedEmail) return null;
 
   const row = await db
-    .prepare("SELECT id FROM users WHERE lower(email) = ? LIMIT 1")
+    .prepare("SELECT id FROM users WHERE email = ? LIMIT 1")
     .bind(normalizedEmail)
     .first<{ id: string }>();
 

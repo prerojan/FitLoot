@@ -93,6 +93,10 @@ type PersistedOnboardingSnapshot = {
   trainingFrequency: number;
 };
 
+function isSupabaseRuntimeDb(db: D1Database): boolean {
+  return (db as D1Database & { __backend?: string }).__backend === "supabase";
+}
+
 type PersistOnboardingProfileStateParams = {
   env: Env;
   userId: string;
@@ -439,7 +443,16 @@ export function registerOnboardingRoutes(
       if (!user) return c.json({ error: "Unauthorized" }, 401);
 
       const data = c.req.valid("json");
-      await ensureGamificationCatalog(c.env.fitloot_db);
+      if (!isSupabaseRuntimeDb(c.env.fitloot_db)) {
+        c.executionCtx.waitUntil(
+          ensureGamificationCatalog(c.env.fitloot_db).catch((error) => {
+            console.error("[/api/onboarding/profile][catalog-sync]", {
+              userId: user.id,
+              message: getErrorMessage(error),
+            });
+          }),
+        );
+      }
 
       try {
         await withTransaction(c.env.fitloot_db, async () => {
@@ -461,7 +474,17 @@ export function registerOnboardingRoutes(
       } catch (error) {
         const handled = respondOnboardingPersistenceError(c, error);
         if (handled) return handled;
-        throw error;
+        console.error("[/api/onboarding/profile]", {
+          userId: user.id,
+          message: getErrorMessage(error),
+        });
+        return c.json(
+          {
+            error: "Erro interno",
+            code: "INTERNAL_ERROR",
+          },
+          500,
+        );
       }
 
       return c.json({ success: true, onboarding_ready: true }, 200);
@@ -478,7 +501,16 @@ export function registerOnboardingRoutes(
       if (!user) return c.json({ error: "Unauthorized" }, 401);
 
       const data = c.req.valid("json");
-      await ensureGamificationCatalog(c.env.fitloot_db);
+      if (!isSupabaseRuntimeDb(c.env.fitloot_db)) {
+        c.executionCtx.waitUntil(
+          ensureGamificationCatalog(c.env.fitloot_db).catch((error) => {
+            console.error("[/api/onboarding][catalog-sync]", {
+              userId: user.id,
+              message: getErrorMessage(error),
+            });
+          }),
+        );
+      }
 
       let checkoutResult: CheckoutStartResult | undefined;
       try {

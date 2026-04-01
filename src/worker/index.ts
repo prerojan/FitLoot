@@ -3206,15 +3206,23 @@ app.get("*", async (c, next) => {
 
 // Fecha o worker com um guard final para fetch e scheduled.
 async function handleFetchWithGuard(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-  const runtimeEnv = attachRuntimeDatabase(env);
+  let runtimeEnv: Env = env;
   try {
+    runtimeEnv = attachRuntimeDatabase(env);
     return await app.fetch(request, runtimeEnv, ctx);
   } catch (error) {
+    const errorMessage = getErrorMessage(error);
+    const lowerMessage = errorMessage.toLowerCase();
+    const hideErrorDetails =
+      lowerMessage.includes("supabase") ||
+      lowerMessage.includes("postgres") ||
+      lowerMessage.includes("connectionstring") ||
+      lowerMessage.includes("invalid url");
     console.error("[worker][fetch-guard]", {
       method: request.method,
       url: request.url,
-      message: getErrorMessage(error),
-      stack: error instanceof Error ? error.stack : undefined,
+      message: hideErrorDetails ? "Database runtime initialization failed." : errorMessage,
+      stack: hideErrorDetails ? undefined : error instanceof Error ? error.stack : undefined,
     });
 
     const origin = resolveCorsOrigin(request.headers.get("Origin") ?? undefined, runtimeEnv);
@@ -3240,7 +3248,26 @@ async function handleFetchWithGuard(request: Request, env: Env, ctx: ExecutionCo
 export default {
   fetch: handleFetchWithGuard,
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
-    const runtimeEnv = attachRuntimeDatabase(env);
+    let runtimeEnv: Env;
+    try {
+      runtimeEnv = attachRuntimeDatabase(env);
+    } catch (error) {
+      const errorMessage = getErrorMessage(error);
+      const lowerMessage = errorMessage.toLowerCase();
+      const hideErrorDetails =
+        lowerMessage.includes("supabase") ||
+        lowerMessage.includes("postgres") ||
+        lowerMessage.includes("connectionstring") ||
+        lowerMessage.includes("invalid url");
+
+      console.error("[worker][scheduled][runtime-init]", {
+        message: hideErrorDetails
+          ? "Database runtime initialization failed."
+          : errorMessage,
+      });
+      return;
+    }
+
     ctx.waitUntil(
       runScheduledWithGuard(event, runtimeEnv).catch((error) => {
         console.error("[worker][scheduled][unhandled]", {
