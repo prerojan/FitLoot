@@ -1,19 +1,19 @@
-# Preparação Inicial de Ambiente Supabase (2026-03-31)
+﻿# Preparacao Inicial de Ambiente Supabase (2026-03-31)
 
 ## Objetivo
 
-Preparar o Supabase para receber a estrutura atual do FitLoot (hoje em Cloudflare D1), com separação por domínios, camada de compatibilidade e segurança para migração incremental sem quebrar a lógica do app.
+Preparar o Supabase para receber a estrutura atual do FitLoot (hoje em Cloudflare D1), com separacao por dominios, camada de compatibilidade e seguranca para migracao incremental sem quebrar a logica do app.
 
-## Base de análise usada
+## Base de analise usada
 
 - `docs/architecture/project-structure-map.md`
 - `docs/audits/2026-03-28-structure-audit.md`
-- Inventário real do D1 de produção (`fitloot-db`) via `wrangler d1 execute`
+- Inventario real do D1 de producao (`fitloot-db`) via `wrangler d1 execute`
 - Mapeamento real de uso de tabelas por `src/worker/routes/*` e `src/worker/services/*`
 
-## Decisão de arquitetura
+## Decisao de arquitetura
 
-Em vez de "um banco por tabela", foi adotado isolamento por **domínios em schemas** no mesmo Postgres/Supabase:
+Em vez de "um banco por tabela", foi adotado isolamento por dominios em schemas no mesmo Postgres/Supabase:
 
 - `core`
 - `social`
@@ -25,9 +25,9 @@ Em vez de "um banco por tabela", foi adotado isolamento por **domínios em schem
 - `ai`
 - `compat`
 
-Isso mantém consistência transacional e evita quebrar joins e fluxos do Worker.
+Isso mantem consistencia transacional e evita quebrar joins e fluxos do Worker.
 
-## O que já foi aplicado no Supabase
+## O que ja foi aplicado no Supabase
 
 Migrations aplicadas:
 
@@ -37,55 +37,56 @@ Migrations aplicadas:
 4. `0004_fix_function_search_path`
 5. `0005_fk_covering_indexes`
 6. `0006_social_online_presence`
+7. `0007_catalog_reward_parity_and_notifications`
+8. `0008_sqlite_datetime_compat`
 
 Estado validado:
 
-- Todas as tabelas principais criadas por domínio
+- Todas as tabelas principais criadas por dominio
 - RLS habilitado nas tabelas
 - Policies de `service_role` aplicadas
 - Camada de views de compatibilidade criada em `compat.*`
 - Camada social online criada (`social.user_presence`, `social.friend_activity_events`, `social.friend_online_presence`)
 - Security Advisor sem lints pendentes
-- Performance Advisor sem alertas de FK sem índice
+- Performance Advisor sem alertas de FK sem indice
 
-## Compatibilidade para migração gradual
+## Nota sobre visualizacao no Supabase Studio
 
-Foi criada camada de views `compat` com nomes legados (`compat.users`, `compat.missions`, etc.).  
-Isso permite migração incremental do acesso SQL do Worker sem exigir rename imediato de toda query.
+Se o dashboard mostrar apenas migrations e "nenhuma tabela", normalmente o filtro de schema esta em `public`.
+Para ver a estrutura completa do projeto, selecione `All schemas` ou cada dominio manualmente:
+`core`, `social`, `catalog`, `missions`, `gameplay`, `billing`, `telemetry`, `compat`.
 
-## Melhorias estruturais já incorporadas
+## Compatibilidade para migracao gradual
 
-- `mission_generation_jobs` agora é schema-managed (não depende mais de `CREATE TABLE` em runtime)
-- FKs e índices críticos adicionados para integridade/performance
+Foi criada camada de views `compat` com nomes legados (`compat.users`, `compat.missions`, etc.).
+Isso permite migracao incremental do acesso SQL do Worker sem exigir rename imediato de toda query.
+
+## Melhorias estruturais incorporadas
+
+- `mission_generation_jobs` e demais estruturas sensiveis agora sao schema-managed (sem DDL em runtime)
+- FKs e indices criticos adicionados para integridade/performance
 - `plan_id` padronizado para `basic/pro/annual/vip` no schema novo
 - Triggers de `updated_at` padronizadas
-- Presença online desacoplada de `user_progression.last_activity_date`
-- Políticas RLS para visibilidade de presença por amizade (`friends/private/public`)
+- Presenca online desacoplada de `user_progression.last_activity_date`
+- Politicas RLS para visibilidade de presenca por amizade (`friends/private/public`)
+- Adapter de banco com `DB_BACKEND` e transacao real (sem no-op)
+- Compatibilidade de `datetime(...)` SQLite no Postgres via `compat.datetime(...)`
 
-## Pontos fracos detectados no legado (D1/Worker) e pendências
+## Pontos fracos detectados no legado (D1/Worker)
 
-1. `withTransaction` no Worker ainda é no-op (`src/worker/index.ts`) e precisa de implementação real no adaptador Postgres.
-2. `USER_PURGE_TARGETS` ainda não inclui `mission_generation_jobs`.
-3. Existem sinais de drift histórico entre migrations e estado real do D1 (ex.: tabelas legadas criadas fora de migration em versões anteriores).
-4. No D1 de produção, havia `plan_id = 'free'` em histórico; no Supabase novo isso já foi bloqueado por constraint.
+1. SQL legado muito extenso e acoplado a sintaxe SQLite (coberto por camada compativel durante o cutover).
+2. Drift historico entre migrations antigas e estado real de producao no D1.
+3. Dados historicos de usuario/missoes com inconsistencias e duplicidade (motivo da estrategia de base limpa).
 
-## Segurança de segredos
+## Seguranca de segredos
 
-- Foi feita varredura local para padrões sensíveis (`sb_secret_`, `sb_publishable_`, JWT de service role, etc.).
-- Nenhum segredo foi encontrado em arquivos do projeto.
-- Recomendação mantida: usar apenas variáveis de ambiente server-side para `service_role` e nunca expor em frontend.
+- Varredura local para padroes sensiveis (`sb_secret_`, `sb_publishable_`, JWT de service role, etc.).
+- Segredos restritos a ambiente server-side (`SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_DB_URL`).
+- Recomendacao obrigatoria: nunca expor `service_role` no frontend.
 
-## Próxima etapa recomendada (migração de dados)
+## Proxima etapa recomendada
 
-1. Executar pre-checks de qualidade no D1.
-2. Exportar por domínio (ordem: `core` -> `catalog` -> `missions/gameplay` -> `billing/telemetry/social`).
-3. Importar no Supabase preservando IDs.
-4. Rodar reconciliação (órfãos, contadores, planos).
-5. Fazer cutover do Worker por feature flag (primeiro leitura, depois escrita).
-
-## Próxima etapa recomendada (friends online)
-
-1. Adicionar heartbeat no backend (`/api/friends/presence/heartbeat`) escrevendo em `social.user_presence`.
-2. Atualizar `GET /api/friends` para usar presença em tempo real da tabela nova, com fallback para lógica antiga.
-3. Registrar eventos sociais em `social.friend_activity_events` (accept, remove, challenge).
-4. Evoluir a aba "Pedidos enviados" com endpoint dedicado e feed social baseado em eventos.
+1. Deploy 1 com adapter dual-path e `DB_BACKEND=d1`.
+2. Deploy 2 com migrations + bootstrap + import seletivo de `promo_codes`.
+3. Deploy 3 ativando `DB_BACKEND=supabase` e executando smoke end-to-end.
+4. Deploy 4 removendo fallback D1 apos janela de rollback curto.

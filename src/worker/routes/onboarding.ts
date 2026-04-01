@@ -457,7 +457,7 @@ export function registerOnboardingRoutes(
             skillTierOrder,
             upsertTrainingPlan,
           });
-        });
+        }, c.env);
       } catch (error) {
         const handled = respondOnboardingPersistenceError(c, error);
         if (handled) return handled;
@@ -524,7 +524,7 @@ export function registerOnboardingRoutes(
             plan_status: checkoutResult.plan_status,
             amount: checkoutResult.amount,
           });
-        });
+        }, c.env);
       } catch (error) {
         const handled = respondOnboardingPersistenceError(c, error);
         if (handled) return handled;

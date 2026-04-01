@@ -1154,7 +1154,7 @@ export function registerMissionRoutes(
           completionPhase = "unlock_performance_variants";
           await deps.tryUnlockSkillsFromPerformance(c.env.fitloot_db, user.id);
           completionPhase = "completed";
-        });
+        }, c.env);
 
         try {
           // Limpa os caches dependentes da lista e do ranking logo após a conclusão confirmada.

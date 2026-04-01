@@ -8,6 +8,8 @@ Estas migrations foram aplicadas diretamente via Supabase MCP no projeto `bjsqqo
 4. `0004_fix_function_search_path`
 5. `0005_fk_covering_indexes`
 6. `0006_social_online_presence`
+7. `0007_catalog_reward_parity_and_notifications` (2026-04-01)
+8. `0008_sqlite_datetime_compat` (2026-04-01)
 
 Validação pós-aplicação:
 
@@ -20,3 +22,4 @@ Referência de arquitetura e decisões:
 
 - `docs/supabase/initial_environment_preparation.md`
 - `docs/supabase/pre_migration_data_quality_checks.sql`
+- `docs/supabase/clean_base_cutover_runbook.md`

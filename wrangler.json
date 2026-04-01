@@ -28,6 +28,15 @@
       "remote": true
     }
   ],
+  "hyperdrive": [
+    {
+      "binding": "SUPABASE_HYPERDRIVE",
+      "id": "03568293dfee43a699f139a8dcf9e5f3"
+    }
+  ],
+  "vars": {
+    "DB_BACKEND": "supabase"
+  },
   "triggers": {
     "crons": [
       "1 0 * * *",

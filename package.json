@@ -9,6 +9,7 @@
     "@vercel/speed-insights": "^1.3.1",
     "hono": "^4.7.7",
     "lucide-react": "^0.510.0",
+    "pg": "^8.20.0",
     "react": "19.0.0",
     "react-dom": "19.0.0",
     "react-router": "^7.5.3",
@@ -22,6 +23,7 @@
     "@testing-library/react": "^16.3.0",
     "@testing-library/user-event": "^14.6.1",
     "@types/node": "22.14.1",
+    "@types/pg": "^8.20.0",
     "@types/react": "19.0.10",
     "@types/react-dom": "19.0.4",
     "@vitejs/plugin-react": "5.1.4",
@@ -55,6 +57,12 @@
     "debug:npm-config": "npm config list && npm config get registry",
     "check:lite": "node ./scripts/static-checks.mjs",
     "ai:check": "npm run check:lite",
-    "validate": "npm run check:lite"
+    "validate": "npm run check:lite",
+    "supabase:reset-clean-base": "node ./scripts/supabase/reset-clean-base.mjs",
+    "supabase:bootstrap-catalog": "node --experimental-strip-types ./scripts/supabase/bootstrap-catalog.mjs",
+    "supabase:generate-catalog-seed-sql": "node --experimental-strip-types ./scripts/supabase/generate-catalog-seed-sql.mjs",
+    "supabase:import-promo-codes": "node ./scripts/supabase/import-promo-codes-from-d1.mjs",
+    "supabase:verify-clean-base": "node ./scripts/supabase/verify-clean-base.mjs",
+    "supabase:prepare-clean-base": "npm run supabase:reset-clean-base && npm run supabase:bootstrap-catalog && npm run supabase:import-promo-codes"
   }
 }

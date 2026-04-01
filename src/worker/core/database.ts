@@ -18,9 +18,41 @@ export async function hasCoreSchema(db: D1Database) {
   }
 
   try {
-    const result = await db.prepare(
-      `SELECT COUNT(*) as count FROM sqlite_master WHERE type='table' AND name IN ('users', 'sessions')`,
+    // Prefer a real table probe that works for D1 and compat views on Supabase.
+    await db.prepare("SELECT 1 FROM users LIMIT 1").first();
+    await db.prepare("SELECT 1 FROM sessions LIMIT 1").first();
+    cachedSchemaState = { ready: true, checkedAt: now };
+    return true;
+  } catch {
+    // Fall back to explicit core schema probe for Supabase deployments
+    // where search_path may not include compat/core.
+  }
+
+  try {
+    await db.prepare("SELECT 1 FROM core.users LIMIT 1").first();
+    await db.prepare("SELECT 1 FROM core.sessions LIMIT 1").first();
+    cachedSchemaState = { ready: true, checkedAt: now };
+    return true;
+  } catch {
+    // Fall back to metadata checks for partially bootstrapped environments.
+  }
+
+  try {
+    let result = await db.prepare(
+      `SELECT COUNT(DISTINCT table_name) as count
+         FROM information_schema.tables
+        WHERE table_name IN ('users', 'sessions')
+          AND (
+            table_schema = 'core'
+            OR table_schema = ANY(current_schemas(true))
+          )`,
     ).first<{ count: number }>();
+
+    if (!result) {
+      result = await db.prepare(
+        `SELECT COUNT(*) as count FROM sqlite_master WHERE type='table' AND name IN ('users', 'sessions')`,
+      ).first<{ count: number }>();
+    }
 
     const ready = Number(result?.count ?? 0) >= 2;
     cachedSchemaState = { ready, checkedAt: now };
@@ -50,9 +82,29 @@ async function getTableColumns(db: D1Database, tableName: string): Promise<Set<s
     return cached.columns;
   }
 
-  const info = await db.prepare(`PRAGMA table_info('${cacheKey}')`).all<{ name: string | null }>();
+  let rows: Array<{ name: string | null }> = [];
+  try {
+    const info = await db.prepare(
+      `SELECT column_name as name
+         FROM information_schema.columns
+        WHERE table_name = ?
+          AND table_schema NOT IN ('pg_catalog', 'information_schema')
+        ORDER BY
+          CASE
+            WHEN table_schema = ANY(current_schemas(true)) THEN 0
+            WHEN table_schema = 'core' THEN 1
+            ELSE 2
+          END,
+          ordinal_position`,
+    ).bind(cacheKey).all<{ name: string | null }>();
+    rows = Array.isArray(info.results) ? info.results : [];
+  } catch {
+    const info = await db.prepare(`PRAGMA table_info('${cacheKey}')`).all<{ name: string | null }>();
+    rows = Array.isArray(info.results) ? info.results : [];
+  }
+
   const columns = new Set(
-    (Array.isArray(info.results) ? info.results : [])
+    rows
       .map((row) => (typeof row.name === "string" ? row.name.toLowerCase() : ""))
       .filter((value) => value.length > 0),
   );

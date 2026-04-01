@@ -42,6 +42,14 @@ import {
   hasTableColumn,
 } from "./core/database";
 import {
+  createDatabaseAdapter,
+  resolveDatabaseBackend,
+} from "./core/dbAdapter";
+import {
+  createSupabaseCompatDatabase,
+  type RuntimeDatabase,
+} from "./core/supabaseCompatDb";
+import {
   getErrorMessage,
 } from "./core/errors";
 import {
@@ -1137,8 +1145,27 @@ async function onMissionFailed(
   await checkMissionRelevanceService(userId, missionId, db, "failed");
 }
 
-async function withTransaction<T>(_db: D1Database, run: () => Promise<T>): Promise<T> {
-  return run();
+async function withTransaction<T>(
+  db: RuntimeDatabase,
+  run: () => Promise<T>,
+  env?: Pick<Env, "DB_BACKEND">,
+): Promise<T> {
+  const adapter = createDatabaseAdapter(
+    env ?? {},
+    db,
+  );
+  return adapter.transaction(run);
+}
+
+function attachRuntimeDatabase(env: Env): Env {
+  const backend = resolveDatabaseBackend(env);
+  if (backend === "supabase") {
+    return {
+      ...env,
+      fitloot_db: createSupabaseCompatDatabase(env) as unknown as D1Database,
+    };
+  }
+  return env;
 }
 
 // Inicializa o app e concentra o tratamento global de erros HTTP.
@@ -1354,27 +1381,9 @@ async function ensureMissionSubtaskSchema(db: D1Database): Promise<void> {
   const now = Date.now();
   if (now - missionSubtaskSchemaCheckedAt < MISSION_SUBTASK_SCHEMA_TTL_MS) return;
 
-  await db.prepare(
-    `CREATE TABLE IF NOT EXISTS mission_subtasks (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      parent_mission_id INTEGER NOT NULL,
-      mission_type TEXT NOT NULL DEFAULT 'daily',
-      subtask_title TEXT NOT NULL,
-      compatibility_key TEXT NOT NULL,
-      compatibility_terms_json TEXT NOT NULL DEFAULT '[]',
-      required_count INTEGER NOT NULL DEFAULT 1,
-      current_count INTEGER NOT NULL DEFAULT 0,
-      is_completed INTEGER NOT NULL DEFAULT 0,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`
-  ).run();
-  await db.prepare(
-    "CREATE INDEX IF NOT EXISTS idx_mission_subtasks_parent ON mission_subtasks(parent_mission_id)"
-  ).run();
-  await db.prepare(
-    "CREATE INDEX IF NOT EXISTS idx_mission_subtasks_parent_completed ON mission_subtasks(parent_mission_id, is_completed)"
-  ).run();
+  await db
+    .prepare("SELECT id FROM mission_subtasks LIMIT 1")
+    .all<{ id: number }>();
 
   missionSubtaskSchemaCheckedAt = now;
 }
@@ -1484,18 +1493,9 @@ const MONTHLY_COUNTER_SCHEMA_TTL_MS = 60_000;
 async function ensureMonthlyCounterSchema(db: D1Database): Promise<void> {
   const now = Date.now();
   if (now - monthlyCounterSchemaCheckedAt < MONTHLY_COUNTER_SCHEMA_TTL_MS) return;
-  await db.prepare(
-    `CREATE TABLE IF NOT EXISTS user_monthly_counters (
-      user_id TEXT NOT NULL,
-      month_key TEXT NOT NULL,
-      missions_completed INTEGER DEFAULT 0,
-      distance_meters INTEGER DEFAULT 0,
-      streak_days INTEGER DEFAULT 0,
-      weekly_circuits_completed INTEGER DEFAULT 0,
-      updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      PRIMARY KEY (user_id, month_key)
-    )`
-  ).run();
+  await db
+    .prepare("SELECT user_id FROM user_monthly_counters LIMIT 1")
+    .all<{ user_id: string }>();
   monthlyCounterSchemaCheckedAt = now;
 }
 
@@ -3206,8 +3206,9 @@ app.get("*", async (c, next) => {
 
 // Fecha o worker com um guard final para fetch e scheduled.
 async function handleFetchWithGuard(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  const runtimeEnv = attachRuntimeDatabase(env);
   try {
-    return await app.fetch(request, env, ctx);
+    return await app.fetch(request, runtimeEnv, ctx);
   } catch (error) {
     console.error("[worker][fetch-guard]", {
       method: request.method,
@@ -3216,7 +3217,7 @@ async function handleFetchWithGuard(request: Request, env: Env, ctx: ExecutionCo
       stack: error instanceof Error ? error.stack : undefined,
     });
 
-    const origin = resolveCorsOrigin(request.headers.get("Origin") ?? undefined, env);
+    const origin = resolveCorsOrigin(request.headers.get("Origin") ?? undefined, runtimeEnv);
     const allowHeaders = resolveCorsAllowHeaders(request.headers);
     const headers = new Headers({
       "Content-Type": "application/json",
@@ -3239,8 +3240,9 @@ async function handleFetchWithGuard(request: Request, env: Env, ctx: ExecutionCo
 export default {
   fetch: handleFetchWithGuard,
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
+    const runtimeEnv = attachRuntimeDatabase(env);
     ctx.waitUntil(
-      runScheduledWithGuard(event, env).catch((error) => {
+      runScheduledWithGuard(event, runtimeEnv).catch((error) => {
         console.error("[worker][scheduled][unhandled]", {
           message: getErrorMessage(error),
         });

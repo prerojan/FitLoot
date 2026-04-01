@@ -149,7 +149,7 @@ export function registerFriendsRoutes(
         )
         .bind(request.to_user_id, request.from_user_id, request.from_user_id)
         .run();
-    });
+    }, c.env);
 
     await onFriendAdded(c.env.fitloot_db, request.to_user_id);
     await onFriendAdded(c.env.fitloot_db, request.from_user_id);

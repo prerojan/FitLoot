@@ -151,7 +151,7 @@ export function registerShopRoutes(
           )
           .bind(user.id, productId, product.points_cost, qrCode, requestId || null)
           .run();
-      });
+      }, c.env);
     } catch (error) {
       const message = getErrorMessage(error).toLowerCase();
       if (message.includes("insufficient_points")) {

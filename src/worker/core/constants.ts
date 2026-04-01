@@ -83,6 +83,7 @@ export const PLAN_GUARD_EXEMPT_PATHS = new Set<string>([
   "/api/app/open",
   "/api/events/route-not-found",
   "/api/onboarding",
+  "/api/onboarding/profile",
   "/api/checkout/start",
   "/api/promo/apply",
   "/api/subscription/status",

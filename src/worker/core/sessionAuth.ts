@@ -145,7 +145,7 @@ export async function hashPassword(
     {
       name: "PBKDF2",
       salt: encoder.encode(salt),
-      iterations: 60_000,
+      iterations: 15_000,
       hash: "SHA-256",
     },
     keyMaterial,
@@ -214,7 +214,7 @@ export function createAuthMiddleware({
 
       const session = await c.env.fitloot_db
         .prepare(
-          'SELECT id, user_id FROM sessions WHERE id = ? AND expires_at > datetime("now")',
+          "SELECT id, user_id FROM sessions WHERE id = ? AND expires_at > datetime('now')",
         )
         .bind(sessionId)
         .first<SessionCookieUser>();

@@ -49,7 +49,7 @@ export function registerAuthRoutes(
         if (existing?.id) {
           const existingUser = await getUserAuthRecordById(c.env.fitloot_db, existing.id);
           if (!isReusableIncompleteAccount(existingUser)) {
-            return c.json({ error: "E-mail já cadastrado" }, 409);
+            return c.json({ error: "E-mail ja cadastrado" }, 409);
           }
 
           await purgeUserAccountData(c.env.fitloot_db, existing.id);
@@ -100,7 +100,7 @@ export function registerAuthRoutes(
         console.error("[register]", error);
         return c.json(
           {
-            error: "Erro interno ao criar usuário",
+            error: "Erro interno ao criar usuario",
             code: "INTERNAL_ERROR",
           },
           500,
@@ -119,7 +119,7 @@ export function registerAuthRoutes(
         {
           emailAvailable: null,
           usernameAvailable: null,
-          message: "Informe email e/ou username para validação.",
+          message: "Informe email e/ou username para validacao.",
         },
         400,
       );
@@ -157,7 +157,12 @@ export function registerAuthRoutes(
       });
     } catch (error) {
       console.error("[check-availability]", error);
-      return c.json({ error: "Falha ao validar disponibilidade." }, 500);
+      return c.json(
+        {
+          error: "Falha ao validar disponibilidade.",
+        },
+        500,
+      );
     }
   });
 
@@ -169,53 +174,64 @@ export function registerAuthRoutes(
       const schemaReady = await hasCoreSchema(c.env.fitloot_db);
       if (!schemaReady) return databaseNotInitializedResponse(c);
 
-      const data = c.req.valid("json");
-      const normalizedEmail = data.email.trim().toLowerCase();
+      try {
+        const data = c.req.valid("json");
+        const normalizedEmail = data.email.trim().toLowerCase();
 
-      const userRow = await c.env.fitloot_db
-        .prepare(
-          "SELECT id, password_hash, password_salt FROM users WHERE lower(email) = ?",
-        )
-        .bind(normalizedEmail)
-        .first<{
-          id: string;
-          password_hash: string | null;
-          password_salt: string | null;
-        }>();
+        const userRow = await c.env.fitloot_db
+          .prepare(
+            "SELECT id, password_hash, password_salt FROM users WHERE lower(email) = ?",
+          )
+          .bind(normalizedEmail)
+          .first<{
+            id: string;
+            password_hash: string | null;
+            password_salt: string | null;
+          }>();
 
-      if (!userRow) {
+        if (!userRow) {
+          return c.json(
+            {
+              error: "Nenhuma conta encontrada com esse e-mail.",
+              code: "USER_NOT_FOUND",
+            },
+            404,
+          );
+        }
+
+        if (!userRow.password_hash || !userRow.password_salt) {
+          return c.json({ error: "Credenciais invalidas" }, 401);
+        }
+
+        const computed = await hashPassword(data.password, userRow.password_salt);
+        if (computed !== userRow.password_hash) {
+          return c.json({ error: "Credenciais invalidas" }, 401);
+        }
+
+        const sessionId = crypto.randomUUID();
+        const expiresAt = new Date(
+          Date.now() + 30 * 24 * 60 * 60 * 1000,
+        ).toISOString();
+
+        await c.env.fitloot_db
+          .prepare(
+            "INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, ?)",
+          )
+          .bind(sessionId, userRow.id, expiresAt)
+          .run();
+
+        c.header("Set-Cookie", generateCookie(sessionId, c.req.url));
+        return c.json({ success: true }, 200);
+      } catch (error) {
+        console.error("[login]", error);
         return c.json(
           {
-            error: "Nenhuma conta encontrada com esse e-mail.",
-            code: "USER_NOT_FOUND",
+            error: "Falha ao autenticar.",
+            code: "INTERNAL_ERROR",
           },
-          404,
+          500,
         );
       }
-
-      if (!userRow.password_hash || !userRow.password_salt) {
-        return c.json({ error: "Credenciais inválidas" }, 401);
-      }
-
-      const computed = await hashPassword(data.password, userRow.password_salt);
-      if (computed !== userRow.password_hash) {
-        return c.json({ error: "Credenciais inválidas" }, 401);
-      }
-
-      const sessionId = crypto.randomUUID();
-      const expiresAt = new Date(
-        Date.now() + 30 * 24 * 60 * 60 * 1000,
-      ).toISOString();
-
-      await c.env.fitloot_db
-        .prepare(
-          "INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, ?)",
-        )
-        .bind(sessionId, userRow.id, expiresAt)
-        .run();
-
-      c.header("Set-Cookie", generateCookie(sessionId, c.req.url));
-      return c.json({ success: true }, 200);
     },
   );
 }

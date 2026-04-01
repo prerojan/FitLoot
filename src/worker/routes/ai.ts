@@ -466,6 +466,9 @@ app.get("/api/ai/generate-missions/status", authMiddleware, async (c) => {
       userId: user.id,
       jobId,
     });
+    if (isMissingSchemaError(error)) {
+      return schemaMismatchResponse(c);
+    }
     return internalErrorResponse(c);
   }
 });

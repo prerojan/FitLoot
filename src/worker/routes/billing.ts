@@ -239,12 +239,15 @@ export function registerBillingRoutes(
           );
         }
 
-        const appliedPromo = await withTransaction(c.env.fitloot_db, async () =>
-          applyPromoCodeForUser(c.env.fitloot_db, c.env, {
-            userId: user.id,
-            code: data.code,
-            markOnboardingCompleted: Number(user.onboarding_completed) === 1,
-          }),
+        const appliedPromo = await withTransaction(
+          c.env.fitloot_db,
+          async () =>
+            applyPromoCodeForUser(c.env.fitloot_db, c.env, {
+              userId: user.id,
+              code: data.code,
+              markOnboardingCompleted: Number(user.onboarding_completed) === 1,
+            }),
+          c.env,
         );
 
         if (!appliedPromo) {
@@ -301,17 +304,20 @@ export function registerBillingRoutes(
           );
         }
 
-        const checkoutResult = await withTransaction(c.env.fitloot_db, async () =>
-          startCheckoutForUser(c.env.fitloot_db, c.env, {
-            userId: user.id,
-            planId: data.plan_id,
-            paymentMethod: data.payment_method,
-            cardNumber: data.card_number,
-            cardHolderName: data.card_holder_name,
-            cardExpiry: data.card_expiry,
-            promoCode: data.promo_code,
-            markOnboardingCompleted: false,
-          }),
+        const checkoutResult = await withTransaction(
+          c.env.fitloot_db,
+          async () =>
+            startCheckoutForUser(c.env.fitloot_db, c.env, {
+              userId: user.id,
+              planId: data.plan_id,
+              paymentMethod: data.payment_method,
+              cardNumber: data.card_number,
+              cardHolderName: data.card_holder_name,
+              cardExpiry: data.card_expiry,
+              promoCode: data.promo_code,
+              markOnboardingCompleted: false,
+            }),
+          c.env,
         );
 
         const refreshedUser = await getUserAuthRecordById(

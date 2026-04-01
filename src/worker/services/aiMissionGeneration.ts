@@ -324,22 +324,11 @@ export function createAiMissionGenerationService(
   async function ensureMissionJobSchema(db: D1Database): Promise<void> {
     const now = Date.now();
     if (now - missionJobSchemaCheckedAt < MISSION_JOB_SCHEMA_TTL_MS) return;
-    await db.prepare(
-      `CREATE TABLE IF NOT EXISTS mission_generation_jobs (
-        id TEXT PRIMARY KEY,
-        user_id TEXT NOT NULL,
-        status TEXT NOT NULL,
-        result_json TEXT,
-        error_message TEXT,
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
-      )`,
-    ).run();
     await db
       .prepare(
-        "CREATE INDEX IF NOT EXISTS idx_mission_generation_jobs_user_status ON mission_generation_jobs(user_id, status)",
+        "SELECT id FROM mission_generation_jobs LIMIT 1",
       )
-      .run();
+      .first<{ id: string }>();
     missionJobSchemaCheckedAt = now;
   }
 

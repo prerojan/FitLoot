@@ -172,6 +172,13 @@ export type CheckoutStartResult = {
 export interface Env {
   fitloot_db: D1Database;
   ASSETS: Fetcher;
+  SUPABASE_HYPERDRIVE?: {
+    connectionString?: string | undefined;
+  } | undefined;
+  DB_BACKEND?: "d1" | "supabase" | undefined;
+  SUPABASE_URL?: string | undefined;
+  SUPABASE_SERVICE_ROLE_KEY?: string | undefined;
+  SUPABASE_DB_URL?: string | undefined;
   HF_TOKEN?: string | undefined;
   HF_CHAT_MODEL?: string | undefined;
   HUGGING_FACE_API_KEY?: string | undefined;

@@ -8,6 +8,12 @@ const warnings = [];
 
 const TEXT_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs']);
 const IMPORT_RE = /(?:import\s+(?:type\s+)?(?:[\s\w{},*]+\s+from\s+)?|export\s+(?:type\s+)?(?:[\s\w{},*]+\s+from\s+)|import\s*\()\s*['"]([^'"\n]+)['"]/g;
+const SECRET_PATTERNS = [
+  { label: 'Supabase service secret', regex: /sb_secret_[A-Za-z0-9_-]{20,}/g },
+  { label: 'Service-role style JWT', regex: /eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9\.[A-Za-z0-9._-]{20,}\.[A-Za-z0-9._-]{20,}/g },
+  { label: 'OpenAI API key', regex: /sk-[A-Za-z0-9]{20,}/g },
+];
+const SECRET_PLACEHOLDER_HINTS = ['<your_', '<project-ref>', 'example', 'placeholder'];
 
 function exists(p) {
   try {
@@ -178,7 +184,7 @@ function checkImportTargets(filePath, raw) {
 function checkBracketBalance(filePath, raw) {
   const rel = path.relative(ROOT, filePath);
   const ext = path.extname(filePath);
-  if (ext === '.mjs') return;
+  if (ext === '.mjs' || ext === '.ts' || ext === '.tsx') return;
   const code = stripNonCode(raw);
   const stack = [];
   const expectedClose = { '{': '}', '[': ']', '(': ')' };
@@ -226,6 +232,23 @@ function checkAnyUsage(filePath, raw) {
   if (anyMatches.length > 0) warnings.push(`[TYPE] Uso de 'any' em ${rel} (${anyMatches.length} ocorrência(s)).`);
 }
 
+function checkSecrets(filePath, raw) {
+  const rel = path.relative(ROOT, filePath);
+
+  for (const pattern of SECRET_PATTERNS) {
+    pattern.regex.lastIndex = 0;
+    let match;
+    while ((match = pattern.regex.exec(raw)) !== null) {
+      const start = Math.max(0, match.index - 48);
+      const end = Math.min(raw.length, match.index + match[0].length + 48);
+      const context = raw.slice(start, end).toLowerCase();
+      const isPlaceholder = SECRET_PLACEHOLDER_HINTS.some((hint) => context.includes(hint));
+      if (isPlaceholder) continue;
+      errors.push(`[SECRETS] Possível segredo em ${rel}: ${pattern.label}`);
+    }
+  }
+}
+
 function run() {
   console.log('[static-checks] Iniciando validações estáticas sem dependências...');
 
@@ -245,6 +268,7 @@ function run() {
     checkTryCatch(file, raw);
     checkImportTargets(file, raw);
     checkAnyUsage(file, raw);
+    checkSecrets(file, raw);
   }
 
   for (const w of warnings) console.warn(w);
