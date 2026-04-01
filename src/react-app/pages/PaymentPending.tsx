@@ -6,9 +6,11 @@ import { ROUTE_PATHS } from "@/react-app/auth/constants";
 import { useAuth } from "@/react-app/auth/context";
 import { hasPlanAccess } from "@/react-app/services/authService";
 import { api } from "@/react-app/utils/api";
+import {
+  completeActivationAndReturnToLogin,
+  resolveActivationCompletionCopy,
+} from "@/react-app/utils/activationCompletion";
 import { clearOnboardingDraft } from "@/react-app/utils/onboardingDraft";
-import { queueActivationNotice } from "@/react-app/utils/activationNotice";
-import { scheduleReloadIntoAppEntry } from "@/react-app/utils/appEntryNavigation";
 
 type PaymentMethod = "none" | "card" | "pix";
 
@@ -53,10 +55,15 @@ export default function PaymentPending() {
   const [lastAmount, setLastAmount] = useState<number | null>(null);
   const [checkoutUrl, setCheckoutUrl] = useState<string | null>(null);
   const [method, setMethod] = useState<PaymentMethod>("card");
+  const [activationConfirmed, setActivationConfirmed] = useState(false);
+  const [activationCompletionInProgress, setActivationCompletionInProgress] = useState(false);
   const [statusPopup, setStatusPopup] = useState<{
     title: string;
     message: string;
+    badge?: string;
     tone: "success" | "warning" | "error";
+    actionLabel?: string;
+    onAction?: (() => void) | undefined;
   } | null>(null);
 
   const clearScheduledPoll = useCallback(() => {
@@ -80,6 +87,7 @@ export default function PaymentPending() {
 
   useEffect(() => {
     if (!user) return;
+    if (activationCompletionInProgress || activationConfirmed) return;
     if (hasPlanAccess(user)) {
       clearScheduledPoll();
       clearOnboardingDraft();
@@ -90,7 +98,7 @@ export default function PaymentPending() {
       clearScheduledPoll();
       navigate(ROUTE_PATHS.checkout, { replace: true });
     }
-  }, [clearScheduledPoll, navigate, user]);
+  }, [activationCompletionInProgress, activationConfirmed, clearScheduledPoll, navigate, user]);
 
   const methodHint = useMemo(() => {
     return method === "none" ? METHOD_HELP.card : METHOD_HELP[method];
@@ -108,6 +116,49 @@ export default function PaymentPending() {
       navigate(ROUTE_PATHS.login, { replace: true });
     }
   };
+
+  const finalizeActivatedAccess = useCallback(
+    async (options?: { skipDelay?: boolean }) => {
+      const completionCopy = resolveActivationCompletionCopy({
+        origin: user?.onboarding_completed === 1 ? "checkout" : "onboarding",
+        outcome: "paid",
+      });
+
+      setActivationConfirmed(true);
+      setActivationCompletionInProgress(true);
+      setStatusPopup({
+        title: completionCopy.localTitle,
+        message: completionCopy.localMessage,
+        tone: "success",
+        ...(completionCopy.loginNotice.badge ? { badge: completionCopy.loginNotice.badge } : {}),
+      });
+
+      const completionResult = await completeActivationAndReturnToLogin({
+        navigate,
+        logout,
+        notice: completionCopy.loginNotice,
+        onBeforeLogout: clearScheduledPoll,
+        preLogoutDelayMs: options?.skipDelay ? 0 : undefined,
+      });
+
+      if (completionResult.ok) {
+        return;
+      }
+
+      setActivationCompletionInProgress(false);
+      setStatusPopup({
+        title: completionCopy.localTitle,
+        message: completionResult.errorMessage,
+        tone: "error",
+        actionLabel: "Tentar encerrar sessao novamente",
+        onAction: () => {
+          void finalizeActivatedAccess({ skipDelay: true });
+        },
+        ...(completionCopy.loginNotice.badge ? { badge: completionCopy.loginNotice.badge } : {}),
+      });
+    },
+    [clearScheduledPoll, logout, navigate, user?.onboarding_completed],
+  );
 
   const verifyStatus = useCallback(async (options: VerifyStatusOptions = {}) => {
     // Consulta o status atual da assinatura e decide o proximo passo.
@@ -150,20 +201,7 @@ export default function PaymentPending() {
       setCheckoutUrl(typeof payload.checkout_url === "string" ? payload.checkout_url : null);
 
       if (payload.has_access) {
-        clearScheduledPoll();
-        clearOnboardingDraft();
-        queueActivationNotice({
-          title: "Conta pronta para uso",
-          message: "Pagamento aprovado e acesso liberado. Bem-vindo(a) ao FitLoot.",
-          badge: "VIP ativo",
-          tone: "success",
-        });
-        setStatusPopup({
-          title: "Pagamento aprovado",
-          message: "Seu acesso foi liberado. Atualizando o app agora...",
-          tone: "success",
-        });
-        scheduleReloadIntoAppEntry(silent ? 500 : 1200);
+        await finalizeActivatedAccess({ skipDelay: silent });
         return;
       }
 
@@ -204,7 +242,7 @@ export default function PaymentPending() {
         setChecking(false);
       }
     }
-  }, [clearScheduledPoll, navigate, scheduleNextPoll]);
+  }, [clearScheduledPoll, finalizeActivatedAccess, navigate, scheduleNextPoll]);
 
   useEffect(() => {
     // Mantem a referencia atualizada para o polling reagendado.
@@ -213,7 +251,7 @@ export default function PaymentPending() {
 
   useEffect(() => {
     // Inicia o polling automatico apenas enquanto o pagamento estiver pendente.
-    if (!user || user.plan_status !== "pending") {
+    if (!user || user.plan_status !== "pending" || activationCompletionInProgress || activationConfirmed) {
       clearScheduledPoll();
       return;
     }
@@ -224,7 +262,7 @@ export default function PaymentPending() {
     return () => {
       clearScheduledPoll();
     };
-  }, [clearScheduledPoll, user, verifyStatus]);
+  }, [activationCompletionInProgress, activationConfirmed, clearScheduledPoll, user, verifyStatus]);
 
   const formattedAmount = useMemo(() => formatAmount(lastAmount), [lastAmount]);
 
@@ -267,12 +305,23 @@ export default function PaymentPending() {
         <button
           type="button"
           onClick={() => {
+            if (activationConfirmed && !activationCompletionInProgress) {
+              void finalizeActivatedAccess({ skipDelay: true });
+              return;
+            }
             void verifyStatus({ resetBackoff: true });
           }}
-          disabled={checking}
+          disabled={checking || activationCompletionInProgress}
           className="mt-6 w-full rounded-xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
         >
-          {checking ? (
+          {activationCompletionInProgress ? (
+            <span className="inline-flex items-center gap-2">
+              <LoadingBall size="sm" />
+              Encerrando sessao para ir ao login
+            </span>
+          ) : activationConfirmed ? (
+            "Tentar encerrar sessao novamente"
+          ) : checking ? (
             <span className="inline-flex items-center gap-2">
               <LoadingBall size="sm" />
               Verificando status
@@ -285,6 +334,7 @@ export default function PaymentPending() {
         <button
           type="button"
           onClick={() => navigate(ROUTE_PATHS.payment)}
+          disabled={activationConfirmed || activationCompletionInProgress}
           className="mt-3 w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm font-semibold text-gray-700 hover:bg-gray-50"
         >
           Alterar pagamento
@@ -295,6 +345,7 @@ export default function PaymentPending() {
           onClick={() => {
             void handleExitAndReset();
           }}
+          disabled={activationConfirmed || activationCompletionInProgress}
           className="mt-3 w-full rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700 hover:bg-red-100"
         >
           Sair e comecar do zero
@@ -304,6 +355,7 @@ export default function PaymentPending() {
           <button
             type="button"
             onClick={() => window.open(checkoutUrl, "_blank", "noopener,noreferrer")}
+            disabled={activationConfirmed || activationCompletionInProgress}
             className="mt-3 w-full rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700 hover:bg-emerald-100"
           >
             Abrir checkout novamente
@@ -316,7 +368,10 @@ export default function PaymentPending() {
         open={statusPopup !== null}
         title={statusPopup?.title ?? ""}
         message={statusPopup?.message ?? ""}
+        badge={statusPopup?.badge}
         tone={statusPopup?.tone ?? "warning"}
+        actionLabel={statusPopup?.actionLabel}
+        onAction={statusPopup?.onAction}
         onClose={() => setStatusPopup(null)}
       />
     </div>

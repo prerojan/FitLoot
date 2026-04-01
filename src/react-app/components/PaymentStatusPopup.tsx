@@ -4,6 +4,8 @@ type PaymentStatusPopupProps = {
   message: string;
   badge?: string | undefined;
   tone: "success" | "warning" | "error";
+  actionLabel?: string | undefined;
+  onAction?: (() => void) | undefined;
   onClose: () => void;
 };
 
@@ -25,7 +27,16 @@ const TONE_STYLES: Record<PaymentStatusPopupProps["tone"], { border: string; bg:
   },
 };
 
-export default function PaymentStatusPopup({ open, title, message, badge, tone, onClose }: PaymentStatusPopupProps) {
+export default function PaymentStatusPopup({
+  open,
+  title,
+  message,
+  badge,
+  tone,
+  actionLabel,
+  onAction,
+  onClose,
+}: PaymentStatusPopupProps) {
   if (!open) return null;
 
   // Seleciona a paleta do popup de acordo com o status retornado pelo pagamento.
@@ -42,6 +53,15 @@ export default function PaymentStatusPopup({ open, title, message, badge, tone, 
         ) : null}
         <h3 className={`text-lg font-bold ${styles.title}`}>{title}</h3>
         <p className="mt-2 text-sm text-gray-700">{message}</p>
+        {actionLabel && onAction ? (
+          <button
+            type="button"
+            onClick={onAction}
+            className="mt-4 w-full rounded-xl bg-[var(--app-primary-color)] px-3 py-2 text-sm font-semibold text-black shadow-sm hover:brightness-105"
+          >
+            {actionLabel}
+          </button>
+        ) : null}
         <button
           type="button"
           onClick={onClose}

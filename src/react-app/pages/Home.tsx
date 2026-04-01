@@ -14,7 +14,12 @@ import {
 import { useAuth } from "@/react-app/auth/context";
 import { useTheme } from "@/react-app/contexts/theme";
 import LoadingBall from "@/react-app/components/LoadingBall";
+import PaymentStatusPopup from "@/react-app/components/PaymentStatusPopup";
 import { api } from "@/react-app/utils/api";
+import {
+  consumeActivationNotice,
+  type ActivationNotice,
+} from "@/react-app/utils/activationNotice";
 
 type LoginForm = {
   email: string;
@@ -36,15 +41,15 @@ const Home: FC = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [userNotFound, setUserNotFound] = useState(false);
+  const [activationNotice, setActivationNotice] = useState<ActivationNotice | null>(null);
 
   const passwordRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get("registered") === "true") {
-      setSuccessMessage("Conta criada com sucesso! Faca login para continuar.");
+    const queuedNotice = consumeActivationNotice();
+    if (queuedNotice) {
+      setActivationNotice(queuedNotice);
     }
   }, []);
 
@@ -196,12 +201,6 @@ const Home: FC = () => {
                 </div>
 
                 {/* Mensagens de retorno do fluxo de login. */}
-                {successMessage && (
-                  <div className="fl-auth-message fl-auth-message-success">
-                    {successMessage}
-                  </div>
-                )}
-
                 {error && (
                   <div className="fl-auth-message fl-auth-message-error space-y-3">
                     <p>{error}</p>
@@ -321,6 +320,14 @@ const Home: FC = () => {
           </div>
         </main>
       </div>
+      <PaymentStatusPopup
+        open={activationNotice !== null}
+        title={activationNotice?.title ?? ""}
+        message={activationNotice?.message ?? ""}
+        badge={activationNotice?.badge}
+        tone={activationNotice?.tone ?? "success"}
+        onClose={() => setActivationNotice(null)}
+      />
     </div>
   );
 };

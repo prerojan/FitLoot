@@ -11,14 +11,12 @@ import {
 } from "react";
 import { useNavigate } from "react-router";
 import AppLoader from "@/react-app/components/AppLoader";
-import PaymentStatusPopup from "@/react-app/components/PaymentStatusPopup";
 import { AuthThemeHeader } from "@/react-app/theme/AuthThemeHeader";
 import { ROUTE_PATHS } from "@/react-app/auth/constants";
 import { useAuth } from "@/react-app/auth/context";
 import { useTheme } from "@/react-app/contexts/theme";
 import { resolveAuthenticatedStartRoute } from "@/react-app/services/authService";
 import { api } from "@/react-app/utils/api";
-import { scheduleReloadIntoAppEntry } from "@/react-app/utils/appEntryNavigation";
 import { saveOnboardingDraft } from "@/react-app/utils/onboardingDraft";
 import { Input } from "@/react-app/components/ui/input";
 import {
@@ -482,7 +480,7 @@ const INJURY_OPTIONS = [
 ] as const;
 
 export default function Onboarding() {
-  const { user, loading: authLoading } = useAuth();
+  const { user, loading: authLoading, checkAuth } = useAuth();
   const navigate = useNavigate();
   const { themeMode, toggleThemeMode } = useTheme();
 
@@ -500,12 +498,7 @@ export default function Onboarding() {
   const usernameReqRef = useRef(0);
   const emailReqRef = useRef(0);
   const planPreviewTimerRef = useRef<number | null>(null);
-  const accountRedirectTimerRef = useRef<number | null>(null);
-  const [statusPopup, setStatusPopup] = useState<{
-    title: string;
-    message: string;
-    tone: "success" | "warning" | "error";
-  } | null>(null);
+  const accountBootstrapRedirectRef = useRef(false);
 
   // Reaproveita o e-mail retornado do checkout quando o usuario volta ao onboarding.
   useEffect(() => {
@@ -520,6 +513,7 @@ export default function Onboarding() {
   useEffect(() => {
     if (authLoading) return;
     if (!user) return;
+    if (accountBootstrapRedirectRef.current) return;
     navigate(resolveAuthenticatedStartRoute(user), { replace: true });
   }, [authLoading, navigate, user]);
 
@@ -528,9 +522,6 @@ export default function Onboarding() {
     return () => {
       if (planPreviewTimerRef.current !== null) {
         window.clearTimeout(planPreviewTimerRef.current);
-      }
-      if (accountRedirectTimerRef.current !== null) {
-        window.clearTimeout(accountRedirectTimerRef.current);
       }
     };
   }, []);
@@ -830,13 +821,11 @@ export default function Onboarding() {
       });
 
       if (!loginRes.ok) {
-        setStatusPopup({
-          title: "Conta criada com sucesso",
-          message:
-            "Sua conta foi criada, mas a sessao ainda esta sendo concluida. Atualizando o app para continuar.",
-          tone: "warning",
-        });
-        accountRedirectTimerRef.current = scheduleReloadIntoAppEntry(1200);
+        localStorage.removeItem("fitloot_authenticated_hint");
+        accountBootstrapRedirectRef.current = false;
+        setStepError(
+          "Conta criada com sucesso, mas nao foi possivel iniciar sua sessao automaticamente. Faca login para continuar no pagamento.",
+        );
         return;
       }
 
@@ -859,7 +848,6 @@ export default function Onboarding() {
       });
 
       localStorage.setItem("fitloot_authenticated_hint", "1");
-
       try {
         const patchRes = await api("/api/users/me", {
           method: "PATCH",
@@ -876,13 +864,11 @@ export default function Onboarding() {
         });
       }
 
-      setStatusPopup({
-        title: "Conta criada com sucesso",
-        message: "Sua conta foi criada. Atualizando o app para abrir o seu proximo passo.",
-        tone: "success",
-      });
-      accountRedirectTimerRef.current = scheduleReloadIntoAppEntry(1200);
+      accountBootstrapRedirectRef.current = true;
+      await checkAuth();
+      navigate(ROUTE_PATHS.checkout, { replace: true });
     } catch {
+      accountBootstrapRedirectRef.current = false;
       setStepError("Nao foi possivel conectar ao servidor.");
     } finally {
       setStepLoading(false);
@@ -934,6 +920,7 @@ export default function Onboarding() {
   const usernameStatusMessage = availabilityMessage(usernameAvailability);
   const emailStatusMessage = availabilityMessage(emailAvailability);
   const isExistingAccountError = stepError?.includes("cadastrado") ?? false;
+  const requiresManualLoginAfterCreation = stepError?.includes("Faca login para continuar no pagamento") ?? false;
   const trimmedFullName = profile.full_name.trim();
   const trimmedUsername = profile.username.trim();
   const normalizedEmail = credentials.email.trim().toLowerCase();
@@ -1661,10 +1648,10 @@ export default function Onboarding() {
             </div>
           </div>
 
-          {isExistingAccountError ? (
+          {isExistingAccountError || requiresManualLoginAfterCreation ? (
             <button
               type="button"
-              onClick={() => navigate(ROUTE_PATHS.app)}
+              onClick={() => navigate(ROUTE_PATHS.login)}
               className="fl-onboarding-secondary-button"
             >
               Fazer login
@@ -1721,14 +1708,6 @@ export default function Onboarding() {
           </div>
         </footer>
       </div>
-
-      <PaymentStatusPopup
-        open={statusPopup !== null}
-        title={statusPopup?.title ?? ""}
-        message={statusPopup?.message ?? ""}
-        tone={statusPopup?.tone ?? "success"}
-        onClose={() => setStatusPopup(null)}
-      />
     </div>
   );
 }

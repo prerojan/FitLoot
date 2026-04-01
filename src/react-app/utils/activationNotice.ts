@@ -24,6 +24,11 @@ export function queueActivationNotice(notice: ActivationNotice): void {
   sessionStorage.setItem(ACTIVATION_NOTICE_KEY, JSON.stringify(notice));
 }
 
+export function clearActivationNotice(): void {
+  if (typeof window === "undefined") return;
+  sessionStorage.removeItem(ACTIVATION_NOTICE_KEY);
+}
+
 export function consumeActivationNotice(): ActivationNotice | null {
   if (typeof window === "undefined") return null;
 

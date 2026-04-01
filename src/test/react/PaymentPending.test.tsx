@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const navigate = vi.fn();
 const logout = vi.fn();
 const apiMock = vi.fn();
-const scheduleReloadIntoAppEntry = vi.fn(() => 123);
+const completeActivationAndReturnToLogin = vi.fn(async () => ({ ok: true as const }));
 
 vi.mock("react-router", async () => {
   const actual = await vi.importActual<typeof import("react-router")>("react-router");
@@ -39,9 +39,20 @@ vi.mock("../../react-app/utils/onboardingDraft", () => ({
   clearOnboardingDraft: vi.fn(),
 }));
 
-vi.mock("../../react-app/utils/appEntryNavigation", () => ({
-  scheduleReloadIntoAppEntry: (...args: Parameters<typeof scheduleReloadIntoAppEntry>) =>
-    scheduleReloadIntoAppEntry(...args),
+vi.mock("../../react-app/utils/activationCompletion", () => ({
+  completeActivationAndReturnToLogin: (
+    ...args: Parameters<typeof completeActivationAndReturnToLogin>
+  ) => completeActivationAndReturnToLogin(...args),
+  resolveActivationCompletionCopy: () => ({
+    localTitle: "Conta criada e acesso liberado",
+    localMessage: "Sua conta foi criada e o pagamento foi aprovado. Encerrando sua sessao para levar voce ao login.",
+    loginNotice: {
+      title: "Conta criada e acesso liberado",
+      message: "Sua conta foi criada e o pagamento foi aprovado. Faca login para entrar no app.",
+      badge: "Acesso liberado",
+      tone: "success" as const,
+    },
+  }),
 }));
 
 import PaymentPending from "../../react-app/pages/PaymentPending";
@@ -51,7 +62,7 @@ describe("PaymentPending", () => {
     vi.clearAllMocks();
   });
 
-  it("schedules an app reload when payment is approved", async () => {
+  it("uses the shared activation finalizer when payment approval grants access", async () => {
     apiMock.mockResolvedValueOnce(
       new Response(
         JSON.stringify({
@@ -80,11 +91,11 @@ describe("PaymentPending", () => {
     });
 
     await waitFor(() => {
-      expect(scheduleReloadIntoAppEntry).toHaveBeenCalledWith(500);
+      expect(completeActivationAndReturnToLogin).toHaveBeenCalled();
     });
 
     expect(
-      screen.getByText(/Seu acesso foi liberado. Atualizando o app agora/i),
+      screen.getByText(/Encerrando sua sessao para levar voce ao login/i),
     ).toBeInTheDocument();
     expect(navigate).not.toHaveBeenCalledWith("/home", { replace: true });
   });

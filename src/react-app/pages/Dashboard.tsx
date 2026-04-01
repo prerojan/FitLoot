@@ -8,7 +8,6 @@ import MissionCard from "@/react-app/components/MissionCard";
 import AIRecommendations from "@/react-app/components/AIRecommendations";
 import AIMissionGenerator from "@/react-app/components/AIMissionGenerator";
 import LoadingBall from "@/react-app/components/LoadingBall";
-import PaymentStatusPopup from "@/react-app/components/PaymentStatusPopup";
 import { Award, Bot, CalendarDays, Camera, Cloud, Flame, Zap } from "lucide-react";
 import { ROUTE_PATHS } from "@/react-app/auth/constants";
 import type {
@@ -28,10 +27,6 @@ import {
   readCachedJson,
 } from "@/react-app/utils/api";
 import { getAchievementShowcaseStyle, resolveShowcasedAchievement } from "@/react-app/utils/achievementShowcase";
-import {
-  consumeActivationNotice,
-  type ActivationNotice,
-} from "@/react-app/utils/activationNotice";
 import {
   MetricCard,
   SectionHeader,
@@ -124,7 +119,6 @@ export default function Dashboard() {
   const [loadingState, setLoadingState] = useState<DashboardLoadingState>(DEFAULT_LOADING_STATE);
   const [error, setError] = useState<string | null>(null);
   const [quickActionsOpen, setQuickActionsOpen] = useState(false);
-  const [activationNotice, setActivationNotice] = useState<ActivationNotice | null>(null);
   const quickActionsRef = useRef<HTMLDivElement | null>(null);
   const { metrics: consolidatedMetrics, loading: metricsLoading, refreshMetrics } = useDailyMetrics({ syncRemote: true });
 
@@ -251,13 +245,6 @@ export default function Dashboard() {
 
     if (hasRequestError) return;
   }, [navigate, setSectionLoading]);
-
-  useEffect(() => {
-    const queuedNotice = consumeActivationNotice();
-    if (queuedNotice) {
-      setActivationNotice(queuedNotice);
-    }
-  }, []);
 
   useEffect(() => {
     // Fecha o menu rapido ao clicar fora da area flutuante.
@@ -788,15 +775,6 @@ export default function Dashboard() {
           <Zap className={`h-6 w-6 transition-transform duration-200 ${quickActionsOpen ? "rotate-12" : ""}`} />
         </button>
       </div>
-
-      <PaymentStatusPopup
-        open={activationNotice !== null}
-        title={activationNotice?.title ?? ""}
-        message={activationNotice?.message ?? ""}
-        badge={activationNotice?.badge}
-        tone={activationNotice?.tone ?? "success"}
-        onClose={() => setActivationNotice(null)}
-      />
     </AppPageShell>
   );
 }

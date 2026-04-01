@@ -31,12 +31,15 @@ import { useTheme } from "@/react-app/contexts/theme";
 import { fetchCurrentUser, hasPlanAccess } from "@/react-app/services/authService";
 import { api } from "@/react-app/utils/api";
 import {
+  completeActivationAndReturnToLogin,
+  resolveActivationCompletionCopy,
+  type ActivationOutcome,
+} from "@/react-app/utils/activationCompletion";
+import {
   clearOnboardingDraft,
   loadOnboardingDraft,
   type OnboardingDraft,
 } from "@/react-app/utils/onboardingDraft";
-import { queueActivationNotice } from "@/react-app/utils/activationNotice";
-import { scheduleReloadIntoAppEntry } from "@/react-app/utils/appEntryNavigation";
 
 type CheckoutFlowResponse = {
   checkout_status?: "pending" | "vip_active" | undefined;
@@ -239,7 +242,6 @@ export default function Checkout() {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
   const { themeMode, toggleThemeMode } = useTheme();
-  const vipRedirectTimerRef = useRef<number | null>(null);
   const requiresOnboardingCheckout = user ? !hasStartedCheckoutFlow(user) && user.onboarding_completed !== 1 : false;
   const [planId, setPlanId] = useState<CheckoutPlanId>(
     requiresOnboardingCheckout
@@ -255,17 +257,21 @@ export default function Checkout() {
   const [promoValidationResult, setPromoValidationResult] = useState<PromoValidationResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [vipActivationInProgress, setVipActivationInProgress] = useState(false);
+  const [activationConfirmed, setActivationConfirmed] = useState(false);
+  const [activationCompletionInProgress, setActivationCompletionInProgress] = useState(false);
   const [statusPopup, setStatusPopup] = useState<{
     title: string;
     message: string;
     badge?: string;
     tone: "success" | "warning" | "error";
+    actionLabel?: string;
+    onAction?: (() => void) | undefined;
   } | null>(null);
   const [onboardingDraft, setOnboardingDraft] = useState<OnboardingDraft | null>(() => loadOnboardingDraft());
   const promoValidationRequestIdRef = useRef(0);
   const promoValidationCodeRef = useRef("");
   const promoValidationPromiseRef = useRef<Promise<PromoValidationResult | null> | null>(null);
+  const confirmedActivationOutcomeRef = useRef<ActivationOutcome | null>(null);
 
   const selectedPlan = useMemo(() => getCheckoutPlan(planId), [planId]);
   const pricing = useMemo(() => getPlanPricing(planId, billingCycle), [planId, billingCycle]);
@@ -287,7 +293,7 @@ export default function Checkout() {
   useEffect(() => {
     // Redireciona usuarios que ja possuem acesso ou pagamento pendente.
     if (!user) return;
-    if (vipActivationInProgress) return;
+    if (activationCompletionInProgress || activationConfirmed) return;
     if (hasPlanAccess(user)) {
       clearOnboardingDraft();
       setOnboardingDraft(null);
@@ -297,15 +303,7 @@ export default function Checkout() {
     if (user.plan_status === "pending") {
       navigate(ROUTE_PATHS.paymentPending, { replace: true });
     }
-  }, [navigate, user, vipActivationInProgress]);
-
-  useEffect(() => {
-    return () => {
-      if (vipRedirectTimerRef.current !== null) {
-        window.clearTimeout(vipRedirectTimerRef.current);
-      }
-    };
-  }, []);
+  }, [activationCompletionInProgress, activationConfirmed, navigate, user]);
 
   useEffect(() => {
     if (!requiresOnboardingCheckout) return;
@@ -326,6 +324,7 @@ export default function Checkout() {
 
   useEffect(() => {
     if (!requiresOnboardingCheckout) return;
+    if (activationConfirmed) return;
 
     if (!onboardingDraft) {
       setError("Nao encontramos os dados do onboarding. Saia e recomece a criacao da conta.");
@@ -337,7 +336,7 @@ export default function Checkout() {
         ? null
         : currentError,
     );
-  }, [onboardingDraft, requiresOnboardingCheckout]);
+  }, [activationConfirmed, onboardingDraft, requiresOnboardingCheckout]);
 
   const handleLogoutAndReset = async () => {
     try {
@@ -471,55 +470,55 @@ export default function Checkout() {
     return false;
   };
 
+  const finalizeConfirmedActivation = async (
+    outcome: ActivationOutcome,
+    options?: { skipDelay?: boolean },
+  ) => {
+    confirmedActivationOutcomeRef.current = outcome;
+    setActivationConfirmed(true);
+    const completionCopy = resolveActivationCompletionCopy({
+      origin: requiresOnboardingCheckout ? "onboarding" : "checkout",
+      outcome,
+    });
+
+    setActivationCompletionInProgress(true);
+    setStatusPopup({
+      title: completionCopy.localTitle,
+      message: completionCopy.localMessage,
+      tone: "success",
+      ...(completionCopy.loginNotice.badge ? { badge: completionCopy.loginNotice.badge } : {}),
+    });
+
+    const completionResult = await completeActivationAndReturnToLogin({
+      navigate,
+      logout,
+      notice: completionCopy.loginNotice,
+      onBeforeLogout: () => {
+        setOnboardingDraft(null);
+      },
+      preLogoutDelayMs: options?.skipDelay ? 0 : undefined,
+    });
+
+    if (completionResult.ok) {
+      return;
+    }
+
+    setActivationCompletionInProgress(false);
+    setStatusPopup({
+      title: completionCopy.localTitle,
+      message: completionResult.errorMessage,
+      tone: "error",
+      actionLabel: "Tentar encerrar sessao novamente",
+      onAction: () => {
+        void finalizeConfirmedActivation(outcome, { skipDelay: true });
+      },
+      ...(completionCopy.loginNotice.badge ? { badge: completionCopy.loginNotice.badge } : {}),
+    });
+  };
+
   const handleCheckout = async () => {
     setError(null);
     const currentOnboardingDraft = requiresOnboardingCheckout ? loadOnboardingDraft() : null;
-    const finalizeAccessTransition = (params: {
-      title: string;
-      message: string;
-      badge: string;
-      delayMs?: number;
-    }) => {
-      clearOnboardingDraft();
-      setOnboardingDraft(null);
-      setVipActivationInProgress(true);
-      setStatusPopup({
-        title: params.title,
-        message: params.message,
-        badge: params.badge,
-        tone: "success",
-      });
-      queueActivationNotice({
-        title: params.title,
-        message: params.message,
-        badge: params.badge,
-        tone: "success",
-      });
-      if (vipRedirectTimerRef.current !== null) {
-        window.clearTimeout(vipRedirectTimerRef.current);
-      }
-      vipRedirectTimerRef.current = scheduleReloadIntoAppEntry(params.delayMs ?? 1500);
-      if (vipRedirectTimerRef.current === null) {
-        setVipActivationInProgress(false);
-      }
-    };
-    const completeVipActivation = async (message?: string) => {
-      const activationTitle = requiresOnboardingCheckout
-        ? "Conta criada com sucesso"
-        : "VIP ativado com sucesso";
-      const activationMessage =
-        message ??
-        (requiresOnboardingCheckout
-          ? "Sua conta foi criada e o VIP foi ativado. Atualizando seu acesso agora."
-          : "Seu VIP foi ativado. Atualizando seu acesso agora.");
-
-      finalizeAccessTransition({
-        title: activationTitle,
-        message: activationMessage,
-        badge: "VIP ativo",
-        delayMs: 1500,
-      });
-    };
 
     if (requiresOnboardingCheckout) {
       setOnboardingDraft(currentOnboardingDraft);
@@ -572,19 +571,19 @@ export default function Checkout() {
       }
 
       if (payload?.checkout_status === "vip_active") {
-        await completeVipActivation(payload?.message);
+        await finalizeConfirmedActivation("vip");
         return;
       }
 
       if (shouldActivateVipFlow) {
         if (payload?.plan_status === "active") {
-          await completeVipActivation("Plano VIP ativado. Atualizando seu acesso agora.");
+          await finalizeConfirmedActivation("vip");
           return;
         }
 
         const vipAccessConfirmed = await confirmVipActivationState();
         if (vipAccessConfirmed) {
-          await completeVipActivation("Plano VIP ativado. Atualizando seu acesso agora.");
+          await finalizeConfirmedActivation("vip");
           return;
         }
 
@@ -593,16 +592,7 @@ export default function Checkout() {
       }
 
       if (payload?.plan_status === "active") {
-        finalizeAccessTransition({
-          title: requiresOnboardingCheckout
-            ? "Conta criada com sucesso"
-            : "Pagamento aprovado",
-          message: requiresOnboardingCheckout
-            ? "Sua conta foi criada e o acesso foi liberado. Atualizando o app agora."
-            : "Seu acesso foi liberado. Atualizando o app agora.",
-          badge: "Acesso liberado",
-          delayMs: 1200,
-        });
+        await finalizeConfirmedActivation("paid");
         return;
       }
 
@@ -620,7 +610,7 @@ export default function Checkout() {
       if (shouldActivateVipFlow) {
         const vipAccessConfirmed = await confirmVipActivationState();
         if (vipAccessConfirmed) {
-          await completeVipActivation("Plano VIP ativado. Atualizando seu acesso agora.");
+          await finalizeConfirmedActivation("vip");
           return;
         }
       }
@@ -859,23 +849,35 @@ export default function Checkout() {
                     <button
                       type="button"
                       onClick={() => {
+                        if (activationConfirmed && confirmedActivationOutcomeRef.current) {
+                          void finalizeConfirmedActivation(confirmedActivationOutcomeRef.current, { skipDelay: true });
+                          return;
+                        }
                         void handleCheckout();
                       }}
-                      disabled={loading || (requiresOnboardingCheckout && !onboardingDraft)}
+                      disabled={
+                        loading ||
+                        activationCompletionInProgress ||
+                        (!activationConfirmed && requiresOnboardingCheckout && !onboardingDraft)
+                      }
                       className="flex h-14 w-full items-center justify-center gap-2 rounded-[1.2rem] bg-[var(--app-primary-color)] px-5 text-base font-black text-black transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-60"
                     >
-                      {loading
+                      {activationCompletionInProgress
+                        ? "Encerrando sessao para ir ao login..."
+                        : activationConfirmed
+                          ? "Tentar ir ao login novamente"
+                        : loading
                         ? isVipPromoValidated
                           ? "Ativando VIP..."
                           : "Abrindo checkout..."
                         : isVipPromoValidated
                           ? requiresOnboardingCheckout
                             ? "Concluir onboarding e ativar VIP"
-                            : "Ativar VIP e ir para Home"
+                            : "Ativar VIP e concluir"
                           : requiresOnboardingCheckout
                             ? "Concluir onboarding e abrir checkout"
                             : "Continuar para o checkout"}
-                      {!loading ? <ArrowRight className="h-4 w-4" /> : null}
+                      {!loading && !activationCompletionInProgress ? <ArrowRight className="h-4 w-4" /> : null}
                     </button>
 
                     <button
@@ -883,6 +885,7 @@ export default function Checkout() {
                       onClick={() => {
                         void handleLogoutAndReset();
                       }}
+                      disabled={activationConfirmed || activationCompletionInProgress}
                       className="w-full rounded-[1.2rem] border border-red-300/35 px-5 py-3 text-sm font-semibold text-red-400 transition hover:bg-red-500/10"
                     >
                       Sair e recomecar
@@ -916,6 +919,8 @@ export default function Checkout() {
         message={statusPopup?.message ?? ""}
         badge={statusPopup?.badge}
         tone={statusPopup?.tone ?? "warning"}
+        actionLabel={statusPopup?.actionLabel}
+        onAction={statusPopup?.onAction}
         onClose={() => setStatusPopup(null)}
       />
     </div>
