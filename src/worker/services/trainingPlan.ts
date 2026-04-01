@@ -1,6 +1,7 @@
 import type { ConditioningLevel } from "../../shared/types";
 import type { Env } from "../core/types";
 import { rapidRequestJson, resolveRapidApiKey } from "./rapidApi";
+import { sanitizeMissionExerciseNames } from "./missionExerciseSelection";
 
 export type TrainingPlanChatPreferences = {
   planFocus: string | null;
@@ -131,13 +132,42 @@ function buildStaticWeeklyPlan(mainGoal: string | null | undefined): TrainingPla
   };
 }
 
+function sanitizeTrainingPlanWeekdayConfig(
+  config: TrainingPlanWeekdayConfig,
+): TrainingPlanWeekdayConfig {
+  const desiredExerciseCount = Math.max(3, Math.min(6, config.exercises.length || 3));
+  return {
+    ...config,
+    exercises: sanitizeMissionExerciseNames({
+      requestedNames: config.exercises,
+      focus: config.focus,
+      limit: desiredExerciseCount,
+      fallbackOrder: ["focus", "catalog"],
+    }),
+  };
+}
+
+function sanitizeTrainingPlanWeekly(
+  weekly: TrainingPlanWeekly,
+): TrainingPlanWeekly {
+  return {
+    segunda: sanitizeTrainingPlanWeekdayConfig(weekly.segunda),
+    terca: sanitizeTrainingPlanWeekdayConfig(weekly.terca),
+    quarta: sanitizeTrainingPlanWeekdayConfig(weekly.quarta),
+    quinta: sanitizeTrainingPlanWeekdayConfig(weekly.quinta),
+    sexta: sanitizeTrainingPlanWeekdayConfig(weekly.sexta),
+    sabado: sanitizeTrainingPlanWeekdayConfig(weekly.sabado),
+    domingo: sanitizeTrainingPlanWeekdayConfig(weekly.domingo),
+  };
+}
+
 function buildStaticInitialTrainingPlan(
   mainGoal: string | null | undefined,
   conditioning: ConditioningLevel,
   equipment: string | null | undefined,
   injuries: string | null | undefined,
 ) {
-  const weekly = buildStaticWeeklyPlan(mainGoal);
+  const weekly = sanitizeTrainingPlanWeekly(buildStaticWeeklyPlan(mainGoal));
   const restDays = TRAINING_PLAN_WEEKDAY_ORDER.filter(
     (day) => weekly[day].rest_day === true,
   );
@@ -483,7 +513,12 @@ async function buildRapidInitialTrainingPlan(
         focus: "rest",
         muscles: ["walk", "stretching"],
         intensity: "leve",
-        exercises: ["Walking", "Stretching"],
+        exercises: sanitizeMissionExerciseNames({
+          requestedNames: ["Walking", "Stretching"],
+          focus: "rest",
+          limit: 3,
+          fallbackOrder: ["focus", "catalog"],
+        }),
         rest_day: true,
       };
       touchedWeekdays.add(weekday);
@@ -496,7 +531,12 @@ async function buildRapidInitialTrainingPlan(
       focus,
       muscles: resolveMusclesForFocus(focus),
       intensity: resolveIntensityForFocus(focus, conditioning),
-      exercises: exerciseNames.slice(0, 8),
+      exercises: sanitizeMissionExerciseNames({
+        requestedNames: exerciseNames,
+        focus,
+        limit: Math.max(3, Math.min(6, exerciseNames.length || 3)),
+        fallbackOrder: ["focus", "catalog"],
+      }),
       rest_day: focus === "rest" || focus === "active_recovery",
     };
     touchedWeekdays.add(weekday);
@@ -512,7 +552,12 @@ async function buildRapidInitialTrainingPlan(
       focus: "rest",
       muscles: ["walk", "stretching"],
       intensity: "leve",
-      exercises: ["Walking", "Stretching"],
+      exercises: sanitizeMissionExerciseNames({
+        requestedNames: ["Walking", "Stretching"],
+        focus: "rest",
+        limit: 3,
+        fallbackOrder: ["focus", "catalog"],
+      }),
       rest_day: true,
     };
   }

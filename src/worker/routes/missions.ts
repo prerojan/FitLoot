@@ -7,6 +7,10 @@ import {
   type MissionMetricType,
   type RewardNotification,
 } from "../../shared/types";
+import {
+  resolveStrictSupportedMissionExerciseDbId,
+  resolveSupportedMissionExerciseName,
+} from "../../shared/exerciseCatalog";
 import { MISSION_LIMITS } from "../../constants/missionMetrics";
 import { assertString, safeGet } from "../../utils/typeHelpers";
 import { hasTableColumn } from "../core/database";
@@ -257,6 +261,63 @@ type MissionRouteDeps = {
   clearMissionDetailCache: (userId: string, missionId: number) => void;
 };
 
+function looksLikeExerciseDbMediaUrl(value: unknown): boolean {
+  return typeof value === "string"
+    && /static\.exercisedb\.dev\/media\/[A-Za-z0-9_-]+\.(?:gif|png|jpe?g|webp)(?:$|\?)/i.test(value.trim());
+}
+
+function extractDailyMissionRepairSource(
+  row: Record<string, unknown>,
+  extractExerciseName: (title: string) => string,
+): string {
+  if (typeof row.exercise_name === "string" && row.exercise_name.trim().length > 0) {
+    return row.exercise_name.trim();
+  }
+  if (typeof row.title === "string" && row.title.trim().length > 0) {
+    return extractExerciseName(row.title).trim();
+  }
+  return "";
+}
+
+function dailyMissionNeedsCatalogRepair(
+  row: Record<string, unknown>,
+  extractExerciseName: (title: string) => string,
+): boolean {
+  if (row.type !== "daily") {
+    return false;
+  }
+
+  const sourceExerciseName = extractDailyMissionRepairSource(row, extractExerciseName);
+  const canonicalExerciseName = resolveSupportedMissionExerciseName(sourceExerciseName);
+  const canonicalExerciseDbId = resolveStrictSupportedMissionExerciseDbId(sourceExerciseName);
+  const explicitExerciseDbId =
+    typeof row.exercise_db_id === "string" && row.exercise_db_id.trim().length > 0
+      ? row.exercise_db_id.trim()
+      : null;
+
+  if (!canonicalExerciseName || !canonicalExerciseDbId) {
+    return true;
+  }
+
+  if (explicitExerciseDbId !== canonicalExerciseDbId) {
+    return true;
+  }
+
+  const hasExerciseDbMedia =
+    looksLikeExerciseDbMediaUrl(row.exercise_db_gif_url)
+    || looksLikeExerciseDbMediaUrl(row.exercise_db_image_url)
+    || looksLikeExerciseDbMediaUrl(row.image_url);
+
+  return !hasExerciseDbMedia;
+}
+
+function missionListNeedsDailyCatalogRepair(
+  rows: readonly Record<string, unknown>[],
+  extractExerciseName: (title: string) => string,
+): boolean {
+  return rows.some((row) => dailyMissionNeedsCatalogRepair(row, extractExerciseName));
+}
+
 // Registra listagem, detalhes, geração e conclusão de missões.
 export function registerMissionRoutes(
   app: Hono<AppContext>,
@@ -315,8 +376,17 @@ export function registerMissionRoutes(
       }
 
       const cached = !forceRefresh ? readMissionListCache(user.id) : null;
-      if (!forceRefresh && cached) {
+      const cachedNeedsRepair =
+        Array.isArray(cached)
+        && missionListNeedsDailyCatalogRepair(
+          cached as Record<string, unknown>[],
+          deps.extractExerciseName,
+        );
+      if (!forceRefresh && cached && !cachedNeedsRepair) {
         return streamJsonArrayResponse(cached);
+      }
+      if (cachedNeedsRepair) {
+        invalidateMissionListCache(user.id);
       }
 
       // Mantém o endpoint de leitura leve e relega manutenção periódica ao fluxo com debounce.
@@ -327,7 +397,8 @@ export function registerMissionRoutes(
         c.executionCtx,
         "safe",
       );
-      if (forceRefresh) {
+      const shouldScheduleLegacyRepair = forceRefresh || cachedNeedsRepair;
+      if (shouldScheduleLegacyRepair) {
         scheduleLegacyDailyMetadataRepairWithGuard(
           c.env,
           c.env.fitloot_db,
@@ -425,7 +496,21 @@ export function registerMissionRoutes(
       const summaries = withProgress.map((mission) =>
         missionSummaryFromNormalized(mission),
       );
-      writeMissionListCache(user.id, summaries);
+      const listNeedsRepair = missionListNeedsDailyCatalogRepair(
+        summaries,
+        deps.extractExerciseName,
+      );
+      if (listNeedsRepair && !shouldScheduleLegacyRepair) {
+        scheduleLegacyDailyMetadataRepairWithGuard(
+          c.env,
+          c.env.fitloot_db,
+          user.id,
+          c.executionCtx,
+        );
+      }
+      if (!listNeedsRepair) {
+        writeMissionListCache(user.id, summaries);
+      }
       return streamJsonArrayResponse(summaries);
     } catch (error) {
       console.error("[/api/missions]", {

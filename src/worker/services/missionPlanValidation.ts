@@ -1,7 +1,6 @@
 import type { MissionMetricType } from "../../shared/types";
 import {
   resolveExerciseDisplayNamePt,
-  resolveSupportedMissionExerciseName,
 } from "../../shared/exerciseCatalog";
 import {
   buildMissionDisplayGoalFromTasks,
@@ -9,6 +8,7 @@ import {
 } from "../../shared/missionLocalization";
 import { getMissionMetricType } from "../../constants/missionMetrics";
 import type { StructuredGenerationOptions } from "./missionGeneration";
+import { resolveMissionExerciseForGeneration } from "./missionExerciseSelection";
 
 type MissionPeriod = "daily" | "weekly" | "monthly";
 
@@ -523,8 +523,20 @@ export function createMissionPlanValidationService(
     for (const draft of dailyDrafts.slice(0, options.dailyTarget + 3)) {
       totalCount += 1;
       const rawName = deps.toSafeString(draft.name, `Missao Diaria ${blueprints.length + 1}`);
+      const muscleGroup = deps.toSafeString(draft.muscle_group, "full body");
+      const exerciseType = deps.toSafeString(draft.exercise_type, rawName);
       const supportedExerciseName =
-        resolveSupportedMissionExerciseName(rawName) ?? rawName;
+        resolveMissionExerciseForGeneration({
+          requestedName: rawName,
+          muscles: [muscleGroup],
+          focus: exerciseType,
+        })
+        ?? resolveMissionExerciseForGeneration({
+          requestedName: rawName,
+          muscles: ["full body"],
+          focus: "conditioning",
+        })
+        ?? rawName;
       const name = resolveExerciseDisplayNamePt(supportedExerciseName) ?? rawName;
       if (
         deps.normalizeMatchText(rawName) !==
@@ -537,8 +549,6 @@ export function createMissionPlanValidationService(
         draft.description,
         `Complete a meta proposta em ${name}.`,
       );
-      const exerciseType = deps.toSafeString(draft.exercise_type, name);
-      const muscleGroup = deps.toSafeString(draft.muscle_group, "full body");
       const expectedMetricType = getMissionMetricType(
         `${supportedExerciseName} ${exerciseType} ${muscleGroup}`,
       );
@@ -654,14 +664,20 @@ export function createMissionPlanValidationService(
         fallbackDraft.name,
         `Missao Diaria ${blueprints.length + 1}`,
       );
-      const supportedExerciseName =
-        resolveSupportedMissionExerciseName(rawName) ?? rawName;
-      const name = resolveExerciseDisplayNamePt(supportedExerciseName) ?? rawName;
       const muscleGroup = deps.toSafeString(fallbackDraft.muscle_group, "full body");
+      const exerciseType = String(fallbackDraft.exercise_type ?? rawName);
+      const supportedExerciseName =
+        resolveMissionExerciseForGeneration({
+          requestedName: rawName,
+          muscles: [muscleGroup],
+          focus: exerciseType,
+        })
+        ?? rawName;
+      const name = resolveExerciseDisplayNamePt(supportedExerciseName) ?? rawName;
       const metricType = deps.structuredMetricTypeToMissionMetric(
         fallbackDraft.metric_type,
         supportedExerciseName,
-        String(fallbackDraft.exercise_type ?? supportedExerciseName),
+        exerciseType,
         muscleGroup,
         "daily",
       );

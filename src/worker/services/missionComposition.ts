@@ -14,6 +14,7 @@ import {
   metricUnitByType,
   shouldShowMissionDuration,
 } from "../../constants/missionMetrics";
+import { sanitizeMissionExerciseNames } from "./missionExerciseSelection";
 
 export type MissionPeriod = "daily" | "weekly" | "monthly";
 
@@ -315,91 +316,13 @@ export function fallbackExercisesByFocus(
   focus: string,
   muscles: string[],
 ): string[] {
-  // Fallback exercise catalogs guarantee viable mission drafting when generated plans need recovery paths.
-  const normalized = focus.toLowerCase();
-  if (normalized.includes("push")) {
-    return [
-      "Push-up",
-      "Pike Push-up",
-      "Triceps Dip",
-      "Plank Reach",
-      "Diamond Push-up",
-    ];
-  }
-  if (normalized.includes("pull")) {
-    return [
-      "Pull-up",
-      "Dead Hang",
-      "Bodyweight Row",
-      "Superman Hold",
-      "Reverse Snow Angel",
-    ];
-  }
-  if (normalized.includes("leg")) {
-    return [
-      "Air Squat",
-      "Lunge",
-      "Glute Bridge",
-      "Wall Sit",
-      "Calf Raise",
-    ];
-  }
-  if (normalized.includes("core")) {
-    return [
-      "High Plank",
-      "Crunch Floor",
-      "Quarter Sit-up",
-      "Mountain Climber",
-      "Dead Bug",
-    ];
-  }
-  if (
-    normalized.includes("active_recovery") ||
-    (normalized.includes("active") && normalized.includes("recover"))
-  ) {
-    return [
-      "Walking",
-      "Stretching",
-      "Mobility Flow",
-      "Glute Bridge",
-      "Air Squat",
-    ];
-  }
-  if (normalized.includes("rest") || normalized.includes("recover")) {
-    return [
-      "Walking",
-      "Stretching",
-      "Mobility Flow",
-      "Yoga Flow",
-      "Glute Bridge",
-    ];
-  }
-  if (normalized.includes("yoga")) {
-    return [
-      "Yoga Flow",
-      "Downward Dog",
-      "Child Pose",
-      "Warrior Sequence",
-      "Mobility Flow",
-    ];
-  }
-  if (muscles.some((muscle) => muscle.toLowerCase().includes("core"))) {
-    return [
-      "High Plank",
-      "Crunch Floor",
-      "Quarter Sit-up",
-      "Dead Bug",
-      "Mountain Climber",
-    ];
-  }
-  return [
-    "Push-up",
-    "Air Squat",
-    "High Plank",
-    "Lunge",
-    "Burpee",
-    "Walking",
-  ];
+  // Fallback exercise catalogs must stay anchored to the curated ExerciseDB-backed set.
+  return sanitizeMissionExerciseNames({
+    requestedNames: [],
+    muscles,
+    focus,
+    limit: 6,
+  });
 }
 
 export function uniqueExercises(

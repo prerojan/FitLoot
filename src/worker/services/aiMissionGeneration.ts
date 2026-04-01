@@ -3,8 +3,13 @@ import type {
   ConditioningLevel,
   MissionMetricType,
 } from "../../shared/types";
+import {
+  resolveExerciseMediaFallbackUrlById,
+  resolveStrictSupportedMissionExerciseDbId,
+} from "../../shared/exerciseCatalog";
 import type { EnrichedExercise } from "./exerciseEnrichment";
 import type { Env } from "../core/types";
+import { resolveMissionExerciseForGeneration } from "./missionExerciseSelection";
 
 type MissionPeriod = "daily" | "weekly" | "monthly";
 
@@ -208,9 +213,15 @@ export function createAiMissionGenerationService(
   ): MissionPayloadLike {
     const baseTitle = `Missao Diaria ${index + 1}`;
     const rawExerciseName = deps.toSafeString(raw.skill_name ?? raw.title, baseTitle);
-    const exerciseName =
-      deps.resolveSupportedMissionExerciseName(rawExerciseName) ?? rawExerciseName;
     const muscle = deps.toSafeString(raw.muscle, "full body");
+    const exerciseName =
+      resolveMissionExerciseForGeneration({
+        requestedName: rawExerciseName,
+        muscles: [muscle],
+        focus: raw.exercise_category ?? raw.title ?? raw.skill_name ?? null,
+      })
+      ?? deps.resolveSupportedMissionExerciseName(rawExerciseName)
+      ?? rawExerciseName;
     const forcedCategory = raw.exercise_category ?? null;
 
     const payload = deps.buildMissionPayload({
@@ -368,7 +379,8 @@ export function createAiMissionGenerationService(
     const aiPrompt = [
       "Gere duas missoes fitness especificas para hoje e responda JSON com a chave missions (array).",
       "Cada missao deve conter: title, description, skill_name, muscle, exercise_category, metric_type, metric_value, sets, rest_seconds.",
-      "Categorias permitidas: plank, isometric, walk, run, yoga, stretching, mobility, strength, cardio_circuit.",
+      "Use SOMENTE exercicios deste catalogo suportado: Push-up, Diamond Push-up, Triceps Dip, Air Squat, Walking Lunge, Glute Bridge, Wall Sit, Calf Raise, Front Plank, 3/4 Sit-up, Crunch Floor, Dead Bug, Mountain Climber, Burpee.",
+      "Nao invente exercicios, nao use walking, running, yoga, stretching, mobility flow, torso twist ou nomes genÃ©ricos.",
       `Condicionamento: ${conditioning}`,
       `Objetivo: ${String(profile?.main_goal ?? "saude_geral")}`,
       `Lesoes: ${String(profile?.injuries ?? "nenhuma")}`,
@@ -423,14 +435,31 @@ export function createAiMissionGenerationService(
             : "daily";
 
         const rawExerciseName = deps.extractExerciseName(mission.title);
+        const missionFocus =
+          typeof mission.exercise_target === "string"
+            ? mission.exercise_target
+            : typeof mission.exercise_type === "string"
+              ? mission.exercise_type
+              : null;
         const exerciseName =
-          deps.resolveSupportedMissionExerciseName(rawExerciseName) ??
+          resolveMissionExerciseForGeneration({
+            requestedName: rawExerciseName,
+            muscles: mission.muscle_groups,
+            focus: missionFocus,
+          })
+          ?? deps.resolveSupportedMissionExerciseName(rawExerciseName) ??
           rawExerciseName;
+        const strictExerciseDbId = resolveStrictSupportedMissionExerciseDbId(
+          exerciseName,
+        );
+        const strictExerciseGifUrl = strictExerciseDbId
+          ? resolveExerciseMediaFallbackUrlById(strictExerciseDbId)
+          : null;
         const shouldEnrichWithExerciseApi = missionPeriod === "daily";
         const [enrichedMedia, aiContext] = await Promise.all([
           shouldEnrichWithExerciseApi
             ? deps.enrichExercise(exerciseName, env, {
-                exerciseDbId: mission.exercise_db_id ?? null,
+                exerciseDbId: mission.exercise_db_id ?? strictExerciseDbId ?? null,
               }).catch(() => null)
             : Promise.resolve(null),
           deps.getExerciseInstructionsFromAI(
@@ -458,22 +487,23 @@ export function createAiMissionGenerationService(
           enrichedMedia?.exerciseDbGifUrl ??
           (enrichedMedia?.videoUrl ? enrichedMedia?.thumbnailUrl ?? null : null) ??
           enrichedMedia?.imageUrl ??
-          mission.image_url ??
-          mission.thumbnail_url ??
+          strictExerciseGifUrl ??
           null;
 
         const withMetric = deps.applyMissionMetricContext(
           {
             ...mission,
             image_url: missionMediaUrl,
-            exercise_db_id: mission.exercise_db_id ?? enrichedMedia?.id ?? null,
+            exercise_db_id: mission.exercise_db_id ?? enrichedMedia?.id ?? strictExerciseDbId ?? null,
             exercise_db_gif_url:
               mission.exercise_db_gif_url ??
               enrichedMedia?.exerciseDbGifUrl ??
+              strictExerciseGifUrl ??
               null,
             exercise_db_image_url:
               mission.exercise_db_image_url ??
               enrichedMedia?.exerciseDbImageUrl ??
+              strictExerciseGifUrl ??
               null,
             exercise_name: mission.exercise_name ?? enrichedMedia?.name ?? exerciseName,
             exercise_equipment:
@@ -573,9 +603,10 @@ export function createAiMissionGenerationService(
           exercise_body_part: enrichedMedia?.bodyPart ?? null,
           exercise_target: enrichedMedia?.target ?? null,
           exercise_db_gif_url:
-            enrichedMedia?.exerciseDbGifUrl ?? withMetric.exercise_db_gif_url,
+            enrichedMedia?.exerciseDbGifUrl ?? strictExerciseGifUrl ?? withMetric.exercise_db_gif_url,
           exercise_db_image_url:
             enrichedMedia?.exerciseDbImageUrl ??
+            strictExerciseGifUrl ??
             withMetric.exercise_db_image_url,
           attributes_benefited:
             aiContext.attributesBenefited.length > 0

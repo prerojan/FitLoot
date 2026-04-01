@@ -17,34 +17,37 @@ type SupplementalExerciseCatalogEntry = {
 const supplementalExerciseCatalog: SupplementalExerciseCatalogEntry[] = [
   {
     slug: "push-up-traditional",
-    namePt: "Flexão tradicional",
+    namePt: "Flexao tradicional",
     searchTerms: ["push-up"],
     exerciseDbId: "I4hDWkc",
-    aliases: ["push-up", "push up", "flexão", "flexao", "flexão tradicional"],
+    aliases: ["push-up", "push up", "flexao", "flexao tradicional", "flexão", "flexão tradicional"],
     muscles: ["upper", "chest", "push", "full body"],
     supportedForMission: true,
   },
   {
     slug: "diamond-push-up",
-    namePt: "Flexão diamante",
+    namePt: "Flexao diamante",
     searchTerms: ["diamond push-up"],
-    aliases: ["diamond push-up", "diamond push up", "flexão diamante", "flexao diamante"],
+    exerciseDbId: "soIB2rj",
+    aliases: ["diamond push-up", "diamond push up", "flexao diamante", "flexão diamante"],
     muscles: ["upper", "chest", "triceps", "push"],
     supportedForMission: true,
   },
   {
     slug: "pike-push-up",
-    namePt: "Flexão pike",
+    namePt: "Flexao pike",
     searchTerms: ["pike push-up"],
-    aliases: ["pike push-up", "pike push up", "flexão pike", "flexao pike"],
+    aliases: ["pike push-up", "pike push up", "flexao pike", "flexão pike"],
     muscles: ["upper", "shoulders", "push"],
-    supportedForMission: true,
+    supportedForMission: false,
+    replacementSlug: "push-up-traditional",
   },
   {
     slug: "triceps-dip",
-    namePt: "Mergulho de tríceps",
+    namePt: "Mergulho de triceps",
     searchTerms: ["triceps dip"],
-    aliases: ["triceps dip", "dip", "dips", "mergulho de tríceps", "mergulho de triceps"],
+    exerciseDbId: "X6C6i5Y",
+    aliases: ["triceps dip", "dip", "dips", "bench dip", "bench dips", "mergulho de triceps", "mergulho de tríceps"],
     muscles: ["upper", "triceps", "push"],
     supportedForMission: true,
   },
@@ -59,36 +62,37 @@ const supplementalExerciseCatalog: SupplementalExerciseCatalogEntry[] = [
   },
   {
     slug: "walking-lunge",
-    namePt: "Avanço caminhando",
+    namePt: "Avanco caminhando",
     searchTerms: ["walking lunge", "lunge"],
     exerciseDbId: "IZVHb27",
-    aliases: ["walking lunge", "lunge", "avanço", "avanco", "avanço caminhando", "avanco caminhando"],
+    aliases: ["walking lunge", "lunge", "reverse lunge", "lunges", "avanco", "avanço", "avanco caminhando", "avanço caminhando"],
     muscles: ["lower", "legs", "glutes", "quads"],
     supportedForMission: true,
   },
   {
     slug: "glute-bridge",
-    namePt: "Ponte de glúteos",
+    namePt: "Ponte de gluteos",
     searchTerms: ["glute bridge"],
-    aliases: ["glute bridge", "ponte de glúteos", "ponte de gluteos", "elevação pélvica", "elevacao pelvica"],
+    exerciseDbId: "u0cNiij",
+    aliases: ["glute bridge", "ponte de gluteos", "ponte de glúteos", "elevacao pelvica", "elevação pélvica"],
     muscles: ["lower", "legs", "glutes", "core"],
     supportedForMission: true,
   },
   {
     slug: "wall-sit",
-    namePt: "Cadeira isométrica",
+    namePt: "Cadeira isometrica",
     searchTerms: ["wall sit"],
     exerciseDbId: "sVQCCeG",
-    aliases: ["wall sit", "cadeira isométrica", "cadeira isometrica"],
+    aliases: ["wall sit", "cadeira isometrica", "cadeira isométrica"],
     muscles: ["lower", "legs", "quads"],
     supportedForMission: true,
   },
   {
     slug: "calf-raise",
-    namePt: "Elevação de panturrilha",
+    namePt: "Elevacao de panturrilha",
     searchTerms: ["calf raise"],
     exerciseDbId: "bJYHBIN",
-    aliases: ["calf raise", "elevação de panturrilha", "elevacao de panturrilha"],
+    aliases: ["calf raise", "elevacao de panturrilha", "elevação de panturrilha"],
     muscles: ["lower", "legs", "calves"],
     supportedForMission: true,
   },
@@ -96,7 +100,7 @@ const supplementalExerciseCatalog: SupplementalExerciseCatalogEntry[] = [
     slug: "plank-front",
     namePt: "Prancha frontal",
     searchTerms: ["front plank", "plank"],
-    visualFallbackExerciseDbId: "VBAWRPG",
+    exerciseDbId: "VBAWRPG",
     aliases: ["plank", "high plank", "front plank", "prancha", "prancha frontal", "prancha isometrica"],
     muscles: ["core", "waist"],
     supportedForMission: true,
@@ -121,11 +125,12 @@ const supplementalExerciseCatalog: SupplementalExerciseCatalogEntry[] = [
   },
   {
     slug: "leg-raise",
-    namePt: "Elevação de pernas",
+    namePt: "Elevacao de pernas",
     searchTerms: ["leg raise"],
-    aliases: ["leg raise", "elevação de pernas", "elevacao de pernas"],
+    aliases: ["leg raise", "elevacao de pernas", "elevação de pernas"],
     muscles: ["core", "waist", "abs"],
-    supportedForMission: true,
+    supportedForMission: false,
+    replacementSlug: "sit-up-traditional",
   },
   {
     slug: "dead-bug",
@@ -196,9 +201,9 @@ const supplementalExerciseCatalog: SupplementalExerciseCatalogEntry[] = [
   },
   {
     slug: "bird-dog",
-    namePt: "Extensão alternada em quatro apoios",
+    namePt: "Extensao alternada em quatro apoios",
     searchTerms: ["bird dog"],
-    aliases: ["bird dog", "extensão alternada em quatro apoios", "extensao alternada em quatro apoios"],
+    aliases: ["bird dog", "extensao alternada em quatro apoios", "extensão alternada em quatro apoios"],
     muscles: ["core", "waist", "glutes"],
     supportedForMission: false,
     replacementSlug: "dead-bug",
@@ -344,6 +349,62 @@ function resolveReplacementEntry(
   return supplementalExerciseCatalogBySlug.get(entry.replacementSlug) ?? null;
 }
 
+type StrictSupportedMissionExerciseEntry = SupplementalExerciseCatalogEntry & {
+  exerciseDbId: string;
+};
+
+function isStrictSupportedMissionExerciseEntry(
+  entry: SupplementalExerciseCatalogEntry | null,
+): entry is StrictSupportedMissionExerciseEntry {
+  return Boolean(
+    entry
+    && entry.supportedForMission
+    && typeof entry.exerciseDbId === "string"
+    && entry.exerciseDbId.trim().length > 0,
+  );
+}
+
+function resolveStrictSupportedMissionExerciseEntry(
+  value: string | null | undefined,
+): StrictSupportedMissionExerciseEntry | null {
+  const supplemental = resolveSupplementalExerciseCatalogEntry(value);
+  const supportedSupplemental = resolveReplacementEntry(supplemental);
+  return isStrictSupportedMissionExerciseEntry(supportedSupplemental)
+    ? supportedSupplemental
+    : null;
+}
+
+function resolveMissionTargetGroup(muscle: string | null | undefined): string {
+  const normalizedMuscle = normalizeExerciseSeedLookup(String(muscle ?? ""));
+  return normalizedMuscle.includes("core") || normalizedMuscle.includes("waist") || normalizedMuscle.includes("abs")
+    ? "core"
+    : normalizedMuscle.includes("glute") || normalizedMuscle.includes("leg") || normalizedMuscle.includes("quad") || normalizedMuscle.includes("ham")
+      ? "lower"
+      : normalizedMuscle.includes("mobility") || normalizedMuscle.includes("flex") || normalizedMuscle.includes("stretch") || normalizedMuscle.includes("recover")
+        ? "mobility"
+        : normalizedMuscle.includes("chest") || normalizedMuscle.includes("shoulder") || normalizedMuscle.includes("tricep") || normalizedMuscle.includes("bicep") || normalizedMuscle.includes("arm") || normalizedMuscle.includes("back")
+          ? "upper"
+          : normalizedMuscle.includes("cardio") || normalizedMuscle.includes("walk") || normalizedMuscle.includes("run")
+            ? "cardio"
+            : "full body";
+}
+
+function listStrictSupportedMissionExerciseEntriesByMuscle(
+  muscle: string | null | undefined,
+): StrictSupportedMissionExerciseEntry[] {
+  const targetGroup = resolveMissionTargetGroup(muscle);
+  return supplementalExerciseCatalog
+    .map((entry) => resolveReplacementEntry(entry))
+    .filter((entry): entry is StrictSupportedMissionExerciseEntry =>
+      isStrictSupportedMissionExerciseEntry(entry)
+      && (
+        entry.muscles.includes(targetGroup)
+        || entry.muscles.includes("full body")
+        || (targetGroup === "cardio" && entry.muscles.includes("lower"))
+      ),
+    );
+}
+
 const exerciseCatalogReplacements = (() => {
   const seenKeys = new Set<string>();
   const replacements: Array<{ pattern: RegExp; replacement: string }> = [];
@@ -414,24 +475,20 @@ export function resolveExerciseDisplayNamePt(value: string | null | undefined): 
 }
 
 export function resolveSupportedMissionExerciseName(value: string | null | undefined): string | null {
-  const supplemental = resolveSupplementalExerciseCatalogEntry(value);
-  const supportedSupplemental = resolveReplacementEntry(supplemental);
-  if (supportedSupplemental && supportedSupplemental.searchTerms.length > 0) {
-    return supportedSupplemental.searchTerms[0] ?? null;
-  }
+  const supportedSupplemental = resolveStrictSupportedMissionExerciseEntry(value);
+  return supportedSupplemental?.searchTerms[0] ?? null;
+}
 
-  const seed = resolveVariantSkillSeedByExerciseName(value);
-  if (!seed) return null;
-  return seed.exerciseDbTerms[0] ?? seed.slug.replace(/-/g, " ");
+export function resolveStrictSupportedMissionExerciseDbId(value: string | null | undefined): string | null {
+  return resolveStrictSupportedMissionExerciseEntry(value)?.exerciseDbId ?? null;
+}
+
+export function resolveStrictSupportedMissionExerciseDisplayNamePt(value: string | null | undefined): string | null {
+  return resolveStrictSupportedMissionExerciseEntry(value)?.namePt ?? null;
 }
 
 export function resolvePreferredExerciseDbId(value: string | null | undefined): string | null {
-  const supplemental = resolveSupplementalExerciseCatalogEntry(value);
-  const supportedSupplemental = resolveReplacementEntry(supplemental);
-  if (supportedSupplemental?.exerciseDbId) {
-    return supportedSupplemental.exerciseDbId;
-  }
-  return null;
+  return resolveStrictSupportedMissionExerciseDbId(value);
 }
 
 function resolveCatalogEntryByExerciseDbId(
@@ -458,48 +515,39 @@ export function resolveExerciseMediaFallbackUrlById(exerciseDbId: string | null 
   const normalizedExerciseDbId = exerciseDbId.trim();
   const catalogEntry = resolveCatalogEntryByExerciseDbId(normalizedExerciseDbId);
   const supportedEntry = resolveReplacementEntry(catalogEntry);
-  const resolvedExerciseDbId =
-    supportedEntry?.visualFallbackExerciseDbId
-    ?? supportedEntry?.exerciseDbId
-    ?? normalizedExerciseDbId;
-
+  const resolvedExerciseDbId = isStrictSupportedMissionExerciseEntry(supportedEntry)
+    ? supportedEntry.exerciseDbId
+    : normalizedExerciseDbId;
   return `https://static.exercisedb.dev/media/${resolvedExerciseDbId}.gif`;
 }
 
 export function resolveExerciseMediaFallbackUrl(value: string | null | undefined): string | null {
-  const supplemental = resolveSupplementalExerciseCatalogEntry(value);
-  const supportedSupplemental = resolveReplacementEntry(supplemental);
-  const exerciseDbId = supportedSupplemental?.visualFallbackExerciseDbId
-    ?? supportedSupplemental?.exerciseDbId
-    ?? null;
+  const exerciseDbId = resolveStrictSupportedMissionExerciseDbId(value);
   return resolveExerciseMediaFallbackUrlById(exerciseDbId);
 }
 
 export function listSupportedMissionExerciseNamesByMuscle(muscle: string | null | undefined): string[] {
-  const normalizedMuscle = normalizeExerciseSeedLookup(String(muscle ?? ""));
-  const targetGroup =
-    normalizedMuscle.includes("core") || normalizedMuscle.includes("waist") || normalizedMuscle.includes("abs")
-      ? "core"
-      : normalizedMuscle.includes("glute") || normalizedMuscle.includes("leg") || normalizedMuscle.includes("quad") || normalizedMuscle.includes("ham")
-        ? "lower"
-        : normalizedMuscle.includes("mobility") || normalizedMuscle.includes("flex") || normalizedMuscle.includes("stretch") || normalizedMuscle.includes("recover")
-          ? "mobility"
-          : normalizedMuscle.includes("chest") || normalizedMuscle.includes("shoulder") || normalizedMuscle.includes("tricep") || normalizedMuscle.includes("bicep") || normalizedMuscle.includes("arm") || normalizedMuscle.includes("back")
-            ? "upper"
-            : normalizedMuscle.includes("cardio") || normalizedMuscle.includes("walk") || normalizedMuscle.includes("run")
-              ? "cardio"
-              : "full body";
-
-  const candidates = supplementalExerciseCatalog.filter((entry) =>
-    entry.supportedForMission
-    && (
-      entry.muscles.includes(targetGroup)
-      || entry.muscles.includes("full body")
-      || (targetGroup === "cardio" && entry.muscles.includes("lower"))
+  return Array.from(
+    new Set(
+      listStrictSupportedMissionExerciseEntriesByMuscle(muscle)
+        .flatMap((entry) => entry.searchTerms.slice(0, 1))
+        .filter((term) => term.length > 0),
     ),
   );
+}
 
-  return Array.from(new Set(candidates.flatMap((entry) => entry.searchTerms.slice(0, 1)).filter((term) => term.length > 0)));
+export function listAllStrictSupportedMissionExerciseNames(): string[] {
+  return Array.from(
+    new Set(
+      supplementalExerciseCatalog
+        .map((entry) => resolveReplacementEntry(entry))
+        .filter((entry): entry is StrictSupportedMissionExerciseEntry =>
+          isStrictSupportedMissionExerciseEntry(entry),
+        )
+        .flatMap((entry) => entry.searchTerms.slice(0, 1))
+        .filter((term) => term.length > 0),
+    ),
+  );
 }
 
 export function localizeExerciseCatalogText(value: string | null | undefined): string | null | undefined {
@@ -541,3 +589,4 @@ export function resolveExerciseSearchTerms(value: string | null | undefined): st
     ),
   );
 }
+

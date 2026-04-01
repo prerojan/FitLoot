@@ -1,11 +1,9 @@
 import type { CSSProperties } from "react";
 import { formatMissionGoal } from "@/constants/missionMetrics";
 import {
-  resolveExerciseMediaFallbackUrl,
   resolveExerciseMediaFallbackUrlById,
 } from "@/shared/exerciseCatalog";
 import {
-  buildMissionFallbackMediaDataUrl,
   localizeMissionText,
   normalizeMissionMediaUrl,
 } from "@/shared/missionLocalization";
@@ -94,6 +92,11 @@ function isGifUrl(url: string | null | undefined): boolean {
 function isPixelOrLineArtUrl(url: string | null | undefined): boolean {
   if (!url) return false;
   return /(pixel|lineart|sprite|icon|outline|vector)/i.test(url);
+}
+
+function isExerciseDbMediaUrl(url: string | null | undefined): boolean {
+  if (!url) return false;
+  return /static\.exercisedb\.dev\/media\/[A-Za-z0-9_-]+\.(?:gif|png|jpe?g|webp)(?:$|\?)/i.test(url);
 }
 
 export function normalizeLookupText(value: string | null | undefined): string {
@@ -337,35 +340,17 @@ export function summarizeAutoProgressLabel(tasks: readonly CircuitTask[]): strin
   return `${taskLabels[0]}, ${taskLabels[1]} e mais ${taskLabels.length - 2}`;
 }
 
-function resolveCatalogMissionMediaFallbackUrl(mission: Mission): string | null {
-  if (mission.type !== "daily") {
+export function resolveMissionMediaUrl(mission: Mission): string | null {
+  const isExerciseDbBackedDailyMission =
+    mission.type !== "daily"
+    || (typeof mission.exercise_db_id === "string" && mission.exercise_db_id.trim().length > 0);
+  if (!isExerciseDbBackedDailyMission) {
     return null;
   }
 
-  const fallbackByExerciseId = resolveExerciseMediaFallbackUrlById(mission.exercise_db_id ?? null);
-  if (fallbackByExerciseId) {
-    return normalizeMissionMediaUrl(fallbackByExerciseId);
-  }
-
-  const candidates = [
-    mission.exercise_name,
-    resolveMissionDisplayTitle(mission.title),
-    mission.description,
-  ];
-
-  for (const candidate of candidates) {
-    const fallbackUrl = resolveExerciseMediaFallbackUrl(candidate);
-    if (fallbackUrl) {
-      return normalizeMissionMediaUrl(fallbackUrl);
-    }
-  }
-
-  return null;
-}
-
-export function resolveMissionMediaUrl(mission: Mission): string | null {
   const primaryImage = normalizeMissionMediaUrl(mission.image_url);
   const ascendGif = isGifUrl(primaryImage) ? primaryImage : null;
+  const exerciseDbPrimary = isExerciseDbMediaUrl(primaryImage) ? primaryImage : null;
   const exerciseDbGif = normalizeMissionMediaUrl(mission.exercise_db_gif_url);
   const exerciseDbImage = normalizeMissionMediaUrl(mission.exercise_db_image_url);
   const videoUrl = normalizeMissionMediaUrl(mission.video_url);
@@ -373,14 +358,14 @@ export function resolveMissionMediaUrl(mission: Mission): string | null {
   const fallbackByExerciseId = normalizeMissionMediaUrl(
     resolveExerciseMediaFallbackUrlById(mission.exercise_db_id ?? null),
   );
-  const catalogFallback = resolveCatalogMissionMediaFallbackUrl(mission);
-  const generatedFallback = buildMissionFallbackMediaDataUrl(
-    mission.exercise_name
-    ?? resolveMissionDisplayTitle(mission.title)
-    ?? mission.description
-    ?? mission.body_area
-    ?? null,
-  );
+
+  if (mission.type === "daily") {
+    return exerciseDbGif
+      ?? exerciseDbImage
+      ?? exerciseDbPrimary
+      ?? fallbackByExerciseId
+      ?? null;
+  }
 
   return ascendGif
     ?? exerciseDbGif
@@ -389,8 +374,6 @@ export function resolveMissionMediaUrl(mission: Mission): string | null {
     ?? primaryImage
     ?? thumbnail
     ?? fallbackByExerciseId
-    ?? catalogFallback
-    ?? generatedFallback
     ?? null;
 }
 

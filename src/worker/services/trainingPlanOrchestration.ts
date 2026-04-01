@@ -7,6 +7,7 @@ import type {
   MissionBlueprint,
   StructuredMissionPlanDraft,
 } from "./missionBlueprintPlanning";
+import { sanitizeMissionExerciseNames } from "./missionExerciseSelection";
 import type { TrainingPlanChatPreferences } from "./trainingPlan";
 import { requestValidatedStructuredPlanWithRetry } from "./structuredPlanRetry";
 
@@ -314,7 +315,12 @@ export function normalizeWeeklyPlanDay(
   return {
     focus,
     muscles: normalizedMuscles.slice(0, 5),
-    exercises: normalizedExercises.slice(0, 10),
+    exercises: sanitizeMissionExerciseNames({
+      requestedNames: normalizedExercises,
+      focus,
+      limit: Math.max(3, Math.min(6, normalizedExercises.length || 3)),
+      fallbackOrder: ["focus", "catalog"],
+    }),
     intensity,
     rest_day: restDay,
   };

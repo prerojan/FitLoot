@@ -508,7 +508,7 @@ export function createMissionBlueprintPlanningService(
       specialRule,
       `Limites: daily_missions=${options.dailyTarget}, weekly_missions=${options.weeklyTarget}, monthly_missions=${options.monthlyTarget}.`,
       "Sua funcao aqui e somente montar o plano adaptado ao usuario: escolha exercicios, volume, metas e recompensas. Alvo muscular, equipamento, instrucoes tecnicas detalhadas, GIFs e videos serao preenchidos pelas APIs de exercicio depois.",
-      "Em daily_missions.name, use o nome canonico do exercicio em ingles, como aparece em catalogos de exercicios (ex.: Push-up, Air Squat, Plank, Crunch, Lunge, Glute Bridge, Walking, Running, Yoga Flow). Nao invente nomes criativos para o exercicio.",
+      "Em daily_missions.name, use SOMENTE nomes canonicos do catalogo suportado do app (ex.: Push-up, Diamond Push-up, Triceps Dip, Air Squat, Walking Lunge, Glute Bridge, Wall Sit, Calf Raise, Front Plank, 3/4 Sit-up, Crunch Floor, Dead Bug, Mountain Climber, Burpee). Nao invente exercicios nem use walking, running, yoga flow, stretching, mobility flow ou nomes genericos.",
       "Use SOMENTE metric_type: reps, seconds, distance, steps, minutes.",
       "Prancha nunca usa repeticoes.",
       "Circuito completo ou sessao longa nunca pode ser daily_mission.",

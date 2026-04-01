@@ -346,17 +346,19 @@ export function createMissionPresentationService({
         ? (localizeMissionText(rawMission.description) ?? rawMission.description)
         : rawMission.description;
     const localizedGoal = resolveMissionDisplayGoal(rawMission, circuitTasks);
+    const normalizedExerciseNameSource =
+      typeof rawMission.exercise_name === "string" &&
+      rawMission.exercise_name.trim().length > 0
+        ? rawMission.exercise_name
+        : displayTitle;
+    const canonicalExerciseDbId = resolvePreferredExerciseDbId(
+      normalizedExerciseNameSource,
+    );
     const explicitExerciseDbId =
       typeof rawMission.exercise_db_id === "string" &&
       rawMission.exercise_db_id.trim().length > 0
         ? rawMission.exercise_db_id.trim()
         : null;
-    const fallbackExerciseDbId = resolvePreferredExerciseDbId(
-      typeof rawMission.exercise_name === "string" &&
-      rawMission.exercise_name.trim().length > 0
-        ? rawMission.exercise_name
-        : displayTitle,
-    );
     const progressValue =
       rawMission.progress_value === null || rawMission.progress_value === undefined
         ? (circuitTasks.length > 0
@@ -413,7 +415,10 @@ export function createMissionPresentationService({
               rawMission.exercise_name
             )
           : null,
-      exercise_db_id: explicitExerciseDbId ?? fallbackExerciseDbId ?? null,
+      exercise_db_id:
+        rawMission.type === "daily"
+          ? canonicalExerciseDbId ?? null
+          : explicitExerciseDbId ?? canonicalExerciseDbId ?? null,
       exercise_equipment:
         typeof rawMission.exercise_equipment === "string"
           ? (localizeMissionText(rawMission.exercise_equipment) ?? rawMission.exercise_equipment)

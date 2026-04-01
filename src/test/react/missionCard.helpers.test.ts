@@ -73,7 +73,7 @@ describe("missionCard helpers - resolveMissionMediaUrl", () => {
     expect(resolveMissionMediaUrl(mission)).toBe("https://static.exercisedb.dev/media/bJYHBIN.gif");
   });
 
-  it("still resolves media from catalog by known exercise name when id is missing", () => {
+  it("does not invent media for daily missions without exercise_db_id", () => {
     const mission = buildMission({
       exercise_db_id: null,
       exercise_name: "Cadeira isometrica",
@@ -84,10 +84,24 @@ describe("missionCard helpers - resolveMissionMediaUrl", () => {
       video_url: null,
     });
 
+    expect(resolveMissionMediaUrl(mission)).toBeNull();
+  });
+
+  it("ignores generic daily images when a canonical ExerciseDB id exists", () => {
+    const mission = buildMission({
+      exercise_db_id: "sVQCCeG",
+      exercise_name: "Cadeira isometrica",
+      image_url: "https://cdn.example.com/generic-wall-sit.png",
+      exercise_db_gif_url: null,
+      exercise_db_image_url: null,
+      thumbnail_url: null,
+      video_url: null,
+    });
+
     expect(resolveMissionMediaUrl(mission)).toBe("https://static.exercisedb.dev/media/sVQCCeG.gif");
   });
 
-  it("returns a generated fallback media data url when no source is available", () => {
+  it("returns null when no ExerciseDB-backed media source is available", () => {
     const mission = buildMission({
       exercise_db_id: null,
       exercise_name: "Treino desconhecido",
@@ -100,7 +114,6 @@ describe("missionCard helpers - resolveMissionMediaUrl", () => {
       video_url: null,
     });
 
-    const resolved = resolveMissionMediaUrl(mission);
-    expect(resolved).toContain("data:image/svg+xml");
+    expect(resolveMissionMediaUrl(mission)).toBeNull();
   });
 });

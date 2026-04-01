@@ -4,6 +4,7 @@ import type {
 } from "../../shared/types";
 import {
   resolveExerciseDisplayNamePt,
+  resolveExerciseMediaFallbackUrlById,
   resolvePreferredExerciseDbId,
   resolveSupportedMissionExerciseName,
 } from "../../shared/exerciseCatalog";
@@ -19,6 +20,7 @@ import {
   enrichExercise,
   type EnrichedExercise,
 } from "./exerciseEnrichment";
+import { resolveMissionExerciseForGeneration } from "./missionExerciseSelection";
 
 type MissionRepairPayload = {
   title: string;
@@ -269,10 +271,20 @@ function resolveLegacyDailyRepairIdentity(
       : "";
 
   const storedSupportedExerciseName =
-    resolveSupportedMissionExerciseName(storedExerciseName)
+    resolveMissionExerciseForGeneration({
+      requestedName: storedExerciseName,
+      muscles: [],
+      focus: null,
+    })
+    ?? resolveSupportedMissionExerciseName(storedExerciseName)
     ?? resolveSupportedMissionExerciseName(localizedStoredExerciseName);
   const titleSupportedExerciseName =
-    resolveSupportedMissionExerciseName(titleExerciseName)
+    resolveMissionExerciseForGeneration({
+      requestedName: titleExerciseName,
+      muscles: [],
+      focus: null,
+    })
+    ?? resolveSupportedMissionExerciseName(titleExerciseName)
     ?? resolveSupportedMissionExerciseName(localizedTitleExerciseName);
 
   let supportedExerciseName = storedSupportedExerciseName ?? titleSupportedExerciseName ?? null;
@@ -408,15 +420,7 @@ export function createLegacyMissionRepairService(deps: LegacyMissionRepairDeps) 
       const hasSupportedExercise =
         repairIdentity.supportedExerciseName !== null;
 
-      if (
-        !hasSupportedExercise
-        && (
-          !hasMedia
-          || !hasExerciseMetadata
-          || requiresMetricRepair
-          || requiresInstructionTranslationRepair
-        )
-      ) {
+      if (!hasSupportedExercise) {
         const missionId = Number(row.id ?? 0);
         if (missionId > 0) {
           missionIdsToRegenerate.push(missionId);
@@ -673,6 +677,7 @@ export function createLegacyMissionRepairService(deps: LegacyMissionRepairDeps) 
       const resolvedExerciseDbIdForStorage =
         enriched?.id ?? preferredExerciseDbId ?? null;
       const resolvedExerciseDbGifUrl = enriched?.exerciseDbGifUrl
+        ?? resolveExerciseMediaFallbackUrlById(resolvedExerciseDbIdForStorage)
         ?? (
           preserveExistingMedia
             ? normalizeMissionMediaUrl(
@@ -683,6 +688,7 @@ export function createLegacyMissionRepairService(deps: LegacyMissionRepairDeps) 
             : null
         );
       const resolvedExerciseDbImageUrl = enriched?.exerciseDbImageUrl
+        ?? resolveExerciseMediaFallbackUrlById(resolvedExerciseDbIdForStorage)
         ?? (
           preserveExistingMedia
             ? normalizeMissionMediaUrl(
@@ -693,6 +699,7 @@ export function createLegacyMissionRepairService(deps: LegacyMissionRepairDeps) 
             : null
         );
       const resolvedImageUrl = enriched?.imageUrl
+        ?? resolveExerciseMediaFallbackUrlById(resolvedExerciseDbIdForStorage)
         ?? (
           preserveExistingMedia
             ? normalizeMissionMediaUrl(

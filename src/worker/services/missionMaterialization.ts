@@ -5,6 +5,10 @@ import type {
 } from "../../shared/types";
 import { repairKnownMojibakeString } from "../../shared/textEncoding";
 import {
+  resolveExerciseMediaFallbackUrlById,
+  resolveStrictSupportedMissionExerciseDbId,
+} from "../../shared/exerciseCatalog";
+import {
   type VariantSkillSeed,
   variantSkillSeeds,
 } from "../../shared/coreSkillSeeds";
@@ -25,6 +29,7 @@ import {
   ensurePortugueseExerciseLabel,
   ensurePortugueseInstructionList,
 } from "./instructionLocalization";
+import { resolveMissionExerciseForGeneration } from "./missionExerciseSelection";
 
 type MissionPeriod = "daily" | "weekly" | "monthly";
 
@@ -502,7 +507,23 @@ export function createMissionMaterializationService(deps: MissionMaterialization
   async function materializeMissionBlueprint(env: Env, profile: MissionGenerationProfileSnapshot, blueprint: MissionBlueprint): Promise<MissionPayload> {
     const config = deps.missionConfigByPeriod(blueprint.period);
     const shouldEnrichWithExerciseApi = blueprint.period === "daily";
-    const supportedExerciseName = shouldEnrichWithExerciseApi ? (deps.resolveSupportedMissionExerciseName(blueprint.exerciseName) ?? blueprint.exerciseName) : blueprint.exerciseName;
+    const supportedExerciseName = shouldEnrichWithExerciseApi
+      ? (
+        resolveMissionExerciseForGeneration({
+          requestedName: blueprint.exerciseName,
+          muscles: [blueprint.muscle],
+          focus: blueprint.description,
+        })
+        ?? deps.resolveSupportedMissionExerciseName(blueprint.exerciseName)
+        ?? blueprint.exerciseName
+      )
+      : blueprint.exerciseName;
+    const strictExerciseDbId = shouldEnrichWithExerciseApi
+      ? resolveStrictSupportedMissionExerciseDbId(supportedExerciseName)
+      : null;
+    const strictExerciseGifUrl = strictExerciseDbId
+      ? resolveExerciseMediaFallbackUrlById(strictExerciseDbId)
+      : null;
     const [enriched, aiContext] = await Promise.all([
       shouldEnrichWithExerciseApi ? enrichExercise(supportedExerciseName, env).catch(() => null) : Promise.resolve(null),
       getExerciseInstructionsFromAI(
@@ -530,11 +551,11 @@ export function createMissionMaterializationService(deps: MissionMaterialization
       period: blueprint.period,
       titlePrefix: config.titlePrefix,
       exerciseName: resolvedName,
-      exerciseDbId: enriched?.id,
+      exerciseDbId: enriched?.id ?? strictExerciseDbId ?? undefined,
       muscle: shouldEnrichWithExerciseApi ? (enriched?.target || blueprint.muscle) : blueprint.muscle,
-      imageUrl: shouldEnrichWithExerciseApi ? (enriched?.imageUrl ?? undefined) : undefined,
-      exerciseDbGifUrl: shouldEnrichWithExerciseApi ? (enriched?.exerciseDbGifUrl ?? undefined) : undefined,
-      exerciseDbImageUrl: shouldEnrichWithExerciseApi ? (enriched?.exerciseDbImageUrl ?? undefined) : undefined,
+      imageUrl: shouldEnrichWithExerciseApi ? (enriched?.imageUrl ?? strictExerciseGifUrl ?? undefined) : undefined,
+      exerciseDbGifUrl: shouldEnrichWithExerciseApi ? (enriched?.exerciseDbGifUrl ?? strictExerciseGifUrl ?? undefined) : undefined,
+      exerciseDbImageUrl: shouldEnrichWithExerciseApi ? (enriched?.exerciseDbImageUrl ?? strictExerciseGifUrl ?? undefined) : undefined,
       exerciseEquipment: shouldEnrichWithExerciseApi ? (enriched?.equipment || undefined) : undefined,
       exerciseBodyPart: shouldEnrichWithExerciseApi ? (enriched?.bodyPart || undefined) : undefined,
       exerciseTarget: shouldEnrichWithExerciseApi ? (enriched?.target || blueprint.muscle) : undefined,
@@ -584,13 +605,16 @@ export function createMissionMaterializationService(deps: MissionMaterialization
       withMetric.safety_tips = aiContext?.safetyTips?.length ? aiContext.safetyTips.slice(0, 4) : withMetric.safety_tips;
       withMetric.difficulty_level = blueprint.difficultyLevel;
       withMetric.exercise_name = resolvedExerciseDisplayName;
-      withMetric.exercise_db_id = enriched?.id ?? withMetric.exercise_db_id;
+      withMetric.exercise_db_id = enriched?.id ?? strictExerciseDbId ?? withMetric.exercise_db_id;
       withMetric.exercise_equipment = enriched?.equipment ?? null;
       withMetric.exercise_body_part = enriched?.bodyPart ?? null;
       withMetric.exercise_target = enriched?.target ?? null;
       withMetric.exercise_secondary_muscles = deps.mergeUniqueStrings(Array.isArray(enriched?.secondaryMuscles) ? enriched.secondaryMuscles : [], 8);
       withMetric.muscle_groups = deps.resolveExerciseApiMuscleGroups(enriched);
       withMetric.body_area = deps.resolveExerciseApiBodyArea(enriched, blueprint.muscle);
+      withMetric.exercise_db_gif_url = enriched?.exerciseDbGifUrl ?? strictExerciseGifUrl ?? withMetric.exercise_db_gif_url;
+      withMetric.exercise_db_image_url = enriched?.exerciseDbImageUrl ?? strictExerciseGifUrl ?? withMetric.exercise_db_image_url;
+      withMetric.image_url = enriched?.imageUrl ?? strictExerciseGifUrl ?? withMetric.image_url;
       return withMetric;
     }
 

@@ -58,12 +58,14 @@ describe("buildInitialTrainingPlan", () => {
     expect(plan.source_provider).toBe("ai-workout-planner");
     expect(plan.source_total_weeks).toBe(6);
     expect(plan.weekly.segunda.exercises).toEqual([
-      "Dumbbell Bench Press",
-      "Shoulder Press",
+      "push-up",
+      "diamond push-up",
+      "triceps dip",
     ]);
     expect(plan.weekly.terca.exercises).toEqual([
-      "Goblet Squat",
-      "Walking Lunge",
+      "air squat",
+      "walking lunge",
+      "glute bridge",
     ]);
     expect(plan.weekly.quarta.rest_day).toBe(true);
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -86,9 +88,9 @@ describe("buildInitialTrainingPlan", () => {
 
     expect(plan.source_provider).toBe("fitloot-static");
     expect(plan.weekly.segunda.exercises).toEqual([
-      "Push-up",
-      "Bench Dip",
-      "Shoulder Press",
+      "push-up",
+      "triceps dip",
+      "diamond push-up",
     ]);
   });
 });

@@ -81,8 +81,11 @@ describe("mission routes", () => {
     const cachedMissions = [
       {
         id: 11,
-        title: "Missao em cache",
+        title: "Missao diaria: Flexao tradicional",
         type: "daily",
+        exercise_name: "push-up",
+        exercise_db_id: "I4hDWkc",
+        image_url: "https://static.exercisedb.dev/media/I4hDWkc.gif",
       },
     ];
     const { db } = createMockD1Database([]);
@@ -108,6 +111,59 @@ describe("mission routes", () => {
     expect(deps.scheduleLegacyDailyMetadataRepairWithGuard).not.toHaveBeenCalled();
     expect(deps.schedulePeriodicProgressRecomputeWithGuard).not.toHaveBeenCalled();
     expect(deps.streamJsonArrayResponse).toHaveBeenCalledWith(cachedMissions);
+  });
+
+  it("bypasses cached daily missions that are outside the ExerciseDB-backed catalog", async () => {
+    const cachedMissions = [
+      {
+        id: 21,
+        title: "Missao diaria: exercicio guiado",
+        type: "daily",
+        exercise_name: "exercicio guiado",
+        exercise_db_id: null,
+        image_url: "https://cdn.example.com/generic.png",
+      },
+    ];
+    const { db } = createMockD1Database([
+      {
+        match: "PRAGMA table_info('missions')",
+        all: [
+          { name: "id" },
+          { name: "user_id" },
+          { name: "status" },
+          { name: "skill_id" },
+        ],
+      },
+      {
+        match: "PRAGMA table_info('skills')",
+        all: [],
+      },
+      {
+        match: "SELECT m.*, NULL as skill_name FROM missions m",
+        all: [],
+      },
+    ]);
+    const env = createTestEnv(db);
+    const deps = createMissionDeps({
+      readMissionListCache: vi.fn(() => cachedMissions),
+    });
+    const app = new Hono<AppContext>();
+    registerMissionRoutes(app, deps, createAuthMiddleware());
+    const { executionCtx } = createExecutionContext();
+
+    const response = await app.fetch(
+      new Request("http://localhost/api/missions"),
+      env,
+      executionCtx,
+    );
+
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload).toEqual([]);
+    expect(deps.invalidateMissionListCache).toHaveBeenCalledWith(TEST_USER.id);
+    expect(deps.schedulePeriodicMissionsRefreshWithGuard).toHaveBeenCalledTimes(1);
+    expect(deps.scheduleLegacyDailyMetadataRepairWithGuard).toHaveBeenCalledTimes(1);
   });
 
   it("serves a cached mission detail payload without querying the mission detail path", async () => {
