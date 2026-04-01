@@ -47,9 +47,30 @@ function createBillingDeps(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function createCompleteOnboardingStateHandlers() {
+  return [
+    {
+      match: "SELECT user_id FROM user_profiles WHERE user_id = ? LIMIT 1",
+      first: { user_id: TEST_USER.id },
+    },
+    {
+      match: "SELECT user_id FROM user_attributes WHERE user_id = ? LIMIT 1",
+      first: { user_id: TEST_USER.id },
+    },
+    {
+      match: "SELECT user_id FROM user_progression WHERE user_id = ? LIMIT 1",
+      first: { user_id: TEST_USER.id },
+    },
+    {
+      match: "SELECT user_id FROM user_training_plans WHERE user_id = ? LIMIT 1",
+      first: { user_id: TEST_USER.id },
+    },
+  ];
+}
+
 describe("billing routes", () => {
   it("starts checkout and returns the refreshed user payload", async () => {
-    const { db } = createMockD1Database([]);
+    const { db } = createMockD1Database(createCompleteOnboardingStateHandlers());
     const env = createTestEnv(db);
     const deps = createBillingDeps();
     const app = new Hono<AppContext>();
@@ -89,6 +110,52 @@ describe("billing routes", () => {
         paymentMethod: "pix",
       }),
     );
+  });
+
+  it("rejects checkout start when onboarding persistence is incomplete", async () => {
+    const { db } = createMockD1Database([
+      {
+        match: "SELECT user_id FROM user_profiles WHERE user_id = ? LIMIT 1",
+        first: null,
+      },
+      {
+        match: "SELECT user_id FROM user_attributes WHERE user_id = ? LIMIT 1",
+        first: { user_id: TEST_USER.id },
+      },
+      {
+        match: "SELECT user_id FROM user_progression WHERE user_id = ? LIMIT 1",
+        first: { user_id: TEST_USER.id },
+      },
+      {
+        match: "SELECT user_id FROM user_training_plans WHERE user_id = ? LIMIT 1",
+        first: { user_id: TEST_USER.id },
+      },
+    ]);
+    const env = createTestEnv(db);
+    const deps = createBillingDeps();
+    const app = new Hono<AppContext>();
+    registerBillingRoutes(app, deps);
+    const { executionCtx } = createExecutionContext();
+
+    const response = await app.fetch(
+      createJsonRequest("/api/checkout/start", {
+        method: "POST",
+        body: {
+          plan_id: "pro",
+          payment_method: "pix",
+        },
+      }),
+      env,
+      executionCtx,
+    );
+
+    const payload = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(payload).toMatchObject({
+      code: "ONBOARDING_STATE_INCOMPLETE",
+    });
+    expect(deps.startCheckoutForUser).not.toHaveBeenCalled();
   });
 
   it("falls back to the user plan data when there is no stored subscription", async () => {

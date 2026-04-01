@@ -200,7 +200,13 @@ export default function Dashboard() {
 
     await Promise.all([
       runRequest<UserProfile>("profile", "/api/profile", Boolean(cacheProfile), Boolean(cacheProfile?.stale), setProfile, () => {
-        shouldRedirectToOnboarding = true;
+        if (Number(user?.onboarding_completed ?? 0) !== 1) {
+          shouldRedirectToOnboarding = true;
+          return;
+        }
+
+        hasRequestError = true;
+        setError("Seu perfil ainda esta sendo sincronizado. Atualize a pagina em instantes.");
       }),
       runRequest<UserProgression>(
         "progression",
@@ -244,7 +250,7 @@ export default function Dashboard() {
     }
 
     if (hasRequestError) return;
-  }, [navigate, setSectionLoading]);
+  }, [navigate, setSectionLoading, user]);
 
   useEffect(() => {
     // Fecha o menu rapido ao clicar fora da area flutuante.

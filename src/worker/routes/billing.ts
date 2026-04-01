@@ -103,6 +103,38 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+async function hasOnboardingCheckoutState(
+  db: D1Database,
+  userId: string,
+): Promise<boolean> {
+  const [
+    profile,
+    attributes,
+    progression,
+    trainingPlan,
+  ] = await Promise.all([
+    db.prepare("SELECT user_id FROM user_profiles WHERE user_id = ? LIMIT 1")
+      .bind(userId)
+      .first<{ user_id: string | null }>(),
+    db.prepare("SELECT user_id FROM user_attributes WHERE user_id = ? LIMIT 1")
+      .bind(userId)
+      .first<{ user_id: string | null }>(),
+    db.prepare("SELECT user_id FROM user_progression WHERE user_id = ? LIMIT 1")
+      .bind(userId)
+      .first<{ user_id: string | null }>(),
+    db.prepare("SELECT user_id FROM user_training_plans WHERE user_id = ? LIMIT 1")
+      .bind(userId)
+      .first<{ user_id: string | null }>(),
+  ]);
+
+  return Boolean(
+    profile?.user_id &&
+      attributes?.user_id &&
+      progression?.user_id &&
+      trainingPlan?.user_id,
+  );
+}
+
 // Registra as rotas de promo, checkout, assinatura e webhooks de pagamento.
 export function registerBillingRoutes(
   app: Hono<AppContext>,
@@ -191,6 +223,22 @@ export function registerBillingRoutes(
 
       try {
         const data = c.req.valid("json");
+        const onboardingReady = await hasOnboardingCheckoutState(
+          c.env.fitloot_db,
+          user.id,
+        );
+
+        if (!onboardingReady) {
+          return c.json(
+            {
+              error:
+                "Seu onboarding ainda nao foi persistido por completo. Refaça a etapa de criacao da conta antes de ativar o acesso.",
+              code: "ONBOARDING_STATE_INCOMPLETE",
+            },
+            409,
+          );
+        }
+
         const appliedPromo = await withTransaction(c.env.fitloot_db, async () =>
           applyPromoCodeForUser(c.env.fitloot_db, c.env, {
             userId: user.id,
@@ -237,6 +285,22 @@ export function registerBillingRoutes(
 
       try {
         const data = c.req.valid("json");
+        const onboardingReady = await hasOnboardingCheckoutState(
+          c.env.fitloot_db,
+          user.id,
+        );
+
+        if (!onboardingReady) {
+          return c.json(
+            {
+              error:
+                "Seu onboarding ainda nao foi persistido por completo. Refaça a etapa de criacao da conta antes de ativar o acesso.",
+              code: "ONBOARDING_STATE_INCOMPLETE",
+            },
+            409,
+          );
+        }
+
         const checkoutResult = await withTransaction(c.env.fitloot_db, async () =>
           startCheckoutForUser(c.env.fitloot_db, c.env, {
             userId: user.id,
