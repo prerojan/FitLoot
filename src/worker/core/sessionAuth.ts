@@ -195,7 +195,11 @@ export function createAuthMiddleware({
     );
   }
 
-  function shouldRunBackgroundMaintenance(path: string): boolean {
+  function shouldRunBackgroundMaintenance(path: string, method: string): boolean {
+    // Read-heavy screens fire multiple parallel GETs (skills/titles/progression/etc).
+    // Running catalog/mission maintenance on every GET creates avoidable DB pressure.
+    // Keep this work for write flows only.
+    if (method.toUpperCase() === "GET") return false;
     // Lightweight auth/bootstrap endpoints should not compete with mission/catalog jobs.
     return !shouldBypassPlanGuard(path);
   }
@@ -206,7 +210,10 @@ export function createAuthMiddleware({
       return databaseNotInitializedResponse(c);
     }
 
-    const shouldRunHeavyBackground = shouldRunBackgroundMaintenance(c.req.path);
+    const shouldRunHeavyBackground = shouldRunBackgroundMaintenance(
+      c.req.path,
+      c.req.method,
+    );
     if (shouldRunHeavyBackground) {
       scheduleCatalogInitialization(c.env.fitloot_db, c.executionCtx);
     }
