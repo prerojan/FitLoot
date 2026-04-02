@@ -7,7 +7,7 @@ import {
   type ConditioningLevel,
   type OnboardingProfileSeedRequest,
 } from "../../shared/types";
-import { hasTableColumn } from "../core/database";
+import { hasTableColumn, purgeUserAccountData } from "../core/database";
 import {
   getErrorMessage,
   isInvalidPromoCodeError,
@@ -19,6 +19,10 @@ import type {
   CheckoutStartResult,
   Env,
 } from "../core/types";
+import {
+  getUserAuthRecordById,
+  isReusableIncompleteAccount,
+} from "../services/userPlanAccess";
 import type { WithTransaction } from "./contracts";
 
 type OnboardingRouteDeps = {
@@ -157,7 +161,16 @@ async function persistOnboardingProfileState({
     .first<{ user_id: string | null }>();
 
   if (existingUsername?.user_id && existingUsername.user_id !== userId) {
-    throw new Error("USERNAME_ALREADY_TAKEN");
+    const existingUser = await getUserAuthRecordById(
+      env.fitloot_db,
+      existingUsername.user_id,
+    );
+    if (!isReusableIncompleteAccount(existingUser)) {
+      throw new Error("USERNAME_ALREADY_TAKEN");
+    }
+
+    // Reclaim stale identity slugs tied to abandoned onboarding records.
+    await purgeUserAccountData(env.fitloot_db, existingUsername.user_id);
   }
 
   let initialAttrs = {

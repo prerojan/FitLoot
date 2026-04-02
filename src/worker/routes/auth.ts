@@ -11,18 +11,16 @@ import {
   hasTableColumn,
   purgeUserAccountData,
 } from "../core/database";
-import type { AppContext, UserAuthRecord } from "../core/types";
-import { getUserAuthRecordById, hasPlanAccess } from "../services/userPlanAccess";
+import type { AppContext } from "../core/types";
+import {
+  getUserAuthRecordById,
+  isReusableIncompleteAccount,
+} from "../services/userPlanAccess";
 
 type AuthRouteDeps = {
   generateCookie: (sessionId: string, requestUrl: string) => string;
   hashPassword: (password: string, salt: string) => Promise<string>;
 };
-
-function isReusableIncompleteAccount(user: UserAuthRecord | null): boolean {
-  if (!user) return false;
-  return Number(user.onboarding_completed) !== 1 && !hasPlanAccess(user.plan_id, user.plan_status);
-}
 
 // Registers the authentication surface responsible for account creation and session login.
 export function registerAuthRoutes(
@@ -126,35 +124,48 @@ export function registerAuthRoutes(
     }
 
     try {
-      const [emailExisting, usernameExisting] = await Promise.all([
-        emailQuery
-          ? c.env.fitloot_db
-              .prepare("SELECT id FROM users WHERE email = ?")
-              .bind(emailQuery)
-              .first<{ id: string }>()
-          : Promise.resolve(null),
-        usernameQuery
-          ? c.env.fitloot_db
-              .prepare("SELECT id FROM user_profiles WHERE username = ?")
-              .bind(usernameQuery)
-              .first<{ id: string }>()
-          : Promise.resolve(null),
-      ]);
+        const [emailExisting, usernameExisting] = await Promise.all([
+          emailQuery
+            ? c.env.fitloot_db
+                .prepare("SELECT id FROM users WHERE email = ?")
+                .bind(emailQuery)
+                .first<{ id: string }>()
+            : Promise.resolve(null),
+          usernameQuery
+            ? c.env.fitloot_db
+                .prepare("SELECT user_id FROM user_profiles WHERE username = ?")
+                .bind(usernameQuery)
+                .first<{ user_id: string }>()
+            : Promise.resolve(null),
+        ]);
 
       let emailAvailable: boolean | null = null;
-      if (emailQuery) {
-        if (!emailExisting?.id) {
-          emailAvailable = true;
-        } else {
-          const existingUser = await getUserAuthRecordById(c.env.fitloot_db, emailExisting.id);
-          emailAvailable = isReusableIncompleteAccount(existingUser);
+        if (emailQuery) {
+          if (!emailExisting?.id) {
+            emailAvailable = true;
+          } else {
+            const existingUser = await getUserAuthRecordById(c.env.fitloot_db, emailExisting.id);
+            emailAvailable = isReusableIncompleteAccount(existingUser);
+          }
         }
-      }
 
-      return c.json({
-        emailAvailable,
-        usernameAvailable: usernameQuery ? !usernameExisting : null,
-      });
+        let usernameAvailable: boolean | null = null;
+        if (usernameQuery) {
+          if (!usernameExisting?.user_id) {
+            usernameAvailable = true;
+          } else {
+            const existingUser = await getUserAuthRecordById(
+              c.env.fitloot_db,
+              usernameExisting.user_id,
+            );
+            usernameAvailable = isReusableIncompleteAccount(existingUser);
+          }
+        }
+
+        return c.json({
+          emailAvailable,
+          usernameAvailable,
+        });
     } catch (error) {
       console.error("[check-availability]", error);
       return c.json(

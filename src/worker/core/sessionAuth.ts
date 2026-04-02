@@ -355,6 +355,67 @@ export function createAuthMiddleware({
         now,
       );
 
+      if (
+        Number(userRecord.onboarding_completed) !== 1 &&
+        hasPlanAccess(userRecord.plan_id, userRecord.plan_status)
+      ) {
+        try {
+          const [profile, attributes, progression, trainingPlan] = await Promise.all([
+            c.env.fitloot_db
+              .prepare("SELECT user_id FROM user_profiles WHERE user_id = ? LIMIT 1")
+              .bind(userRecord.id)
+              .first<{ user_id: string | null }>(),
+            c.env.fitloot_db
+              .prepare("SELECT user_id FROM user_attributes WHERE user_id = ? LIMIT 1")
+              .bind(userRecord.id)
+              .first<{ user_id: string | null }>(),
+            c.env.fitloot_db
+              .prepare("SELECT user_id FROM user_progression WHERE user_id = ? LIMIT 1")
+              .bind(userRecord.id)
+              .first<{ user_id: string | null }>(),
+            c.env.fitloot_db
+              .prepare("SELECT user_id FROM user_training_plans WHERE user_id = ? LIMIT 1")
+              .bind(userRecord.id)
+              .first<{ user_id: string | null }>(),
+          ]);
+
+          const hasPersistedOnboardingState = Boolean(
+            profile?.user_id &&
+              attributes?.user_id &&
+              progression?.user_id &&
+              trainingPlan?.user_id,
+          );
+
+          if (hasPersistedOnboardingState) {
+            await c.env.fitloot_db
+              .prepare("UPDATE users SET onboarding_completed = 1 WHERE id = ?")
+              .bind(userRecord.id)
+              .run();
+
+            userRecord = {
+              ...userRecord,
+              onboarding_completed: 1,
+            };
+
+            writeCache(
+              userRecordCache,
+              session.user_id,
+              userRecord,
+              userRecordCacheTtlMs,
+              now,
+            );
+          }
+        } catch (reconcileError) {
+          console.warn("[authMiddleware][onboarding-reconcile]", {
+            userId: userRecord.id,
+            message:
+              reconcileError instanceof Error
+                ? reconcileError.message
+                : String(reconcileError),
+          });
+        }
+      }
+
       const hasUnlockedAccess =
         Number(userRecord.onboarding_completed) === 1 &&
         hasPlanAccess(userRecord.plan_id, userRecord.plan_status);

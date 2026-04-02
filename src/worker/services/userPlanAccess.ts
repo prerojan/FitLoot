@@ -90,6 +90,16 @@ export function shouldPurgeUserOnLogout(user: UserAuthRecord): boolean {
   );
 }
 
+export function isReusableIncompleteAccount(
+  user: Pick<UserAuthRecord, "onboarding_completed" | "plan_id" | "plan_status"> | null,
+): boolean {
+  if (!user) return false;
+  return (
+    Number(user.onboarding_completed) !== 1 &&
+    !hasPlanAccess(user.plan_id, user.plan_status)
+  );
+}
+
 export function normalizePublicPlanIdFromValue(
   value: string | null | undefined,
 ): PublicPlanId | null {

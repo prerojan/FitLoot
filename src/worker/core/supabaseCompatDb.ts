@@ -159,11 +159,283 @@ function stripTrailingSemicolon(sql: string): string {
   return sql.replace(/;\s*$/u, "");
 }
 
+function isIdentifierBoundaryCharacter(value: string | undefined): boolean {
+  if (!value) return true;
+  return !/[A-Za-z0-9_$]/u.test(value);
+}
+
+function findClosingParenthesis(sql: string, openIndex: number): number {
+  let depth = 0;
+  let inSingleQuote = false;
+  let inDoubleQuote = false;
+  let inLineComment = false;
+  let inBlockComment = false;
+
+  for (let index = openIndex; index < sql.length; index += 1) {
+    const current = sql[index]!;
+    const next = sql[index + 1] ?? "";
+
+    if (inLineComment) {
+      if (current === "\n") {
+        inLineComment = false;
+      }
+      continue;
+    }
+
+    if (inBlockComment) {
+      if (current === "*" && next === "/") {
+        inBlockComment = false;
+        index += 1;
+      }
+      continue;
+    }
+
+    if (!inSingleQuote && !inDoubleQuote) {
+      if (current === "-" && next === "-") {
+        inLineComment = true;
+        index += 1;
+        continue;
+      }
+      if (current === "/" && next === "*") {
+        inBlockComment = true;
+        index += 1;
+        continue;
+      }
+    }
+
+    if (current === "'" && !inDoubleQuote) {
+      if (inSingleQuote && next === "'") {
+        index += 1;
+        continue;
+      }
+      inSingleQuote = !inSingleQuote;
+      continue;
+    }
+
+    if (current === '"' && !inSingleQuote) {
+      if (inDoubleQuote && next === '"') {
+        index += 1;
+        continue;
+      }
+      inDoubleQuote = !inDoubleQuote;
+      continue;
+    }
+
+    if (inSingleQuote || inDoubleQuote) {
+      continue;
+    }
+
+    if (current === "(") {
+      depth += 1;
+      continue;
+    }
+
+    if (current === ")") {
+      depth -= 1;
+      if (depth === 0) {
+        return index;
+      }
+    }
+  }
+
+  return -1;
+}
+
+function splitTopLevelSqlArgs(expression: string): string[] {
+  const args: string[] = [];
+  let start = 0;
+  let depth = 0;
+  let inSingleQuote = false;
+  let inDoubleQuote = false;
+  let inLineComment = false;
+  let inBlockComment = false;
+
+  for (let index = 0; index < expression.length; index += 1) {
+    const current = expression[index]!;
+    const next = expression[index + 1] ?? "";
+
+    if (inLineComment) {
+      if (current === "\n") {
+        inLineComment = false;
+      }
+      continue;
+    }
+
+    if (inBlockComment) {
+      if (current === "*" && next === "/") {
+        inBlockComment = false;
+        index += 1;
+      }
+      continue;
+    }
+
+    if (!inSingleQuote && !inDoubleQuote) {
+      if (current === "-" && next === "-") {
+        inLineComment = true;
+        index += 1;
+        continue;
+      }
+      if (current === "/" && next === "*") {
+        inBlockComment = true;
+        index += 1;
+        continue;
+      }
+    }
+
+    if (current === "'" && !inDoubleQuote) {
+      if (inSingleQuote && next === "'") {
+        index += 1;
+        continue;
+      }
+      inSingleQuote = !inSingleQuote;
+      continue;
+    }
+
+    if (current === '"' && !inSingleQuote) {
+      if (inDoubleQuote && next === '"') {
+        index += 1;
+        continue;
+      }
+      inDoubleQuote = !inDoubleQuote;
+      continue;
+    }
+
+    if (inSingleQuote || inDoubleQuote) {
+      continue;
+    }
+
+    if (current === "(") {
+      depth += 1;
+      continue;
+    }
+
+    if (current === ")") {
+      depth = Math.max(0, depth - 1);
+      continue;
+    }
+
+    if (current === "," && depth === 0) {
+      args.push(expression.slice(start, index).trim());
+      start = index + 1;
+    }
+  }
+
+  args.push(expression.slice(start).trim());
+  return args.filter((value) => value.length > 0);
+}
+
 function rewriteScalarMax(sql: string): string {
-  return sql.replace(
-    /\bMAX\s*\(\s*([^(),]+?)\s*,\s*([^)]+?)\s*\)/giu,
-    "GREATEST($1, $2)",
-  );
+  let output = "";
+  let index = 0;
+  let inSingleQuote = false;
+  let inDoubleQuote = false;
+  let inLineComment = false;
+  let inBlockComment = false;
+
+  while (index < sql.length) {
+    const current = sql[index]!;
+    const next = sql[index + 1] ?? "";
+
+    if (inLineComment) {
+      output += current;
+      if (current === "\n") {
+        inLineComment = false;
+      }
+      index += 1;
+      continue;
+    }
+
+    if (inBlockComment) {
+      output += current;
+      if (current === "*" && next === "/") {
+        output += "/";
+        inBlockComment = false;
+        index += 2;
+        continue;
+      }
+      index += 1;
+      continue;
+    }
+
+    if (!inSingleQuote && !inDoubleQuote) {
+      if (current === "-" && next === "-") {
+        output += "--";
+        inLineComment = true;
+        index += 2;
+        continue;
+      }
+      if (current === "/" && next === "*") {
+        output += "/*";
+        inBlockComment = true;
+        index += 2;
+        continue;
+      }
+    }
+
+    if (current === "'" && !inDoubleQuote) {
+      output += current;
+      if (inSingleQuote && next === "'") {
+        output += "'";
+        index += 2;
+        continue;
+      }
+      inSingleQuote = !inSingleQuote;
+      index += 1;
+      continue;
+    }
+
+    if (current === '"' && !inSingleQuote) {
+      output += current;
+      if (inDoubleQuote && next === '"') {
+        output += '"';
+        index += 2;
+        continue;
+      }
+      inDoubleQuote = !inDoubleQuote;
+      index += 1;
+      continue;
+    }
+
+    if (!inSingleQuote && !inDoubleQuote) {
+      const token = sql.slice(index, index + 3);
+      const previous = index > 0 ? sql[index - 1] : undefined;
+      const following = sql[index + 3];
+      const isMaxToken =
+        token.length === 3 &&
+        token.toLowerCase() === "max" &&
+        isIdentifierBoundaryCharacter(previous) &&
+        isIdentifierBoundaryCharacter(following);
+
+      if (isMaxToken) {
+        let cursor = index + 3;
+        while (cursor < sql.length && /\s/u.test(sql[cursor]!)) {
+          cursor += 1;
+        }
+
+        if (sql[cursor] === "(") {
+          const closeIndex = findClosingParenthesis(sql, cursor);
+          if (closeIndex > cursor) {
+            const innerExpression = sql.slice(cursor + 1, closeIndex);
+            const args = splitTopLevelSqlArgs(innerExpression);
+            if (args.length === 2) {
+              output += `GREATEST(${args[0]}, ${args[1]})`;
+              index = closeIndex + 1;
+              continue;
+            }
+          }
+        }
+      }
+    }
+
+    output += current;
+    index += 1;
+  }
+
+  return output;
+}
+
+export function rewriteScalarMaxForTests(sql: string): string {
+  return rewriteScalarMax(sql);
 }
 
 function rewriteInsertOrIgnore(sql: string): { sql: string; wasInsertIgnore: boolean } {
