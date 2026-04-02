@@ -27,9 +27,9 @@ type CompiledSql = {
 // can exhaust upstream connection limits. Keep this very small.
 const DEFAULT_POOL_MAX = 1;
 const DEFAULT_POOL_IDLE_TIMEOUT_MS = 30_000;
-const DEFAULT_POOL_CONNECT_TIMEOUT_MS = 4_000;
-const DEFAULT_POOL_QUERY_TIMEOUT_MS = 12_000;
-const DEFAULT_POOL_STATEMENT_TIMEOUT_MS = 12_000;
+const DEFAULT_POOL_CONNECT_TIMEOUT_MS = 2_500;
+const DEFAULT_POOL_QUERY_TIMEOUT_MS = 6_000;
+const DEFAULT_POOL_STATEMENT_TIMEOUT_MS = 15_000;
 const SEARCH_PATH = "compat,core,missions,gameplay,catalog,billing,social,telemetry,public";
 const TABLE_SCHEMA_MAP: Readonly<Record<string, string>> = {
   users: "core",
@@ -592,7 +592,7 @@ class SupabaseCompatDatabase {
   ): Promise<{ rows: T[]; rowCount: number; lastRowId: number | null }> {
     const compiled = await this.compileSql(sql, params, mode);
     const maxAttempts =
-      !this.transactionClient && mode !== "run" ? 2 : 1;
+      !this.transactionClient && mode !== "run" ? 3 : 1;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
       try {
@@ -600,14 +600,9 @@ class SupabaseCompatDatabase {
         if (this.transactionClient) {
           result = await this.transactionClient.query<T>(compiled.sql, [...compiled.params]);
         } else {
-          // Use single-query clients outside explicit transactions and always
-          // destroy them afterward to avoid reusing stale sockets from poolers.
-          const client = await this.pool.connect();
-          try {
-            result = await client.query<T>(compiled.sql, [...compiled.params]);
-          } finally {
-            client.release(true);
-          }
+          // Reuse pooled connections between queries so auth-heavy request bursts
+          // do not pay a full reconnect cost for every statement.
+          result = await this.pool.query<T>(compiled.sql, [...compiled.params]);
         }
         const rows = Array.isArray(result.rows) ? result.rows : [];
         const rowCount = Number(result.rowCount ?? rows.length ?? 0);
@@ -627,7 +622,8 @@ class SupabaseCompatDatabase {
             message: getErrorMessage(error),
             sql: stripTrailingSemicolon(sql).slice(0, 120),
           });
-          await sleep(75 * attempt);
+          const jitterMs = Math.floor(Math.random() * 80);
+          await sleep(120 * attempt + jitterMs);
           continue;
         }
 

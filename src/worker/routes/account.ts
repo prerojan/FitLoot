@@ -51,6 +51,17 @@ type AccountRouteDeps = {
   ) => Promise<void>;
 };
 
+function isTransientDatabaseError(error: unknown): boolean {
+  const message = getErrorMessage(error).toLowerCase();
+  return (
+    message.includes("query read timeout") ||
+    message.includes("timeout exceeded when trying to connect") ||
+    message.includes("read etimedout") ||
+    message.includes("socket hang up") ||
+    message.includes("connection terminated")
+  );
+}
+
 // Route registration for account, session, and user identity endpoints.
 export function registerAccountRoutes(
   app: Hono<AppContext>,
@@ -131,7 +142,7 @@ export function registerAccountRoutes(
         userId: user.id,
       });
 
-      if (isMissingSchemaError(error)) {
+      if (isMissingSchemaError(error) || isTransientDatabaseError(error)) {
         return c.json({ success: true, degraded: true }, 200);
       }
 

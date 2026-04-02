@@ -16,6 +16,9 @@ type SessionCookieUser = {
 
 type CreateAuthMiddlewareDeps = {
   catalogCacheTtlMs?: number;
+  sessionCacheTtlMs?: number;
+  userRecordCacheTtlMs?: number;
+  authCacheMaxEntries?: number;
   cleanupSettledMissionsWithGuard: (
     db: D1Database,
     userId: string,
@@ -156,6 +159,9 @@ export async function hashPassword(
 
 export function createAuthMiddleware({
   catalogCacheTtlMs = 60_000,
+  sessionCacheTtlMs = 5_000,
+  userRecordCacheTtlMs = 2_000,
+  authCacheMaxEntries = 5_000,
   cleanupSettledMissionsWithGuard,
   ensureCaminhadaLeveUserSkill,
   ensureCatalogReady,
@@ -166,8 +172,76 @@ export function createAuthMiddleware({
   shouldBypassPlanGuard,
   tryUnlockSkillsFromPerformance,
 }: CreateAuthMiddlewareDeps): MiddlewareHandler<AppContext> {
+  type CacheEntry<T> = {
+    value: T;
+    expiresAt: number;
+  };
+
   let catalogInitCheckedAt = 0;
   let catalogInitPromise: Promise<void> | null = null;
+  const sessionCache = new Map<string, CacheEntry<SessionCookieUser>>();
+  const userRecordCache = new Map<string, CacheEntry<UserAuthRecord>>();
+  const inflightSessionLoads = new Map<string, Promise<SessionCookieUser | null>>();
+  const inflightUserLoads = new Map<string, Promise<UserAuthRecord | null>>();
+
+  function readCache<T>(
+    cache: Map<string, CacheEntry<T>>,
+    key: string,
+    now: number,
+  ): T | null {
+    const cached = cache.get(key);
+    if (!cached) return null;
+    if (cached.expiresAt <= now) {
+      cache.delete(key);
+      return null;
+    }
+    return cached.value;
+  }
+
+  function writeCache<T>(
+    cache: Map<string, CacheEntry<T>>,
+    key: string,
+    value: T,
+    ttlMs: number,
+    now: number,
+  ): void {
+    cache.set(key, {
+      value,
+      expiresAt: now + ttlMs,
+    });
+
+    if (cache.size <= authCacheMaxEntries) return;
+
+    for (const [entryKey, entryValue] of cache.entries()) {
+      if (entryValue.expiresAt <= now) {
+        cache.delete(entryKey);
+      }
+    }
+
+    while (cache.size > authCacheMaxEntries) {
+      const oldestKey = cache.keys().next().value;
+      if (typeof oldestKey !== "string") break;
+      cache.delete(oldestKey);
+    }
+  }
+
+  async function loadWithDedupe<T>(
+    inflightMap: Map<string, Promise<T | null>>,
+    key: string,
+    loader: () => Promise<T | null>,
+  ): Promise<T | null> {
+    const inflight = inflightMap.get(key);
+    if (inflight) {
+      return inflight;
+    }
+
+    const pending = (async () => loader())()
+      .finally(() => {
+        inflightMap.delete(key);
+      });
+    inflightMap.set(key, pending);
+    return pending;
+  }
 
   function scheduleCatalogInitialization(
     db: D1Database,
@@ -227,28 +301,55 @@ export function createAuthMiddleware({
         );
       }
 
-      const session = await c.env.fitloot_db
-        .prepare(
-          "SELECT id, user_id FROM sessions WHERE id = ? AND expires_at > CURRENT_TIMESTAMP",
-        )
-        .bind(sessionId)
-        .first<SessionCookieUser>();
-
+      const now = Date.now();
+      let session = readCache(sessionCache, sessionId, now);
       if (!session) {
-        return c.json({ error: "Unauthorized", code: "SESSION_INVALID" }, 401);
+        session = await loadWithDedupe(
+          inflightSessionLoads,
+          sessionId,
+          () =>
+            c.env.fitloot_db
+              .prepare(
+                "SELECT id, user_id FROM sessions WHERE id = ? AND expires_at > CURRENT_TIMESTAMP",
+              )
+              .bind(sessionId)
+              .first<SessionCookieUser>(),
+        );
       }
 
-      const userRecord = await getUserAuthRecordById(
-        c.env.fitloot_db,
-        session.user_id,
-      );
+      if (!session) {
+        sessionCache.delete(sessionId);
+        return c.json({ error: "Unauthorized", code: "SESSION_INVALID" }, 401);
+      }
+      writeCache(sessionCache, sessionId, session, sessionCacheTtlMs, now);
+
+      let userRecord = readCache(userRecordCache, session.user_id, now);
+      if (!userRecord) {
+        userRecord = await loadWithDedupe(
+          inflightUserLoads,
+          session.user_id,
+          () => getUserAuthRecordById(
+            c.env.fitloot_db,
+            session.user_id,
+          ),
+        );
+      }
 
       if (!userRecord) {
+        userRecordCache.delete(session.user_id);
+        sessionCache.delete(sessionId);
         return c.json(
           { error: "Usuário não encontrado", code: "USER_NOT_FOUND" },
           404,
         );
       }
+      writeCache(
+        userRecordCache,
+        session.user_id,
+        userRecord,
+        userRecordCacheTtlMs,
+        now,
+      );
 
       const hasUnlockedAccess =
         Number(userRecord.onboarding_completed) === 1 &&
@@ -348,3 +449,4 @@ export function createAuthMiddleware({
     }
   };
 }
+
