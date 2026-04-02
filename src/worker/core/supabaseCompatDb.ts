@@ -25,10 +25,10 @@ type CompiledSql = {
 
 // Cloudflare Workers isolates scale horizontally, so large per-isolate pools
 // can exhaust upstream connection limits. Keep this very small.
-const DEFAULT_POOL_MAX = 1;
+const DEFAULT_POOL_MAX = 2;
 const DEFAULT_POOL_IDLE_TIMEOUT_MS = 30_000;
-const DEFAULT_POOL_CONNECT_TIMEOUT_MS = 2_500;
-const DEFAULT_POOL_QUERY_TIMEOUT_MS = 6_000;
+const DEFAULT_POOL_CONNECT_TIMEOUT_MS = 4_000;
+const DEFAULT_POOL_QUERY_TIMEOUT_MS = 8_000;
 const DEFAULT_POOL_STATEMENT_TIMEOUT_MS = 15_000;
 const SEARCH_PATH = "compat,core,missions,gameplay,catalog,billing,social,telemetry,public";
 const TABLE_SCHEMA_MAP: Readonly<Record<string, string>> = {
@@ -592,7 +592,7 @@ class SupabaseCompatDatabase {
   ): Promise<{ rows: T[]; rowCount: number; lastRowId: number | null }> {
     const compiled = await this.compileSql(sql, params, mode);
     const maxAttempts =
-      !this.transactionClient && mode !== "run" ? 3 : 1;
+      !this.transactionClient && mode !== "run" ? 5 : 1;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
       try {
@@ -600,9 +600,16 @@ class SupabaseCompatDatabase {
         if (this.transactionClient) {
           result = await this.transactionClient.query<T>(compiled.sql, [...compiled.params]);
         } else {
-          // Reuse pooled connections between queries so auth-heavy request bursts
-          // do not pay a full reconnect cost for every statement.
-          result = await this.pool.query<T>(compiled.sql, [...compiled.params]);
+          // Acquire a pooled client explicitly so we can evict broken sockets on
+          // query failure while still reusing healthy ones.
+          const client = await this.pool.connect();
+          try {
+            result = await client.query<T>(compiled.sql, [...compiled.params]);
+            client.release();
+          } catch (queryError) {
+            client.release(true);
+            throw queryError;
+          }
         }
         const rows = Array.isArray(result.rows) ? result.rows : [];
         const rowCount = Number(result.rowCount ?? rows.length ?? 0);
@@ -622,8 +629,8 @@ class SupabaseCompatDatabase {
             message: getErrorMessage(error),
             sql: stripTrailingSemicolon(sql).slice(0, 120),
           });
-          const jitterMs = Math.floor(Math.random() * 80);
-          await sleep(120 * attempt + jitterMs);
+          const jitterMs = Math.floor(Math.random() * 120);
+          await sleep(150 * attempt + jitterMs);
           continue;
         }
 

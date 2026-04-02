@@ -51,6 +51,10 @@ type CreateAuthMiddlewareDeps = {
   ) => Promise<void>;
 };
 
+function isSupabaseRuntimeDb(db: D1Database): boolean {
+  return (db as D1Database & { __backend?: string }).__backend === "supabase";
+}
+
 export function parseCookieHeader(cookieHeader: string | undefined) {
   if (!cookieHeader) return new Map<string, string>();
 
@@ -288,7 +292,7 @@ export function createAuthMiddleware({
       c.req.path,
       c.req.method,
     );
-    if (shouldRunHeavyBackground) {
+    if (shouldRunHeavyBackground && !isSupabaseRuntimeDb(c.env.fitloot_db)) {
       scheduleCatalogInitialization(c.env.fitloot_db, c.executionCtx);
     }
 
