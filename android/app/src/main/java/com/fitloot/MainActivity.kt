@@ -384,9 +384,14 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun isNetworkOnline(): Boolean {
-        val activeNetwork = connectivityManager.activeNetwork ?: return false
-        val capabilities = connectivityManager.getNetworkCapabilities(activeNetwork) ?: return false
-        return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+        return runCatching {
+            val activeNetwork = connectivityManager.activeNetwork ?: return false
+            val capabilities = connectivityManager.getNetworkCapabilities(activeNetwork) ?: return false
+            capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+        }.getOrElse { error ->
+            Log.w(TAG, "Unable to resolve current network state", error)
+            false
+        }
     }
 
     private fun dispatchNetworkStatusChanged(

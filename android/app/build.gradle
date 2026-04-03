@@ -7,6 +7,14 @@ def releaseStoreFile = (findProperty("FITLOOT_ANDROID_KEYSTORE") ?: System.geten
 def releaseStorePassword = (findProperty("FITLOOT_ANDROID_KEYSTORE_PASSWORD") ?: System.getenv("FITLOOT_ANDROID_KEYSTORE_PASSWORD"))?.toString()
 def releaseKeyAlias = (findProperty("FITLOOT_ANDROID_KEY_ALIAS") ?: System.getenv("FITLOOT_ANDROID_KEY_ALIAS"))?.toString()
 def releaseKeyPassword = (findProperty("FITLOOT_ANDROID_KEY_PASSWORD") ?: System.getenv("FITLOOT_ANDROID_KEY_PASSWORD"))?.toString()
+def defaultDevWebBaseUrl = "http://10.0.2.2:5173"
+def devWebBaseUrl = (findProperty("FITLOOT_DEV_WEB_BASE_URL") ?: System.getenv("FITLOOT_DEV_WEB_BASE_URL") ?: defaultDevWebBaseUrl).toString().trim().replaceAll("/+\$", "")
+def explicitDevAllowedHosts = (findProperty("FITLOOT_DEV_ALLOWED_HOSTS") ?: System.getenv("FITLOOT_DEV_ALLOWED_HOSTS"))?.toString()?.trim()
+def devWebUri = new URI(devWebBaseUrl)
+def devAllowedHosts = explicitDevAllowedHosts ?: [devWebUri.host, "localhost", "fitloot.vercel.app"]
+    .findAll { it != null && it.toString().trim().length() > 0 }
+    .unique()
+    .join(",")
 
 android {
     namespace 'com.fitloot'
@@ -46,8 +54,8 @@ android {
             dimension "environment"
             applicationIdSuffix ".dev"
             versionNameSuffix "-dev"
-            buildConfigField "String", "WEB_BASE_URL", '"http://10.0.2.2:5173"'
-            buildConfigField "String", "ALLOWED_HOSTS", '"10.0.2.2,localhost,fitloot.vercel.app"'
+            buildConfigField "String", "WEB_BASE_URL", "\"${devWebBaseUrl}\""
+            buildConfigField "String", "ALLOWED_HOSTS", "\"${devAllowedHosts}\""
             buildConfigField "String", "WEB_MODE", '"remote"'
             buildConfigField "String", "HOST_BUILD_TYPE", '"dev"'
             manifestPlaceholders = [usesCleartextTraffic: "true"]
