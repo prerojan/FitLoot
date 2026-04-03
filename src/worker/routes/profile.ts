@@ -7,6 +7,12 @@ import {
   isMissingSchemaError,
   schemaMismatchResponse,
 } from "../core/errors";
+import {
+  deleteRuntimeBootstrapProjection,
+  deleteRuntimeUserProjections,
+  readRuntimeProfileProjection,
+  upsertRuntimeProfileProjection,
+} from "../core/runtimeUserProjectionStore";
 import type { AppContext, AuthUser, Env } from "../core/types";
 
 type FeedbackKind = "Sugestao" | "Bug" | "Elogio" | "Outro";
@@ -95,6 +101,17 @@ type RepairActivatedProfileStateParams = {
   normalizeTrainingFrequencyInput: ProfileRouteDeps["normalizeTrainingFrequencyInput"];
   upsertTrainingPlan: ProfileRouteDeps["upsertTrainingPlan"];
 };
+
+const RUNTIME_PROFILE_PROJECTION_TTL_MS = 30_000;
+
+function resolveRuntimeProjectionDb(
+  c: import("hono").Context<AppContext>,
+): D1Database | null {
+  const runtimeDb = c.env.fitloot_runtime_db;
+  if (!runtimeDb) return null;
+  if (runtimeDb === c.env.fitloot_db) return null;
+  return runtimeDb;
+}
 
 function normalizeFeedbackKind(raw: unknown): FeedbackKind {
   const value = String(raw ?? "").trim().toLowerCase();
@@ -399,6 +416,7 @@ export function registerProfileRoutes(
   app.get("/api/profile", authMiddleware, async (c) => {
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
+    const runtimeProjectionDb = resolveRuntimeProjectionDb(c);
 
     try {
       if (Number(user.onboarding_completed ?? 0) !== 1) {
@@ -406,6 +424,24 @@ export function registerProfileRoutes(
           { error: "Perfil nao encontrado", code: "PROFILE_NOT_FOUND" },
           404,
         );
+      }
+
+      if (runtimeProjectionDb) {
+        try {
+          const cachedProfile = await readRuntimeProfileProjection<Record<string, unknown>>(
+            runtimeProjectionDb,
+            user.id,
+            RUNTIME_PROFILE_PROJECTION_TTL_MS,
+          );
+          if (cachedProfile) {
+            return c.json(cachedProfile);
+          }
+        } catch (runtimeProjectionError) {
+          console.warn("[/api/profile][runtime-read]", {
+            userId: user.id,
+            message: getErrorMessage(runtimeProjectionError),
+          });
+        }
       }
 
       const profileWithState = await c.env.fitloot_db
@@ -463,12 +499,37 @@ export function registerProfileRoutes(
           console.warn("[/api/profile][recovered-missing-profile]", {
             userId: user.id,
           });
+          if (runtimeProjectionDb) {
+            c.executionCtx.waitUntil(
+              upsertRuntimeProfileProjection(runtimeProjectionDb, user.id, recoveredProfile).catch(
+                (runtimeProjectionError) => {
+                  console.warn("[/api/profile][runtime-write-recovered]", {
+                    userId: user.id,
+                    message: getErrorMessage(runtimeProjectionError),
+                  });
+                },
+              ),
+            );
+          }
           return c.json(recoveredProfile);
         }
 
         return c.json(
           { error: "Perfil nao encontrado", code: "PROFILE_NOT_FOUND" },
           404,
+        );
+      }
+
+      if (runtimeProjectionDb) {
+        c.executionCtx.waitUntil(
+          upsertRuntimeProfileProjection(runtimeProjectionDb, user.id, profile).catch(
+            (runtimeProjectionError) => {
+              console.warn("[/api/profile][runtime-write]", {
+                userId: user.id,
+                message: getErrorMessage(runtimeProjectionError),
+              });
+            },
+          ),
         );
       }
 
@@ -580,6 +641,26 @@ export function registerProfileRoutes(
       .prepare("SELECT * FROM user_profiles WHERE user_id = ?")
       .bind(user.id)
       .first();
+
+    const runtimeProjectionDb = resolveRuntimeProjectionDb(c);
+    if (runtimeProjectionDb) {
+      c.executionCtx.waitUntil(
+        (async () => {
+          await deleteRuntimeBootstrapProjection(runtimeProjectionDb, user.id);
+          if (profile) {
+            await upsertRuntimeProfileProjection(runtimeProjectionDb, user.id, profile);
+          } else {
+            await deleteRuntimeUserProjections(runtimeProjectionDb, user.id);
+          }
+        })().catch((runtimeProjectionError) => {
+          console.warn("[/api/profile/customization][runtime-sync]", {
+            userId: user.id,
+            message: getErrorMessage(runtimeProjectionError),
+          });
+        }),
+      );
+    }
+
     return c.json({ success: true, profile });
   });
 
@@ -599,6 +680,18 @@ export function registerProfileRoutes(
       )
       .bind(focus, user.id)
       .run();
+
+    const runtimeProjectionDb = resolveRuntimeProjectionDb(c);
+    if (runtimeProjectionDb) {
+      c.executionCtx.waitUntil(
+        deleteRuntimeUserProjections(runtimeProjectionDb, user.id).catch((runtimeProjectionError) => {
+          console.warn("[/api/profile/skill-focus][runtime-invalidate]", {
+            userId: user.id,
+            message: getErrorMessage(runtimeProjectionError),
+          });
+        }),
+      );
+    }
 
     return c.json({ success: true, active_skill_focus: focus });
   });
@@ -759,6 +852,18 @@ export function registerProfileRoutes(
         }
       })(),
     );
+
+    const runtimeProjectionDb = resolveRuntimeProjectionDb(c);
+    if (runtimeProjectionDb) {
+      c.executionCtx.waitUntil(
+        deleteRuntimeUserProjections(runtimeProjectionDb, user.id).catch((runtimeProjectionError) => {
+          console.warn("[/api/profile/goal][runtime-invalidate]", {
+            userId: user.id,
+            message: getErrorMessage(runtimeProjectionError),
+          });
+        }),
+      );
+    }
 
     return c.json({
       success: true,

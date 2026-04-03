@@ -8,6 +8,10 @@ import {
   isMissingSchemaError,
   schemaMismatchResponse,
 } from "../core/errors";
+import {
+  readRuntimeDashboardProjection,
+  upsertRuntimeDashboardProjection,
+} from "../core/runtimeUserProjectionStore";
 import type {
   AppContext,
   PhysicalBenchmarkDelta,
@@ -65,6 +69,17 @@ type ProgressionRouteDeps = {
   ) => Promise<void>;
 };
 
+const RUNTIME_DASHBOARD_PROJECTION_TTL_MS = 20_000;
+
+function resolveRuntimeProjectionDb(
+  c: import("hono").Context<AppContext>,
+): D1Database | null {
+  const runtimeDb = c.env.fitloot_runtime_db;
+  if (!runtimeDb) return null;
+  if (runtimeDb === c.env.fitloot_db) return null;
+  return runtimeDb;
+}
+
 // Route registration for progression, attributes, benchmarks, and skill stages.
 export function registerProgressionRoutes(
   app: Hono<AppContext>,
@@ -82,8 +97,28 @@ export function registerProgressionRoutes(
   app.get("/api/progression", authMiddleware, async (c) => {
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
+    const runtimeProjectionDb = resolveRuntimeProjectionDb(c);
 
     try {
+      if (runtimeProjectionDb) {
+        try {
+          const cachedProgression = await readRuntimeDashboardProjection<Record<string, unknown>>(
+            runtimeProjectionDb,
+            user.id,
+            "progression",
+            RUNTIME_DASHBOARD_PROJECTION_TTL_MS,
+          );
+          if (cachedProgression) {
+            return c.json(cachedProgression);
+          }
+        } catch (runtimeProjectionError) {
+          console.warn("[/api/progression][runtime-read]", {
+            userId: user.id,
+            message: getErrorMessage(runtimeProjectionError),
+          });
+        }
+      }
+
       let progression = await c.env.fitloot_db
         .prepare("SELECT * FROM user_progression WHERE user_id = ?")
         .bind(user.id)
@@ -135,12 +170,31 @@ export function registerProgressionRoutes(
         }
       }
 
-      return c.json({
+      const responsePayload = {
         ...progression,
         ...(typeof celebrateLevel === "number" && celebrateLevel > 0
           ? { celebrate_level: celebrateLevel }
           : {}),
-      });
+      };
+
+      if (runtimeProjectionDb) {
+        const cachedPayload = { ...progression };
+        c.executionCtx.waitUntil(
+          upsertRuntimeDashboardProjection(
+            runtimeProjectionDb,
+            user.id,
+            "progression",
+            cachedPayload,
+          ).catch((runtimeProjectionError) => {
+            console.warn("[/api/progression][runtime-write]", {
+              userId: user.id,
+              message: getErrorMessage(runtimeProjectionError),
+            });
+          }),
+        );
+      }
+
+      return c.json(responsePayload);
     } catch (error) {
       console.error("[/api/progression]", {
         message: getErrorMessage(error),
@@ -217,13 +271,62 @@ export function registerProgressionRoutes(
   app.get("/api/attributes", authMiddleware, async (c) => {
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
+    const runtimeProjectionDb = resolveRuntimeProjectionDb(c);
 
-    const attributes = await c.env.fitloot_db
-      .prepare("SELECT * FROM user_attributes WHERE user_id = ?")
-      .bind(user.id)
-      .first();
+    try {
+      if (runtimeProjectionDb) {
+        try {
+          const cachedAttributes = await readRuntimeDashboardProjection<Record<string, unknown>>(
+            runtimeProjectionDb,
+            user.id,
+            "attributes",
+            RUNTIME_DASHBOARD_PROJECTION_TTL_MS,
+          );
+          if (cachedAttributes) {
+            return c.json(cachedAttributes);
+          }
+        } catch (runtimeProjectionError) {
+          console.warn("[/api/attributes][runtime-read]", {
+            userId: user.id,
+            message: getErrorMessage(runtimeProjectionError),
+          });
+        }
+      }
 
-    return c.json(attributes);
+      const attributes = await c.env.fitloot_db
+        .prepare("SELECT * FROM user_attributes WHERE user_id = ?")
+        .bind(user.id)
+        .first<Record<string, unknown>>();
+
+      if (runtimeProjectionDb && attributes) {
+        c.executionCtx.waitUntil(
+          upsertRuntimeDashboardProjection(
+            runtimeProjectionDb,
+            user.id,
+            "attributes",
+            attributes,
+          ).catch((runtimeProjectionError) => {
+            console.warn("[/api/attributes][runtime-write]", {
+              userId: user.id,
+              message: getErrorMessage(runtimeProjectionError),
+            });
+          }),
+        );
+      }
+
+      return c.json(attributes);
+    } catch (error) {
+      console.error("[/api/attributes]", {
+        userId: user.id,
+        message: getErrorMessage(error),
+      });
+
+      if (isMissingSchemaError(error)) {
+        return schemaMismatchResponse(c);
+      }
+
+      return internalErrorResponse(c);
+    }
   });
 
   app.post("/api/progress/snapshot", authMiddleware, async (c) => {

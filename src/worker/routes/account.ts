@@ -17,6 +17,11 @@ import {
   deleteRuntimeUserAuth,
   upsertRuntimeUserAuth,
 } from "../core/runtimeUserAuthStore";
+import {
+  deleteRuntimeUserProjections,
+  readRuntimeBootstrapProjection,
+  upsertRuntimeBootstrapProjection,
+} from "../core/runtimeUserProjectionStore";
 import type {
   AppContext,
   UserAuthRecord,
@@ -67,6 +72,25 @@ function isTransientDatabaseError(error: unknown): boolean {
   );
 }
 
+async function runWithTransientRetry(
+  task: () => Promise<void>,
+  maxAttempts = 2,
+): Promise<void> {
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      await task();
+      return;
+    } catch (error) {
+      if (!isTransientDatabaseError(error) || attempt >= maxAttempts) {
+        throw error;
+      }
+      await new Promise((resolve) => {
+        setTimeout(resolve, 150 * attempt);
+      });
+    }
+  }
+}
+
 function resolveRuntimeCacheDb(
   c: import("hono").Context<AppContext>,
 ): D1Database | null {
@@ -75,6 +99,20 @@ function resolveRuntimeCacheDb(
   if (runtimeDb === c.env.fitloot_db) return null;
   return runtimeDb;
 }
+
+const RUNTIME_BOOTSTRAP_PROJECTION_TTL_MS = 30_000;
+
+type BootstrapRuntimeProjection = {
+  showcased_achievements: unknown;
+  profile_theme: {
+    custom_primary_color: unknown;
+    custom_secondary_color: unknown;
+    custom_background_type: unknown;
+    custom_background_value: unknown;
+    custom_font: unknown;
+  } | null;
+  progression: Record<string, unknown> | null;
+};
 
 // Route registration for account, session, and user identity endpoints.
 export function registerAccountRoutes(
@@ -149,6 +187,41 @@ export function registerAccountRoutes(
     }
 
     try {
+      const runtimeCacheDb = resolveRuntimeCacheDb(c);
+      if (runtimeCacheDb) {
+        try {
+          const cachedProjection = await readRuntimeBootstrapProjection<BootstrapRuntimeProjection>(
+            runtimeCacheDb,
+            user.id,
+            RUNTIME_BOOTSTRAP_PROJECTION_TTL_MS,
+          );
+          if (cachedProjection) {
+            return c.json({
+              user: {
+                id: user.id,
+                email: user.email,
+                name: user.name,
+                avatar_url: user.avatar_url ?? undefined,
+                showcased_achievements:
+                  cachedProjection.showcased_achievements ?? null,
+                onboarding_completed: user.onboarding_completed,
+                plan_id: user.plan_id,
+                plan_status: user.plan_status,
+                payment_method: user.payment_method,
+              },
+              profile_theme: cachedProjection.profile_theme ?? null,
+              progression: cachedProjection.progression ?? null,
+              app_open_degraded: false,
+            });
+          }
+        } catch (runtimeProjectionError) {
+          console.warn("[/api/app/bootstrap][runtime-read]", {
+            message: getErrorMessage(runtimeProjectionError),
+            userId: user.id,
+          });
+        }
+      }
+
       let profile: Record<string, unknown> | null = null;
       let progression: Record<string, unknown> | null = null;
       let bootstrapDegraded = false;
@@ -208,15 +281,29 @@ export function registerAccountRoutes(
         });
       }
 
-      let appOpenDegraded = false;
-      try {
-        await onAppOpen(c.env.fitloot_db, user.id, new Date().toISOString());
-      } catch (appOpenError) {
-        appOpenDegraded = true;
-        console.error("[/api/app/bootstrap][app-open-hook]", {
-          message: getErrorMessage(appOpenError),
-          userId: user.id,
-        });
+      const profileTheme = profile
+        ? {
+            custom_primary_color: profile.custom_primary_color ?? null,
+            custom_secondary_color: profile.custom_secondary_color ?? null,
+            custom_background_type: profile.custom_background_type ?? null,
+            custom_background_value: profile.custom_background_value ?? null,
+            custom_font: profile.custom_font ?? null,
+          }
+        : null;
+
+      if (runtimeCacheDb) {
+        c.executionCtx.waitUntil(
+          upsertRuntimeBootstrapProjection(runtimeCacheDb, user.id, {
+            showcased_achievements: profile?.showcased_achievements ?? null,
+            profile_theme: profileTheme,
+            progression: progression ?? null,
+          }).catch((runtimeProjectionError) => {
+            console.warn("[/api/app/bootstrap][runtime-write]", {
+              message: getErrorMessage(runtimeProjectionError),
+              userId: user.id,
+            });
+          }),
+        );
       }
 
       return c.json({
@@ -231,17 +318,9 @@ export function registerAccountRoutes(
           plan_status: user.plan_status,
           payment_method: user.payment_method,
         },
-        profile_theme: profile
-          ? {
-              custom_primary_color: profile.custom_primary_color ?? null,
-              custom_secondary_color: profile.custom_secondary_color ?? null,
-              custom_background_type: profile.custom_background_type ?? null,
-              custom_background_value: profile.custom_background_value ?? null,
-              custom_font: profile.custom_font ?? null,
-            }
-          : null,
+        profile_theme: profileTheme,
         progression: progression ?? null,
-        app_open_degraded: appOpenDegraded || bootstrapDegraded,
+        app_open_degraded: bootstrapDegraded,
       });
     } catch (error) {
       console.error("[/api/app/bootstrap]", {
@@ -261,22 +340,20 @@ export function registerAccountRoutes(
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
 
-    try {
-      const timestamp = new Date().toISOString();
-      await onAppOpen(c.env.fitloot_db, user.id, timestamp);
-      return c.json({ success: true });
-    } catch (error) {
-      console.error("[/api/app/open]", {
-        message: getErrorMessage(error),
-        userId: user.id,
-      });
+    const timestamp = new Date().toISOString();
+    c.executionCtx.waitUntil(
+      runWithTransientRetry(
+        () => onAppOpen(c.env.fitloot_db, user.id, timestamp),
+        2,
+      ).catch((error) => {
+        console.error("[/api/app/open]", {
+          message: getErrorMessage(error),
+          userId: user.id,
+        });
+      }),
+    );
 
-      if (isMissingSchemaError(error) || isTransientDatabaseError(error)) {
-        return c.json({ success: true, degraded: true }, 200);
-      }
-
-      return internalErrorResponse(c);
-    }
+    return c.json({ success: true });
   });
 
   app.post("/api/events/route-not-found", authMiddleware, async (c) => {
@@ -300,7 +377,7 @@ export function registerAccountRoutes(
       });
 
       if (isMissingSchemaError(error)) {
-        return c.json({ success: true, degraded: true }, 200);
+        return schemaMismatchResponse(c);
       }
 
       return internalErrorResponse(c);
@@ -438,6 +515,16 @@ export function registerAccountRoutes(
             accountReset = true;
           } else {
             await deleteSessionInAllStores();
+          }
+
+          if (runtimeSessionDb) {
+            try {
+              await deleteRuntimeUserProjections(runtimeSessionDb, session.user_id);
+            } catch (runtimeCleanupError) {
+              console.warn("[/api/logout][runtime-projection-sync]", {
+                message: getErrorMessage(runtimeCleanupError),
+              });
+            }
           }
         } else {
           await deleteSessionInAllStores();

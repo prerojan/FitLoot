@@ -11,6 +11,7 @@ import {
   fetchAuthBootstrap,
   fetchCurrentUser,
   hasPlanAccess,
+  notifyAppOpen,
   prefetchCoreRoutes,
 } from "../../services/authService";
 import { applyProfileTheme } from "../../theme/profileTheme";
@@ -75,6 +76,7 @@ export function useAuthBootstrap({
         localStorage.setItem(AUTHENTICATED_HINT_KEY, "1");
         setUser(fallbackUser);
         applyProfileTheme(null);
+        void notifyAppOpen().catch(() => undefined);
         return;
       }
 
@@ -96,6 +98,7 @@ export function useAuthBootstrap({
       if (user.onboarding_completed === 1 && hasPlanAccess(user)) {
         prefetchCoreRoutes();
       }
+      void notifyAppOpen().catch(() => undefined);
 
       // Entrega a conquista 404 pendente assim que a sessao volta a existir.
       const pending404 = localStorage.getItem(PENDING_404_ACHIEVEMENT_KEY) === "1";

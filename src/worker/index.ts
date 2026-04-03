@@ -73,6 +73,12 @@ import {
   getSessionIdFromCookieHeader,
   hashPassword,
 } from "./core/sessionAuth";
+import {
+  deleteRuntimeHttpCacheBySession,
+  readRuntimeHttpCache,
+  upsertRuntimeHttpCache,
+} from "./core/runtimeHttpCacheStore";
+import { deleteRuntimeUserProjections } from "./core/runtimeUserProjectionStore";
 import { registerFriendsRoutes } from "./routes/friends";
 import { registerHealthRoutes } from "./routes/health";
 import { registerMetricsRoutes } from "./routes/metrics";
@@ -1170,7 +1176,7 @@ function resolveDatabaseTopology(
   const normalized = String(env.DB_TOPOLOGY ?? "").trim().toLowerCase();
   if (normalized === "hybrid") return "hybrid";
   if (normalized === "single") return "single";
-  return resolveDatabaseBackend(env) === "supabase" ? "single" : "single";
+  return resolveDatabaseBackend(env) === "supabase" ? "hybrid" : "single";
 }
 
 function hasExplicitSupabaseWriteConfig(
@@ -1181,6 +1187,11 @@ function hasExplicitSupabaseWriteConfig(
   );
 }
 
+function isTruthyEnvFlag(value: string | undefined): boolean {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes";
+}
+
 function attachRuntimeDatabase(env: Env): Env {
   const backend = resolveDatabaseBackend(env);
   if (backend !== "supabase") return env;
@@ -1188,21 +1199,24 @@ function attachRuntimeDatabase(env: Env): Env {
   const topology = resolveDatabaseTopology(env);
   const runtimeD1 = env.fitloot_runtime_db ?? env.fitloot_db;
   const writeMode = hasExplicitSupabaseWriteConfig(env) ? "write" : "default";
+  const enableReadSplit = isTruthyEnvFlag(env.SUPABASE_ENABLE_READ_SPLIT);
   const supabaseWriteDb = createSupabaseCompatDatabase(env, {
     mode: writeMode,
   });
 
   if (topology === "hybrid") {
     let supabaseReadDb: RuntimeDatabase | null = null;
-    try {
-      supabaseReadDb = createSupabaseCompatDatabase(env, {
-        mode: "read",
-        fallbackToWriteConnection: true,
-      });
-    } catch (error) {
-      console.warn("[hybrid-db][read-init-fallback]", {
-        message: getErrorMessage(error),
-      });
+    if (enableReadSplit) {
+      try {
+        supabaseReadDb = createSupabaseCompatDatabase(env, {
+          mode: "read",
+          fallbackToWriteConnection: true,
+        });
+      } catch (error) {
+        console.warn("[hybrid-db][read-init-fallback]", {
+          message: getErrorMessage(error),
+        });
+      }
     }
 
     return {
@@ -1229,7 +1243,10 @@ const app = new Hono<AppContext>();
 
 const HOT_GET_CACHEABLE_PATHS = new Set<string>([
   "/api/auth/check-availability",
+  "/api/app/bootstrap",
+  "/api/users/me",
   "/api/profile",
+  "/api/attributes",
   "/api/progression",
   "/api/skills",
   "/api/skills/available",
@@ -1237,6 +1254,10 @@ const HOT_GET_CACHEABLE_PATHS = new Set<string>([
   "/api/achievements",
   "/api/benchmarks",
   "/api/missions",
+  "/api/food/today",
+  "/api/shop/products",
+  "/api/shop/orders",
+  "/api/ai/recommendations",
   "/api/friends",
   "/api/friends/requests",
   "/api/metrics/today",
@@ -1249,7 +1270,7 @@ const PUBLIC_HOT_CACHEABLE_PATHS = new Set<string>([
 type CachedResponseSnapshot = {
   status: number;
   headers: Array<[string, string]>;
-  body: ArrayBuffer;
+  body: string;
 };
 
 type CachedResponseEntry = {
@@ -1304,6 +1325,29 @@ function resolveSessionScopedRequestKey(c: {
   return `anon:${ip}:${userAgent}:${c.req.path}:${url.search}`;
 }
 
+function resolveRuntimeHotCacheDb(c: {
+  env: Pick<Env, "fitloot_db" | "fitloot_runtime_db">;
+}): D1Database | null {
+  const runtimeDb = c.env.fitloot_runtime_db;
+  if (!runtimeDb) return null;
+  if (runtimeDb === c.env.fitloot_db) return null;
+  return runtimeDb;
+}
+
+function tryGetRequestUser(
+  c: Pick<import("hono").Context<AppContext>, "get">,
+): { id: string } | null {
+  try {
+    const user = c.get("user") as { id?: unknown } | undefined;
+    if (!user || typeof user.id !== "string" || user.id.length === 0) {
+      return null;
+    }
+    return { id: user.id };
+  } catch {
+    return null;
+  }
+}
+
 function cloneResponseSnapshot(
   snapshot: CachedResponseSnapshot,
   options: { staleFallback?: boolean } = {},
@@ -1313,7 +1357,7 @@ function cloneResponseSnapshot(
     headers.set("x-fitloot-cache", "stale-fallback");
   }
 
-  return new Response(snapshot.body.slice(0), {
+  return new Response(snapshot.body, {
     status: snapshot.status,
     headers,
   });
@@ -1331,7 +1375,7 @@ async function captureCacheableResponseSnapshot(
     return null;
   }
 
-  const body = await response.clone().arrayBuffer();
+  const body = await response.clone().text();
   return {
     status: response.status,
     headers: Array.from(response.headers.entries()),
@@ -1429,6 +1473,9 @@ app.use("*", async (c, next) => {
 app.use("/api/*", async (c, next) => {
   const method = c.req.method.toUpperCase();
   const sessionId = getSessionIdFromCookieHeader(c.req.header("Cookie"));
+  const runtimeHotCacheDb = resolveRuntimeHotCacheDb(c);
+  const isSessionScopedRequestKey = (requestKey: string): boolean =>
+    Boolean(sessionId && requestKey.startsWith(`${sessionId}:`));
 
   if (method === "GET" && isHotCacheableGetPath(c.req.path)) {
     const requestKey = resolveSessionScopedRequestKey(c);
@@ -1439,19 +1486,19 @@ app.use("/api/*", async (c, next) => {
 
     const dedupeWindowMs = readEnvInt(
       c.env.REQUEST_DEDUPE_WINDOW_MS,
-      1_200,
+      1_800,
       250,
       10_000,
     );
     const cacheTtlMs = readEnvInt(
       c.env.HOT_GET_CACHE_TTL_MS,
-      3_500,
+      5_000,
       500,
       30_000,
     );
     const staleTtlMs = readEnvInt(
       c.env.HOT_GET_STALE_TTL_MS,
-      90_000,
+      120_000,
       5_000,
       600_000,
     );
@@ -1466,6 +1513,34 @@ app.use("/api/*", async (c, next) => {
         staleSnapshot = cached.snapshot;
       } else {
         hotGetResponseCache.delete(requestKey);
+      }
+    }
+
+    const shouldUseRuntimeEdgeCache =
+      Boolean(runtimeHotCacheDb) && isSessionScopedRequestKey(requestKey);
+    if (!cached && shouldUseRuntimeEdgeCache && runtimeHotCacheDb) {
+      try {
+        const runtimeCached = await readRuntimeHttpCache(runtimeHotCacheDb, requestKey);
+        if (runtimeCached) {
+          hotGetResponseCache.set(requestKey, {
+            snapshot: runtimeCached.snapshot,
+            expiresAt: runtimeCached.expiresAt,
+            staleUntil: runtimeCached.staleUntil,
+          });
+
+          if (runtimeCached.expiresAt > now) {
+            return cloneResponseSnapshot(runtimeCached.snapshot);
+          }
+
+          if (runtimeCached.staleUntil > now) {
+            staleSnapshot = runtimeCached.snapshot;
+          }
+        }
+      } catch (runtimeCacheError) {
+        console.warn("[hot-get-cache][runtime-read]", {
+          path: c.req.path,
+          message: getErrorMessage(runtimeCacheError),
+        });
       }
     }
 
@@ -1494,11 +1569,32 @@ app.use("/api/*", async (c, next) => {
     try {
       const snapshot = await currentRequest;
       if (snapshot) {
+        const writtenAt = Date.now();
+        const expiresAt = writtenAt + cacheTtlMs;
+        const staleUntil = writtenAt + staleTtlMs;
         hotGetResponseCache.set(requestKey, {
           snapshot,
-          expiresAt: Date.now() + cacheTtlMs,
-          staleUntil: Date.now() + staleTtlMs,
+          expiresAt,
+          staleUntil,
         });
+
+        if (shouldUseRuntimeEdgeCache && runtimeHotCacheDb && sessionId) {
+          c.executionCtx.waitUntil(
+            upsertRuntimeHttpCache(runtimeHotCacheDb, {
+              cacheKey: requestKey,
+              sessionId,
+              path: c.req.path,
+              expiresAt,
+              staleUntil,
+              snapshot,
+            }).catch((runtimeCacheError) => {
+              console.warn("[hot-get-cache][runtime-write]", {
+                path: c.req.path,
+                message: getErrorMessage(runtimeCacheError),
+              });
+            }),
+          );
+        }
       } else if (staleSnapshot && c.res.status >= 500) {
         return cloneResponseSnapshot(staleSnapshot, { staleFallback: true });
       }
@@ -1511,14 +1607,45 @@ app.use("/api/*", async (c, next) => {
 
   await next();
 
-  if (
-    sessionId &&
+  const shouldInvalidateMutationCache =
     method !== "GET" &&
     method !== "HEAD" &&
-    method !== "OPTIONS" &&
-    c.res.status < 500
-  ) {
+    method !== "OPTIONS";
+  const shouldInvalidateLogoutCache = method === "GET" && c.req.path === "/api/logout";
+  const shouldInvalidateAfterRequest =
+    c.res.status < 500 &&
+    (shouldInvalidateMutationCache || shouldInvalidateLogoutCache);
+
+  if (shouldInvalidateAfterRequest && sessionId) {
     invalidateSessionScopedHotCache(sessionId);
+  }
+
+  if (shouldInvalidateAfterRequest && runtimeHotCacheDb) {
+    if (sessionId) {
+      c.executionCtx.waitUntil(
+        deleteRuntimeHttpCacheBySession(runtimeHotCacheDb, sessionId).catch((runtimeCacheError) => {
+          console.warn("[hot-get-cache][runtime-invalidate]", {
+            path: c.req.path,
+            message: getErrorMessage(runtimeCacheError),
+          });
+        }),
+      );
+    }
+
+    const requestUser = tryGetRequestUser(c);
+    if (requestUser?.id) {
+      c.executionCtx.waitUntil(
+        deleteRuntimeUserProjections(runtimeHotCacheDb, requestUser.id).catch(
+          (runtimeProjectionError) => {
+            console.warn("[runtime-projections][invalidate]", {
+              path: c.req.path,
+              userId: requestUser.id,
+              message: getErrorMessage(runtimeProjectionError),
+            });
+          },
+        ),
+      );
+    }
   }
 });
 

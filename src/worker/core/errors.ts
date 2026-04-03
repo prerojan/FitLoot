@@ -18,7 +18,12 @@ export function isInvalidPromoCodeError(error: unknown): boolean {
 
 export function isMissingSchemaError(error: unknown) {
   const message = getErrorMessage(error).toLowerCase();
-  return message.includes("no such table") || message.includes("no such column");
+  return (
+    message.includes("no such table") ||
+    message.includes("no such column") ||
+    (message.includes("relation") && message.includes("does not exist")) ||
+    (message.includes("column") && message.includes("does not exist"))
+  );
 }
 
 export function schemaMismatchResponse(c: Context<AppContext>) {

@@ -1,20 +1,17 @@
 import { Hono, type MiddlewareHandler } from "hono";
 
+import {
+  getErrorMessage,
+  internalErrorResponse,
+  isMissingSchemaError,
+  schemaMismatchResponse,
+} from "../core/errors";
 import type { AppContext } from "../core/types";
 
 type PresenceRouteDeps = {
   authMiddleware: MiddlewareHandler<AppContext>;
   getSessionIdFromCookieHeader: (cookieHeader: string | undefined) => string | null;
 };
-
-function isPresenceSchemaError(error: unknown): boolean {
-  const message = (error instanceof Error ? error.message : String(error)).toLowerCase();
-  return (
-    message.includes("no such table") ||
-    message.includes("relation") ||
-    message.includes("user_presence")
-  );
-}
 
 function normalizePresenceVisibility(value: unknown): "friends" | "private" | "public" {
   const normalized = String(value ?? "").trim().toLowerCase();
@@ -28,6 +25,36 @@ function normalizeCurrentActivity(value: unknown): string | null {
   const trimmed = value.trim();
   if (!trimmed) return null;
   return trimmed.slice(0, 120);
+}
+
+function isTransientDatabaseError(error: unknown): boolean {
+  const message = getErrorMessage(error).toLowerCase();
+  return (
+    message.includes("query read timeout") ||
+    message.includes("timeout exceeded when trying to connect") ||
+    message.includes("read etimedout") ||
+    message.includes("socket hang up") ||
+    message.includes("connection terminated")
+  );
+}
+
+async function runWithTransientRetry(
+  task: () => Promise<void>,
+  maxAttempts = 2,
+): Promise<void> {
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      await task();
+      return;
+    } catch (error) {
+      if (!isTransientDatabaseError(error) || attempt >= maxAttempts) {
+        throw error;
+      }
+      await new Promise((resolve) => {
+        setTimeout(resolve, 140 * attempt);
+      });
+    }
+  }
 }
 
 // Registers lightweight user presence heartbeat routes used by friends online status.
@@ -45,46 +72,62 @@ export function registerPresenceRoutes(
     const sessionId = getSessionIdFromCookieHeader(c.req.header("Cookie"));
 
     try {
-      await c.env.fitloot_db
-        .prepare(
-          `INSERT INTO user_presence (
-            user_id,
-            presence_status,
-            visibility,
-            source,
-            session_id,
-            current_activity,
-            last_heartbeat_at,
-            last_seen_at,
-            updated_at
-          ) VALUES (
-            ?,
-            'online',
-            ?,
-            'app',
-            ?,
-            ?,
-            datetime('now'),
-            datetime('now'),
-            datetime('now')
+      await runWithTransientRetry(async () => {
+        await c.env.fitloot_db
+          .prepare(
+            `INSERT INTO user_presence (
+              user_id,
+              presence_status,
+              visibility,
+              source,
+              session_id,
+              current_activity,
+              last_heartbeat_at,
+              last_seen_at,
+              updated_at
+            ) VALUES (
+              ?,
+              'online',
+              ?,
+              'app',
+              ?,
+              ?,
+              CURRENT_TIMESTAMP,
+              CURRENT_TIMESTAMP,
+              CURRENT_TIMESTAMP
+            )
+            ON CONFLICT(user_id) DO UPDATE SET
+              presence_status = 'online',
+              visibility = excluded.visibility,
+              session_id = excluded.session_id,
+              current_activity = excluded.current_activity,
+              last_heartbeat_at = CURRENT_TIMESTAMP,
+              last_seen_at = CURRENT_TIMESTAMP,
+              updated_at = CURRENT_TIMESTAMP`,
           )
-          ON CONFLICT(user_id) DO UPDATE SET
-            presence_status = 'online',
-            visibility = excluded.visibility,
-            session_id = excluded.session_id,
-            current_activity = excluded.current_activity,
-            last_heartbeat_at = datetime('now'),
-            last_seen_at = datetime('now'),
-            updated_at = datetime('now')`,
-        )
-        .bind(user.id, visibility, sessionId, currentActivity)
-        .run();
+          .bind(user.id, visibility, sessionId, currentActivity)
+          .run();
+      });
       return c.json({ success: true });
     } catch (error) {
-      if (isPresenceSchemaError(error)) {
-        return c.json({ success: true, degraded: true });
+      console.error("[/api/presence/heartbeat]", {
+        message: getErrorMessage(error),
+        userId: user.id,
+      });
+      if (isMissingSchemaError(error)) {
+        return schemaMismatchResponse(c);
       }
-      throw error;
+      if (isTransientDatabaseError(error)) {
+        return c.json(
+          {
+            error:
+              "Servico temporariamente indisponivel para atualizar presenca.",
+            code: "PRESENCE_TRANSIENT_DB_ERROR",
+          },
+          503,
+        );
+      }
+      return internalErrorResponse(c);
     }
   });
 
@@ -93,23 +136,38 @@ export function registerPresenceRoutes(
     if (!user) return c.json({ error: "Unauthorized" }, 401);
 
     try {
-      await c.env.fitloot_db
-        .prepare(
-          `UPDATE user_presence
-              SET presence_status = 'offline',
-                  last_seen_at = datetime('now'),
-                  updated_at = datetime('now')
-            WHERE user_id = ?`,
-        )
-        .bind(user.id)
-        .run();
+      await runWithTransientRetry(async () => {
+        await c.env.fitloot_db
+          .prepare(
+            `UPDATE user_presence
+                SET presence_status = 'offline',
+                    last_seen_at = CURRENT_TIMESTAMP,
+                    updated_at = CURRENT_TIMESTAMP
+              WHERE user_id = ?`,
+          )
+          .bind(user.id)
+          .run();
+      });
       return c.json({ success: true });
     } catch (error) {
-      if (isPresenceSchemaError(error)) {
-        return c.json({ success: true, degraded: true });
+      console.error("[/api/presence/offline]", {
+        message: getErrorMessage(error),
+        userId: user.id,
+      });
+      if (isMissingSchemaError(error)) {
+        return schemaMismatchResponse(c);
       }
-      throw error;
+      if (isTransientDatabaseError(error)) {
+        return c.json(
+          {
+            error:
+              "Servico temporariamente indisponivel para atualizar presenca.",
+            code: "PRESENCE_TRANSIENT_DB_ERROR",
+          },
+          503,
+        );
+      }
+      return internalErrorResponse(c);
     }
   });
 }
-

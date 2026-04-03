@@ -189,6 +189,7 @@ export interface Env {
   SUPABASE_DB_URL?: string | undefined;
   SUPABASE_WRITE_DB_URL?: string | undefined;
   SUPABASE_READ_DB_URL?: string | undefined;
+  SUPABASE_ENABLE_READ_SPLIT?: string | undefined;
   SUPABASE_POOL_MAX?: string | undefined;
   SUPABASE_CONNECT_TIMEOUT_MS?: string | undefined;
   SUPABASE_QUERY_TIMEOUT_MS?: string | undefined;

@@ -30,6 +30,7 @@ type CreateAuthMiddlewareDeps = {
   catalogCacheTtlMs?: number;
   sessionCacheTtlMs?: number;
   userRecordCacheTtlMs?: number;
+  onboardingReconcileTtlMs?: number;
   authCacheMaxEntries?: number;
   cleanupSettledMissionsWithGuard: (
     db: D1Database,
@@ -200,6 +201,7 @@ export function createAuthMiddleware({
   catalogCacheTtlMs = 60_000,
   sessionCacheTtlMs = 5_000,
   userRecordCacheTtlMs = 10_000,
+  onboardingReconcileTtlMs = 120_000,
   authCacheMaxEntries = 5_000,
   cleanupSettledMissionsWithGuard,
   ensureCaminhadaLeveUserSkill,
@@ -223,6 +225,7 @@ export function createAuthMiddleware({
   const userRecordCache = new Map<string, CacheEntry<UserAuthRecord>>();
   const inflightSessionLoads = new Map<string, Promise<SessionCookieRecord | null>>();
   const inflightUserLoads = new Map<string, Promise<UserAuthRecord | null>>();
+  const onboardingReconcileAttempts = new Map<string, number>();
 
   function readCache<T>(
     cache: Map<string, CacheEntry<T>>,
@@ -297,6 +300,29 @@ export function createAuthMiddleware({
       });
     inflightMap.set(key, pending);
     return pending;
+  }
+
+  function shouldRunOnboardingReconcile(userId: string, now: number): boolean {
+    const lastAttemptAt = onboardingReconcileAttempts.get(userId);
+    if (
+      typeof lastAttemptAt === "number" &&
+      now - lastAttemptAt < onboardingReconcileTtlMs
+    ) {
+      return false;
+    }
+
+    onboardingReconcileAttempts.set(userId, now);
+    if (onboardingReconcileAttempts.size <= authCacheMaxEntries) {
+      return true;
+    }
+
+    while (onboardingReconcileAttempts.size > authCacheMaxEntries) {
+      const oldestKey = onboardingReconcileAttempts.keys().next().value;
+      if (typeof oldestKey !== "string") break;
+      onboardingReconcileAttempts.delete(oldestKey);
+    }
+
+    return true;
   }
 
   function scheduleCatalogInitialization(
@@ -487,7 +513,8 @@ export function createAuthMiddleware({
 
       if (
         Number(userRecord.onboarding_completed) !== 1 &&
-        hasPlanAccess(userRecord.plan_id, userRecord.plan_status)
+        hasPlanAccess(userRecord.plan_id, userRecord.plan_status) &&
+        shouldRunOnboardingReconcile(userRecord.id, now)
       ) {
         try {
           const [profile, attributes, progression, trainingPlan] = await Promise.all([
@@ -527,6 +554,7 @@ export function createAuthMiddleware({
               onboarding_completed: 1,
             };
             shouldSyncRuntimeUserRecord = true;
+            onboardingReconcileAttempts.delete(userRecord.id);
 
             writeCache(
               userRecordCache,

@@ -515,22 +515,26 @@ function replaceQuestionMarkParams(sql: string): string {
 
 export function isRetryableReadError(error: unknown): boolean {
   const message = getErrorMessage(error).toLowerCase();
+  // Statement timeouts usually indicate an actually slow query. Retrying the
+  // same statement immediately is unlikely to help and can worsen pressure.
+  if (
+    message.includes("canceling statement due to statement timeout") ||
+    message.includes("statement timeout")
+  ) {
+    return false;
+  }
+
   return (
     message.includes("query read timeout") ||
+    message.includes("timeout exceeded when trying to connect") ||
     message.includes("connection terminated") ||
     message.includes("connection terminated unexpectedly") ||
-    message.includes("timeout exceeded when trying to connect") ||
     message.includes("read etimedout") ||
     message.includes("socket hang up") ||
     message.includes("connect etimedout") ||
     message.includes("connect econnrefused") ||
     message.includes("getaddrinfo enotfound") ||
-    message.includes("enotfound") ||
-    message.includes("password authentication failed") ||
-    message.includes("no pg_hba.conf entry") ||
-    (message.includes("role") && message.includes("does not exist")) ||
-    message.includes("self signed certificate") ||
-    message.includes("certificate has expired")
+    message.includes("enotfound")
   );
 }
 
@@ -953,7 +957,10 @@ class SupabaseCompatDatabase {
           const client = await this.pool.connect();
           try {
             result = await client.query<T>(compiled.sql, [...compiled.params]);
-            client.release();
+            // Hyperdrive+pooler can intermittently hand back stale sockets across
+            // edge invocations. Releasing as broken forces fresh checkout and
+            // removes recurring first-query read timeouts.
+            client.release(true);
           } catch (queryError) {
             client.release(true);
             throw queryError;

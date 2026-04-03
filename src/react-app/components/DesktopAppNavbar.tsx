@@ -71,14 +71,16 @@ export default function DesktopAppNavbar({
       }
 
       try {
-        if (!profile && (!cachedProfile || cachedProfile.stale)) {
+        // Avoid repeated background refreshes across route transitions.
+        // We only fetch when there is no cached snapshot at all.
+        if (!profile && !cachedProfile) {
           const payload = await fetchAndCacheJson<UserProfile>("/api/profile");
           if (!cancelled) {
             setResolvedProfile(payload);
           }
         }
 
-        if (!progression && (!cachedProgression || cachedProgression.stale)) {
+        if (!progression && !cachedProgression) {
           const payload = await fetchAndCacheJson<UserProgression>("/api/progression");
           if (!cancelled) {
             setResolvedProgression(payload);

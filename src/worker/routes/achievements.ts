@@ -22,52 +22,65 @@ export function registerAchievementRoutes(
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
 
-    const achievements = await c.env.fitloot_db
-      .prepare(
-        `SELECT a.*, ua.unlocked_at, ua.progress_current, ua.progress_required,
-        CASE WHEN ua.id IS NOT NULL THEN 1 ELSE 0 END as unlocked
-        FROM achievements a
-        LEFT JOIN user_achievements ua ON a.id = ua.achievement_id AND ua.user_id = ?
-        ORDER BY a.secret ASC, a.rarity, a.id`,
-      )
-      .bind(user.id)
-      .all<Record<string, unknown>>();
+    try {
+      const achievements = await c.env.fitloot_db
+        .prepare(
+          `SELECT a.*, ua.unlocked_at, ua.progress_current, ua.progress_required,
+          CASE WHEN ua.id IS NOT NULL THEN 1 ELSE 0 END as unlocked
+          FROM achievements a
+          LEFT JOIN user_achievements ua ON a.id = ua.achievement_id AND ua.user_id = ?
+          ORDER BY a.secret ASC, a.rarity, a.id`,
+        )
+        .bind(user.id)
+        .all<Record<string, unknown>>();
 
-    const mapped = achievements.results.map((achievement) => {
-      const normalizedAchievement = {
-        ...achievement,
-        name:
-          typeof achievement.name === "string"
-            ? repairKnownMojibakeString(achievement.name)
-            : achievement.name,
-        description:
-          typeof achievement.description === "string"
-            ? repairKnownMojibakeString(achievement.description)
-            : achievement.description,
-        rarity:
-          typeof achievement.rarity === "string"
-            ? repairKnownMojibakeString(achievement.rarity)
-            : achievement.rarity,
-        reference:
-          typeof achievement.reference === "string"
-            ? repairKnownMojibakeString(achievement.reference)
-            : achievement.reference,
-      };
-      const unlocked = Number(achievement.unlocked ?? 0) === 1;
-      const isSecret = Number(achievement.secret ?? 0) === 1;
-      if (isSecret && !unlocked) {
-        return {
-          ...normalizedAchievement,
-          name: "?",
-          description: "Conquista secreta",
-          condition: null,
-          icon: "",
+      const mapped = achievements.results.map((achievement) => {
+        const normalizedAchievement = {
+          ...achievement,
+          name:
+            typeof achievement.name === "string"
+              ? repairKnownMojibakeString(achievement.name)
+              : achievement.name,
+          description:
+            typeof achievement.description === "string"
+              ? repairKnownMojibakeString(achievement.description)
+              : achievement.description,
+          rarity:
+            typeof achievement.rarity === "string"
+              ? repairKnownMojibakeString(achievement.rarity)
+              : achievement.rarity,
+          reference:
+            typeof achievement.reference === "string"
+              ? repairKnownMojibakeString(achievement.reference)
+              : achievement.reference,
         };
-      }
-      return normalizedAchievement;
-    });
+        const unlocked = Number(achievement.unlocked ?? 0) === 1;
+        const isSecret = Number(achievement.secret ?? 0) === 1;
+        if (isSecret && !unlocked) {
+          return {
+            ...normalizedAchievement,
+            name: "?",
+            description: "Conquista secreta",
+            condition: null,
+            icon: "",
+          };
+        }
+        return normalizedAchievement;
+      });
 
-    return c.json(mapped);
+      return c.json(mapped);
+    } catch (error) {
+      console.error("[/api/achievements]", {
+        message: getErrorMessage(error),
+        userId: user.id,
+      });
+
+      if (isMissingSchemaError(error)) {
+        return schemaMismatchResponse(c);
+      }
+
+      return internalErrorResponse(c);
+    }
   });
 
   app.get("/api/titles", authMiddleware, async (c) => {

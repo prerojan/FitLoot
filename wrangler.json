@@ -32,20 +32,31 @@
     {
       "binding": "SUPABASE_HYPERDRIVE",
       "id": "03568293dfee43a699f139a8dcf9e5f3"
+    },
+    {
+      "binding": "SUPABASE_WRITE_HYPERDRIVE",
+      "id": "03568293dfee43a699f139a8dcf9e5f3"
+    },
+    {
+      "binding": "SUPABASE_READ_HYPERDRIVE",
+      "id": "03568293dfee43a699f139a8dcf9e5f3"
     }
   ],
   "vars": {
     "DB_BACKEND": "supabase",
     "DB_TOPOLOGY": "hybrid",
-    "SUPABASE_POOL_MAX": "4",
-    "SUPABASE_CONNECT_TIMEOUT_MS": "10000",
-    "SUPABASE_QUERY_TIMEOUT_MS": "12000",
+    "SUPABASE_ENABLE_READ_SPLIT": "false",
+    "SUPABASE_POOL_MAX": "16",
+    "SUPABASE_CONNECT_TIMEOUT_MS": "5000",
+    "SUPABASE_IDLE_TIMEOUT_MS": "1000",
+    "SUPABASE_QUERY_TIMEOUT_MS": "2000",
+    "SUPABASE_STATEMENT_TIMEOUT_MS": "12000",
     "SUPABASE_READ_MAX_ATTEMPTS": "3",
     "SUPABASE_READ_RETRY_BASE_DELAY_MS": "120",
-    "SUPABASE_READ_RETRY_MAX_DELAY_MS": "1200",
-    "REQUEST_DEDUPE_WINDOW_MS": "1200",
-    "HOT_GET_CACHE_TTL_MS": "3500",
-    "HOT_GET_STALE_TTL_MS": "90000"
+    "SUPABASE_READ_RETRY_MAX_DELAY_MS": "900",
+    "REQUEST_DEDUPE_WINDOW_MS": "1800",
+    "HOT_GET_CACHE_TTL_MS": "5000",
+    "HOT_GET_STALE_TTL_MS": "120000"
   },
   "triggers": {
     "crons": [

@@ -222,18 +222,10 @@ describe("billing routes", () => {
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
-    const activeSubscription = {
-      ...pendingSubscription,
-      status: "active",
-      started_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    };
-
     const reconcilePendingSubscriptionForUser = vi.fn(async () => undefined);
     const getLatestSubscriptionByUser = vi
       .fn()
-      .mockResolvedValueOnce(pendingSubscription)
-      .mockResolvedValueOnce(activeSubscription);
+      .mockResolvedValueOnce(pendingSubscription);
     const getUserAuthRecordById = vi
       .fn()
       .mockResolvedValueOnce({
@@ -241,12 +233,6 @@ describe("billing routes", () => {
         avatar_url: null,
         onboarding_completed: 1,
         plan_status: "pending",
-      })
-      .mockResolvedValueOnce({
-        ...TEST_USER,
-        avatar_url: null,
-        onboarding_completed: 1,
-        plan_status: "active",
       });
     const deps = createBillingDeps({
       getLatestSubscriptionByUser,
@@ -277,8 +263,8 @@ describe("billing routes", () => {
     );
     expect(payload).toMatchObject({
       plan_id: "pro",
-      plan_status: "active",
-      has_access: true,
+      plan_status: "pending",
+      has_access: false,
       checkout_url: "https://checkout.example/pro",
     });
   });

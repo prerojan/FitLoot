@@ -103,6 +103,96 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function isTransientDatabaseError(error: unknown): boolean {
+  const message = getErrorMessage(error).toLowerCase();
+  return (
+    message.includes("query read timeout") ||
+    message.includes("timeout exceeded when trying to connect") ||
+    message.includes("read etimedout") ||
+    message.includes("socket hang up") ||
+    message.includes("connection terminated")
+  );
+}
+
+async function runWithTransientRetry<T>(
+  task: () => Promise<T>,
+  maxAttempts = 2,
+): Promise<T> {
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      return await task();
+    } catch (error) {
+      if (!isTransientDatabaseError(error) || attempt >= maxAttempts) {
+        throw error;
+      }
+      await new Promise((resolve) => {
+        setTimeout(resolve, 160 * attempt);
+      });
+    }
+  }
+
+  throw new Error("TRANSIENT_RETRY_EXHAUSTED");
+}
+
+const PENDING_RECONCILE_COOLDOWN_MS = 30_000;
+const pendingReconcileState = new Map<
+  string,
+  { lastAttemptAt: number; inflight: Promise<void> | null }
+>();
+
+function schedulePendingSubscriptionReconcile(
+  c: import("hono").Context<AppContext>,
+  deps: Pick<
+    BillingRouteDeps,
+    "reconcilePendingSubscriptionForUser"
+  >,
+  params: {
+    userId: string;
+    customerEmail?: string | null;
+    latestSubscription?: SubscriptionRecord | null;
+  },
+): void {
+  const now = Date.now();
+  const existing =
+    pendingReconcileState.get(params.userId) ?? {
+      lastAttemptAt: 0,
+      inflight: null,
+    };
+
+  if (existing.inflight) return;
+  if (now - existing.lastAttemptAt < PENDING_RECONCILE_COOLDOWN_MS) return;
+
+  const run = deps
+    .reconcilePendingSubscriptionForUser(c.env.fitloot_db, c.env, params)
+    .catch((error) => {
+      if (isTransientDatabaseError(error)) {
+        console.warn("[subscription-status][cakto-reconcile-transient]", {
+          userId: params.userId,
+          message: getErrorMessage(error),
+        });
+        return;
+      }
+      console.error("[subscription-status][cakto-reconcile]", {
+        userId: params.userId,
+        message: getErrorMessage(error),
+      });
+    })
+    .finally(() => {
+      const current = pendingReconcileState.get(params.userId);
+      if (!current) return;
+      pendingReconcileState.set(params.userId, {
+        lastAttemptAt: current.lastAttemptAt,
+        inflight: null,
+      });
+    });
+
+  pendingReconcileState.set(params.userId, {
+    lastAttemptAt: now,
+    inflight: run,
+  });
+  c.executionCtx.waitUntil(run);
+}
+
 async function hasOnboardingCheckoutState(
   db: D1Database,
   userId: string,
@@ -206,6 +296,16 @@ export function registerBillingRoutes(
         if (isMissingSchemaError(error)) {
           return schemaMismatchResponse(c);
         }
+        if (isTransientDatabaseError(error)) {
+          return c.json(
+            {
+              error:
+                "Servico temporariamente indisponivel para iniciar o checkout.",
+              code: "CHECKOUT_TRANSIENT_DB_ERROR",
+            },
+            503,
+          );
+        }
 
         throw error;
       }
@@ -223,9 +323,8 @@ export function registerBillingRoutes(
 
       try {
         const data = c.req.valid("json");
-        const onboardingReady = await hasOnboardingCheckoutState(
-          c.env.fitloot_db,
-          user.id,
+        const onboardingReady = await runWithTransientRetry(() =>
+          hasOnboardingCheckoutState(c.env.fitloot_db, user.id),
         );
 
         if (!onboardingReady) {
@@ -348,10 +447,40 @@ export function registerBillingRoutes(
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
 
-    let [latestSubscription, refreshedUser] = await Promise.all([
-      getLatestSubscriptionByUser(c.env.fitloot_db, user.id),
-      getUserAuthRecordById(c.env.fitloot_db, user.id),
-    ]);
+    let latestSubscription: SubscriptionRecord | null = null;
+    let refreshedUser: UserAuthRecord | null = null;
+    let usedTransientSnapshot = false;
+
+    try {
+      [latestSubscription, refreshedUser] = await runWithTransientRetry(
+        () =>
+          Promise.all([
+            getLatestSubscriptionByUser(c.env.fitloot_db, user.id),
+            getUserAuthRecordById(c.env.fitloot_db, user.id),
+          ]),
+        3,
+      );
+    } catch (error) {
+      if (!isTransientDatabaseError(error)) {
+        throw error;
+      }
+
+      usedTransientSnapshot = true;
+      refreshedUser = {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        avatar_url: user.avatar_url ?? null,
+        onboarding_completed: user.onboarding_completed,
+        plan_id: user.plan_id,
+        plan_status: user.plan_status,
+        payment_method: user.payment_method,
+      };
+      console.warn("[subscription-status][transient-fallback]", {
+        userId: user.id,
+        message: getErrorMessage(error),
+      });
+    }
 
     if (!refreshedUser) {
       return c.json(
@@ -360,24 +489,16 @@ export function registerBillingRoutes(
       );
     }
 
-    if (refreshedUser.plan_status === "pending") {
-      try {
-        await reconcilePendingSubscriptionForUser(c.env.fitloot_db, c.env, {
+    if (!usedTransientSnapshot && refreshedUser.plan_status === "pending") {
+      schedulePendingSubscriptionReconcile(
+        c,
+        { reconcilePendingSubscriptionForUser },
+        {
           userId: user.id,
           customerEmail: refreshedUser.email,
           latestSubscription,
-        });
-
-        [latestSubscription, refreshedUser] = await Promise.all([
-          getLatestSubscriptionByUser(c.env.fitloot_db, user.id),
-          getUserAuthRecordById(c.env.fitloot_db, user.id),
-        ]);
-      } catch (error) {
-        console.error("[subscription-status][cakto-reconcile]", {
-          userId: user.id,
-          message: getErrorMessage(error),
-        });
-      }
+        },
+      );
     }
 
     if (!refreshedUser) {
