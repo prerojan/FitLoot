@@ -315,12 +315,27 @@ export function createMissionPresentationService({
     );
   }
 
+  function toFiniteNumber(value: unknown, fallback = 0): number {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  }
+
+  function toNullableFiniteNumber(value: unknown): number | null {
+    if (value === null || value === undefined) return null;
+    if (typeof value === "string" && value.trim().length === 0) return null;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
   function normalizeMissionRow(
     rawMission: Record<string, unknown>,
   ): Record<string, unknown> & NormalizedMissionComputedFields {
-    const metricType = normalizeMissionMetricType(rawMission.metric_type, rawMission.target_time);
-    const targetReps = Number(rawMission.target_reps ?? 0);
-    const targetTime = Number(rawMission.target_time ?? 0);
+    const metricType = normalizeMissionMetricType(
+      rawMission.metric_type,
+      rawMission.target_time,
+    );
+    const targetReps = toFiniteNumber(rawMission.target_reps, 0);
+    const targetTime = toFiniteNumber(rawMission.target_time, 0);
     const metricValue = Number(
       rawMission.metric_value ?? (metricType === "duration_seconds" ? targetTime : targetReps),
     );
@@ -364,11 +379,18 @@ export function createMissionPresentationService({
         ? (circuitTasks.length > 0
             ? circuitTasks.filter((task) => task.completed).length
             : undefined)
-        : Number(rawMission.progress_value);
+        : (() => {
+            const parsed = Number(rawMission.progress_value);
+            return Number.isFinite(parsed) ? parsed : undefined;
+          })();
     const displayImageUrl = resolveMissionDisplayImage(rawMission);
 
     return {
       ...rawMission,
+      id: toFiniteNumber(rawMission.id, 0),
+      skill_id: toNullableFiniteNumber(rawMission.skill_id),
+      target_reps: toNullableFiniteNumber(rawMission.target_reps),
+      target_time: toNullableFiniteNumber(rawMission.target_time),
       title: displayTitle,
       description: displayDescription,
       metric_type: metricType,
@@ -462,6 +484,10 @@ export function createMissionPresentationService({
       goal: localizedGoal,
       is_ai_special: Number(rawMission.is_ai_special ?? 0) === 1 ? 1 : 0,
       progress_value: progressValue,
+      xp_reward: Math.max(0, toFiniteNumber(rawMission.xp_reward, 0)),
+      points_reward: Math.max(0, toFiniteNumber(rawMission.points_reward, 0)),
+      is_completed: Number(rawMission.is_completed ?? 0) === 1 ? 1 : 0,
+      verified_by_sensor: Number(rawMission.verified_by_sensor ?? 0) === 1 ? 1 : 0,
     };
   }
 

@@ -383,11 +383,28 @@ export const OnboardingRequestSchema = OnboardingProfileSeedRequestSchema.extend
 export type OnboardingRequest = z.infer<typeof OnboardingRequestSchema>;
 
 // Complete Mission Request Schema
+const OptionalMissionMetricInputSchema = z.preprocess((value) => {
+  if (value === undefined || value === null || value === "") {
+    return undefined;
+  }
+
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : undefined;
+  }
+
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+
+  return value;
+}, z.number().finite().min(0).optional());
+
 export const CompleteMissionRequestSchema = z.object({
-  mission_id: z.number(),
-  reps_completed: z.number().min(0).optional(),
-  time_completed: z.number().min(0).optional(),
-  metric_completed: z.number().min(0).optional(),
+  mission_id: z.coerce.number().int().positive(),
+  reps_completed: OptionalMissionMetricInputSchema,
+  time_completed: OptionalMissionMetricInputSchema,
+  metric_completed: OptionalMissionMetricInputSchema,
   sensor_verified: z.boolean(),
 });
 

@@ -404,7 +404,7 @@ describe("mission routes", () => {
       createJsonRequest("/api/missions/complete", {
         method: "POST",
         body: {
-          mission_id: 77,
+          mission_id: "77",
           metric_completed: 12,
           reps_completed: 12,
           sensor_verified: true,

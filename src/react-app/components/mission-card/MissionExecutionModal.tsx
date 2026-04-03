@@ -264,11 +264,16 @@ export function MissionExecutionModal({
   // Finalizes the mission with the value expected by the existing completion contract.
   const finishMission = async () => {
     if (!canFinishMission || finishing) return;
-    const value = isDistanceMission
+    const rawValue = isDistanceMission
       ? Number(state.inputValue)
       : isCounterMission
         ? Math.max(totalGoal, totalCounterProgress)
         : totalGoal;
+    if (!Number.isFinite(rawValue) || rawValue < 0) {
+      setFinishing(false);
+      return;
+    }
+    const value = rawValue;
     try {
       setFinishing(true);
       await onFinish(value);

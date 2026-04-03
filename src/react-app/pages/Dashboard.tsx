@@ -314,15 +314,28 @@ export default function Dashboard() {
   }, [refreshData, setSectionLoading]);
 
   const handleMissionComplete = async (missionId: number, metricValue: number, verified: boolean) => {
+    const normalizedMissionId = Number(missionId);
+    const normalizedMetricValue = Number(metricValue);
+
+    if (!Number.isFinite(normalizedMissionId) || normalizedMissionId <= 0) {
+      setError("Nao foi possivel concluir a missao. Identificador invalido.");
+      throw new Error("MISSION_COMPLETE_HANDLED");
+    }
+
+    if (!Number.isFinite(normalizedMetricValue) || normalizedMetricValue < 0) {
+      setError("Nao foi possivel concluir a missao. Progresso invalido.");
+      throw new Error("MISSION_COMPLETE_HANDLED");
+    }
+
     try {
       const response = await api("/api/missions/complete", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          mission_id: missionId,
-          reps_completed: metricValue,
-          metric_completed: metricValue,
-          sensor_verified: verified,
+          mission_id: normalizedMissionId,
+          reps_completed: normalizedMetricValue,
+          metric_completed: normalizedMetricValue,
+          sensor_verified: Boolean(verified),
         }),
       });
 
@@ -332,25 +345,67 @@ export default function Dashboard() {
       }
 
       if (!response.ok) {
-        const payload = (await response.json().catch(() => null)) as {
-          error?: string | undefined;
-          phase?: string | undefined;
-          code?: string | undefined;
-        } | null;
+        const payload = (await response.json().catch(() => null)) as
+          | {
+              error?:
+                | string
+                | {
+                    issues?: Array<{ message?: string | undefined }>;
+                  }
+                | undefined;
+              phase?: string | undefined;
+              code?: string | undefined;
+            }
+          | null;
+        const payloadCode = typeof payload?.code === "string" ? payload.code : "";
+        const payloadError = typeof payload?.error === "string" ? payload.error : undefined;
+        const payloadErrorObject =
+          payload && typeof payload.error === "object" && payload.error !== null
+            ? payload.error
+            : null;
+        const validationIssues = Array.isArray(payloadErrorObject?.issues)
+          ? payloadErrorObject.issues
+          : [];
+        const validationMessage = validationIssues.find(
+          (issue): issue is { message: string } =>
+            typeof issue?.message === "string",
+        )?.message;
+
+        if (payloadCode === "MISSION_AUTO_PROGRESS_ONLY") {
+          setError(
+            payloadError ??
+              "Essa missao possui progresso automatico. Conclua as tarefas diarias relacionadas.",
+          );
+          void refreshData();
+          throw new Error("MISSION_COMPLETE_HANDLED");
+        }
+
         const detail = payload?.phase ? ` (fase: ${payload.phase})` : "";
-        setError(`${payload?.error ?? "Não foi possível concluir a missão."}${detail}`);
-        return;
+        setError(
+          `${payloadError ?? validationMessage ?? "Nao foi possivel concluir a missao."}${detail}`,
+        );
+        throw new Error("MISSION_COMPLETE_HANDLED");
       }
 
       const result = (await response.json()) as {
         reward_events?: RewardNotification[] | undefined;
       };
-      setMissions((current) => current.filter((mission) => mission.id !== missionId));
+      setMissions((current) =>
+        current.filter((mission) => Number(mission.id) !== normalizedMissionId),
+      );
+      setError(null);
       pushRewardNotifications(result.reward_events);
 
       await refreshData();
-    } catch {
-      setError("Não foi possível concluir a missão agora.");
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        error.message === "MISSION_COMPLETE_HANDLED"
+      ) {
+        throw error;
+      }
+      setError("Nao foi possivel concluir a missao agora.");
+      throw error;
     }
   };
 
