@@ -59,7 +59,13 @@ export async function rapidRequestJson<T>(
   );
 
   if (!response.ok) {
-    throw new Error(`rapidapi-request-failed:${host}:${response.status}`);
+    const reason = await response.text().catch(() => "");
+    const trimmedReason = reason.trim();
+    throw new Error(
+      trimmedReason.length > 0
+        ? `rapidapi-request-failed:${host}:${response.status}:${trimmedReason}`
+        : `rapidapi-request-failed:${host}:${response.status}`,
+    );
   }
 
   return (await response.json()) as T;

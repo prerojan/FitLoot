@@ -30,6 +30,9 @@ const DEFAULT_POOL_IDLE_TIMEOUT_MS = 30_000;
 const DEFAULT_POOL_CONNECT_TIMEOUT_MS = 4_000;
 const DEFAULT_POOL_QUERY_TIMEOUT_MS = 8_000;
 const DEFAULT_POOL_STATEMENT_TIMEOUT_MS = 15_000;
+const DEFAULT_READ_MAX_ATTEMPTS = 2;
+const DEFAULT_READ_RETRY_BASE_DELAY_MS = 120;
+const DEFAULT_READ_RETRY_MAX_DELAY_MS = 750;
 const SEARCH_PATH = "compat,core,missions,gameplay,catalog,billing,social,telemetry,public";
 const TABLE_SCHEMA_MAP: Readonly<Record<string, string>> = {
   users: "core",
@@ -623,6 +626,12 @@ type SupabasePoolTuning = {
   statementTimeoutMs: number;
 };
 
+type SupabaseRetryTuning = {
+  maxReadAttempts: number;
+  baseDelayMs: number;
+  maxDelayMs: number;
+};
+
 export type SupabaseCompatDatabaseOptions = {
   mode?: SupabaseConnectionMode;
   fallbackToWriteConnection?: boolean;
@@ -641,6 +650,9 @@ type SupabaseCompatFactoryEnv = Pick<
   | "SUPABASE_QUERY_TIMEOUT_MS"
   | "SUPABASE_STATEMENT_TIMEOUT_MS"
   | "SUPABASE_IDLE_TIMEOUT_MS"
+  | "SUPABASE_READ_MAX_ATTEMPTS"
+  | "SUPABASE_READ_RETRY_BASE_DELAY_MS"
+  | "SUPABASE_READ_RETRY_MAX_DELAY_MS"
 >;
 
 function readEnvNumber(
@@ -681,6 +693,26 @@ function resolvePoolTuning(env: SupabaseCompatFactoryEnv): SupabasePoolTuning {
       env.SUPABASE_STATEMENT_TIMEOUT_MS,
       DEFAULT_POOL_STATEMENT_TIMEOUT_MS,
       { min: 1_000, max: 300_000 },
+    ),
+  };
+}
+
+function resolveRetryTuning(env: SupabaseCompatFactoryEnv): SupabaseRetryTuning {
+  return {
+    maxReadAttempts: readEnvNumber(
+      env.SUPABASE_READ_MAX_ATTEMPTS,
+      DEFAULT_READ_MAX_ATTEMPTS,
+      { min: 1, max: 5 },
+    ),
+    baseDelayMs: readEnvNumber(
+      env.SUPABASE_READ_RETRY_BASE_DELAY_MS,
+      DEFAULT_READ_RETRY_BASE_DELAY_MS,
+      { min: 0, max: 5_000 },
+    ),
+    maxDelayMs: readEnvNumber(
+      env.SUPABASE_READ_RETRY_MAX_DELAY_MS,
+      DEFAULT_READ_RETRY_MAX_DELAY_MS,
+      { min: 50, max: 10_000 },
     ),
   };
 }
@@ -845,7 +877,10 @@ class SupabaseCompatDatabase {
   private transactionDepth = 0;
   private readonly tableIdColumnCache = new Map<string, boolean>();
 
-  constructor(private readonly pool: Pool) {}
+  constructor(
+    private readonly pool: Pool,
+    private readonly retryTuning: SupabaseRetryTuning,
+  ) {}
 
   prepare(query: string): D1PreparedStatement {
     return new SupabasePreparedStatement(this, query) as unknown as D1PreparedStatement;
@@ -999,7 +1034,9 @@ class SupabaseCompatDatabase {
   ): Promise<{ rows: T[]; rowCount: number; lastRowId: number | null }> {
     const compiled = await this.compileSql(sql, params, mode);
     const maxAttempts =
-      !this.transactionClient && mode !== "run" ? 5 : 1;
+      !this.transactionClient && mode !== "run"
+        ? this.retryTuning.maxReadAttempts
+        : 1;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
       try {
@@ -1029,15 +1066,20 @@ class SupabaseCompatDatabase {
         };
       } catch (error) {
         const shouldRetry =
-          attempt < maxAttempts && isRetryableReadError(error);
+          attempt < maxAttempts &&
+          isRetryableReadError(error);
         if (shouldRetry) {
           console.warn("[supabase-compat-db][query-retry]", {
             attempt,
             message: getErrorMessage(error),
             sql: stripTrailingSemicolon(sql).slice(0, 120),
           });
-          const jitterMs = Math.floor(Math.random() * 120);
-          await sleep(150 * attempt + jitterMs);
+          const jitterMs = Math.floor(Math.random() * 100);
+          const backoffMs = Math.min(
+            this.retryTuning.maxDelayMs,
+            this.retryTuning.baseDelayMs * attempt + jitterMs,
+          );
+          await sleep(backoffMs);
           continue;
         }
 
@@ -1071,8 +1113,9 @@ export function createSupabaseCompatDatabase(
     fallbackToWriteConnection,
   );
   const poolTuning = resolvePoolTuning(env);
+  const retryTuning = resolveRetryTuning(env);
   const pool = getPgPool(connectionUrl, useSsl, poolTuning);
-  const compatDb = new SupabaseCompatDatabase(pool);
+  const compatDb = new SupabaseCompatDatabase(pool, retryTuning);
   const db = compatDb as unknown as RuntimeDatabase;
   db.__backend = "supabase";
   db.__transaction = <T>(run: () => Promise<T>) => compatDb.runInTransaction(run);

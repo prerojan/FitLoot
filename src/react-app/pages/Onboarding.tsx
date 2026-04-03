@@ -651,6 +651,10 @@ export default function Onboarding() {
 
   const validateUsername = useCallback(async (rawUsername: string) => {
     const username = rawUsername.trim();
+    const companionEmailRaw = credentials.email.trim().toLowerCase();
+    const companionEmail = EMAIL_REGEX.test(companionEmailRaw)
+      ? companionEmailRaw
+      : undefined;
     if (!username) {
       setUsernameAvailability({ status: "idle" });
       return true;
@@ -664,7 +668,11 @@ export default function Onboarding() {
     setUsernameAvailability({ status: "checking" });
 
     try {
-      const payload = await requestAvailability({ username });
+      const availabilityParams: { email?: string; username?: string } = { username };
+      if (companionEmail) {
+        availabilityParams.email = companionEmail;
+      }
+      const payload = await requestAvailability(availabilityParams);
 
       if (requestId !== usernameReqRef.current) return false;
       if (!payload || typeof payload.usernameAvailable !== "boolean") {
@@ -684,10 +692,14 @@ export default function Onboarding() {
       }
       return false;
     }
-  }, [requestAvailability]);
+  }, [credentials.email, requestAvailability]);
 
   const validateEmail = useCallback(async (rawEmail: string) => {
     const email = rawEmail.trim().toLowerCase();
+    const companionUsernameRaw = profile.username.trim();
+    const companionUsername = companionUsernameRaw.length >= 3
+      ? companionUsernameRaw
+      : undefined;
     if (!email) {
       setEmailAvailability({ status: "idle" });
       return true;
@@ -702,7 +714,11 @@ export default function Onboarding() {
     setEmailAvailability({ status: "checking" });
 
     try {
-      const payload = await requestAvailability({ email });
+      const availabilityParams: { email?: string; username?: string } = { email };
+      if (companionUsername) {
+        availabilityParams.username = companionUsername;
+      }
+      const payload = await requestAvailability(availabilityParams);
 
       if (requestId !== emailReqRef.current) return false;
       if (!payload || typeof payload.emailAvailable !== "boolean") {
@@ -722,7 +738,7 @@ export default function Onboarding() {
       }
       return false;
     }
-  }, [requestAvailability]);
+  }, [profile.username, requestAvailability]);
 
   // Faz o debounce da disponibilidade do username durante a digitacao.
   useEffect(() => {
@@ -955,18 +971,25 @@ export default function Onboarding() {
         return;
       }
 
-      const loginRes = await api("/api/auth/login", {
-        method: "POST",
-        body: JSON.stringify({ email: normalizedEmail, password: credentials.password }),
-      });
+      const registerPayload = (await registerRes.json().catch(() => null)) as
+        | { session_established?: boolean | undefined }
+        | null;
+      const sessionEstablishedFromRegister = registerPayload?.session_established === true;
 
-      if (!loginRes.ok) {
-        localStorage.removeItem("fitloot_authenticated_hint");
-        accountBootstrapRedirectRef.current = false;
-        setStepError(
-          "Conta criada com sucesso, mas nao foi possivel iniciar sua sessao automaticamente. Faca login para continuar no pagamento.",
-        );
-        return;
+      if (!sessionEstablishedFromRegister) {
+        const loginRes = await api("/api/auth/login", {
+          method: "POST",
+          body: JSON.stringify({ email: normalizedEmail, password: credentials.password }),
+        });
+
+        if (!loginRes.ok) {
+          localStorage.removeItem("fitloot_authenticated_hint");
+          accountBootstrapRedirectRef.current = false;
+          setStepError(
+            "Conta criada com sucesso, mas nao foi possivel iniciar sua sessao automaticamente. Faca login para continuar no pagamento.",
+          );
+          return;
+        }
       }
 
       const onboardingDraft: OnboardingDraft = {

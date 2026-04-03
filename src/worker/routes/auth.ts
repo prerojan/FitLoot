@@ -93,7 +93,27 @@ export function registerAuthRoutes(
             .run();
         }
 
-        return c.json({ success: true }, 201);
+        let sessionEstablished = false;
+        try {
+          const sessionId = crypto.randomUUID();
+          const expiresAt = new Date(
+            Date.now() + 30 * 24 * 60 * 60 * 1000,
+          ).toISOString();
+
+          await c.env.fitloot_db
+            .prepare(
+              "INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, ?)",
+            )
+            .bind(sessionId, userId, expiresAt)
+            .run();
+
+          c.header("Set-Cookie", generateCookie(sessionId, c.req.url));
+          sessionEstablished = true;
+        } catch (sessionError) {
+          console.error("[register][session-bootstrap]", sessionError);
+        }
+
+        return c.json({ success: true, session_established: sessionEstablished }, 201);
       } catch (error) {
         console.error("[register]", error);
         return c.json(
@@ -138,36 +158,35 @@ export function registerAuthRoutes(
           return started;
         };
 
-        const [emailExisting, usernameExisting] = await Promise.all([
-          emailQuery
-            ? c.env.fitloot_db
-                .prepare("SELECT id FROM users WHERE lower(email) = ?")
-                .bind(emailQuery)
-                .first<{ id: string }>()
-            : Promise.resolve(null),
-          normalizedUsernameQuery
-            ? c.env.fitloot_db
-                .prepare("SELECT user_id FROM user_profiles WHERE lower(username) = ?")
-                .bind(normalizedUsernameQuery)
-                .first<{ user_id: string }>()
-            : Promise.resolve(null),
-        ]);
+        const availabilityLookup =
+          emailQuery || normalizedUsernameQuery
+            ? await c.env.fitloot_db
+                .prepare(
+                  `SELECT
+                    (SELECT id FROM users WHERE lower(email) = ? LIMIT 1) AS email_user_id,
+                    (SELECT user_id FROM user_profiles WHERE lower(username) = ? LIMIT 1) AS username_user_id`,
+                )
+                .bind(emailQuery || null, normalizedUsernameQuery || null)
+                .first<{ email_user_id: string | null; username_user_id: string | null }>()
+            : null;
+        const emailUserId = availabilityLookup?.email_user_id ?? null;
+        const usernameUserId = availabilityLookup?.username_user_id ?? null;
 
       let emailAvailable: boolean | null = null;
         if (emailQuery) {
-          if (!emailExisting?.id) {
+          if (!emailUserId) {
             emailAvailable = true;
           } else {
-            emailAvailable = await isReusableByUserId(emailExisting.id);
+            emailAvailable = await isReusableByUserId(emailUserId);
           }
         }
 
         let usernameAvailable: boolean | null = null;
         if (normalizedUsernameQuery) {
-          if (!usernameExisting?.user_id) {
+          if (!usernameUserId) {
             usernameAvailable = true;
           } else {
-            usernameAvailable = await isReusableByUserId(usernameExisting.user_id);
+            usernameAvailable = await isReusableByUserId(usernameUserId);
           }
         }
 

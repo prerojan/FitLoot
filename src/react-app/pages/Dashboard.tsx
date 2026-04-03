@@ -23,7 +23,6 @@ import {
   api,
   clearJsonCache,
   fetchAndCacheJson,
-  prefetchJson,
   readCachedJson,
   writeCachedJson,
 } from "@/react-app/utils/api";
@@ -280,7 +279,7 @@ export default function Dashboard() {
   }, [user, navigate, loadData]);
 
   useEffect(() => {
-    // Antecipa rotas e caches usados com mais frequencia no dashboard.
+    // Antecipa apenas o bundle das rotas mais acessadas.
     void import("@/react-app/pages/Profile");
     void import("@/react-app/pages/MiniGames");
     void import("@/react-app/pages/Friends");
@@ -288,10 +287,6 @@ export default function Dashboard() {
     void import("@/react-app/pages/Ranking");
     void import("@/react-app/pages/AIChat");
     void import("@/react-app/pages/FoodAnalysis");
-    void prefetchJson("/api/profile");
-    void prefetchJson("/api/missions");
-    void prefetchJson("/api/metrics/today");
-    void prefetchJson("/api/titles");
   }, []);
 
   const refreshData = useCallback(async () => {

@@ -194,6 +194,9 @@ export interface Env {
   SUPABASE_QUERY_TIMEOUT_MS?: string | undefined;
   SUPABASE_STATEMENT_TIMEOUT_MS?: string | undefined;
   SUPABASE_IDLE_TIMEOUT_MS?: string | undefined;
+  SUPABASE_READ_MAX_ATTEMPTS?: string | undefined;
+  SUPABASE_READ_RETRY_BASE_DELAY_MS?: string | undefined;
+  SUPABASE_READ_RETRY_MAX_DELAY_MS?: string | undefined;
   REQUEST_DEDUPE_WINDOW_MS?: string | undefined;
   HOT_GET_CACHE_TTL_MS?: string | undefined;
   HF_TOKEN?: string | undefined;

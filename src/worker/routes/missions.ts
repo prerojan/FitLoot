@@ -28,6 +28,8 @@ import {
   SETTLED_MISSION_RETENTION_MODIFIER_BY_PERIOD,
 } from "../constants/missionRetention";
 
+const MISSION_SCHEMA_CAPABILITY_TTL_MS = 5 * 60_000;
+
 type StreamJsonArrayResponse = (
   items: readonly unknown[],
   status?: number,
@@ -342,6 +344,11 @@ export function registerMissionRoutes(
     writeMissionDetailCache,
     writeMissionListCache,
   } = deps;
+  let missionReadSchemaCapabilities: {
+    checkedAt: number;
+    hasMissionStatus: boolean;
+    includeSkillJoin: boolean;
+  } | null = null;
 
   const canJoinSkillsTable = async (db: D1Database): Promise<boolean> => {
     try {
@@ -357,6 +364,36 @@ export function registerMissionRoutes(
       });
       return false;
     }
+  };
+
+  const resolveMissionReadSchemaCapabilities = async (
+    db: D1Database,
+  ): Promise<{
+    hasMissionStatus: boolean;
+    includeSkillJoin: boolean;
+  }> => {
+    const now = Date.now();
+    if (
+      missionReadSchemaCapabilities &&
+      now - missionReadSchemaCapabilities.checkedAt < MISSION_SCHEMA_CAPABILITY_TTL_MS
+    ) {
+      return {
+        hasMissionStatus: missionReadSchemaCapabilities.hasMissionStatus,
+        includeSkillJoin: missionReadSchemaCapabilities.includeSkillJoin,
+      };
+    }
+
+    const [hasMissionStatus, includeSkillJoin] = await Promise.all([
+      hasTableColumn(db, "missions", "status"),
+      canJoinSkillsTable(db),
+    ]);
+    missionReadSchemaCapabilities = {
+      checkedAt: now,
+      hasMissionStatus,
+      includeSkillJoin,
+    };
+
+    return { hasMissionStatus, includeSkillJoin };
   };
 
   const buildMissionSkillQueryParts = (includeSkillJoin: boolean) => ({
@@ -413,10 +450,8 @@ export function registerMissionRoutes(
       }
 
       // Busca missões ativas e histórico recente, com fallback para esquemas antigos sem coluna status.
-      const [hasMissionStatus, includeSkillJoin] = await Promise.all([
-        hasTableColumn(c.env.fitloot_db, "missions", "status"),
-        canJoinSkillsTable(c.env.fitloot_db),
-      ]);
+      const { hasMissionStatus, includeSkillJoin } =
+        await resolveMissionReadSchemaCapabilities(c.env.fitloot_db);
       const { selectSkillName, skillJoinClause } =
         buildMissionSkillQueryParts(includeSkillJoin);
       const activePendingFilter = hasMissionStatus

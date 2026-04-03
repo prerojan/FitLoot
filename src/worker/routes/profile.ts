@@ -404,30 +404,46 @@ export function registerProfileRoutes(
         );
       }
 
-      const profile = await c.env.fitloot_db
-        .prepare("SELECT * FROM user_profiles WHERE user_id = ?")
+      const profileWithState = await c.env.fitloot_db
+        .prepare(
+          `SELECT
+            up.*,
+            ua.user_id as __has_attributes_user_id,
+            pr.user_id as __has_progression_user_id,
+            tp.user_id as __has_training_plan_user_id
+          FROM user_profiles up
+          LEFT JOIN user_attributes ua
+            ON ua.user_id = up.user_id
+          LEFT JOIN user_progression pr
+            ON pr.user_id = up.user_id
+          LEFT JOIN user_training_plans tp
+            ON tp.user_id = up.user_id
+          WHERE up.user_id = ?
+          LIMIT 1`,
+        )
         .bind(user.id)
-        .first();
-      const [hasAttributes, hasProgression, hasTrainingPlan] = await Promise.all([
-        c.env.fitloot_db
-          .prepare("SELECT user_id FROM user_attributes WHERE user_id = ? LIMIT 1")
-          .bind(user.id)
-          .first<{ user_id: string | null }>(),
-        c.env.fitloot_db
-          .prepare("SELECT user_id FROM user_progression WHERE user_id = ? LIMIT 1")
-          .bind(user.id)
-          .first<{ user_id: string | null }>(),
-        c.env.fitloot_db
-          .prepare("SELECT user_id FROM user_training_plans WHERE user_id = ? LIMIT 1")
-          .bind(user.id)
-          .first<{ user_id: string | null }>(),
-      ]);
+        .first<Record<string, unknown>>();
+      let profile: Record<string, unknown> | null = null;
+      let hasAttributes = false;
+      let hasProgression = false;
+      let hasTrainingPlan = false;
+
+      if (profileWithState) {
+        const normalized = { ...profileWithState };
+        hasAttributes = Boolean(normalized.__has_attributes_user_id);
+        hasProgression = Boolean(normalized.__has_progression_user_id);
+        hasTrainingPlan = Boolean(normalized.__has_training_plan_user_id);
+        delete normalized.__has_attributes_user_id;
+        delete normalized.__has_progression_user_id;
+        delete normalized.__has_training_plan_user_id;
+        profile = normalized;
+      }
 
       if (
         !profile ||
-        !hasAttributes?.user_id ||
-        !hasProgression?.user_id ||
-        !hasTrainingPlan?.user_id
+        !hasAttributes ||
+        !hasProgression ||
+        !hasTrainingPlan
       ) {
         const recoveredProfile = await repairActivatedProfileState({
           db: c.env.fitloot_db,

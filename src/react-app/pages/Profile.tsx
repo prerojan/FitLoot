@@ -208,27 +208,71 @@ export default function Profile() {
     if (hasCache) setLoading(false);
 
     try {
-      const [p, a, pr, s, as, ach, t, b] = await Promise.all([
-        fetchAndCacheJson<UserProfile>("/api/profile"),
-        fetchAndCacheJson<UserAttributes>("/api/attributes"),
-        fetchAndCacheJson<UserProgression>("/api/progression"),
-        fetchAndCacheJson<SkillWithProgress[]>("/api/skills"),
-        fetchAndCacheJson<Skill[]>("/api/skills/available"),
-        fetchAndCacheJson<AchievementWithUnlock[]>("/api/achievements"),
-        fetchAndCacheJson<TitleWithUnlock[]>("/api/titles"),
-        fetchAndCacheJson<BenchmarksResponse>("/api/benchmarks").catch(
-          () => ({ benchmarks: [] } satisfies BenchmarksResponse),
-        )
-      ]);
+      const shouldFetch = (entry: { stale: boolean } | null): boolean => !entry || entry.stale;
+      const requests: Promise<void>[] = [];
 
-      syncProfileThemeState(p);
-      setAttributes(a);
-      setProgression(pr);
-      setSkills(Array.isArray(s) ? s : []);
-      setAvailableSkills(Array.isArray(as) ? as : []);
-      setAchievements(Array.isArray(ach) ? sanitizeAchievementsForDisplay(ach) : []);
-      setTitles(Array.isArray(t) ? t : []);
-      setBenchmarks(Array.isArray(b.benchmarks) ? b.benchmarks : []);
+      if (shouldFetch(cachedProfile)) {
+        requests.push(
+          fetchAndCacheJson<UserProfile>("/api/profile").then((payload) => {
+            syncProfileThemeState(payload);
+          }),
+        );
+      }
+      if (shouldFetch(cachedAttributes)) {
+        requests.push(
+          fetchAndCacheJson<UserAttributes>("/api/attributes").then((payload) => {
+            setAttributes(payload);
+          }),
+        );
+      }
+      if (shouldFetch(cachedProgression)) {
+        requests.push(
+          fetchAndCacheJson<UserProgression>("/api/progression").then((payload) => {
+            setProgression(payload);
+          }),
+        );
+      }
+      if (shouldFetch(cachedSkills)) {
+        requests.push(
+          fetchAndCacheJson<SkillWithProgress[]>("/api/skills").then((payload) => {
+            setSkills(Array.isArray(payload) ? payload : []);
+          }),
+        );
+      }
+      if (shouldFetch(cachedAvailableSkills)) {
+        requests.push(
+          fetchAndCacheJson<Skill[]>("/api/skills/available").then((payload) => {
+            setAvailableSkills(Array.isArray(payload) ? payload : []);
+          }),
+        );
+      }
+      if (shouldFetch(cachedAchievements)) {
+        requests.push(
+          fetchAndCacheJson<AchievementWithUnlock[]>("/api/achievements").then((payload) => {
+            setAchievements(Array.isArray(payload) ? sanitizeAchievementsForDisplay(payload) : []);
+          }),
+        );
+      }
+      if (shouldFetch(cachedTitles)) {
+        requests.push(
+          fetchAndCacheJson<TitleWithUnlock[]>("/api/titles").then((payload) => {
+            setTitles(Array.isArray(payload) ? payload : []);
+          }),
+        );
+      }
+      if (shouldFetch(cachedBenchmarks)) {
+        requests.push(
+          fetchAndCacheJson<BenchmarksResponse>("/api/benchmarks")
+            .catch(() => ({ benchmarks: [] } satisfies BenchmarksResponse))
+            .then((payload) => {
+              setBenchmarks(Array.isArray(payload.benchmarks) ? payload.benchmarks : []);
+            }),
+        );
+      }
+
+      if (requests.length > 0) {
+        await Promise.all(requests);
+      }
     } catch (loadError) {
       if (loadError instanceof ApiRequestError && (loadError.status === 401 || loadError.status === 403)) {
         navigate("/app", { replace: true });

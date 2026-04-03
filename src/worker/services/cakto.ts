@@ -348,7 +348,13 @@ export async function getCaktoAccessToken(env: CaktoEnv): Promise<string> {
     });
 
     if (!response.ok) {
-      throw new Error(`Failed to obtain Cakto token (${response.status}).`);
+      const reason = await response.text().catch(() => "");
+      const detail = reason.trim();
+      throw new Error(
+        detail.length > 0
+          ? `Failed to obtain Cakto token (${response.status}): ${detail}`
+          : `Failed to obtain Cakto token (${response.status}).`,
+      );
     }
 
     const payload = (await response.json()) as CaktoTokenResponse;
@@ -386,7 +392,13 @@ async function fetchCaktoJson<T>(env: CaktoEnv, endpoint: string, searchParams?:
   });
 
   if (!response.ok) {
-    throw new Error(`Cakto API request failed (${response.status}).`);
+    const reason = await response.text().catch(() => "");
+    const detail = reason.trim();
+    throw new Error(
+      detail.length > 0
+        ? `Cakto API request failed (${response.status}): ${detail}`
+        : `Cakto API request failed (${response.status}).`,
+    );
   }
 
   return response.json() as Promise<T>;
