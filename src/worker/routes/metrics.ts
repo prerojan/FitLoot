@@ -3,6 +3,8 @@ import { zValidator } from "@hono/zod-validator";
 
 import {
   FoodScanRequestSchema,
+  OfflineSyncRequestSchema,
+  type OfflineSyncOperation,
   UpdateDailyMetricsRequestSchema,
 } from "../../shared/types";
 import { assertString, safeGet } from "../../utils/typeHelpers";
@@ -17,6 +19,226 @@ import {
 type MetricsRouteDeps = {
   authMiddleware: MiddlewareHandler<AppContext>;
 };
+
+type StoredOfflineOperationRow = {
+  response_payload?: string | null;
+};
+
+function roundMetricDelta(value: number): number {
+  return Math.max(0, Math.round(Number(value) || 0));
+}
+
+function resolveMetricsDate(occurredAt: string, fallbackDate?: string | undefined): string {
+  if (typeof fallbackDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(fallbackDate)) {
+    return fallbackDate;
+  }
+
+  const parsed = new Date(occurredAt);
+  if (Number.isFinite(parsed.getTime())) {
+    return parsed.toISOString().slice(0, 10);
+  }
+
+  return assertString(safeGet(new Date().toISOString().split("T"), 0));
+}
+
+async function readStoredOfflineOperationResult(
+  db: D1Database,
+  userId: string,
+  operationId: string,
+): Promise<unknown | null> {
+  const row = await db
+    .prepare(
+      `SELECT response_payload
+       FROM offline_sync_operations
+       WHERE user_id = ? AND operation_id = ?`,
+    )
+    .bind(userId, operationId)
+    .first<StoredOfflineOperationRow>();
+
+  if (!row?.response_payload) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(row.response_payload);
+  } catch {
+    return null;
+  }
+}
+
+async function persistOfflineOperationResult(
+  db: D1Database,
+  params: {
+    userId: string;
+    operationId: string;
+    operationType: string;
+    occurredAt: string;
+    source: string;
+    confidence?: string | undefined;
+    requestPayload: unknown;
+    responsePayload: unknown;
+  },
+): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO offline_sync_operations (
+         user_id,
+         operation_id,
+         operation_type,
+         occurred_at,
+         source,
+         confidence,
+         request_payload,
+         response_payload,
+         status,
+         processed_at,
+         updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'processed', datetime('now'), datetime('now'))
+       ON CONFLICT(user_id, operation_id) DO UPDATE SET
+         operation_type = excluded.operation_type,
+         occurred_at = excluded.occurred_at,
+         source = excluded.source,
+         confidence = excluded.confidence,
+         request_payload = excluded.request_payload,
+         response_payload = excluded.response_payload,
+         status = 'processed',
+         processed_at = datetime('now'),
+         updated_at = datetime('now')`,
+    )
+    .bind(
+      params.userId,
+      params.operationId,
+      params.operationType,
+      params.occurredAt,
+      params.source,
+      params.confidence ?? null,
+      JSON.stringify(params.requestPayload),
+      JSON.stringify(params.responsePayload),
+    )
+    .run();
+}
+
+async function applyMetricDeltaOperation(
+  db: D1Database,
+  params: {
+    userId: string;
+    field: "steps" | "calories_burned";
+    delta: number;
+    date: string;
+  },
+): Promise<{
+  date: string;
+  steps: number;
+  calories_burned: number;
+}> {
+  const { userId, field, date } = params;
+  const delta = roundMetricDelta(params.delta);
+  const initialSteps = field === "steps" ? delta : 0;
+  const initialCalories = field === "calories_burned" ? delta : 0;
+  const nextValueSql = field === "steps"
+    ? "steps = MAX(0, COALESCE(steps, 0) + excluded.steps)"
+    : "calories_burned = MAX(0, COALESCE(calories_burned, 0) + excluded.calories_burned)";
+
+  await db
+    .prepare(
+      `INSERT INTO daily_metrics (user_id, date, steps, calories_burned, updated_at)
+       VALUES (?, ?, ?, ?, datetime('now'))
+       ON CONFLICT(user_id, date) DO UPDATE SET
+         ${nextValueSql},
+         updated_at = datetime('now')`,
+    )
+    .bind(userId, date, initialSteps, initialCalories)
+    .run();
+
+  const metrics = await db
+    .prepare(
+      `SELECT date, steps, calories_burned
+       FROM daily_metrics
+       WHERE user_id = ? AND date = ?`,
+    )
+    .bind(userId, date)
+    .first<{
+      date: string;
+      steps: number;
+      calories_burned: number;
+    }>();
+
+  return {
+    date,
+    steps: Number(metrics?.steps ?? 0),
+    calories_burned: Number(metrics?.calories_burned ?? 0),
+  };
+}
+
+async function processOfflineSyncOperation(
+  db: D1Database,
+  userId: string,
+  operation: OfflineSyncOperation,
+): Promise<Record<string, unknown>> {
+  const existingResult = await readStoredOfflineOperationResult(
+    db,
+    userId,
+    operation.operation_id,
+  );
+  if (existingResult && typeof existingResult === "object") {
+    return {
+      ...existingResult as Record<string, unknown>,
+      status: "duplicate",
+    };
+  }
+
+  let resultPayload: Record<string, unknown>;
+  if (operation.type === "step_delta_recorded") {
+    const date = resolveMetricsDate(operation.occurred_at, operation.payload.date);
+    const metrics = await applyMetricDeltaOperation(db, {
+      userId,
+      field: "steps",
+      delta: operation.payload.delta,
+      date,
+    });
+    resultPayload = {
+      operation_id: operation.operation_id,
+      type: operation.type,
+      status: "processed",
+      metrics,
+    };
+  } else if (operation.type === "calorie_delta_recorded") {
+    const date = resolveMetricsDate(operation.occurred_at, operation.payload.date);
+    const metrics = await applyMetricDeltaOperation(db, {
+      userId,
+      field: "calories_burned",
+      delta: operation.payload.delta,
+      date,
+    });
+    resultPayload = {
+      operation_id: operation.operation_id,
+      type: operation.type,
+      status: "processed",
+      metrics,
+    };
+  } else {
+    resultPayload = {
+      operation_id: operation.operation_id,
+      type: operation.type,
+      status: "processed",
+      acknowledged: true,
+      payload: operation.payload,
+    };
+  }
+
+  await persistOfflineOperationResult(db, {
+    userId,
+    operationId: operation.operation_id,
+    operationType: operation.type,
+    occurredAt: operation.occurred_at,
+    source: operation.source,
+    confidence: operation.confidence,
+    requestPayload: operation,
+    responsePayload: resultPayload,
+  });
+
+  return resultPayload;
+}
 
 // Route registration for daily metrics and food diary persistence.
 export function registerMetricsRoutes(
@@ -98,6 +320,47 @@ export function registerMetricsRoutes(
         return c.json({ success: true });
       } catch (error) {
         console.error("[/api/metrics/update]", {
+          message: getErrorMessage(error),
+          userId: user.id,
+        });
+
+        if (isMissingSchemaError(error)) {
+          return schemaMismatchResponse(c);
+        }
+
+        return internalErrorResponse(c);
+      }
+    },
+  );
+
+  app.post(
+    "/api/offline/sync",
+    authMiddleware,
+    zValidator("json", OfflineSyncRequestSchema),
+    async (c) => {
+      const user = c.get("user");
+      if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+      try {
+        const data = c.req.valid("json");
+        const results: Record<string, unknown>[] = [];
+
+        for (const operation of data.operations) {
+          results.push(
+            await processOfflineSyncOperation(
+              c.env.fitloot_db,
+              user.id,
+              operation,
+            ),
+          );
+        }
+
+        return c.json({
+          success: true,
+          operations: results,
+        });
+      } catch (error) {
+        console.error("[/api/offline/sync]", {
           message: getErrorMessage(error),
           userId: user.id,
         });

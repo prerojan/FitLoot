@@ -67,6 +67,7 @@ const TABLE_DOMAIN_MAP: Readonly<Record<string, DatabaseDomain>> = {
 
   daily_metrics: "telemetry",
   food_diary: "telemetry",
+  offline_sync_operations: "telemetry",
   progress_snapshots: "telemetry",
   physical_benchmarks: "telemetry",
   app_state: "telemetry",

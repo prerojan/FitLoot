@@ -3,9 +3,28 @@ plugins {
     id 'org.jetbrains.kotlin.android'
 }
 
+def releaseStoreFile = (findProperty("FITLOOT_ANDROID_KEYSTORE") ?: System.getenv("FITLOOT_ANDROID_KEYSTORE"))?.toString()
+def releaseStorePassword = (findProperty("FITLOOT_ANDROID_KEYSTORE_PASSWORD") ?: System.getenv("FITLOOT_ANDROID_KEYSTORE_PASSWORD"))?.toString()
+def releaseKeyAlias = (findProperty("FITLOOT_ANDROID_KEY_ALIAS") ?: System.getenv("FITLOOT_ANDROID_KEY_ALIAS"))?.toString()
+def releaseKeyPassword = (findProperty("FITLOOT_ANDROID_KEY_PASSWORD") ?: System.getenv("FITLOOT_ANDROID_KEY_PASSWORD"))?.toString()
+
 android {
     namespace 'com.fitloot'
     compileSdk 34
+
+    signingConfigs {
+        debug {}
+        release {
+            if (releaseStoreFile && releaseStorePassword && releaseKeyAlias && releaseKeyPassword) {
+                storeFile file(releaseStoreFile)
+                storePassword releaseStorePassword
+                keyAlias releaseKeyAlias
+                keyPassword releaseKeyPassword
+            } else {
+                initWith signingConfigs.debug
+            }
+        }
+    }
 
     defaultConfig {
         applicationId "com.fitloot"
@@ -20,17 +39,50 @@ android {
         }
     }
 
-    buildTypes {
-        release {
-            minifyEnabled false
-            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
-            signingConfig signingConfigs.debug
+    flavorDimensions += ["environment"]
+
+    productFlavors {
+        dev {
+            dimension "environment"
+            applicationIdSuffix ".dev"
+            versionNameSuffix "-dev"
+            buildConfigField "String", "WEB_BASE_URL", '"http://10.0.2.2:5173"'
+            buildConfigField "String", "ALLOWED_HOSTS", '"10.0.2.2,localhost,fitloot.vercel.app"'
+            buildConfigField "String", "WEB_MODE", '"remote"'
+            buildConfigField "String", "HOST_BUILD_TYPE", '"dev"'
+            manifestPlaceholders = [usesCleartextTraffic: "true"]
         }
+
         internal {
-            initWith release
-            debuggable true
-            matchingFallbacks = ['release']
+            dimension "environment"
+            applicationIdSuffix ".internal"
             versionNameSuffix "-internal"
+            buildConfigField "String", "WEB_BASE_URL", '"https://fitloot.vercel.app"'
+            buildConfigField "String", "ALLOWED_HOSTS", '"fitloot.vercel.app"'
+            buildConfigField "String", "WEB_MODE", '"remote"'
+            buildConfigField "String", "HOST_BUILD_TYPE", '"internal"'
+            manifestPlaceholders = [usesCleartextTraffic: "false"]
+        }
+
+        prod {
+            dimension "environment"
+            buildConfigField "String", "WEB_BASE_URL", '"https://fitloot.vercel.app"'
+            buildConfigField "String", "ALLOWED_HOSTS", '"fitloot.vercel.app"'
+            buildConfigField "String", "WEB_MODE", '"remote"'
+            buildConfigField "String", "HOST_BUILD_TYPE", '"prod"'
+            manifestPlaceholders = [usesCleartextTraffic: "false"]
+        }
+    }
+
+    buildTypes {
+        debug {
+            debuggable true
+        }
+        release {
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            signingConfig signingConfigs.release
         }
     }
     compileOptions {
@@ -42,6 +94,7 @@ android {
     }
     buildFeatures {
         viewBinding true
+        buildConfig true
     }
 }
 
@@ -63,6 +116,7 @@ dependencies {
 
     // Health Connect
     implementation "androidx.health.connect:connect-client:1.1.0-alpha07"
+    implementation "com.google.android.gms:play-services-location:21.3.0"
 
     testImplementation 'junit:junit:4.13.2'
     androidTestImplementation 'androidx.test.ext:junit:1.1.5'

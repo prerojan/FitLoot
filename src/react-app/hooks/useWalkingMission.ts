@@ -9,6 +9,9 @@ import { useMapService } from "./useMapService";
 import { formatStepsSourceLabel } from "@/react-app/services/native/stepsService";
 import type { Mission, MissionMetricType } from "@/shared/types";
 
+const NOOP_ASYNC_LOCATION_TRACKING = async (): Promise<void> => undefined;
+const NOOP_LOCATION_TRACKING = (): void => undefined;
+
 export interface WalkingMissionState {
   isRunning: boolean;
   isPaused: boolean;
@@ -48,6 +51,8 @@ export const useWalkingMission = ({ mission, onComplete, autoRefresh = true }: U
     addMarker,
     clearMarkers,
     userLocation: mapUserLocation,
+    startForegroundLocationTracking = NOOP_ASYNC_LOCATION_TRACKING,
+    stopForegroundLocationTracking = NOOP_LOCATION_TRACKING,
   } = useMapService();
 
   const [state, setState] = useState<WalkingMissionState>({
@@ -82,6 +87,7 @@ export const useWalkingMission = ({ mission, onComplete, autoRefresh = true }: U
         isRunning: false,
         isPaused: false,
       }));
+      stopForegroundLocationTracking();
 
       const verified = healthData
         ? healthData.source !== "api" && healthData.source !== "unavailable"
@@ -94,7 +100,7 @@ export const useWalkingMission = ({ mission, onComplete, autoRefresh = true }: U
         error: "Falha ao registrar conclusao da missao.",
       }));
     }
-  }, [healthData, mission.id, onComplete]);
+  }, [healthData, mission.id, onComplete, stopForegroundLocationTracking]);
 
   // Converte a meta da missao para passos e distancia, mantendo ambos disponiveis.
   useEffect(() => {
@@ -230,6 +236,7 @@ export const useWalkingMission = ({ mission, onComplete, autoRefresh = true }: U
       }));
 
       await generateSafeRoute();
+      await startForegroundLocationTracking();
 
       if (import.meta.env.DEV && healthData && healthData.confidence !== "official") {
         console.warn(`Fonte de passos em fallback: ${formatStepsSourceLabel(healthData.source)}.`);
@@ -242,7 +249,7 @@ export const useWalkingMission = ({ mission, onComplete, autoRefresh = true }: U
         error: "Falha ao iniciar a missao. Tente novamente.",
       }));
     }
-  }, [generateSafeRoute, healthData]);
+  }, [generateSafeRoute, healthData, startForegroundLocationTracking]);
 
   // Alterna entre execucao ativa e pausada.
   const togglePause = useCallback(() => {
@@ -260,8 +267,9 @@ export const useWalkingMission = ({ mission, onComplete, autoRefresh = true }: U
       isPaused: false,
       endTime: new Date(),
     }));
+    stopForegroundLocationTracking();
     clearMarkers();
-  }, [clearMarkers]);
+  }, [clearMarkers, stopForegroundLocationTracking]);
 
   // Reinicia o estado para uma nova tentativa da mesma missao.
   const resetExecution = useCallback(() => {
@@ -291,6 +299,12 @@ export const useWalkingMission = ({ mission, onComplete, autoRefresh = true }: U
     const secs = seconds % 60;
     return `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
   }, []);
+
+  useEffect(() => {
+    return () => {
+      stopForegroundLocationTracking();
+    };
+  }, [stopForegroundLocationTracking]);
 
   return {
     // Estado exposto

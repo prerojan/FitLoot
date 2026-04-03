@@ -4,28 +4,35 @@ import android.Manifest
 import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
 import android.net.Uri
 import android.os.Bundle
 import android.util.Log
 import android.view.View
 import android.view.ViewGroup
+import android.webkit.GeolocationPermissions
+import android.webkit.PermissionRequest
+import android.webkit.ValueCallback
+import android.webkit.WebChromeClient
+import android.webkit.WebView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.health.connect.client.PermissionController
 import androidx.lifecycle.lifecycleScope
-import android.webkit.PermissionRequest
-import android.webkit.ValueCallback
-import android.webkit.WebChromeClient
-import android.webkit.WebView
+import com.fitloot.databinding.ActivityMainBinding
+import com.fitloot.bridge.FitLootWebAppConfig
 import com.fitloot.bridge.FitLootWebViewConfigurator
 import com.fitloot.bridge.NativeBridgeContract
 import com.fitloot.health.HealthConnectPermissionCoordinator
+import com.fitloot.location.ForegroundLocationTracker
 import com.fitloot.media.NativeMediaPayloadFactory
-import com.fitloot.databinding.ActivityMainBinding
 import kotlinx.coroutines.launch
 import org.json.JSONObject
+import java.time.Instant
 
 class MainActivity : AppCompatActivity() {
 
@@ -36,9 +43,27 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
     private lateinit var webAppInterface: WebAppInterface
+    private lateinit var locationTracker: ForegroundLocationTracker
     private var webView: WebView? = null
     private var fileChooserCallback: ValueCallback<Array<Uri>>? = null
     private var pendingWebPermissionRequest: PermissionRequest? = null
+    private var pendingGeolocationOrigin: String? = null
+    private var pendingGeolocationCallback: GeolocationPermissions.Callback? = null
+    private var isNetworkCallbackRegistered = false
+
+    private val connectivityManager by lazy {
+        getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager
+    }
+
+    private val networkCallback = object : ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(network: Network) {
+            dispatchNetworkStatusChanged(true, "android-online")
+        }
+
+        override fun onLost(network: Network) {
+            dispatchNetworkStatusChanged(isNetworkOnline(), "android-offline")
+        }
+    }
 
     private val cameraResultLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode == Activity.RESULT_OK) {
@@ -100,6 +125,7 @@ class MainActivity : AppCompatActivity() {
         setContentView(binding.root)
 
         setupWebView()
+        registerNetworkCallback()
     }
 
     private fun setupWebView(): Boolean {
@@ -121,12 +147,68 @@ class MainActivity : AppCompatActivity() {
             ),
         )
 
+        locationTracker = ForegroundLocationTracker(
+            this,
+            onLocationUpdated = { payload ->
+                if (::webAppInterface.isInitialized) {
+                    webAppInterface.sendEventToWebApp(
+                        NativeBridgeContract.EVENT_LOCATION_UPDATED,
+                        payload,
+                    )
+                }
+            },
+            onPermissionChanged = { payload ->
+                if (::webAppInterface.isInitialized) {
+                    webAppInterface.sendEventToWebApp(
+                        NativeBridgeContract.EVENT_LOCATION_PERMISSION_CHANGED,
+                        payload,
+                    )
+                }
+            },
+        )
+
         webAppInterface = WebAppInterface(
             this,
             createdWebView,
             onCameraRequest = { intent -> cameraResultLauncher.launch(intent) },
             onGalleryRequest = { intent -> galleryResultLauncher.launch(intent) },
-            onPermissionsRequest = { requestAppPermissions() }
+            onDevicePermissionsRequest = { requestAppPermissions() },
+            onLocationPermissionsRequest = {
+                requestRuntimePermissions(
+                    includeCamera = false,
+                    includeActivityRecognition = false,
+                    includeLocation = true,
+                )
+            },
+            onReadHostContext = {
+                FitLootWebAppConfig.buildHostContextJson(isNetworkOnline())
+            },
+            onRequestCurrentLocation = {
+                if (!locationTracker.hasLocationPermission()) {
+                    requestRuntimePermissions(
+                        includeCamera = false,
+                        includeActivityRecognition = false,
+                        includeLocation = true,
+                    )
+                }
+                locationTracker.requestCurrentLocation()
+            },
+            onStartLocationTracking = {
+                if (!locationTracker.hasLocationPermission()) {
+                    requestRuntimePermissions(
+                        includeCamera = false,
+                        includeActivityRecognition = false,
+                        includeLocation = true,
+                    )
+                }
+                locationTracker.startTracking()
+            },
+            onStopLocationTracking = {
+                locationTracker.stopTracking()
+            },
+            onReadLocationPermissionStatus = {
+                locationTracker.buildPermissionStatusJson()
+            },
         )
 
         FitLootWebViewConfigurator.configure(
@@ -152,9 +234,15 @@ class MainActivity : AppCompatActivity() {
             onPermissionRequest = { request ->
                 handleWebPermissionRequest(request)
             },
+            onGeolocationPermissionRequest = { origin, callback ->
+                handleGeolocationPermissionRequest(origin, callback)
+            },
         )
+
         createdWebView.addJavascriptInterface(webAppInterface, NativeBridgeContract.BRIDGE_NAME)
         FitLootWebViewConfigurator.loadHome(createdWebView)
+        locationTracker.emitPermissionStatus()
+        dispatchNetworkStatusChanged()
         return true
     }
 
@@ -170,39 +258,58 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun requestAppPermissions() {
-        requestRuntimePermissions(includeActivityRecognition = true)
+        requestRuntimePermissions(
+            includeCamera = true,
+            includeActivityRecognition = true,
+            includeLocation = true,
+        )
         requestHealthConnectPermissionsIfNeeded()
     }
 
-    private fun requestRuntimePermissions(includeActivityRecognition: Boolean) {
-        val permissions = mutableListOf(
-            Manifest.permission.CAMERA,
-        )
+    private fun requestRuntimePermissions(
+        includeCamera: Boolean,
+        includeActivityRecognition: Boolean,
+        includeLocation: Boolean,
+    ) {
+        val permissions = mutableListOf<String>()
+        if (includeCamera) {
+            permissions.add(Manifest.permission.CAMERA)
+        }
         if (includeActivityRecognition) {
             permissions.add(Manifest.permission.ACTIVITY_RECOGNITION)
         }
-
-        val listPermissionsNeeded = ArrayList<String>()
-        for (p in permissions) {
-            if (ContextCompat.checkSelfPermission(this, p) != PackageManager.PERMISSION_GRANTED) {
-                listPermissionsNeeded.add(p)
-            }
+        if (includeLocation) {
+            permissions.add(Manifest.permission.ACCESS_COARSE_LOCATION)
+            permissions.add(Manifest.permission.ACCESS_FINE_LOCATION)
         }
-        if (listPermissionsNeeded.isNotEmpty()) {
-            ActivityCompat.requestPermissions(this, listPermissionsNeeded.toTypedArray(), RUNTIME_PERMISSIONS_REQUEST_CODE)
+
+        val missingPermissions = permissions.filter { permission ->
+            ContextCompat.checkSelfPermission(this, permission) != PackageManager.PERMISSION_GRANTED
+        }
+
+        if (missingPermissions.isNotEmpty()) {
+            ActivityCompat.requestPermissions(
+                this,
+                missingPermissions.toTypedArray(),
+                RUNTIME_PERMISSIONS_REQUEST_CODE,
+            )
         }
     }
 
     private fun handleWebPermissionRequest(request: PermissionRequest) {
         val requestedResources = request.resources.toList()
         val grantedResources = mutableListOf<String>()
-
         val needsCamera = requestedResources.contains(PermissionRequest.RESOURCE_VIDEO_CAPTURE)
-        val hasCameraPermission = ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+        val hasCameraPermission =
+            ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
 
         if (needsCamera && !hasCameraPermission) {
             pendingWebPermissionRequest = request
-            requestRuntimePermissions(includeActivityRecognition = false)
+            requestRuntimePermissions(
+                includeCamera = true,
+                includeActivityRecognition = false,
+                includeLocation = false,
+            )
             return
         }
 
@@ -218,12 +325,111 @@ class MainActivity : AppCompatActivity() {
         request.grant(grantedResources.toTypedArray())
     }
 
+    private fun handleGeolocationPermissionRequest(
+        origin: String,
+        callback: GeolocationPermissions.Callback,
+    ) {
+        if (!FitLootWebAppConfig.isTrustedUrl(origin)) {
+            callback.invoke(origin, false, false)
+            return
+        }
+
+        if (locationTracker.hasLocationPermission()) {
+            callback.invoke(origin, true, false)
+            locationTracker.emitPermissionStatus()
+            return
+        }
+
+        pendingGeolocationOrigin = origin
+        pendingGeolocationCallback = callback
+        requestRuntimePermissions(
+            includeCamera = false,
+            includeActivityRecognition = false,
+            includeLocation = true,
+        )
+    }
+
     private fun requestHealthConnectPermissionsIfNeeded() {
         lifecycleScope.launch {
             runCatching {
                 HealthConnectPermissionCoordinator.requestIfNeeded(this@MainActivity, healthPermissionsLauncher)
             }
         }
+    }
+
+    private fun registerNetworkCallback() {
+        if (isNetworkCallbackRegistered) {
+            return
+        }
+
+        runCatching {
+            connectivityManager.registerDefaultNetworkCallback(networkCallback)
+            isNetworkCallbackRegistered = true
+        }.onFailure { error ->
+            Log.w(TAG, "Unable to register network callback", error)
+        }
+    }
+
+    private fun unregisterNetworkCallback() {
+        if (!isNetworkCallbackRegistered) {
+            return
+        }
+
+        runCatching {
+            connectivityManager.unregisterNetworkCallback(networkCallback)
+        }.onFailure { error ->
+            Log.w(TAG, "Unable to unregister network callback", error)
+        }
+        isNetworkCallbackRegistered = false
+    }
+
+    private fun isNetworkOnline(): Boolean {
+        val activeNetwork = connectivityManager.activeNetwork ?: return false
+        val capabilities = connectivityManager.getNetworkCapabilities(activeNetwork) ?: return false
+        return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+    }
+
+    private fun dispatchNetworkStatusChanged(
+        online: Boolean = isNetworkOnline(),
+        type: String = if (online) "android-online" else "android-offline",
+    ) {
+        if (!::webAppInterface.isInitialized) {
+            return
+        }
+
+        webAppInterface.sendEventToWebApp(
+            NativeBridgeContract.EVENT_NETWORK_STATUS_CHANGED,
+            JSONObject().apply {
+                put("online", online)
+                put("type", type)
+                put("timestamp", Instant.now().toString())
+            },
+        )
+    }
+
+    private fun dispatchAppLifecycleChanged(state: String) {
+        if (!::webAppInterface.isInitialized) {
+            return
+        }
+
+        webAppInterface.sendEventToWebApp(
+            NativeBridgeContract.EVENT_APP_LIFECYCLE_CHANGED,
+            JSONObject().apply {
+                put("state", state)
+                put("timestamp", Instant.now().toString())
+            },
+        )
+    }
+
+    private fun resolvePendingGeolocationPermissionRequest() {
+        val origin = pendingGeolocationOrigin ?: return
+        val callback = pendingGeolocationCallback ?: return
+        pendingGeolocationOrigin = null
+        pendingGeolocationCallback = null
+
+        val granted = locationTracker.hasLocationPermission()
+        callback.invoke(origin, granted, false)
+        locationTracker.emitPermissionStatus()
     }
 
     override fun onRequestPermissionsResult(
@@ -239,22 +445,36 @@ class MainActivity : AppCompatActivity() {
 
         webAppInterface.onRuntimePermissionsChanged()
 
-        val request = pendingWebPermissionRequest ?: return
+        val request = pendingWebPermissionRequest
         pendingWebPermissionRequest = null
 
-        val cameraGranted = ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
-        if (cameraGranted) {
-            handleWebPermissionRequest(request)
-        } else {
-            request.deny()
+        if (request != null) {
+            val cameraGranted =
+                ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+            if (cameraGranted) {
+                handleWebPermissionRequest(request)
+            } else {
+                request.deny()
+            }
         }
+
+        resolvePendingGeolocationPermissionRequest()
     }
 
     override fun onResume() {
         super.onResume()
         if (::webAppInterface.isInitialized) {
             webAppInterface.onRuntimePermissionsChanged()
+            dispatchNetworkStatusChanged()
+            dispatchAppLifecycleChanged("foreground")
         }
+    }
+
+    override fun onPause() {
+        if (::webAppInterface.isInitialized) {
+            dispatchAppLifecycleChanged("background")
+        }
+        super.onPause()
     }
 
     override fun onBackPressed() {
@@ -267,6 +487,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        unregisterNetworkCallback()
+        if (::locationTracker.isInitialized) {
+            locationTracker.stopTracking()
+        }
         webView?.destroy()
         webView = null
         super.onDestroy()

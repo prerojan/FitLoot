@@ -1,6 +1,7 @@
 import type { DailyMetrics } from "@/shared/types";
-import { api, fetchAndCacheJson, readCachedJson } from "@/react-app/utils/api";
+import { fetchAndCacheJson, readCachedJson } from "@/react-app/utils/api";
 import { debugNativeOnce } from "./androidBridge";
+import { offlineSyncService } from "@/react-app/services/runtime/offlineSyncService";
 import {
   stepsService,
   type StepConfidence,
@@ -44,7 +45,6 @@ type RefreshMetricsOptions = {
 };
 
 const METRICS_API_PATH = "/api/metrics/today";
-const METRICS_UPDATE_API_PATH = "/api/metrics/update";
 const SUBSCRIPTION_INTERVAL_MS = 60 * 1000;
 
 // Normaliza timestamps e payloads mínimos antes de montar o estado consolidado.
@@ -140,14 +140,9 @@ function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Falha ao carregar métricas.";
 }
 
-function shouldSyncOfficialMetrics(stepSnapshot: StepSnapshot | null): boolean {
+function shouldPublishOfflineMetrics(stepSnapshot: StepSnapshot | null): boolean {
   if (!stepSnapshot) return false;
-  if (stepSnapshot.confidence !== "official") return false;
-  return (
-    stepSnapshot.source === "android-health-connect" ||
-    stepSnapshot.source === "health-connect" ||
-    stepSnapshot.source === "google-fit"
-  );
+  return stepSnapshot.source === "android-health-connect" || stepSnapshot.source === "android-sensor";
 }
 
 class MetricsService {
@@ -286,6 +281,11 @@ class MetricsService {
       const cached = readCachedJson<DailyMetrics>(METRICS_API_PATH);
       if (cached?.data) {
         this.apiMetrics = cached.data;
+        offlineSyncService.hydrateMetricsBaseline({
+          date: cached.data.date,
+          steps: cached.data.steps,
+          calories: cached.data.calories_burned,
+        });
       }
     }
 
@@ -296,6 +296,11 @@ class MetricsService {
     try {
       const metrics = await fetchAndCacheJson<DailyMetrics>(METRICS_API_PATH);
       this.apiMetrics = metrics;
+      offlineSyncService.hydrateMetricsBaseline({
+        date: metrics.date,
+        steps: metrics.steps,
+        calories: metrics.calories_burned,
+      });
       return metrics;
     } catch {
       return this.apiMetrics;
@@ -307,13 +312,14 @@ class MetricsService {
     stepSnapshot: StepSnapshot | null,
     consolidatedMetrics: ConsolidatedMetrics,
   ): Promise<void> {
-    if (!shouldSyncOfficialMetrics(stepSnapshot)) {
+    if (!shouldPublishOfflineMetrics(stepSnapshot)) {
       return;
     }
 
     const nextPayload = {
       steps: consolidatedMetrics.dailyMetrics.steps,
       calories_burned: consolidatedMetrics.dailyMetrics.calories_burned,
+      date: consolidatedMetrics.dailyMetrics.date,
     };
     const payloadKey = JSON.stringify(nextPayload);
     if (this.lastSyncedPayloadKey === payloadKey) {
@@ -330,20 +336,19 @@ class MetricsService {
     }
 
     try {
-      const response = await api(METRICS_UPDATE_API_PATH, {
-        method: "POST",
-        body: JSON.stringify(nextPayload),
+      await offlineSyncService.publishMetricsSnapshot({
+        date: consolidatedMetrics.dailyMetrics.date,
+        steps: consolidatedMetrics.dailyMetrics.steps,
+        calories: consolidatedMetrics.dailyMetrics.calories_burned,
+        confidence: stepSnapshot?.confidence === "official" ? "official" : "derived",
       });
-
-      if (!response.ok) {
-        return;
-      }
 
       this.lastSyncedPayloadKey = payloadKey;
       this.apiMetrics = {
         ...(this.apiMetrics ?? createEmptyDailyMetrics()),
         steps: nextPayload.steps,
         calories_burned: nextPayload.calories_burned,
+        date: nextPayload.date,
         updated_at: consolidatedMetrics.lastUpdated,
       };
 

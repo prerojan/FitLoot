@@ -1,4 +1,4 @@
-import { BrowserRouter as Router } from "react-router";
+import { BrowserRouter, HashRouter } from "react-router";
 import { useState, useEffect, Suspense, useCallback } from "react";
 import { Analytics } from "@vercel/analytics/react";
 import { SpeedInsights } from "@vercel/speed-insights/react";
@@ -18,6 +18,8 @@ import { clearJsonCache } from "@/react-app/utils/api";
 import type { User } from "@/react-app/auth/types";
 import { hasPlanAccess } from "@/react-app/services/authService";
 import { startPresenceHeartbeat } from "@/react-app/services/presenceService";
+import { getHostContext } from "@/react-app/services/runtime/hostRuntime";
+import { offlineSyncService } from "@/react-app/services/runtime/offlineSyncService";
 import AppRoutes from "./routes/AppRoutes";
 import RouteLoader from "./routes/RouteLoader";
 
@@ -26,6 +28,8 @@ type AppProps = {
 };
 
 export default function App({ initialThemeMode = DEFAULT_APP_THEME_MODE }: AppProps) {
+  const hostContext = getHostContext();
+  const RouterComponent = hostContext.webMode === "bundled" ? HashRouter : BrowserRouter;
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [themeMode, setThemeModeState] = useState<AppThemeMode>(initialThemeMode);
@@ -52,6 +56,10 @@ export default function App({ initialThemeMode = DEFAULT_APP_THEME_MODE }: AppPr
   }, [checkAuth]);
 
   useEffect(() => {
+    offlineSyncService.start();
+  }, []);
+
+  useEffect(() => {
     applyAppThemeMode(themeMode);
     persistAppThemeMode(themeMode);
   }, [themeMode]);
@@ -72,14 +80,14 @@ export default function App({ initialThemeMode = DEFAULT_APP_THEME_MODE }: AppPr
         }}
       >
         <AuthContext.Provider value={{ user, loading, checkAuth, logout }}>
-          <Router>
+          <RouterComponent>
             <Suspense fallback={<RouteLoader />}>
               <AppRoutes />
             </Suspense>
 
             <Analytics />
             <SpeedInsights />
-          </Router>
+          </RouterComponent>
         </AuthContext.Provider>
       </AppChromeContext.Provider>
     </ThemeContext.Provider>

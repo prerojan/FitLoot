@@ -20,12 +20,12 @@ import type {
 } from "@/shared/types";
 import {
   ApiRequestError,
-  api,
   clearJsonCache,
   fetchAndCacheJson,
   readCachedJson,
   writeCachedJson,
 } from "@/react-app/utils/api";
+import { offlineSyncService } from "@/react-app/services/runtime/offlineSyncService";
 import { getAchievementShowcaseStyle, resolveShowcasedAchievement } from "@/react-app/utils/achievementShowcase";
 import {
   MetricCard,
@@ -118,8 +118,12 @@ export default function Dashboard() {
   const [activeTitle, setActiveTitle] = useState<Title | null>(null);
   const [loadingState, setLoadingState] = useState<DashboardLoadingState>(DEFAULT_LOADING_STATE);
   const [error, setError] = useState<string | null>(null);
+  const [pendingMissionIds, setPendingMissionIds] = useState<number[]>(() =>
+    Array.from(offlineSyncService.getPendingMissionIds()),
+  );
   const [quickActionsOpen, setQuickActionsOpen] = useState(false);
   const quickActionsRef = useRef<HTMLDivElement | null>(null);
+  const pendingMissionCountRef = useRef(pendingMissionIds.length);
   const { metrics: consolidatedMetrics, loading: metricsLoading, refreshMetrics } = useDailyMetrics({ syncRemote: true });
 
   const setSectionLoading = useCallback((section: keyof DashboardLoadingState, value: boolean) => {
@@ -301,6 +305,21 @@ export default function Dashboard() {
     ]);
   }, [loadData, refreshMetrics]);
 
+  useEffect(() => {
+    return offlineSyncService.subscribe((state) => {
+      const nextPendingIds = state.operations
+        .filter((operation) => operation.type === "mission_completed")
+        .map((operation) => operation.payload.mission_id);
+      const previousPendingCount = pendingMissionCountRef.current;
+      pendingMissionCountRef.current = nextPendingIds.length;
+      setPendingMissionIds(nextPendingIds);
+
+      if (previousPendingCount > 0 && nextPendingIds.length === 0) {
+        void refreshData();
+      }
+    });
+  }, [refreshData]);
+
   const hydrateGeneratedMissions = useCallback((nextMissions: Mission[]) => {
     if (nextMissions.length > 0) {
       writeCachedJson("/api/missions", nextMissions);
@@ -328,73 +347,26 @@ export default function Dashboard() {
     }
 
     try {
-      const response = await api("/api/missions/complete", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          mission_id: normalizedMissionId,
-          reps_completed: normalizedMetricValue,
-          metric_completed: normalizedMetricValue,
-          sensor_verified: Boolean(verified),
-        }),
+      const syncResult = await offlineSyncService.syncMissionCompletion({
+        missionId: normalizedMissionId,
+        metricCompleted: normalizedMetricValue,
+        sensorVerified: Boolean(verified),
+        userId: user?.id,
+        confidence: verified ? "official" : "derived",
       });
 
-      if (response.status === 401 || response.status === 403) {
-        navigate("/app");
+      const nextMissions = missions.filter(
+        (mission) => Number(mission.id) !== normalizedMissionId,
+      );
+      setMissions(nextMissions);
+      writeCachedJson("/api/missions", nextMissions);
+      setError(null);
+
+      if (syncResult.status === "queued") {
         return;
       }
 
-      if (!response.ok) {
-        const payload = (await response.json().catch(() => null)) as
-          | {
-              error?:
-                | string
-                | {
-                    issues?: Array<{ message?: string | undefined }>;
-                  }
-                | undefined;
-              phase?: string | undefined;
-              code?: string | undefined;
-            }
-          | null;
-        const payloadCode = typeof payload?.code === "string" ? payload.code : "";
-        const payloadError = typeof payload?.error === "string" ? payload.error : undefined;
-        const payloadErrorObject =
-          payload && typeof payload.error === "object" && payload.error !== null
-            ? payload.error
-            : null;
-        const validationIssues = Array.isArray(payloadErrorObject?.issues)
-          ? payloadErrorObject.issues
-          : [];
-        const validationMessage = validationIssues.find(
-          (issue): issue is { message: string } =>
-            typeof issue?.message === "string",
-        )?.message;
-
-        if (payloadCode === "MISSION_AUTO_PROGRESS_ONLY") {
-          setError(
-            payloadError ??
-              "Essa missao possui progresso automatico. Conclua as tarefas diarias relacionadas.",
-          );
-          void refreshData();
-          throw new Error("MISSION_COMPLETE_HANDLED");
-        }
-
-        const detail = payload?.phase ? ` (fase: ${payload.phase})` : "";
-        setError(
-          `${payloadError ?? validationMessage ?? "Nao foi possivel concluir a missao."}${detail}`,
-        );
-        throw new Error("MISSION_COMPLETE_HANDLED");
-      }
-
-      const result = (await response.json()) as {
-        reward_events?: RewardNotification[] | undefined;
-      };
-      setMissions((current) =>
-        current.filter((mission) => Number(mission.id) !== normalizedMissionId),
-      );
-      setError(null);
-      pushRewardNotifications(result.reward_events);
+      pushRewardNotifications(syncResult.result?.reward_events as RewardNotification[] | undefined);
 
       await refreshData();
     } catch (error) {
@@ -410,30 +382,42 @@ export default function Dashboard() {
   };
 
   const allDailyMissions = useMemo(
-    () =>
-      sortMissions(
-        missions.filter(
-          (mission) => mission.type === "daily" && !isAiSpecialMission(mission) && !isExpiredMission(mission),
-        ),
+    () => sortMissions(
+      missions.filter(
+        (mission) =>
+          !pendingMissionIds.includes(Number(mission.id)) &&
+          mission.type === "daily" &&
+          !isAiSpecialMission(mission) &&
+          !isExpiredMission(mission),
       ),
-    [isAiSpecialMission, isExpiredMission, missions],
+    ),
+    [isAiSpecialMission, isExpiredMission, missions, pendingMissionIds],
   );
   const visibleDailyMissions = useMemo(() => allDailyMissions.slice(0, 3), [allDailyMissions]);
   const aiSpecialMissions = useMemo(
-    () => sortMissions(missions.filter((mission) => isAiSpecialMission(mission) && mission.is_completed !== 1 && !isExpiredMission(mission))),
-    [isAiSpecialMission, isExpiredMission, missions],
+    () =>
+      sortMissions(
+        missions.filter(
+          (mission) =>
+            !pendingMissionIds.includes(Number(mission.id)) &&
+            isAiSpecialMission(mission) &&
+            mission.is_completed !== 1 &&
+            !isExpiredMission(mission),
+        ),
+      ),
+    [isAiSpecialMission, isExpiredMission, missions, pendingMissionIds],
   );
   const weeklyMissions = useMemo(
-    () => sortMissions(missions.filter((mission) => mission.type === "weekly" && mission.is_completed !== 1 && !isExpiredMission(mission) && !isAiSpecialMission(mission))),
-    [isAiSpecialMission, isExpiredMission, missions],
+    () => sortMissions(missions.filter((mission) => !pendingMissionIds.includes(Number(mission.id)) && mission.type === "weekly" && mission.is_completed !== 1 && !isExpiredMission(mission) && !isAiSpecialMission(mission))),
+    [isAiSpecialMission, isExpiredMission, missions, pendingMissionIds],
   );
   const monthlyMissions = useMemo(
-    () => sortMissions(missions.filter((mission) => mission.type === "monthly" && mission.is_completed !== 1 && !isExpiredMission(mission) && !isAiSpecialMission(mission))),
-    [isAiSpecialMission, isExpiredMission, missions],
+    () => sortMissions(missions.filter((mission) => !pendingMissionIds.includes(Number(mission.id)) && mission.type === "monthly" && mission.is_completed !== 1 && !isExpiredMission(mission) && !isAiSpecialMission(mission))),
+    [isAiSpecialMission, isExpiredMission, missions, pendingMissionIds],
   );
   const expiredMissions = useMemo(
-    () => sortMissions(missions.filter((mission) => isExpiredMission(mission) && mission.is_completed !== 1 && !isAiSpecialMission(mission))),
-    [isAiSpecialMission, isExpiredMission, missions],
+    () => sortMissions(missions.filter((mission) => !pendingMissionIds.includes(Number(mission.id)) && isExpiredMission(mission) && mission.is_completed !== 1 && !isAiSpecialMission(mission))),
+    [isAiSpecialMission, isExpiredMission, missions, pendingMissionIds],
   );
   const expiredMissionRefreshDelay = useMemo(
     () => resolveExpiredMissionRefreshDelay(expiredMissions),

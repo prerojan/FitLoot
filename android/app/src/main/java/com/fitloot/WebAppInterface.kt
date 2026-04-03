@@ -17,7 +17,13 @@ class WebAppInterface(
     private val webView: WebView,
     private val onCameraRequest: (Intent) -> Unit,
     private val onGalleryRequest: (Intent) -> Unit,
-    private val onPermissionsRequest: (() -> Unit)? = null
+    private val onDevicePermissionsRequest: (() -> Unit)? = null,
+    private val onLocationPermissionsRequest: (() -> Unit)? = null,
+    private val onReadHostContext: (() -> JSONObject)? = null,
+    private val onRequestCurrentLocation: (() -> Unit)? = null,
+    private val onStartLocationTracking: (() -> Unit)? = null,
+    private val onStopLocationTracking: (() -> Unit)? = null,
+    private val onReadLocationPermissionStatus: (() -> JSONObject)? = null,
 ) {
 
     private val stepCounter = StepCounter(context)
@@ -36,15 +42,50 @@ class WebAppInterface(
     }
 
     @JavascriptInterface
+    fun getHostContext(): String {
+        return onReadHostContext?.invoke()?.toString() ?: JSONObject().apply {
+            put("platform", "android")
+            put("webMode", "remote")
+            put("buildType", "prod")
+            put("networkOnline", true)
+        }.toString()
+    }
+
+    @JavascriptInterface
     fun requestPermissions() {
-        onPermissionsRequest?.invoke()
+        onDevicePermissionsRequest?.invoke()
+    }
+
+    @JavascriptInterface
+    fun requestLocationPermission() {
+        onLocationPermissionsRequest?.invoke()
+    }
+
+    @JavascriptInterface
+    fun getLocationPermissionStatus(): String {
+        return onReadLocationPermissionStatus?.invoke()?.toString() ?: JSONObject().toString()
+    }
+
+    @JavascriptInterface
+    fun requestCurrentLocation() {
+        onRequestCurrentLocation?.invoke()
+    }
+
+    @JavascriptInterface
+    fun startLocationTracking() {
+        onStartLocationTracking?.invoke()
+    }
+
+    @JavascriptInterface
+    fun stopLocationTracking() {
+        onStopLocationTracking?.invoke()
     }
 
     @JavascriptInterface
     fun startStepTracking() {
         if (!stepCounter.hasActivityRecognitionPermission()) {
             pendingStepTrackingStart = true
-            onPermissionsRequest?.invoke()
+            onDevicePermissionsRequest?.invoke()
             return
         }
 
@@ -75,7 +116,7 @@ class WebAppInterface(
     @JavascriptInterface
     fun getStepMetrics() {
         if (!stepCounter.hasActivityRecognitionPermission()) {
-            onPermissionsRequest?.invoke()
+            onDevicePermissionsRequest?.invoke()
         }
         scope.launch {
             val metrics = stepCounter.getDailyMetrics()
@@ -87,6 +128,10 @@ class WebAppInterface(
         if (pendingStepTrackingStart && stepCounter.hasActivityRecognitionPermission()) {
             pendingStepTrackingStart = false
             stepCounter.start()
+        }
+
+        onReadLocationPermissionStatus?.invoke()?.let { status ->
+            sendEventToWebApp(NativeBridgeContract.EVENT_LOCATION_PERMISSION_CHANGED, status)
         }
     }
 

@@ -263,6 +263,82 @@ type MissionRouteDeps = {
   clearMissionDetailCache: (userId: string, missionId: number) => void;
 };
 
+type StoredMissionOperationRow = {
+  response_payload?: string | null;
+};
+
+async function readStoredMissionOperationResult(
+  db: D1Database,
+  userId: string,
+  operationId: string,
+): Promise<Record<string, unknown> | null> {
+  const row = await db
+    .prepare(
+      `SELECT response_payload
+       FROM offline_sync_operations
+       WHERE user_id = ? AND operation_id = ?`,
+    )
+    .bind(userId, operationId)
+    .first<StoredMissionOperationRow>();
+
+  if (!row?.response_payload) {
+    return null;
+  }
+
+  try {
+    const payload = JSON.parse(row.response_payload);
+    return payload && typeof payload === "object"
+      ? payload as Record<string, unknown>
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+async function persistMissionOperationResult(
+  db: D1Database,
+  params: {
+    userId: string;
+    operationId: string;
+    occurredAt?: string | undefined;
+    requestPayload: unknown;
+    responsePayload: unknown;
+  },
+): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO offline_sync_operations (
+         user_id,
+         operation_id,
+         operation_type,
+         occurred_at,
+         source,
+         confidence,
+         request_payload,
+         response_payload,
+         status,
+         processed_at,
+         updated_at
+       ) VALUES (?, ?, 'mission_completed', ?, 'browser', NULL, ?, ?, 'processed', datetime('now'), datetime('now'))
+       ON CONFLICT(user_id, operation_id) DO UPDATE SET
+         operation_type = 'mission_completed',
+         occurred_at = excluded.occurred_at,
+         request_payload = excluded.request_payload,
+         response_payload = excluded.response_payload,
+         status = 'processed',
+         processed_at = datetime('now'),
+         updated_at = datetime('now')`,
+    )
+    .bind(
+      params.userId,
+      params.operationId,
+      params.occurredAt ?? new Date().toISOString(),
+      JSON.stringify(params.requestPayload),
+      JSON.stringify(params.responsePayload),
+    )
+    .run();
+}
+
 function looksLikeExerciseDbMediaUrl(value: unknown): boolean {
   return typeof value === "string"
     && /static\.exercisedb\.dev\/media\/[A-Za-z0-9_-]+\.(?:gif|png|jpe?g|webp)(?:$|\?)/i.test(value.trim());
@@ -803,6 +879,14 @@ export function registerMissionRoutes(
       if (!user) return c.json({ error: "Unauthorized" }, 401);
 
       const data = c.req.valid("json");
+      const operationId =
+        typeof data.operation_id === "string" && data.operation_id.trim().length > 0
+          ? data.operation_id.trim()
+          : null;
+      const occurredAt =
+        typeof data.occurred_at === "string" && data.occurred_at.trim().length > 0
+          ? data.occurred_at.trim()
+          : undefined;
       const completedMetricValue = Number(
         data.metric_completed ??
           data.reps_completed ??
@@ -812,6 +896,17 @@ export function registerMissionRoutes(
       let completionPhase = "load_mission";
 
       try {
+        if (operationId) {
+          const storedResult = await readStoredMissionOperationResult(
+            c.env.fitloot_db,
+            user.id,
+            operationId,
+          );
+          if (storedResult) {
+            return c.json(storedResult);
+          }
+        }
+
         const mission = await c.env.fitloot_db
           .prepare(
             "SELECT * FROM missions WHERE id = ? AND user_id = ? AND is_completed = 0",
@@ -1232,14 +1327,26 @@ export function registerMissionRoutes(
         );
         leveledUp = rewardEvents.some((event) => event.type === "level_up");
 
-        return c.json({
+        const responsePayload = {
           success: true,
           xpGained,
           pointsGained,
           leveledUp,
           reward_events: rewardEvents,
           streakMultiplier: streakMultiplier.toFixed(1),
-        });
+        };
+
+        if (operationId) {
+          await persistMissionOperationResult(c.env.fitloot_db, {
+            userId: user.id,
+            operationId,
+            occurredAt,
+            requestPayload: data,
+            responsePayload,
+          });
+        }
+
+        return c.json(responsePayload);
       } catch (error) {
         const errorMsg = getErrorMessage(error);
         console.error("[/api/missions/complete]", {

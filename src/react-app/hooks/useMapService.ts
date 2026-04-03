@@ -6,6 +6,10 @@
 import { useState, useEffect, useCallback } from "react";
 import { openStreetMapService, OSMConfig, OSMMarker } from "../services/openStreetMapService";
 import type { NominatimResult } from "../services/openStreetMapService";
+import {
+  locationRuntimeService,
+  type LocationPermissionStatus,
+} from "@/react-app/services/runtime/locationRuntimeService";
 
 export interface MapState {
   center: [number, number];
@@ -45,30 +49,21 @@ export const useMapService = (options: UseMapServiceOptions = {}) => {
 
   const [userLocation, setUserLocation] = useState<[number, number] | null>(null);
   const [isInitialized, setIsInitialized] = useState<boolean>(false);
+  const [locationPermission, setLocationPermission] = useState<LocationPermissionStatus>(
+    () => locationRuntimeService.getState().permission,
+  );
 
-  // Resolve a localizacao atual usando a API nativa do navegador.
+  // Resolve a localizacao atual pela camada de runtime, priorizando Android nativo.
   const getCurrentLocation = useCallback(async (): Promise<[number, number] | null> => {
-    if (!navigator.geolocation) {
-      console.warn("Geolocalizacao nao suportada pelo navegador");
-      return null;
-    }
-
     try {
-      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
-        navigator.geolocation.getCurrentPosition(
-          resolve,
-          reject,
-          {
-            enableHighAccuracy: true,
-            timeout: 10000,
-            maximumAge: 300000, // 5 minutes
-          },
-        );
-      });
+      const runtimeLocation = await locationRuntimeService.getCurrentLocation();
+      if (!runtimeLocation) {
+        return null;
+      }
 
       const coordinates: [number, number] = [
-        position.coords.longitude,
-        position.coords.latitude,
+        runtimeLocation.longitude,
+        runtimeLocation.latitude,
       ];
 
       setUserLocation(coordinates);
@@ -86,11 +81,13 @@ export const useMapService = (options: UseMapServiceOptions = {}) => {
       setMapState((prev) => ({ ...prev, isLoading: true, error: null }));
 
       await openStreetMapService.initialize();
-      setIsInitialized(true);
+      setLocationPermission(await locationRuntimeService.getLocationPermissionStatus());
 
       if (enableGeolocation) {
         await getCurrentLocation();
       }
+
+      setIsInitialized(true);
 
       setMapState((prev) => ({ ...prev, isLoading: false }));
     } catch (err) {
@@ -296,6 +293,33 @@ export const useMapService = (options: UseMapServiceOptions = {}) => {
     void initialize();
   }, [initialize]);
 
+  useEffect(() => {
+    return locationRuntimeService.subscribe((runtimeState) => {
+      setLocationPermission(runtimeState.permission);
+
+      if (runtimeState.location) {
+        const coordinates: [number, number] = [
+          runtimeState.location.longitude,
+          runtimeState.location.latitude,
+        ];
+        setUserLocation(coordinates);
+        setMapState((prev) => ({ ...prev, center: coordinates }));
+      }
+
+      if (runtimeState.error) {
+        setMapState((prev) => ({ ...prev, error: runtimeState.error }));
+      }
+    });
+  }, []);
+
+  const startForegroundLocationTracking = useCallback(async (): Promise<void> => {
+    await locationRuntimeService.startForegroundLocationTracking();
+  }, []);
+
+  const stopForegroundLocationTracking = useCallback((): void => {
+    locationRuntimeService.stopForegroundLocationTracking();
+  }, []);
+
   return {
     // Estado exposto
     mapState,
@@ -305,6 +329,8 @@ export const useMapService = (options: UseMapServiceOptions = {}) => {
     // Acoes de mapa
     initialize,
     getCurrentLocation,
+    startForegroundLocationTracking,
+    stopForegroundLocationTracking,
     searchLocation,
     reverseGeocode,
     addMarker,
@@ -323,6 +349,8 @@ export const useMapService = (options: UseMapServiceOptions = {}) => {
     // Derivados prontos para consumo
     hasUserLocation: !!userLocation,
     markerCount: mapState.markers.length,
+    locationPermission: locationPermission.permission,
+    locationPrecision: locationPermission.precision,
   };
 };
 

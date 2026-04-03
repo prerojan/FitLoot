@@ -90,10 +90,10 @@ function InsightCard({
   // Cartao-base das leituras geradas pela IA no painel.
   return (
     <article
-      className="fl-theme-surface min-w-0 rounded-[1.5rem] p-4 sm:rounded-[1.75rem] sm:p-5"
+      className="fl-theme-surface flex h-full min-w-0 rounded-[1.5rem] p-4 sm:rounded-[1.75rem] sm:p-5 md:p-6"
       style={{ boxShadow: "var(--fl-shadow-glass)" }}
     >
-      <div className="flex items-start gap-4">
+      <div className="flex min-w-0 items-start gap-4">
         <div
           className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl"
           style={{
@@ -103,14 +103,14 @@ function InsightCard({
         >
           {icon}
         </div>
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <p className="text-[10px] font-black uppercase tracking-[0.24em]" style={{ color: "var(--app-primary-color)" }}>
             {eyebrow}
           </p>
-          <h3 className="mt-2 text-base font-black" style={{ color: "var(--fl-color-text)" }}>
+          <h3 className="mt-2 break-words text-base font-black leading-snug sm:text-[1.02rem]" style={{ color: "var(--fl-color-text)" }}>
             {title}
           </h3>
-          <p className="mt-2 text-sm leading-relaxed" style={{ color: "var(--fl-color-text-muted)" }}>
+          <p className="mt-2 break-words text-sm leading-relaxed" style={{ color: "var(--fl-color-text-muted)" }}>
             {description}
           </p>
         </div>
@@ -246,7 +246,7 @@ export default function AIRecommendations() {
 
       {/* Mensagem principal sintetizada para leitura rapida. */}
       <div
-        className="rounded-[1.5rem] p-4 sm:rounded-[2rem] sm:p-6"
+        className="rounded-[1.5rem] p-4 sm:rounded-[2rem] sm:p-6 md:p-7"
         style={{
           background:
             "radial-gradient(circle at top right, color-mix(in srgb, var(--app-primary-color) 22%, transparent), transparent 44%), linear-gradient(135deg, color-mix(in srgb, var(--fl-surface-gradient-top) 96%, transparent), color-mix(in srgb, var(--fl-surface-gradient-bottom) 100%, transparent))",
@@ -254,7 +254,7 @@ export default function AIRecommendations() {
           boxShadow: "var(--fl-shadow-glass)",
         }}
       >
-        <div className="flex items-start gap-4">
+        <div className="flex min-w-0 items-start gap-4">
           <div
             className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl"
             style={{
@@ -264,11 +264,11 @@ export default function AIRecommendations() {
           >
             <Sparkles className="h-5 w-5" />
           </div>
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <p className="text-[10px] font-black uppercase tracking-[0.24em]" style={{ color: "var(--app-primary-color)" }}>
               Leitura rapida
             </p>
-            <p className="mt-2 text-sm leading-relaxed" style={{ color: "var(--fl-color-text)" }}>
+            <p className="mt-2 break-words text-sm leading-relaxed sm:text-[0.95rem]" style={{ color: "var(--fl-color-text)" }}>
               {recommendations.motivation_message}
             </p>
           </div>
@@ -276,7 +276,7 @@ export default function AIRecommendations() {
       </div>
 
       {/* Grade das tres recomendacoes acionaveis geradas pela IA. */}
-      <div className="grid gap-3 sm:gap-4 md:grid-cols-2 xl:grid-cols-3">
+      <div className="grid gap-3 sm:gap-4 [grid-template-columns:repeat(auto-fit,minmax(min(100%,15rem),1fr))]">
         <InsightCard
           icon={<Target className="h-5 w-5" />}
           eyebrow="Proxima skill"

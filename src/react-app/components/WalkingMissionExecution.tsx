@@ -13,6 +13,9 @@ import { useMapService } from "@/react-app/hooks/useMapService";
 import { formatStepsSourceLabel } from "@/react-app/services/native/stepsService";
 import type { Mission, MissionMetricType } from "@/shared/types";
 
+const NOOP_ASYNC_LOCATION_TRACKING = async (): Promise<void> => undefined;
+const NOOP_LOCATION_TRACKING = (): void => undefined;
+
 type WalkingMissionExecutionProps = {
   mission: Mission & { skill_name?: string | undefined };
   onComplete: (id: number, value: number, verified: boolean) => Promise<void> | void;
@@ -50,6 +53,9 @@ const WalkingMissionExecution = ({ mission, onComplete, onClose }: WalkingMissio
     addMarker,
     clearMarkers,
     userLocation: mapUserLocation,
+    startForegroundLocationTracking = NOOP_ASYNC_LOCATION_TRACKING,
+    stopForegroundLocationTracking = NOOP_LOCATION_TRACKING,
+    locationPrecision = "precise",
   } = useMapService();
 
   const [state, setState] = useState<ExecutionState>({
@@ -82,6 +88,7 @@ const WalkingMissionExecution = ({ mission, onComplete, onClose }: WalkingMissio
         isRunning: false,
         isPaused: false,
       }));
+      stopForegroundLocationTracking();
 
       const verified = healthData
         ? healthData.source !== "api" && healthData.source !== "unavailable"
@@ -94,7 +101,7 @@ const WalkingMissionExecution = ({ mission, onComplete, onClose }: WalkingMissio
         error: "Falha ao registrar conclusao da missao.",
       }));
     }
-  }, [healthData, mission.id, onComplete]);
+  }, [healthData, mission.id, onComplete, stopForegroundLocationTracking]);
 
   // Converte a meta para passos e distancia a partir da configuracao da missao.
   useEffect(() => {
@@ -205,6 +212,7 @@ const WalkingMissionExecution = ({ mission, onComplete, onClose }: WalkingMissio
       }));
 
       await generateSafeRoute();
+      await startForegroundLocationTracking();
 
       if (import.meta.env.DEV && healthData && healthData.confidence !== "official") {
         console.warn(`Fonte de passos em fallback: ${formatStepsSourceLabel(healthData.source)}.`);
@@ -235,9 +243,16 @@ const WalkingMissionExecution = ({ mission, onComplete, onClose }: WalkingMissio
       isPaused: false,
       endTime: new Date(),
     }));
+    stopForegroundLocationTracking();
     clearMarkers();
     onClose();
-  }, [clearMarkers, onClose]);
+  }, [clearMarkers, onClose, stopForegroundLocationTracking]);
+
+  useEffect(() => {
+    return () => {
+      stopForegroundLocationTracking();
+    };
+  }, [stopForegroundLocationTracking]);
 
   // Deriva o percentual de progresso a partir da metrica da missao.
   const progress = isStepsMission
@@ -338,6 +353,12 @@ const WalkingMissionExecution = ({ mission, onComplete, onClose }: WalkingMissio
                   <Badge variant={state.isCompleted ? "default" : "neutral"}>
                     {state.isCompleted ? "Concluida" : state.isRunning ? "Em andamento" : "Pendente"}
                   </Badge>
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-gray-600">Precisao do GPS:</span>
+                  <span className="font-medium">
+                    {locationPrecision === "approximate" ? "Aproximada" : "Precisa"}
+                  </span>
                 </div>
               </div>
             </div>

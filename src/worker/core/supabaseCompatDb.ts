@@ -64,6 +64,7 @@ const TABLE_SCHEMA_MAP: Readonly<Record<string, string>> = {
   friend_activity_events: "social",
   daily_metrics: "telemetry",
   food_diary: "telemetry",
+  offline_sync_operations: "telemetry",
   progress_snapshots: "telemetry",
   physical_benchmarks: "telemetry",
   app_state: "telemetry",

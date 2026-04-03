@@ -9,7 +9,6 @@ import {
   Star,
   Trophy,
   X,
-  Info,
 } from "lucide-react";
 import { Card } from "@/react-app/components/ui/card";
 import { Button } from "@/react-app/components/ui/button";
@@ -193,19 +192,14 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
   const detailDescription = missionDetails.description
     ? (localizeMissionText(missionDetails.description) ?? missionDetails.description)
     : null;
-  const safetyTips = Array.isArray(missionDetails.safety_tips) && missionDetails.safety_tips.length > 0
+  const safetyTipsBase = Array.isArray(missionDetails.safety_tips) && missionDetails.safety_tips.length > 0
     ? localizeMissionTextArray(missionDetails.safety_tips)
     : ["Mantenha alinhamento postural e interrompa em caso de dor aguda."];
-  const instructionList =
-    (Array.isArray(missionDetails.instructions) && missionDetails.instructions.length > 0
-      ? localizeMissionTextArray(missionDetails.instructions)
-      : Array.isArray(missionDetails.exercise_instructions_pt) && missionDetails.exercise_instructions_pt.length > 0
-        ? localizeMissionTextArray(missionDetails.exercise_instructions_pt)
-        : Array.isArray(missionDetails.exercise_instructions_en) && missionDetails.exercise_instructions_en.length > 0
-          ? localizeMissionTextArray(missionDetails.exercise_instructions_en)
-          : detailDescription
-            ? [detailDescription]
-            : ["Siga o movimento com controle e respire durante cada repetição."]);
+  const safetyTips = Array.from(new Set([
+    ...safetyTipsBase,
+    "Faça alongamentos leves antes de iniciar a missão para preparar músculos e articulações.",
+    "Após concluir a missão, faça alongamentos leves para apoiar a recuperação muscular.",
+  ]));
   const missionMediaStyle = resolveMissionMediaStyle(missionMediaUrl);
   const detailMissionMediaStyle = resolveMissionMediaStyle(detailMissionMediaUrl);
   const detailIsTrackableWalkingMission = (detailMetricType === "steps" || detailMetricType === "distance_meters") && missionDetails.type === "daily";
@@ -661,32 +655,6 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
                           style={{ background: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)", borderColor: "color-mix(in srgb, var(--app-primary-color) 20%, transparent)" }}
                         >
                           <span className="font-semibold text-sm" style={{ color: "var(--app-primary-color)" }}>{label}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="px-6 pt-8">
-                    <h3 className="text-lg font-bold mb-3 flex items-center gap-2" style={{ color: "var(--fl-color-text)" }}>
-                      <Info className="w-5 h-5" style={{ color: "var(--app-primary-color)" }} />
-                      Execução
-                    </h3>
-                    <div className="space-y-3">
-                      {instructionList.map((step, index) => (
-                        <div
-                          key={`${step}-${index}`}
-                          className="flex gap-3 rounded-2xl border p-3"
-                          style={{ background: "color-mix(in srgb, var(--fl-surface-muted) 50%, transparent)", borderColor: "var(--fl-border-soft)" }}
-                        >
-                          <span
-                            className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-black"
-                            style={{ background: "color-mix(in srgb, var(--app-primary-color) 18%, transparent)", color: "var(--app-primary-color)" }}
-                          >
-                            {index + 1}
-                          </span>
-                          <p className="text-sm leading-relaxed" style={{ color: "var(--fl-color-text-muted)" }}>
-                            {step}
-                          </p>
                         </div>
                       ))}
                     </div>

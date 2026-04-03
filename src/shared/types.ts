@@ -406,9 +406,94 @@ export const CompleteMissionRequestSchema = z.object({
   time_completed: OptionalMissionMetricInputSchema,
   metric_completed: OptionalMissionMetricInputSchema,
   sensor_verified: z.boolean(),
+  operation_id: z.string().trim().min(8).max(128).optional(),
+  occurred_at: z.string().datetime({ offset: true }).optional(),
 });
 
 export type CompleteMissionRequest = z.infer<typeof CompleteMissionRequestSchema>;
+
+export const OfflineOperationTypeSchema = z.enum([
+  "mission_completed",
+  "achievement_triggered",
+  "step_delta_recorded",
+  "calorie_delta_recorded",
+]);
+
+export type OfflineOperationType = z.infer<typeof OfflineOperationTypeSchema>;
+
+export const OfflineOperationSourceSchema = z.enum([
+  "android-native",
+  "browser",
+]);
+
+export type OfflineOperationSource = z.infer<typeof OfflineOperationSourceSchema>;
+
+export const OfflineOperationConfidenceSchema = z.enum([
+  "official",
+  "derived",
+]);
+
+export type OfflineOperationConfidence = z.infer<typeof OfflineOperationConfidenceSchema>;
+
+const OfflineMetricDeltaPayloadSchema = z.object({
+  delta: z.number().finite().min(0),
+  total_after_delta: z.number().finite().min(0).optional(),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+});
+
+export const StepDeltaRecordedOperationSchema = z.object({
+  operation_id: z.string().trim().min(8).max(128),
+  type: z.literal("step_delta_recorded"),
+  user_id: z.string().trim().min(1).max(128).optional(),
+  occurred_at: z.string().datetime({ offset: true }),
+  source: OfflineOperationSourceSchema,
+  confidence: OfflineOperationConfidenceSchema,
+  payload: OfflineMetricDeltaPayloadSchema,
+});
+
+export type StepDeltaRecordedOperation = z.infer<typeof StepDeltaRecordedOperationSchema>;
+
+export const CalorieDeltaRecordedOperationSchema = z.object({
+  operation_id: z.string().trim().min(8).max(128),
+  type: z.literal("calorie_delta_recorded"),
+  user_id: z.string().trim().min(1).max(128).optional(),
+  occurred_at: z.string().datetime({ offset: true }),
+  source: OfflineOperationSourceSchema,
+  confidence: OfflineOperationConfidenceSchema,
+  payload: OfflineMetricDeltaPayloadSchema,
+});
+
+export type CalorieDeltaRecordedOperation = z.infer<typeof CalorieDeltaRecordedOperationSchema>;
+
+export const AchievementTriggeredOperationSchema = z.object({
+  operation_id: z.string().trim().min(8).max(128),
+  type: z.literal("achievement_triggered"),
+  user_id: z.string().trim().min(1).max(128).optional(),
+  occurred_at: z.string().datetime({ offset: true }),
+  source: OfflineOperationSourceSchema,
+  confidence: OfflineOperationConfidenceSchema.optional(),
+  payload: z.object({
+    achievement_name: z.string().trim().min(1).max(160),
+    progress_current: z.number().finite().min(0).optional(),
+    progress_required: z.number().finite().min(0).optional(),
+  }).passthrough(),
+});
+
+export type AchievementTriggeredOperation = z.infer<typeof AchievementTriggeredOperationSchema>;
+
+export const OfflineSyncOperationSchema = z.discriminatedUnion("type", [
+  StepDeltaRecordedOperationSchema,
+  CalorieDeltaRecordedOperationSchema,
+  AchievementTriggeredOperationSchema,
+]);
+
+export type OfflineSyncOperation = z.infer<typeof OfflineSyncOperationSchema>;
+
+export const OfflineSyncRequestSchema = z.object({
+  operations: z.array(OfflineSyncOperationSchema).min(1).max(100),
+});
+
+export type OfflineSyncRequest = z.infer<typeof OfflineSyncRequestSchema>;
 
 // Food Scan Request Schema
 export const FoodScanRequestSchema = z.object({
