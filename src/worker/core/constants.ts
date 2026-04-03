@@ -80,7 +80,10 @@ export const INCOMPLETE_ONBOARDING_PURGE_TARGETS = USER_PURGE_TARGETS.filter(
 
 export const PLAN_GUARD_EXEMPT_PATHS = new Set<string>([
   "/api/users/me",
+  "/api/app/bootstrap",
   "/api/app/open",
+  "/api/presence/heartbeat",
+  "/api/presence/offline",
   "/api/events/route-not-found",
   "/api/onboarding",
   "/api/onboarding/profile",

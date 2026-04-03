@@ -35,7 +35,11 @@
     }
   ],
   "vars": {
-    "DB_BACKEND": "supabase"
+    "DB_BACKEND": "supabase",
+    "DB_TOPOLOGY": "hybrid",
+    "SUPABASE_POOL_MAX": "8",
+    "REQUEST_DEDUPE_WINDOW_MS": "1200",
+    "HOT_GET_CACHE_TTL_MS": "3500"
   },
   "triggers": {
     "crons": [

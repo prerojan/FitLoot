@@ -128,6 +128,94 @@ export function registerAccountRoutes(
     }
   });
 
+  app.get("/api/app/bootstrap", authMiddleware, async (c) => {
+    const user = c.get("user");
+    if (!user?.id) {
+      return c.json({ error: "Unauthorized", code: "UNAUTHORIZED" }, 401);
+    }
+
+    try {
+      const [profile, progression] = await Promise.all([
+        c.env.fitloot_db
+          .prepare(
+            `SELECT
+              custom_primary_color,
+              custom_secondary_color,
+              custom_background_type,
+              custom_background_value,
+              custom_font,
+              showcased_achievements
+            FROM user_profiles
+            WHERE user_id = ?`,
+          )
+          .bind(user.id)
+          .first<Record<string, unknown>>(),
+        c.env.fitloot_db
+          .prepare(
+            `SELECT
+              level,
+              xp,
+              next_level_xp,
+              current_streak,
+              best_streak,
+              last_activity_date,
+              celebrate_level
+            FROM user_progression
+            WHERE user_id = ?`,
+          )
+          .bind(user.id)
+          .first<Record<string, unknown>>(),
+      ]);
+
+      let appOpenDegraded = false;
+      try {
+        await onAppOpen(c.env.fitloot_db, user.id, new Date().toISOString());
+      } catch (appOpenError) {
+        appOpenDegraded = true;
+        console.error("[/api/app/bootstrap][app-open-hook]", {
+          message: getErrorMessage(appOpenError),
+          userId: user.id,
+        });
+      }
+
+      return c.json({
+        user: {
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          avatar_url: user.avatar_url ?? undefined,
+          showcased_achievements: profile?.showcased_achievements ?? null,
+          onboarding_completed: user.onboarding_completed,
+          plan_id: user.plan_id,
+          plan_status: user.plan_status,
+          payment_method: user.payment_method,
+        },
+        profile_theme: profile
+          ? {
+              custom_primary_color: profile.custom_primary_color ?? null,
+              custom_secondary_color: profile.custom_secondary_color ?? null,
+              custom_background_type: profile.custom_background_type ?? null,
+              custom_background_value: profile.custom_background_value ?? null,
+              custom_font: profile.custom_font ?? null,
+            }
+          : null,
+        progression: progression ?? null,
+        app_open_degraded: appOpenDegraded,
+      });
+    } catch (error) {
+      console.error("[/api/app/bootstrap]", {
+        message: getErrorMessage(error),
+        userId: user.id,
+      });
+
+      if (isMissingSchemaError(error)) {
+        return schemaMismatchResponse(c);
+      }
+
+      return internalErrorResponse(c);
+    }
+  });
+
   app.post("/api/app/open", authMiddleware, async (c) => {
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);

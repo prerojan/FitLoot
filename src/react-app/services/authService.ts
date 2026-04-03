@@ -1,6 +1,31 @@
 import { api } from "@/react-app/utils/api";
 import { AUTHENTICATED_HINT_KEY, ROUTE_PATHS } from "@/react-app/auth/constants";
 import type { User } from "@/react-app/auth/types";
+import type { UserProfileTheme } from "@/react-app/types/profile";
+
+export type AuthBootstrapPayload = {
+  user: User;
+  profile_theme: UserProfileTheme | null;
+  progression: Record<string, unknown> | null;
+  app_open_degraded?: boolean | undefined;
+};
+
+export async function fetchAuthBootstrap(): Promise<AuthBootstrapPayload | null> {
+  // Consolida a carga inicial de autenticacao em uma unica requisicao.
+  const response = await api("/api/app/bootstrap");
+  if (response.status === 401 || response.status === 403) {
+    localStorage.removeItem(AUTHENTICATED_HINT_KEY);
+    return null;
+  }
+  if (!response.ok) return null;
+
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!contentType.includes("application/json") && !contentType.includes("+json")) {
+    return null;
+  }
+
+  return ((await response.json().catch(() => null)) as AuthBootstrapPayload | null) ?? null;
+}
 
 export async function fetchCurrentUser(): Promise<User | null> {
   // Resolve a sessao atual sem propagar excecoes para os consumidores.

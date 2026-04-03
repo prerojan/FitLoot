@@ -1,5 +1,6 @@
 import { Hono, type MiddlewareHandler } from "hono";
 
+import { getErrorMessage } from "../core/errors";
 import type { AppContext } from "../core/types";
 import type { WithTransaction } from "./contracts";
 
@@ -8,6 +9,112 @@ type FriendsRouteDeps = {
   onFriendAdded: (db: D1Database, userId: string) => Promise<void>;
   withTransaction: WithTransaction;
 };
+
+const RUNTIME_FRIEND_PROJECTION_TTL_MS = 45_000;
+let runtimeFriendProjectionSchemaReady = false;
+
+async function ensureRuntimeFriendProjectionSchema(runtimeDb: D1Database): Promise<void> {
+  if (runtimeFriendProjectionSchemaReady) return;
+  await runtimeDb.exec(
+    `CREATE TABLE IF NOT EXISTS runtime_friend_snapshots (
+      user_id TEXT NOT NULL,
+      friend_user_id TEXT NOT NULL,
+      friend_level INTEGER NOT NULL DEFAULT 0,
+      friend_xp INTEGER NOT NULL DEFAULT 0,
+      payload_json TEXT NOT NULL,
+      snapshot_at TEXT NOT NULL,
+      PRIMARY KEY (user_id, friend_user_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_runtime_friend_snapshots_user_rank
+      ON runtime_friend_snapshots (user_id, friend_level DESC, friend_xp DESC, friend_user_id ASC);`,
+  );
+  runtimeFriendProjectionSchemaReady = true;
+}
+
+async function readRuntimeFriendProjection(
+  runtimeDb: D1Database,
+  userId: string,
+  limit: number,
+  offset: number,
+): Promise<Record<string, unknown>[] | null> {
+  await ensureRuntimeFriendProjectionSchema(runtimeDb);
+  const freshness = await runtimeDb
+    .prepare(
+      `SELECT snapshot_at
+         FROM runtime_friend_snapshots
+        WHERE user_id = ?
+        ORDER BY snapshot_at DESC
+        LIMIT 1`,
+    )
+    .bind(userId)
+    .first<{ snapshot_at?: string | null }>();
+
+  const snapshotAt = freshness?.snapshot_at ? Date.parse(freshness.snapshot_at) : NaN;
+  if (!Number.isFinite(snapshotAt)) return null;
+  if (Date.now() - snapshotAt > RUNTIME_FRIEND_PROJECTION_TTL_MS) return null;
+
+  const rows = await runtimeDb
+    .prepare(
+      `SELECT payload_json
+         FROM runtime_friend_snapshots
+        WHERE user_id = ?
+        ORDER BY friend_level DESC, friend_xp DESC, friend_user_id ASC
+        LIMIT ? OFFSET ?`,
+    )
+    .bind(userId, limit, offset)
+    .all<{ payload_json: string }>();
+
+  return rows.results
+    .map((row) => {
+      try {
+        return JSON.parse(row.payload_json) as Record<string, unknown>;
+      } catch {
+        return null;
+      }
+    })
+    .filter((row): row is Record<string, unknown> => row !== null);
+}
+
+async function writeRuntimeFriendProjection(
+  runtimeDb: D1Database,
+  userId: string,
+  friends: ReadonlyArray<Record<string, unknown>>,
+): Promise<void> {
+  await ensureRuntimeFriendProjectionSchema(runtimeDb);
+  const snapshotAt = new Date().toISOString();
+  await runtimeDb
+    .prepare("DELETE FROM runtime_friend_snapshots WHERE user_id = ?")
+    .bind(userId)
+    .run();
+
+  if (friends.length === 0) return;
+
+  const statements: D1PreparedStatement[] = [];
+  for (const friend of friends) {
+    statements.push(
+      runtimeDb
+        .prepare(
+          `INSERT INTO runtime_friend_snapshots (
+            user_id,
+            friend_user_id,
+            friend_level,
+            friend_xp,
+            payload_json,
+            snapshot_at
+          ) VALUES (?, ?, ?, ?, ?, ?)`,
+        )
+        .bind(
+          userId,
+          String(friend.friend_user_id ?? ""),
+          Math.max(0, Number(friend.friend_level ?? 0)),
+          Math.max(0, Number(friend.friend_xp ?? 0)),
+          JSON.stringify(friend),
+          snapshotAt,
+        ),
+    );
+  }
+  await runtimeDb.batch(statements);
+}
 
 // Route registration for friend discovery, requests, and legacy aliases.
 export function registerFriendsRoutes(
@@ -199,30 +306,96 @@ export function registerFriendsRoutes(
     const limit = Math.min(Math.max(Number(c.req.query("limit") ?? 120), 1), 300);
     const offset = Math.max(Number(c.req.query("offset") ?? 0), 0);
 
-    const friends = await c.env.fitloot_db
-      .prepare(
-        `SELECT f.id, COALESCE(f.friend_id, f.friend_user_id) as friend_user_id, up.username as friend_username,
-          up.full_name as friend_full_name, pr.level as friend_level, pr.xp as friend_xp,
-          pr.current_streak as friend_streak, pr.last_activity_date
-        FROM friendships f
-        INNER JOIN user_profiles up ON COALESCE(f.friend_id, f.friend_user_id) = up.user_id
-        INNER JOIN user_progression pr ON COALESCE(f.friend_id, f.friend_user_id) = pr.user_id
-        WHERE f.user_id = ?
-        ORDER BY friend_level DESC, friend_xp DESC
-        LIMIT ? OFFSET ?`,
-      )
-      .bind(user.id, limit, offset)
-      .all();
+    const runtimeDb = c.env.fitloot_runtime_db;
+    if (runtimeDb) {
+      try {
+        const projected = await readRuntimeFriendProjection(runtimeDb, user.id, limit, offset);
+        if (projected && projected.length > 0) {
+          return c.json(projected);
+        }
+      } catch {
+        // projection read should never block canonical source fetch
+      }
+    }
 
-    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
-    const friendsWithOnlineStatus = friends.results.map((friend) => ({
-      ...friend,
-      is_online: friend.last_activity_date
-        ? new Date(friend.last_activity_date as string) > new Date(fiveMinutesAgo)
-        : false,
-    }));
+    try {
+      const friendsWithPresence = await c.env.fitloot_db
+        .prepare(
+          `SELECT
+            f.id,
+            COALESCE(f.friend_id, f.friend_user_id) as friend_user_id,
+            up.username as friend_username,
+            up.full_name as friend_full_name,
+            pr.level as friend_level,
+            pr.xp as friend_xp,
+            pr.current_streak as friend_streak,
+            COALESCE(fp.is_online, 0) as is_online
+          FROM friendships f
+          INNER JOIN user_profiles up
+            ON COALESCE(f.friend_id, f.friend_user_id) = up.user_id
+          INNER JOIN user_progression pr
+            ON COALESCE(f.friend_id, f.friend_user_id) = pr.user_id
+          LEFT JOIN friend_online_presence fp
+            ON fp.user_id = f.user_id
+           AND fp.friend_user_id = COALESCE(f.friend_id, f.friend_user_id)
+          WHERE f.user_id = ?
+          ORDER BY friend_level DESC, friend_xp DESC
+          LIMIT ? OFFSET ?`,
+        )
+        .bind(user.id, limit, offset)
+        .all<Record<string, unknown>>();
 
-    return c.json(friendsWithOnlineStatus);
+      const normalized = friendsWithPresence.results.map((friend) => ({
+        ...friend,
+        is_online: Number(friend.is_online ?? 0) > 0,
+      }));
+
+      if (runtimeDb) {
+        void writeRuntimeFriendProjection(runtimeDb, user.id, normalized).catch(() => undefined);
+      }
+      return c.json(normalized);
+    } catch (error) {
+      const errorMessage = getErrorMessage(error).toLowerCase();
+      const canFallback =
+        errorMessage.includes("friend_online_presence") ||
+        errorMessage.includes("user_presence") ||
+        errorMessage.includes("no such table") ||
+        errorMessage.includes("relation");
+
+      if (!canFallback) {
+        throw error;
+      }
+
+      // Fallback de compatibilidade para ambientes sem a view de presença.
+      const friends = await c.env.fitloot_db
+        .prepare(
+          `SELECT f.id, COALESCE(f.friend_id, f.friend_user_id) as friend_user_id, up.username as friend_username,
+            up.full_name as friend_full_name, pr.level as friend_level, pr.xp as friend_xp,
+            pr.current_streak as friend_streak, pr.last_activity_date
+          FROM friendships f
+          INNER JOIN user_profiles up ON COALESCE(f.friend_id, f.friend_user_id) = up.user_id
+          INNER JOIN user_progression pr ON COALESCE(f.friend_id, f.friend_user_id) = pr.user_id
+          WHERE f.user_id = ?
+          ORDER BY friend_level DESC, friend_xp DESC
+          LIMIT ? OFFSET ?`,
+        )
+        .bind(user.id, limit, offset)
+        .all();
+
+      const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+      const friendsWithOnlineStatus = friends.results.map((friend) => ({
+        ...friend,
+        is_online: friend.last_activity_date
+          ? new Date(friend.last_activity_date as string) > new Date(fiveMinutesAgo)
+          : false,
+      }));
+
+      if (runtimeDb) {
+        void writeRuntimeFriendProjection(runtimeDb, user.id, friendsWithOnlineStatus).catch(() => undefined);
+      }
+
+      return c.json(friendsWithOnlineStatus);
+    }
   });
 
   app.get("/api/friends/requests", authMiddleware, async (c) => {

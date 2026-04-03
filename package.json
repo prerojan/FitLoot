@@ -63,6 +63,9 @@
     "supabase:generate-catalog-seed-sql": "node --experimental-strip-types ./scripts/supabase/generate-catalog-seed-sql.mjs",
     "supabase:import-promo-codes": "node ./scripts/supabase/import-promo-codes-from-d1.mjs",
     "supabase:verify-clean-base": "node ./scripts/supabase/verify-clean-base.mjs",
-    "supabase:prepare-clean-base": "npm run supabase:reset-clean-base && npm run supabase:bootstrap-catalog && npm run supabase:import-promo-codes"
+    "supabase:prepare-clean-base": "npm run supabase:reset-clean-base && npm run supabase:bootstrap-catalog && npm run supabase:import-promo-codes",
+    "supabase:quarantine-legacy": "node ./scripts/supabase/quarantine-legacy-tables.mjs",
+    "supabase:restore-quarantine": "node ./scripts/supabase/restore-quarantined-legacy-tables.mjs",
+    "supabase:drop-quarantine": "node ./scripts/supabase/drop-quarantined-legacy-tables.mjs"
   }
 }

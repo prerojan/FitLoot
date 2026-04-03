@@ -40,7 +40,7 @@ export function registerAuthRoutes(
         const normalizedEmail = data.email.trim().toLowerCase();
 
         const existing = await c.env.fitloot_db
-          .prepare("SELECT id FROM users WHERE email = ?")
+          .prepare("SELECT id FROM users WHERE lower(email) = ?")
           .bind(normalizedEmail)
           .first<{ id: string }>();
 
@@ -127,7 +127,7 @@ export function registerAuthRoutes(
         const [emailExisting, usernameExisting] = await Promise.all([
           emailQuery
             ? c.env.fitloot_db
-                .prepare("SELECT id FROM users WHERE email = ?")
+                .prepare("SELECT id FROM users WHERE lower(email) = ?")
                 .bind(emailQuery)
                 .first<{ id: string }>()
             : Promise.resolve(null),
@@ -191,7 +191,7 @@ export function registerAuthRoutes(
 
         const userRow = await c.env.fitloot_db
           .prepare(
-            "SELECT id, password_hash, password_salt FROM users WHERE email = ?",
+            "SELECT id, password_hash, password_salt FROM users WHERE lower(email) = ?",
           )
           .bind(normalizedEmail)
           .first<{

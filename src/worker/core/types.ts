@@ -171,14 +171,31 @@ export type CheckoutStartResult = {
 
 export interface Env {
   fitloot_db: D1Database;
+  fitloot_runtime_db?: D1Database | undefined;
   ASSETS: Fetcher;
   SUPABASE_HYPERDRIVE?: {
     connectionString?: string | undefined;
   } | undefined;
+  SUPABASE_WRITE_HYPERDRIVE?: {
+    connectionString?: string | undefined;
+  } | undefined;
+  SUPABASE_READ_HYPERDRIVE?: {
+    connectionString?: string | undefined;
+  } | undefined;
   DB_BACKEND?: "d1" | "supabase" | undefined;
+  DB_TOPOLOGY?: "single" | "hybrid" | undefined;
   SUPABASE_URL?: string | undefined;
   SUPABASE_SERVICE_ROLE_KEY?: string | undefined;
   SUPABASE_DB_URL?: string | undefined;
+  SUPABASE_WRITE_DB_URL?: string | undefined;
+  SUPABASE_READ_DB_URL?: string | undefined;
+  SUPABASE_POOL_MAX?: string | undefined;
+  SUPABASE_CONNECT_TIMEOUT_MS?: string | undefined;
+  SUPABASE_QUERY_TIMEOUT_MS?: string | undefined;
+  SUPABASE_STATEMENT_TIMEOUT_MS?: string | undefined;
+  SUPABASE_IDLE_TIMEOUT_MS?: string | undefined;
+  REQUEST_DEDUPE_WINDOW_MS?: string | undefined;
+  HOT_GET_CACHE_TTL_MS?: string | undefined;
   HF_TOKEN?: string | undefined;
   HF_CHAT_MODEL?: string | undefined;
   HUGGING_FACE_API_KEY?: string | undefined;

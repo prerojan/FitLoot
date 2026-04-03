@@ -1,0 +1,10 @@
+[{
+    "code":  "maderaaichefe",
+    "description":  "Ativação VIP",
+    "effect":  "activate_vip",
+    "effect_value":  null,
+    "max_uses":  null,
+    "uses_count":  12,
+    "active":  1,
+    "expires_at":  null
+}]

@@ -8,13 +8,13 @@ import {
 import type { User } from "../types";
 import { triggerRouteNotFoundAchievement } from "../../services/achievementService";
 import {
+  fetchAuthBootstrap,
   fetchCurrentUser,
   hasPlanAccess,
-  notifyAppOpen,
   prefetchCoreRoutes,
 } from "../../services/authService";
-import { fetchProfileTheme } from "../../services/profileService";
 import { applyProfileTheme } from "../../theme/profileTheme";
+import { writeCachedJson } from "../../utils/api";
 
 interface UseAuthBootstrapParams {
   setUser: (user: User | null) => void;
@@ -60,26 +60,42 @@ export function useAuthBootstrap({
         return;
       }
 
-      // Restaura a sessao, aplica o tema e aquece as rotas principais quando cabivel.
-      const user = await fetchCurrentUser();
-      if (!user) {
-        localStorage.removeItem(AUTHENTICATED_HINT_KEY);
+      // Restaura sessao e bootstrap principal em uma unica ida ao backend.
+      const bootstrap = await fetchAuthBootstrap();
+      const user = bootstrap?.user ?? null;
+      if (!bootstrap || !user) {
+        const fallbackUser = await fetchCurrentUser();
+        if (!fallbackUser) {
+          localStorage.removeItem(AUTHENTICATED_HINT_KEY);
+          applyProfileTheme(null);
+          setUser(null);
+          return;
+        }
+
+        localStorage.setItem(AUTHENTICATED_HINT_KEY, "1");
+        setUser(fallbackUser);
         applyProfileTheme(null);
-        setUser(null);
         return;
       }
 
       localStorage.setItem(AUTHENTICATED_HINT_KEY, "1");
-
       setUser(user);
-      if (user.onboarding_completed === 1 && hasPlanAccess(user)) {
-        const profile = await fetchProfileTheme().catch(() => null);
-        applyProfileTheme(profile);
-        prefetchCoreRoutes();
+
+      if (bootstrap.profile_theme) {
+        applyProfileTheme(bootstrap.profile_theme);
+        writeCachedJson("/api/profile", bootstrap.profile_theme);
       } else {
         applyProfileTheme(null);
       }
-      void notifyAppOpen().catch(() => undefined);
+
+      if (bootstrap.progression) {
+        writeCachedJson("/api/progression", bootstrap.progression);
+      }
+      writeCachedJson("/api/users/me", user);
+
+      if (user.onboarding_completed === 1 && hasPlanAccess(user)) {
+        prefetchCoreRoutes();
+      }
 
       // Entrega a conquista 404 pendente assim que a sessao volta a existir.
       const pending404 = localStorage.getItem(PENDING_404_ACHIEVEMENT_KEY) === "1";

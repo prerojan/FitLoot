@@ -1,8 +1,14 @@
 const DEFAULT_DEV_API_URL = "http://localhost:8787";
 const DEFAULT_CACHE_TTL_MS = 60_000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 20_000;
+const DEFAULT_MAX_PARALLEL_GET_REQUESTS = 6;
 
 const rawApiUrl = import.meta.env.VITE_API_URL?.trim() ?? "";
+const rawMaxParallelGetRequests =
+  Number(import.meta.env.VITE_API_MAX_PARALLEL_GET_REQUESTS ?? DEFAULT_MAX_PARALLEL_GET_REQUESTS);
+const MAX_PARALLEL_GET_REQUESTS = Number.isFinite(rawMaxParallelGetRequests)
+  ? Math.max(1, Math.min(20, Math.floor(rawMaxParallelGetRequests)))
+  : DEFAULT_MAX_PARALLEL_GET_REQUESTS;
 // In production we prefer same-origin `/api` calls so previews and custom domains
 // do not depend on cross-origin cookies/CORS to reach the worker.
 const resolvedApiUrl = rawApiUrl || (import.meta.env.PROD ? "" : DEFAULT_DEV_API_URL);
@@ -29,6 +35,9 @@ export class ApiRequestError extends Error {
 }
 
 const requestCache = new Map<string, CacheEntry>();
+const inflightGetRequests = new Map<string, Promise<Response>>();
+const pendingGetSlots: Array<() => void> = [];
+let activeGetRequests = 0;
 
 type PlanAccessRequiredPayload = {
   redirect_to?: string | undefined;
@@ -42,6 +51,32 @@ function normalizePath(path: string): string {
 function buildCacheKey(path: string): string {
   // Usa apenas GET como chave de leitura cacheada no cliente.
   return `GET:${normalizePath(path)}`;
+}
+
+function buildInflightGetKey(url: string): string {
+  return `GET:${url}`;
+}
+
+async function acquireGetSlot(): Promise<void> {
+  if (activeGetRequests < MAX_PARALLEL_GET_REQUESTS) {
+    activeGetRequests += 1;
+    return;
+  }
+
+  await new Promise<void>((resolve) => {
+    pendingGetSlots.push(() => {
+      activeGetRequests += 1;
+      resolve();
+    });
+  });
+}
+
+function releaseGetSlot(): void {
+  activeGetRequests = Math.max(0, activeGetRequests - 1);
+  const next = pendingGetSlots.shift();
+  if (next) {
+    next();
+  }
 }
 
 /** Evita guardar `celebrate_level` no cache (só deve disparar modal uma vez). */
@@ -134,17 +169,50 @@ export async function api(path: string, options: ApiRequestOptions = {}) {
       }, Number(timeoutMs))
     : null;
 
-  try {
-    const response = await fetch(url, {
-      ...restOptions,
-      method,
-      credentials: "include",
-      signal: controller.signal,
-      headers: requestHeaders,
-    });
+  const executeRequest = async (): Promise<Response> => {
+    if (method === "GET") {
+      await acquireGetSlot();
+    }
 
-    await handlePlanAccessRequired(response);
-    return response;
+    try {
+      const response = await fetch(url, {
+        ...restOptions,
+        method,
+        credentials: "include",
+        signal: controller.signal,
+        headers: requestHeaders,
+      });
+
+      await handlePlanAccessRequired(response);
+      return response;
+    } finally {
+      if (method === "GET") {
+        releaseGetSlot();
+      }
+    }
+  };
+
+  try {
+    const canDedupeGet = method === "GET" && !hasBody && !signal;
+    if (!canDedupeGet) {
+      return await executeRequest();
+    }
+
+    const inflightKey = buildInflightGetKey(url);
+    const shared = inflightGetRequests.get(inflightKey);
+    if (shared) {
+      const response = await shared;
+      return response.clone();
+    }
+
+    const started = executeRequest();
+    inflightGetRequests.set(inflightKey, started);
+    try {
+      const response = await started;
+      return response.clone();
+    } finally {
+      inflightGetRequests.delete(inflightKey);
+    }
   } finally {
     if (timeoutId !== null) {
       globalThis.clearTimeout(timeoutId);

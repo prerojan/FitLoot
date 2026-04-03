@@ -63,15 +63,21 @@ export async function hasCoreSchema(db: D1Database) {
   }
 
   try {
-    let result = await db.prepare(
-      `SELECT COUNT(DISTINCT table_name) as count
-         FROM information_schema.tables
-        WHERE table_name IN ('users', 'sessions')
-          AND (
-            table_schema = 'core'
-            OR table_schema = ANY(current_schemas(true))
-          )`,
-    ).first<{ count: number }>();
+    let result: { count: number } | null = null;
+
+    try {
+      result = await db.prepare(
+        `SELECT COUNT(DISTINCT table_name) as count
+           FROM information_schema.tables
+          WHERE table_name IN ('users', 'sessions')
+            AND (
+              table_schema = 'core'
+              OR table_schema = ANY(current_schemas(true))
+            )`,
+      ).first<{ count: number }>();
+    } catch {
+      // D1/local mocks do not expose information_schema; fallback to sqlite metadata.
+    }
 
     if (!result) {
       result = await db.prepare(

@@ -2,15 +2,23 @@
 import { readFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import path from "node:path";
 import {
   closePool,
+  executeSql,
   normalizeNullableText,
   normalizeText,
   safeInt,
-  upsertRows,
 } from "./_common.mjs";
 
 const execFileAsync = promisify(execFile);
+const WRANGLER_CLI = path.resolve(
+  process.cwd(),
+  "node_modules",
+  "wrangler",
+  "bin",
+  "wrangler.js",
+);
 
 function parseArgs(argv) {
   const args = {
@@ -76,9 +84,9 @@ async function loadPromoCodesFromD1(d1Database) {
   ].join(" ");
 
   const { stdout } = await execFileAsync(
-    "npx",
+    process.execPath,
     [
-      "wrangler",
+      WRANGLER_CLI,
       "d1",
       "execute",
       d1Database,
@@ -139,13 +147,44 @@ async function run() {
 
   const rows = sanitizePromoCodeRows(rawRows);
   console.log(`[supabase][promo-codes] upserting ${rows.length} promo codes...`);
+  for (const row of rows) {
+    await executeSql(
+      `DELETE FROM catalog.promo_codes
+        WHERE lower(code) = lower($1)`,
+      [row.code],
+    );
 
-  await upsertRows({
-    schema: "catalog",
-    table: "promo_codes",
-    rows,
-    onConflict: "code",
-  });
+    await executeSql(
+      `INSERT INTO catalog.promo_codes (
+        code,
+        description,
+        effect,
+        effect_value,
+        max_uses,
+        uses_count,
+        active,
+        expires_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      ON CONFLICT (code) DO UPDATE SET
+        description = EXCLUDED.description,
+        effect = EXCLUDED.effect,
+        effect_value = EXCLUDED.effect_value,
+        max_uses = EXCLUDED.max_uses,
+        uses_count = EXCLUDED.uses_count,
+        active = EXCLUDED.active,
+        expires_at = EXCLUDED.expires_at`,
+      [
+        row.code,
+        row.description,
+        row.effect,
+        row.effect_value,
+        row.max_uses,
+        row.uses_count,
+        row.active,
+        row.expires_at,
+      ],
+    );
+  }
 
   console.log("[supabase][promo-codes] done.");
 }

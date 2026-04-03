@@ -49,6 +49,7 @@ import {
   createSupabaseCompatDatabase,
   type RuntimeDatabase,
 } from "./core/supabaseCompatDb";
+import { createHybridCompatDatabase } from "./core/hybridCompatDb";
 import {
   getErrorMessage,
 } from "./core/errors";
@@ -80,6 +81,7 @@ import { registerShopRoutes } from "./routes/shop";
 import { registerAchievementRoutes } from "./routes/achievements";
 import { registerAccountRoutes } from "./routes/account";
 import { registerBillingRoutes } from "./routes/billing";
+import { registerPresenceRoutes } from "./routes/presence";
 import { registerOnboardingRoutes } from "./routes/onboarding";
 import { registerProfileRoutes } from "./routes/profile";
 import { registerMissionRoutes } from "./routes/missions";
@@ -1157,19 +1159,159 @@ async function withTransaction<T>(
   return adapter.transaction(run);
 }
 
+type DatabaseTopology = "single" | "hybrid";
+
+function resolveDatabaseTopology(
+  env: Pick<Env, "DB_TOPOLOGY" | "DB_BACKEND">,
+): DatabaseTopology {
+  const normalized = String(env.DB_TOPOLOGY ?? "").trim().toLowerCase();
+  if (normalized === "hybrid") return "hybrid";
+  if (normalized === "single") return "single";
+  return resolveDatabaseBackend(env) === "supabase" ? "single" : "single";
+}
+
+function hasExplicitSupabaseWriteConfig(
+  env: Pick<Env, "SUPABASE_WRITE_DB_URL" | "SUPABASE_WRITE_HYPERDRIVE">,
+): boolean {
+  return Boolean(
+    (env.SUPABASE_WRITE_DB_URL ?? "").trim() || env.SUPABASE_WRITE_HYPERDRIVE,
+  );
+}
+
 function attachRuntimeDatabase(env: Env): Env {
   const backend = resolveDatabaseBackend(env);
-  if (backend === "supabase") {
+  if (backend !== "supabase") return env;
+
+  const topology = resolveDatabaseTopology(env);
+  const runtimeD1 = env.fitloot_runtime_db ?? env.fitloot_db;
+  const writeMode = hasExplicitSupabaseWriteConfig(env) ? "write" : "default";
+  const supabaseWriteDb = createSupabaseCompatDatabase(env, {
+    mode: writeMode,
+  });
+
+  if (topology === "hybrid") {
+    const supabaseReadDb = createSupabaseCompatDatabase(env, {
+      mode: "read",
+      fallbackToWriteConnection: true,
+    });
+
     return {
       ...env,
-      fitloot_db: createSupabaseCompatDatabase(env) as unknown as D1Database,
+      fitloot_runtime_db: runtimeD1,
+      fitloot_db: createHybridCompatDatabase({
+        supabaseWriteDb,
+        supabaseReadDb,
+        runtimeDb: runtimeD1,
+        readFallbackToWrite: true,
+      }) as unknown as D1Database,
     };
   }
-  return env;
+
+  return {
+    ...env,
+    fitloot_runtime_db: runtimeD1,
+    fitloot_db: supabaseWriteDb as unknown as D1Database,
+  };
 }
 
 // Inicializa o app e concentra o tratamento global de erros HTTP.
 const app = new Hono<AppContext>();
+
+const HOT_GET_CACHEABLE_PATHS = new Set<string>([
+  "/api/profile",
+  "/api/progression",
+  "/api/skills",
+  "/api/skills/available",
+  "/api/titles",
+  "/api/achievements",
+  "/api/benchmarks",
+  "/api/missions",
+  "/api/friends",
+  "/api/friends/requests",
+  "/api/metrics/today",
+]);
+
+type CachedResponseSnapshot = {
+  status: number;
+  headers: Array<[string, string]>;
+  body: ArrayBuffer;
+};
+
+type CachedResponseEntry = {
+  expiresAt: number;
+  snapshot: CachedResponseSnapshot;
+};
+
+const hotGetResponseCache = new Map<string, CachedResponseEntry>();
+const hotGetInflightRequests = new Map<
+  string,
+  { startedAt: number; promise: Promise<CachedResponseSnapshot | null> }
+>();
+
+function readEnvInt(
+  value: string | undefined,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(max, Math.max(min, Math.floor(parsed)));
+}
+
+function isHotCacheableGetPath(path: string): boolean {
+  return HOT_GET_CACHEABLE_PATHS.has(path);
+}
+
+function resolveSessionScopedRequestKey(c: {
+  req: {
+    path: string;
+    url: string;
+    header: (name: string) => string | undefined;
+  };
+}): string | null {
+  const sessionId = getSessionIdFromCookieHeader(c.req.header("Cookie"));
+  if (!sessionId) return null;
+  const url = new URL(c.req.url);
+  return `${sessionId}:${c.req.path}:${url.search}`;
+}
+
+function cloneResponseSnapshot(snapshot: CachedResponseSnapshot): Response {
+  return new Response(snapshot.body.slice(0), {
+    status: snapshot.status,
+    headers: new Headers(snapshot.headers),
+  });
+}
+
+async function captureCacheableResponseSnapshot(
+  response: Response,
+): Promise<CachedResponseSnapshot | null> {
+  if (!response.ok || response.status !== 200) return null;
+  const cacheControl = (response.headers.get("Cache-Control") ?? "").toLowerCase();
+  if (cacheControl.includes("no-store")) return null;
+
+  const contentType = (response.headers.get("Content-Type") ?? "").toLowerCase();
+  if (!contentType.includes("application/json") && !contentType.includes("+json")) {
+    return null;
+  }
+
+  const body = await response.clone().arrayBuffer();
+  return {
+    status: response.status,
+    headers: Array.from(response.headers.entries()),
+    body,
+  };
+}
+
+function invalidateSessionScopedHotCache(sessionId: string): void {
+  const prefix = `${sessionId}:`;
+
+  for (const key of hotGetResponseCache.keys()) {
+    if (key.startsWith(prefix)) {
+      hotGetResponseCache.delete(key);
+    }
+  }
+}
 
 app.onError((error, c) => {
   console.error("[worker][unhandled]", {
@@ -1247,6 +1389,86 @@ app.use("*", async (c, next) => {
   applyCorsHeadersToResponseHeaders(c.res.headers, origin, allowHeaders);
 });
 
+// Coalesce bursty identical GETs and keep a short user-scoped response cache for hot routes.
+app.use("/api/*", async (c, next) => {
+  const method = c.req.method.toUpperCase();
+  const sessionId = getSessionIdFromCookieHeader(c.req.header("Cookie"));
+
+  if (method === "GET" && isHotCacheableGetPath(c.req.path)) {
+    const requestKey = resolveSessionScopedRequestKey(c);
+    if (!requestKey) {
+      await next();
+      return;
+    }
+
+    const dedupeWindowMs = readEnvInt(
+      c.env.REQUEST_DEDUPE_WINDOW_MS,
+      1_200,
+      250,
+      10_000,
+    );
+    const cacheTtlMs = readEnvInt(
+      c.env.HOT_GET_CACHE_TTL_MS,
+      3_500,
+      500,
+      30_000,
+    );
+    const now = Date.now();
+    const cached = hotGetResponseCache.get(requestKey);
+    if (cached && cached.expiresAt > now) {
+      return cloneResponseSnapshot(cached.snapshot);
+    }
+    if (cached) {
+      hotGetResponseCache.delete(requestKey);
+    }
+
+    const inflight = hotGetInflightRequests.get(requestKey);
+    if (inflight && now - inflight.startedAt <= dedupeWindowMs) {
+      const sharedSnapshot = await inflight.promise;
+      if (sharedSnapshot) {
+        return cloneResponseSnapshot(sharedSnapshot);
+      }
+      await next();
+      return;
+    }
+
+    const currentRequest = (async () => {
+      await next();
+      return captureCacheableResponseSnapshot(c.res);
+    })();
+    hotGetInflightRequests.set(requestKey, {
+      startedAt: now,
+      promise: currentRequest,
+    });
+
+    try {
+      const snapshot = await currentRequest;
+      if (snapshot) {
+        hotGetResponseCache.set(requestKey, {
+          snapshot,
+          expiresAt: Date.now() + cacheTtlMs,
+        });
+      }
+    } finally {
+      hotGetInflightRequests.delete(requestKey);
+    }
+
+    return;
+  }
+
+  await next();
+
+  if (
+    sessionId &&
+    method !== "GET" &&
+    method !== "HEAD" &&
+    method !== "OPTIONS" &&
+    c.res.status < 500
+  ) {
+    invalidateSessionScopedHotCache(sessionId);
+  }
+});
+
 // Registra autenticação, conta, cobrança, onboarding e progressão base.
 registerAuthRoutes(app, {
   generateCookie,
@@ -1263,6 +1485,11 @@ registerAccountRoutes(app, {
   onProfileCustomization: onProfileCustomizationService,
   shouldPurgeUserOnLogout,
   unlockAchievementIfNeeded: unlockAchievementIfNeededService,
+});
+
+registerPresenceRoutes(app, {
+  authMiddleware,
+  getSessionIdFromCookieHeader,
 });
 
 registerBillingRoutes(app, {

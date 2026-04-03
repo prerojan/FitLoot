@@ -2,7 +2,10 @@ import { randomUUID } from "node:crypto";
 import pg from "pg";
 
 const { Pool } = pg;
-const DEFAULT_TIMEOUT_MS = 30_000;
+const DEFAULT_STATEMENT_TIMEOUT_MS = 60_000;
+const DEFAULT_CONNECT_TIMEOUT_MS = 20_000;
+const DEFAULT_POOL_MAX = 5;
+const MAX_EXECUTE_RETRIES = 3;
 
 let cachedPool = null;
 
@@ -16,11 +19,11 @@ function normalizeConnectionUrl(connectionUrl) {
   return parsed.toString();
 }
 
-function quoteIdent(identifier) {
+export function quoteIdent(identifier) {
   return `"${String(identifier).replaceAll('"', '""')}"`;
 }
 
-function quoteQualified(schema, table) {
+export function quoteQualified(schema, table) {
   return `${quoteIdent(schema)}.${quoteIdent(table)}`;
 }
 
@@ -38,13 +41,29 @@ function getPool() {
   if (cachedPool) return cachedPool;
   const { dbUrl } = requireSupabaseEnv();
   const normalizedUrl = normalizeConnectionUrl(dbUrl);
+  const statementTimeoutMs = Number.parseInt(
+    process.env.SUPABASE_SCRIPT_STATEMENT_TIMEOUT_MS ?? "",
+    10,
+  );
+  const connectTimeoutMs = Number.parseInt(
+    process.env.SUPABASE_SCRIPT_CONNECT_TIMEOUT_MS ?? "",
+    10,
+  );
+  const poolMax = Number.parseInt(process.env.SUPABASE_SCRIPT_POOL_MAX ?? "", 10);
+
   cachedPool = new Pool({
     connectionString: normalizedUrl,
-    max: 3,
+    max: Number.isFinite(poolMax) && poolMax > 0 ? Math.min(poolMax, 20) : DEFAULT_POOL_MAX,
     idleTimeoutMillis: 10_000,
-    connectionTimeoutMillis: 10_000,
+    connectionTimeoutMillis:
+      Number.isFinite(connectTimeoutMs) && connectTimeoutMs > 0
+        ? Math.min(connectTimeoutMs, 120_000)
+        : DEFAULT_CONNECT_TIMEOUT_MS,
     allowExitOnIdle: true,
-    statement_timeout: DEFAULT_TIMEOUT_MS,
+    statement_timeout:
+      Number.isFinite(statementTimeoutMs) && statementTimeoutMs > 0
+        ? Math.min(statementTimeoutMs, 300_000)
+        : DEFAULT_STATEMENT_TIMEOUT_MS,
     ssl: {
       rejectUnauthorized: false,
     },
@@ -60,7 +79,39 @@ export async function closePool() {
 
 export async function executeSql(sql, params = []) {
   const pool = getPool();
-  return pool.query(sql, params);
+
+  for (let attempt = 1; attempt <= MAX_EXECUTE_RETRIES; attempt += 1) {
+    try {
+      return await pool.query(sql, params);
+    } catch (error) {
+      const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+      const retryable =
+        message.includes("connection timeout") ||
+        message.includes("query read timeout") ||
+        message.includes("connection terminated");
+
+      if (!retryable || attempt >= MAX_EXECUTE_RETRIES) {
+        throw error;
+      }
+
+      const waitMs = attempt * 300;
+      await new Promise((resolve) => setTimeout(resolve, waitMs));
+    }
+  }
+
+  throw new Error("unreachable executeSql retry state");
+}
+
+export async function tableExists(schema, table) {
+  const { rows } = await executeSql(
+    `SELECT 1
+       FROM information_schema.tables
+      WHERE table_schema = $1
+        AND table_name = $2
+      LIMIT 1`,
+    [schema, table],
+  );
+  return rows.length > 0;
 }
 
 export async function listAllRows({

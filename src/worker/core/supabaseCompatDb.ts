@@ -24,8 +24,8 @@ type CompiledSql = {
 };
 
 // Cloudflare Workers isolates scale horizontally, so large per-isolate pools
-// can exhaust upstream connection limits. Keep this very small.
-const DEFAULT_POOL_MAX = 2;
+// can exhaust upstream connection limits. Keep this moderate and configurable.
+const DEFAULT_POOL_MAX = 8;
 const DEFAULT_POOL_IDLE_TIMEOUT_MS = 30_000;
 const DEFAULT_POOL_CONNECT_TIMEOUT_MS = 4_000;
 const DEFAULT_POOL_QUERY_TIMEOUT_MS = 8_000;
@@ -518,7 +518,7 @@ function replaceQuestionMarkParams(sql: string): string {
   return output;
 }
 
-function isRetryableReadError(error: unknown): boolean {
+export function isRetryableReadError(error: unknown): boolean {
   const message = getErrorMessage(error).toLowerCase();
   return (
     message.includes("query read timeout") ||
@@ -604,19 +604,145 @@ function readHyperdriveConnectionString(binding: unknown): string | null {
   return value.length > 0 ? value : null;
 }
 
-function getPgPool(dbUrlRaw: string, useSsl: boolean): Pool {
+type SupabaseConnectionMode = "default" | "write" | "read";
+
+type SupabasePoolTuning = {
+  max: number;
+  connectionTimeoutMs: number;
+  idleTimeoutMs: number;
+  queryTimeoutMs: number;
+  statementTimeoutMs: number;
+};
+
+export type SupabaseCompatDatabaseOptions = {
+  mode?: SupabaseConnectionMode;
+  fallbackToWriteConnection?: boolean;
+};
+
+type SupabaseCompatFactoryEnv = Pick<
+  Env,
+  | "SUPABASE_DB_URL"
+  | "SUPABASE_HYPERDRIVE"
+  | "SUPABASE_WRITE_DB_URL"
+  | "SUPABASE_WRITE_HYPERDRIVE"
+  | "SUPABASE_READ_DB_URL"
+  | "SUPABASE_READ_HYPERDRIVE"
+  | "SUPABASE_POOL_MAX"
+  | "SUPABASE_CONNECT_TIMEOUT_MS"
+  | "SUPABASE_QUERY_TIMEOUT_MS"
+  | "SUPABASE_STATEMENT_TIMEOUT_MS"
+  | "SUPABASE_IDLE_TIMEOUT_MS"
+>;
+
+function readEnvNumber(
+  value: string | undefined,
+  fallback: number,
+  {
+    min,
+    max,
+  }: {
+    min: number;
+    max: number;
+  },
+): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(max, Math.max(min, Math.floor(parsed)));
+}
+
+function resolvePoolTuning(env: SupabaseCompatFactoryEnv): SupabasePoolTuning {
+  return {
+    max: readEnvNumber(env.SUPABASE_POOL_MAX, DEFAULT_POOL_MAX, { min: 1, max: 32 }),
+    connectionTimeoutMs: readEnvNumber(
+      env.SUPABASE_CONNECT_TIMEOUT_MS,
+      DEFAULT_POOL_CONNECT_TIMEOUT_MS,
+      { min: 1_000, max: 60_000 },
+    ),
+    idleTimeoutMs: readEnvNumber(
+      env.SUPABASE_IDLE_TIMEOUT_MS,
+      DEFAULT_POOL_IDLE_TIMEOUT_MS,
+      { min: 1_000, max: 300_000 },
+    ),
+    queryTimeoutMs: readEnvNumber(
+      env.SUPABASE_QUERY_TIMEOUT_MS,
+      DEFAULT_POOL_QUERY_TIMEOUT_MS,
+      { min: 1_000, max: 120_000 },
+    ),
+    statementTimeoutMs: readEnvNumber(
+      env.SUPABASE_STATEMENT_TIMEOUT_MS,
+      DEFAULT_POOL_STATEMENT_TIMEOUT_MS,
+      { min: 1_000, max: 300_000 },
+    ),
+  };
+}
+
+function resolveDefaultSupabaseConnection(
+  env: Pick<Env, "SUPABASE_DB_URL" | "SUPABASE_HYPERDRIVE">,
+): { connectionUrl: string; useSsl: boolean } {
+  const hyperdriveValue = readHyperdriveConnectionString(env.SUPABASE_HYPERDRIVE);
+  if (hyperdriveValue) {
+    // Hyperdrive exposes a local proxy endpoint; SSL should not be forced here.
+    return { connectionUrl: hyperdriveValue, useSsl: false };
+  }
+
+  const directUrl = env.SUPABASE_DB_URL?.trim();
+  if (directUrl) {
+    return { connectionUrl: directUrl, useSsl: true };
+  }
+
+  throw new Error(
+    "DB_BACKEND=supabase requires SUPABASE_HYPERDRIVE binding or SUPABASE_DB_URL in Worker secrets.",
+  );
+}
+
+function resolveSupabaseConnection(
+  env: SupabaseCompatFactoryEnv,
+  mode: SupabaseConnectionMode,
+  fallbackToWriteConnection: boolean,
+): { connectionUrl: string; useSsl: boolean } {
+  const readOrWriteHyperdrive =
+    mode === "read" ? env.SUPABASE_READ_HYPERDRIVE : env.SUPABASE_WRITE_HYPERDRIVE;
+  const readOrWriteDbUrl =
+    mode === "read" ? env.SUPABASE_READ_DB_URL : env.SUPABASE_WRITE_DB_URL;
+
+  const explicitHyperdrive = readHyperdriveConnectionString(readOrWriteHyperdrive);
+  if (explicitHyperdrive) {
+    return { connectionUrl: explicitHyperdrive, useSsl: false };
+  }
+
+  const explicitDbUrl = readOrWriteDbUrl?.trim();
+  if (explicitDbUrl) {
+    return { connectionUrl: explicitDbUrl, useSsl: true };
+  }
+
+  if (mode === "read" && fallbackToWriteConnection) {
+    return resolveSupabaseConnection(env, "write", true);
+  }
+
+  return resolveDefaultSupabaseConnection(env);
+}
+
+function getPgPool(dbUrlRaw: string, useSsl: boolean, poolTuning: SupabasePoolTuning): Pool {
   const normalized = normalizeConnectionUrl(dbUrlRaw);
-  const cacheKey = `${normalized}::ssl=${useSsl ? "1" : "0"}`;
+  const cacheKey = [
+    normalized,
+    `ssl=${useSsl ? "1" : "0"}`,
+    `max=${poolTuning.max}`,
+    `connect=${poolTuning.connectionTimeoutMs}`,
+    `idle=${poolTuning.idleTimeoutMs}`,
+    `query=${poolTuning.queryTimeoutMs}`,
+    `stmt=${poolTuning.statementTimeoutMs}`,
+  ].join("::");
   const cached = poolCache.get(cacheKey);
   if (cached) return cached;
 
   const poolConfig: PoolConfig = {
     connectionString: normalized,
-    max: DEFAULT_POOL_MAX,
-    connectionTimeoutMillis: DEFAULT_POOL_CONNECT_TIMEOUT_MS,
-    idleTimeoutMillis: DEFAULT_POOL_IDLE_TIMEOUT_MS,
-    query_timeout: DEFAULT_POOL_QUERY_TIMEOUT_MS,
-    statement_timeout: DEFAULT_POOL_STATEMENT_TIMEOUT_MS,
+    max: poolTuning.max,
+    connectionTimeoutMillis: poolTuning.connectionTimeoutMs,
+    idleTimeoutMillis: poolTuning.idleTimeoutMs,
+    query_timeout: poolTuning.queryTimeoutMs,
+    statement_timeout: poolTuning.statementTimeoutMs,
     ssl: useSsl
       ? {
           rejectUnauthorized: false,
@@ -923,33 +1049,20 @@ export type RuntimeDatabase = D1Database & {
   __transaction?: <T>(run: () => Promise<T>) => Promise<T>;
 };
 
-function resolveSupabaseConnection(
-  env: Pick<Env, "SUPABASE_DB_URL" | "SUPABASE_HYPERDRIVE">,
-): { connectionUrl: string; useSsl: boolean } {
-  const hyperdriveValue = readHyperdriveConnectionString(env.SUPABASE_HYPERDRIVE);
-  if (hyperdriveValue) {
-    // Hyperdrive exposes a local proxy endpoint; SSL should not be forced here.
-    return { connectionUrl: hyperdriveValue, useSsl: false };
-  }
-
-  const directUrl = env.SUPABASE_DB_URL?.trim();
-  if (directUrl) {
-    return { connectionUrl: directUrl, useSsl: true };
-  }
-
-  if (!directUrl) {
-    throw new Error(
-      "DB_BACKEND=supabase requires SUPABASE_HYPERDRIVE binding or SUPABASE_DB_URL in Worker secrets.",
-    );
-  }
-  return { connectionUrl: directUrl, useSsl: true };
-}
-
 export function createSupabaseCompatDatabase(
-  env: Pick<Env, "SUPABASE_DB_URL" | "SUPABASE_HYPERDRIVE">,
+  env: SupabaseCompatFactoryEnv,
+  options: SupabaseCompatDatabaseOptions = {},
 ): RuntimeDatabase {
-  const { connectionUrl, useSsl } = resolveSupabaseConnection(env);
-  const pool = getPgPool(connectionUrl, useSsl);
+  const mode = options.mode ?? "default";
+  const fallbackToWriteConnection =
+    mode === "read" ? options.fallbackToWriteConnection !== false : false;
+  const { connectionUrl, useSsl } = resolveSupabaseConnection(
+    env,
+    mode,
+    fallbackToWriteConnection,
+  );
+  const poolTuning = resolvePoolTuning(env);
+  const pool = getPgPool(connectionUrl, useSsl, poolTuning);
   const compatDb = new SupabaseCompatDatabase(pool);
   const db = compatDb as unknown as RuntimeDatabase;
   db.__backend = "supabase";

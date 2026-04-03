@@ -7,37 +7,15 @@ import { Badge } from "@/react-app/components/ui/badge";
 import { Button } from "@/react-app/components/ui/button";
 import { Card } from "@/react-app/components/ui/card";
 import { ROUTE_PATHS } from "@/react-app/auth/constants";
-import { api } from "@/react-app/utils/api";
-
-type Friend = {
-  id: number;
-  friend_user_id: string;
-  friend_username: string;
-  friend_full_name: string;
-  friend_level: number;
-  friend_xp: number;
-  friend_streak: number;
-  status?: string | undefined;
-};
-
-type SearchResult = {
-  user_id: string;
-  username: string;
-  full_name: string;
-  level: number;
-  xp: number;
-};
-
-const FRIENDS_CACHE_TTL_MS = 60_000;
-
-// Cache em memoria para evitar recargas repetidas ao reabrir o painel.
-let friendsCache:
-  | {
-      cachedAt: number;
-      friends: Friend[];
-      pending: Friend[];
-    }
-  | null = null;
+import {
+  fetchFriendsBundle,
+  type Friend,
+  FriendsApiError,
+  respondFriendRequest,
+  searchUsersByUsername,
+  sendFriendRequest as sendFriendRequestApi,
+  type FriendSearchResult as SearchResult,
+} from "@/react-app/services/friendsService";
 
 export default function ProfileFriendsPanel() {
   const navigate = useNavigate();
@@ -49,56 +27,47 @@ export default function ProfileFriendsPanel() {
   const [searching, setSearching] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Aplica o snapshot em cache antes do refresh remoto.
-  const applyCachedFriends = useCallback((cache: { friends: Friend[]; pending: Friend[] }) => {
-    setFriends(cache.friends);
-    setPendingRequests(cache.pending);
-    setLoading(false);
-  }, []);
-
-  // Carrega amigos e solicitacoes com cache curto e fallback de navegacao.
-  const loadFriends = useCallback(async (forceRefresh = false) => {
-    if (!forceRefresh && friendsCache) {
-      applyCachedFriends({ friends: friendsCache.friends, pending: friendsCache.pending });
-      if (Date.now() - friendsCache.cachedAt < FRIENDS_CACHE_TTL_MS) {
-        return;
-      }
-    }
-
-    try {
-      setError(null);
-      const [friendsRes, requestsRes] = await Promise.all([
-        api("/api/friends"),
-        api("/api/friends/requests"),
-      ]);
-
-      if (friendsRes.status === 401 || friendsRes.status === 403 || requestsRes.status === 401 || requestsRes.status === 403) {
+  const handleFriendsError = useCallback((rawError: unknown, fallbackMessage: string) => {
+    if (rawError instanceof FriendsApiError) {
+      if (rawError.code === "UNAUTHORIZED") {
         navigate("/app");
         return;
       }
+      setError(rawError.message || fallbackMessage);
+      return;
+    }
 
-      if (!friendsRes.ok || !requestsRes.ok) {
-        throw new Error("Falha ao carregar amigos.");
-      }
+    setError(fallbackMessage);
+  }, [navigate]);
 
-      const friendsData = (await friendsRes.json()) as Friend[];
-      const requestsData = (await requestsRes.json()) as Friend[];
-      const nextFriends = Array.isArray(friendsData) ? friendsData : [];
-      const nextPending = Array.isArray(requestsData) ? requestsData : [];
-
-      setFriends(nextFriends);
-      setPendingRequests(nextPending);
-      friendsCache = { cachedAt: Date.now(), friends: nextFriends, pending: nextPending };
-    } catch {
-      setError("Nao foi possivel carregar a lista de amigos agora.");
+  // Carrega amigos e solicitacoes do servico compartilhado.
+  const loadFriends = useCallback(async (forceRefresh = false) => {
+    try {
+      setError(null);
+      const bundle = await fetchFriendsBundle({ forceRefresh });
+      setFriends(bundle.friends);
+      setPendingRequests(bundle.pending);
+    } catch (error) {
+      handleFriendsError(error, "Nao foi possivel carregar a lista de amigos agora.");
     } finally {
       setLoading(false);
     }
-  }, [applyCachedFriends, navigate]);
+  }, [handleFriendsError]);
 
   // Resolve a carga inicial do painel.
   useEffect(() => {
     void loadFriends();
+  }, [loadFriends]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      void loadFriends(true);
+    }, 40_000);
+
+    return () => {
+      window.clearInterval(timer);
+    };
   }, [loadFriends]);
 
   // Busca usuarios por username para iniciar novas conexoes.
@@ -110,74 +79,35 @@ export default function ProfileFriendsPanel() {
 
     setSearching(true);
     try {
-      const response = await api(`/api/friends/search?username=${encodeURIComponent(searchQuery.trim())}`);
-      if (response.status === 401 || response.status === 403) {
-        navigate("/app");
-        return;
-      }
-      if (!response.ok) {
-        throw new Error("Falha na busca de usuarios.");
-      }
-      const payload = (await response.json()) as SearchResult[];
-      setSearchResults(Array.isArray(payload) ? payload : []);
-    } catch {
-      setError("Nao foi possivel buscar usuarios agora.");
+      const payload = await searchUsersByUsername(searchQuery.trim());
+      setSearchResults(payload);
+    } catch (error) {
+      handleFriendsError(error, "Nao foi possivel buscar usuarios agora.");
     } finally {
       setSearching(false);
     }
   };
 
   // Envia solicitacao de amizade e recarrega o painel consolidado.
-  const sendFriendRequest = async (friendUserId: string) => {
+  const handleSendFriendRequest = async (friendUserId: string) => {
     try {
-      const response = await api("/api/friends/request", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ friend_user_id: friendUserId }),
-      });
-
-      if (response.status === 401 || response.status === 403) {
-        navigate("/app");
-        return;
-      }
-
-      if (!response.ok) {
-        const payload = (await response.json().catch(() => null)) as { error?: string | undefined } | null;
-        setError(payload?.error ?? "Nao foi possivel enviar solicitacao.");
-        return;
-      }
+      await sendFriendRequestApi(friendUserId);
 
       setSearchQuery("");
       setSearchResults([]);
       await loadFriends(true);
-    } catch {
-      setError("Nao foi possivel enviar solicitacao.");
+    } catch (error) {
+      handleFriendsError(error, "Nao foi possivel enviar solicitacao.");
     }
   };
 
   // Aceita ou rejeita uma solicitacao pendente.
   const respondRequest = async (requestId: number, accept: boolean) => {
     try {
-      const response = await api(accept ? "/api/friends/accept" : "/api/friends/reject", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ request_id: requestId }),
-      });
-
-      if (response.status === 401 || response.status === 403) {
-        navigate("/app");
-        return;
-      }
-
-      if (!response.ok) {
-        const payload = (await response.json().catch(() => null)) as { error?: string | undefined } | null;
-        setError(payload?.error ?? "Nao foi possivel responder a solicitacao.");
-        return;
-      }
-
+      await respondFriendRequest(requestId, accept);
       await loadFriends(true);
-    } catch {
-      setError("Nao foi possivel responder a solicitacao.");
+    } catch (error) {
+      handleFriendsError(error, "Nao foi possivel responder a solicitacao.");
     }
   };
 
@@ -240,7 +170,7 @@ export default function ProfileFriendsPanel() {
                     <Badge className="mt-1">Nivel {result.level}</Badge>
                   </div>
                 </div>
-                <Button className="px-4 py-2 rounded-full" onClick={() => { void sendFriendRequest(result.user_id); }}>
+                <Button className="px-4 py-2 rounded-full" onClick={() => { void handleSendFriendRequest(result.user_id); }}>
                   <UserPlus className="w-4 h-4" />
                   Adicionar
                 </Button>

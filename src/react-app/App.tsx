@@ -16,6 +16,8 @@ import {
 import { applyProfileTheme } from "@/react-app/theme/profileTheme";
 import { clearJsonCache } from "@/react-app/utils/api";
 import type { User } from "@/react-app/auth/types";
+import { hasPlanAccess } from "@/react-app/services/authService";
+import { startPresenceHeartbeat } from "@/react-app/services/presenceService";
 import AppRoutes from "./routes/AppRoutes";
 import RouteLoader from "./routes/RouteLoader";
 
@@ -53,6 +55,11 @@ export default function App({ initialThemeMode = DEFAULT_APP_THEME_MODE }: AppPr
     applyAppThemeMode(themeMode);
     persistAppThemeMode(themeMode);
   }, [themeMode]);
+
+  useEffect(() => {
+    if (!user?.id || user.onboarding_completed !== 1 || !hasPlanAccess(user)) return;
+    return startPresenceHeartbeat();
+  }, [user, user?.id, user?.onboarding_completed, user?.plan_id, user?.plan_status]);
 
   return (
     <ThemeContext.Provider value={{ themeMode, setThemeMode, toggleThemeMode }}>
