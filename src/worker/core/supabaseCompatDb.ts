@@ -962,34 +962,49 @@ class SupabaseCompatDatabase {
     const cached = this.tableIdColumnCache.get(target.cacheKey);
     if (typeof cached === "boolean") return cached;
 
-    const queryTarget: QueryTarget = this.currentQueryTarget();
-    let result: QueryResult<Record<string, unknown>>;
+    try {
+      const queryTarget: QueryTarget = this.currentQueryTarget();
+      let result: QueryResult<Record<string, unknown>>;
 
-    if (target.schema) {
-      result = await queryTarget.query(
-        `SELECT 1
-           FROM information_schema.columns
-          WHERE table_schema = $1
-            AND table_name = $2
-            AND column_name = 'id'
-          LIMIT 1`,
-        [target.schema, target.table],
-      );
-    } else {
-      result = await queryTarget.query(
-        `SELECT 1
-           FROM information_schema.columns
-          WHERE table_name = $1
-            AND column_name = 'id'
-            AND table_schema NOT IN ('pg_catalog', 'information_schema')
-          LIMIT 1`,
-        [target.table],
-      );
+      if (target.schema) {
+        result = await queryTarget.query(
+          `SELECT 1
+             FROM information_schema.columns
+            WHERE table_schema = $1
+              AND table_name = $2
+              AND column_name = 'id'
+            LIMIT 1`,
+          [target.schema, target.table],
+        );
+      } else {
+        result = await queryTarget.query(
+          `SELECT 1
+             FROM information_schema.columns
+            WHERE table_name = $1
+              AND column_name = 'id'
+              AND table_schema NOT IN ('pg_catalog', 'information_schema')
+            LIMIT 1`,
+          [target.table],
+        );
+      }
+
+      const hasColumn = (result.rowCount ?? 0) > 0;
+      this.tableIdColumnCache.set(target.cacheKey, hasColumn);
+      return hasColumn;
+    } catch (error) {
+      if (!isRetryableReadError(error)) {
+        throw error;
+      }
+
+      // Metadata probes should never block writes on transient connectivity hiccups.
+      // In that case we skip RETURNING id optimization for this table and keep going.
+      this.tableIdColumnCache.set(target.cacheKey, false);
+      console.warn("[supabase-compat-db][id-column-probe]", {
+        message: getErrorMessage(error),
+        table: target.cacheKey,
+      });
+      return false;
     }
-
-    const hasColumn = (result.rowCount ?? 0) > 0;
-    this.tableIdColumnCache.set(target.cacheKey, hasColumn);
-    return hasColumn;
   }
 
   private currentQueryTarget(): QueryTarget {

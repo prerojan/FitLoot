@@ -11,6 +11,8 @@ import {
   hasTableColumn,
   purgeUserAccountData,
 } from "../core/database";
+import { upsertRuntimeSession } from "../core/runtimeSessionStore";
+import { upsertRuntimeUserAuth } from "../core/runtimeUserAuthStore";
 import type { AppContext } from "../core/types";
 import {
   getUserAuthRecordById,
@@ -21,6 +23,38 @@ type AuthRouteDeps = {
   generateCookie: (sessionId: string, requestUrl: string) => string;
   hashPassword: (password: string, salt: string) => Promise<string>;
 };
+
+function resolveRuntimeSessionDb(c: import("hono").Context<AppContext>): D1Database | null {
+  const runtimeDb = c.env.fitloot_runtime_db;
+  if (!runtimeDb) return null;
+  if (runtimeDb === c.env.fitloot_db) return null;
+  return runtimeDb;
+}
+
+function isUniqueConstraintError(error: unknown): boolean {
+  const message = (error instanceof Error ? error.message : String(error))
+    .toLowerCase()
+    .trim();
+  return (
+    message.includes("unique constraint") ||
+    message.includes("duplicate key value") ||
+    message.includes("violates unique")
+  );
+}
+
+function isConnectionTimeoutLike(error: unknown): boolean {
+  const message = (error instanceof Error ? error.message : String(error))
+    .toLowerCase()
+    .trim();
+  return (
+    message.includes("query read timeout") ||
+    message.includes("timeout exceeded when trying to connect") ||
+    message.includes("connect etimedout") ||
+    message.includes("read etimedout") ||
+    message.includes("socket hang up") ||
+    message.includes("connection terminated")
+  );
+}
 
 // Registers the authentication surface responsible for account creation and session login.
 export function registerAuthRoutes(
@@ -39,58 +73,85 @@ export function registerAuthRoutes(
         const data = c.req.valid("json");
         const normalizedEmail = data.email.trim().toLowerCase();
 
-        const existing = await c.env.fitloot_db
-          .prepare("SELECT id FROM users WHERE lower(email) = ?")
-          .bind(normalizedEmail)
-          .first<{ id: string }>();
+        const insertUser = async (userId: string) => {
+          await c.env.fitloot_db
+            .prepare(
+              "INSERT INTO users (id, email, name, password_hash, password_salt) VALUES (?, ?, ?, ?, ?)",
+            )
+            .bind(userId, normalizedEmail, data.name ?? "", passwordHash, salt)
+            .run();
+        };
 
-        if (existing?.id) {
+        const salt = crypto.randomUUID();
+        const passwordHash = await hashPassword(data.password, salt);
+        let userId = crypto.randomUUID();
+
+        try {
+          await insertUser(userId);
+        } catch (insertError) {
+          if (!isUniqueConstraintError(insertError)) {
+            throw insertError;
+          }
+
+          const existing = await c.env.fitloot_db
+            .prepare("SELECT id FROM users WHERE lower(email) = ?")
+            .bind(normalizedEmail)
+            .first<{ id: string }>();
+
+          if (!existing?.id) {
+            throw insertError;
+          }
+
           const existingUser = await getUserAuthRecordById(c.env.fitloot_db, existing.id);
           if (!isReusableIncompleteAccount(existingUser)) {
             return c.json({ error: "E-mail ja cadastrado" }, 409);
           }
 
           await purgeUserAccountData(c.env.fitloot_db, existing.id);
+          userId = crypto.randomUUID();
+          await insertUser(userId);
         }
 
-        const userId = crypto.randomUUID();
-        const salt = crypto.randomUUID();
-        const passwordHash = await hashPassword(data.password, salt);
+        const isSupabaseDb =
+          (c.env.fitloot_db as D1Database & { __backend?: string }).__backend ===
+          "supabase";
 
-        await c.env.fitloot_db
-          .prepare(
-            "INSERT INTO users (id, email, name, password_hash, password_salt) VALUES (?, ?, ?, ?, ?)",
-          )
-          .bind(userId, normalizedEmail, data.name ?? "", passwordHash, salt)
-          .run();
-
-        const [
-          planIdColumnExists,
-          planStatusColumnExists,
-          paymentMethodColumnExists,
-          onboardingColumnExists,
-        ] = await Promise.all([
-          hasTableColumn(c.env.fitloot_db, "users", "plan_id"),
-          hasTableColumn(c.env.fitloot_db, "users", "plan_status"),
-          hasTableColumn(c.env.fitloot_db, "users", "payment_method"),
-          hasTableColumn(c.env.fitloot_db, "users", "onboarding_completed"),
-        ]);
-
-        if (planIdColumnExists && planStatusColumnExists) {
-          const assignments = ["plan_id = 'basic'", "plan_status = 'failed'"];
-          if (paymentMethodColumnExists) {
-            assignments.push("payment_method = 'none'");
-          }
-          if (onboardingColumnExists) {
-            assignments.push("onboarding_completed = 0");
-          }
-
+        if (isSupabaseDb) {
           await c.env.fitloot_db
             .prepare(
-              `UPDATE users SET ${assignments.join(", ")} WHERE id = ?`,
+              "UPDATE users SET plan_id = 'basic', plan_status = 'failed', payment_method = 'none', onboarding_completed = 0 WHERE id = ?",
             )
             .bind(userId)
             .run();
+        } else {
+          const [
+            planIdColumnExists,
+            planStatusColumnExists,
+            paymentMethodColumnExists,
+            onboardingColumnExists,
+          ] = await Promise.all([
+            hasTableColumn(c.env.fitloot_db, "users", "plan_id"),
+            hasTableColumn(c.env.fitloot_db, "users", "plan_status"),
+            hasTableColumn(c.env.fitloot_db, "users", "payment_method"),
+            hasTableColumn(c.env.fitloot_db, "users", "onboarding_completed"),
+          ]);
+
+          if (planIdColumnExists && planStatusColumnExists) {
+            const assignments = ["plan_id = 'basic'", "plan_status = 'failed'"];
+            if (paymentMethodColumnExists) {
+              assignments.push("payment_method = 'none'");
+            }
+            if (onboardingColumnExists) {
+              assignments.push("onboarding_completed = 0");
+            }
+
+            await c.env.fitloot_db
+              .prepare(
+                `UPDATE users SET ${assignments.join(", ")} WHERE id = ?`,
+              )
+              .bind(userId)
+              .run();
+          }
         }
 
         let sessionEstablished = false;
@@ -106,6 +167,36 @@ export function registerAuthRoutes(
             )
             .bind(sessionId, userId, expiresAt)
             .run();
+
+          const runtimeSessionDb = resolveRuntimeSessionDb(c);
+          if (runtimeSessionDb) {
+            try {
+              await Promise.all([
+                upsertRuntimeSession(runtimeSessionDb, {
+                  id: sessionId,
+                  user_id: userId,
+                  expires_at: expiresAt,
+                }),
+                upsertRuntimeUserAuth(runtimeSessionDb, {
+                  id: userId,
+                  email: normalizedEmail,
+                  name: data.name ?? "",
+                  avatar_url: null,
+                  onboarding_completed: 0,
+                  plan_id: "basic",
+                  plan_status: "failed",
+                  payment_method: "none",
+                }),
+              ]);
+            } catch (runtimeSyncError) {
+              console.warn("[register][runtime-session-sync]", {
+                message:
+                  runtimeSyncError instanceof Error
+                    ? runtimeSyncError.message
+                    : String(runtimeSyncError),
+              });
+            }
+          }
 
           c.header("Set-Cookie", generateCookie(sessionId, c.req.url));
           sessionEstablished = true;
@@ -258,6 +349,46 @@ export function registerAuthRoutes(
           )
           .bind(sessionId, userRow.id, expiresAt)
           .run();
+
+        const runtimeSessionDb = resolveRuntimeSessionDb(c);
+        if (runtimeSessionDb) {
+          try {
+            const authRecord =
+              (await getUserAuthRecordById(c.env.fitloot_db, userRow.id).catch(
+                (error) => {
+                  if (!isConnectionTimeoutLike(error)) {
+                    throw error;
+                  }
+                  return null;
+                },
+              )) ?? {
+                id: userRow.id,
+                email: normalizedEmail,
+                name: "",
+                avatar_url: null,
+                onboarding_completed: 0,
+                plan_id: "basic" as const,
+                plan_status: "failed" as const,
+                payment_method: "none" as const,
+              };
+
+            await Promise.all([
+              upsertRuntimeSession(runtimeSessionDb, {
+                id: sessionId,
+                user_id: userRow.id,
+                expires_at: expiresAt,
+              }),
+              upsertRuntimeUserAuth(runtimeSessionDb, authRecord),
+            ]);
+          } catch (runtimeSyncError) {
+            console.warn("[login][runtime-session-sync]", {
+              message:
+                runtimeSyncError instanceof Error
+                  ? runtimeSyncError.message
+                  : String(runtimeSyncError),
+            });
+          }
+        }
 
         c.header("Set-Cookie", generateCookie(sessionId, c.req.url));
         return c.json({ success: true }, 200);

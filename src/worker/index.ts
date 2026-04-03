@@ -2915,6 +2915,11 @@ async function insertMission(
     "thumbnail_url",
     "updated_at",
   ];
+  const rawDurationEstimate = Number(mission.duration_estimate_minutes);
+  const normalizedDurationEstimateMinutes =
+    Number.isFinite(rawDurationEstimate) && rawDurationEstimate > 0
+      ? Math.round(rawDurationEstimate)
+      : 10;
   const values: unknown[] = [
     userId,
     period,
@@ -2947,7 +2952,7 @@ async function insertMission(
     mission.exercise_type,
     mission.body_area,
     JSON.stringify(mission.attributes_benefited),
-    mission.duration_estimate_minutes,
+    normalizedDurationEstimateMinutes,
     mission.exercise_category,
     mission.mission_origin,
     JSON.stringify(mission.circuit_tasks),

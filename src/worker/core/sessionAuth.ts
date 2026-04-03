@@ -4,6 +4,14 @@ import {
   databaseNotInitializedResponse,
   hasCoreSchema,
 } from "./database";
+import {
+  readRuntimeSession,
+  upsertRuntimeSession,
+} from "./runtimeSessionStore";
+import {
+  readRuntimeUserAuth,
+  upsertRuntimeUserAuth,
+} from "./runtimeUserAuthStore";
 import type {
   AppContext,
   UserAuthRecord,
@@ -12,6 +20,10 @@ import type {
 type SessionCookieUser = {
   id: string;
   user_id: string;
+};
+
+type SessionCookieRecord = SessionCookieUser & {
+  expires_at?: string | null;
 };
 
 type CreateAuthMiddlewareDeps = {
@@ -51,8 +63,31 @@ type CreateAuthMiddlewareDeps = {
   ) => Promise<void>;
 };
 
+function isTransientAuthDatabaseError(error: unknown): boolean {
+  const message = (error instanceof Error ? error.message : String(error))
+    .toLowerCase()
+    .trim();
+  return (
+    message.includes("query read timeout") ||
+    message.includes("timeout exceeded when trying to connect") ||
+    message.includes("connection terminated") ||
+    message.includes("connect etimedout") ||
+    message.includes("read etimedout") ||
+    message.includes("socket hang up")
+  );
+}
+
 function isSupabaseRuntimeDb(db: D1Database): boolean {
   return (db as D1Database & { __backend?: string }).__backend === "supabase";
+}
+
+function resolveRuntimeFallbackDb(
+  db: D1Database,
+  runtimeDb: D1Database | undefined,
+): D1Database | null {
+  if (!runtimeDb) return null;
+  if (runtimeDb === db) return null;
+  return runtimeDb;
 }
 
 export function parseCookieHeader(cookieHeader: string | undefined) {
@@ -164,7 +199,7 @@ export async function hashPassword(
 export function createAuthMiddleware({
   catalogCacheTtlMs = 60_000,
   sessionCacheTtlMs = 5_000,
-  userRecordCacheTtlMs = 2_000,
+  userRecordCacheTtlMs = 10_000,
   authCacheMaxEntries = 5_000,
   cleanupSettledMissionsWithGuard,
   ensureCaminhadaLeveUserSkill,
@@ -179,13 +214,14 @@ export function createAuthMiddleware({
   type CacheEntry<T> = {
     value: T;
     expiresAt: number;
+    staleUntil: number;
   };
 
   let catalogInitCheckedAt = 0;
   let catalogInitPromise: Promise<void> | null = null;
   const sessionCache = new Map<string, CacheEntry<SessionCookieUser>>();
   const userRecordCache = new Map<string, CacheEntry<UserAuthRecord>>();
-  const inflightSessionLoads = new Map<string, Promise<SessionCookieUser | null>>();
+  const inflightSessionLoads = new Map<string, Promise<SessionCookieRecord | null>>();
   const inflightUserLoads = new Map<string, Promise<UserAuthRecord | null>>();
 
   function readCache<T>(
@@ -202,6 +238,20 @@ export function createAuthMiddleware({
     return cached.value;
   }
 
+  function readStaleCache<T>(
+    cache: Map<string, CacheEntry<T>>,
+    key: string,
+    now: number,
+  ): T | null {
+    const cached = cache.get(key);
+    if (!cached) return null;
+    if (cached.staleUntil <= now) {
+      cache.delete(key);
+      return null;
+    }
+    return cached.value;
+  }
+
   function writeCache<T>(
     cache: Map<string, CacheEntry<T>>,
     key: string,
@@ -209,9 +259,11 @@ export function createAuthMiddleware({
     ttlMs: number,
     now: number,
   ): void {
+    const staleWindowMs = Math.min(180_000, Math.max(15_000, ttlMs * 6));
     cache.set(key, {
       value,
       expiresAt: now + ttlMs,
+      staleUntil: now + staleWindowMs,
     });
 
     if (cache.size <= authCacheMaxEntries) return;
@@ -307,18 +359,65 @@ export function createAuthMiddleware({
 
       const now = Date.now();
       let session = readCache(sessionCache, sessionId, now);
+      const staleSession = readStaleCache(sessionCache, sessionId, now);
+      const runtimeFallbackDb = resolveRuntimeFallbackDb(
+        c.env.fitloot_db,
+        c.env.fitloot_runtime_db,
+      );
       if (!session) {
-        session = await loadWithDedupe(
-          inflightSessionLoads,
-          sessionId,
-          () =>
-            c.env.fitloot_db
-              .prepare(
-                "SELECT id, user_id FROM sessions WHERE id = ? AND expires_at > CURRENT_TIMESTAMP",
-              )
-              .bind(sessionId)
-              .first<SessionCookieUser>(),
-        );
+        // Prefer edge-local session reads to keep auth resilient under Supabase burst pressure.
+        if (runtimeFallbackDb) {
+          try {
+            session = await readRuntimeSession(runtimeFallbackDb, sessionId);
+          } catch {
+            // Runtime fallback is best-effort; authoritative fallback remains Supabase.
+          }
+        }
+
+        if (!session) {
+          try {
+            const sessionRecord = await loadWithDedupe(
+              inflightSessionLoads,
+              sessionId,
+              () =>
+                c.env.fitloot_db
+                  .prepare(
+                    "SELECT id, user_id, expires_at FROM sessions WHERE id = ? AND expires_at > CURRENT_TIMESTAMP",
+                  )
+                  .bind(sessionId)
+                  .first<SessionCookieRecord>(),
+            );
+
+            if (sessionRecord) {
+              session = {
+                id: sessionRecord.id,
+                user_id: sessionRecord.user_id,
+              };
+              if (runtimeFallbackDb && sessionRecord.expires_at) {
+                c.executionCtx.waitUntil(
+                  upsertRuntimeSession(runtimeFallbackDb, {
+                    id: sessionRecord.id,
+                    user_id: sessionRecord.user_id,
+                    expires_at: sessionRecord.expires_at,
+                  })
+                    .catch(() => undefined),
+                );
+              }
+            }
+          } catch (sessionError) {
+            if (!isTransientAuthDatabaseError(sessionError)) {
+              throw sessionError;
+            }
+
+            if (!session && staleSession) {
+              session = staleSession;
+            }
+
+            if (!session) {
+              throw sessionError;
+            }
+          }
+        }
       }
 
       if (!session) {
@@ -328,15 +427,46 @@ export function createAuthMiddleware({
       writeCache(sessionCache, sessionId, session, sessionCacheTtlMs, now);
 
       let userRecord = readCache(userRecordCache, session.user_id, now);
-      if (!userRecord) {
-        userRecord = await loadWithDedupe(
-          inflightUserLoads,
-          session.user_id,
-          () => getUserAuthRecordById(
-            c.env.fitloot_db,
+      const staleUserRecord = readStaleCache(userRecordCache, session.user_id, now);
+      let runtimeUserRecord: UserAuthRecord | null = null;
+      let shouldSyncRuntimeUserRecord = false;
+
+      if (!userRecord && runtimeFallbackDb) {
+        try {
+          runtimeUserRecord = await readRuntimeUserAuth(
+            runtimeFallbackDb,
             session.user_id,
-          ),
-        );
+            { maxAgeMs: 45_000 },
+          );
+          if (runtimeUserRecord) {
+            userRecord = runtimeUserRecord;
+          }
+        } catch {
+          // Runtime fallback is best-effort for transient Supabase pressure.
+        }
+      }
+
+      if (!userRecord) {
+        try {
+          userRecord = await loadWithDedupe(
+            inflightUserLoads,
+            session.user_id,
+            () => getUserAuthRecordById(
+              c.env.fitloot_db,
+              session.user_id,
+            ),
+          );
+          shouldSyncRuntimeUserRecord = Boolean(userRecord);
+        } catch (userRecordError) {
+          if (!isTransientAuthDatabaseError(userRecordError)) {
+            throw userRecordError;
+          }
+
+          userRecord = staleUserRecord ?? runtimeUserRecord;
+          if (!userRecord) {
+            throw userRecordError;
+          }
+        }
       }
 
       if (!userRecord) {
@@ -396,6 +526,7 @@ export function createAuthMiddleware({
               ...userRecord,
               onboarding_completed: 1,
             };
+            shouldSyncRuntimeUserRecord = true;
 
             writeCache(
               userRecordCache,
@@ -414,6 +545,14 @@ export function createAuthMiddleware({
                 : String(reconcileError),
           });
         }
+      }
+
+      if (runtimeFallbackDb && shouldSyncRuntimeUserRecord) {
+        c.executionCtx.waitUntil(
+          upsertRuntimeUserAuth(runtimeFallbackDb, userRecord).catch(
+            () => undefined,
+          ),
+        );
       }
 
       const hasUnlockedAccess =

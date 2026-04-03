@@ -24,6 +24,10 @@ function isConnectionTimeoutLike(error: unknown): boolean {
   );
 }
 
+function isSupabaseRuntimeDb(db: D1Database): boolean {
+  return (db as D1Database & { __backend?: string }).__backend === "supabase";
+}
+
 export async function hasCoreSchema(db: D1Database) {
   const runtimeDb = db as D1Database & { __backend?: string };
   if (runtimeDb.__backend === "supabase") {
@@ -112,6 +116,7 @@ async function getTableColumns(db: D1Database, tableName: string): Promise<Set<s
   if (cached && now - cached.checkedAt < TABLE_COLUMN_CACHE_TTL_MS) {
     return cached.columns;
   }
+  const staleColumns = cached?.columns ?? null;
 
   let rows: Array<{ name: string | null }> = [];
   try {
@@ -129,7 +134,13 @@ async function getTableColumns(db: D1Database, tableName: string): Promise<Set<s
           ordinal_position`,
     ).bind(cacheKey).all<{ name: string | null }>();
     rows = Array.isArray(info.results) ? info.results : [];
-  } catch {
+  } catch (error) {
+    if (staleColumns && isConnectionTimeoutLike(error)) {
+      return staleColumns;
+    }
+    if (isSupabaseRuntimeDb(db)) {
+      throw error;
+    }
     const info = await db.prepare(`PRAGMA table_info('${cacheKey}')`).all<{ name: string | null }>();
     rows = Array.isArray(info.results) ? info.results : [];
   }

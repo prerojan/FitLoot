@@ -49,10 +49,21 @@ function createUserRow(options: {
 
 describe("auth routes", () => {
   it("reuses email from incomplete account and registers a fresh user", async () => {
+    let insertAttempts = 0;
     const { db, calls } = createMockD1Database([
       {
         match: "SELECT COUNT(*) as count FROM sqlite_master",
         first: { count: 2 },
+      },
+      {
+        match: "INSERT INTO users (id, email, name, password_hash, password_salt)",
+        run: () => {
+          insertAttempts += 1;
+          if (insertAttempts === 1) {
+            throw new Error("duplicate key value violates unique constraint users_email_key");
+          }
+          return { success: true, meta: { changes: 1 } };
+        },
       },
       {
         match: "SELECT id FROM users WHERE lower(email) = ?",
@@ -80,11 +91,11 @@ describe("auth routes", () => {
         run: { success: true, meta: { changes: 1 } },
       },
       {
-        match: "INSERT INTO users (id, email, name, password_hash, password_salt)",
+        match: "UPDATE users SET",
         run: { success: true, meta: { changes: 1 } },
       },
       {
-        match: "UPDATE users SET",
+        match: "INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, ?)",
         run: { success: true, meta: { changes: 1 } },
       },
     ]);
@@ -120,10 +131,21 @@ describe("auth routes", () => {
   });
 
   it("keeps blocking email already tied to active account", async () => {
+    let insertAttempts = 0;
     const { db, calls } = createMockD1Database([
       {
         match: "SELECT COUNT(*) as count FROM sqlite_master",
         first: { count: 2 },
+      },
+      {
+        match: "INSERT INTO users (id, email, name, password_hash, password_salt)",
+        run: () => {
+          insertAttempts += 1;
+          if (insertAttempts === 1) {
+            throw new Error("duplicate key value violates unique constraint users_email_key");
+          }
+          return { success: true, meta: { changes: 1 } };
+        },
       },
       {
         match: "SELECT id FROM users WHERE lower(email) = ?",
@@ -169,8 +191,11 @@ describe("auth routes", () => {
 
     expect(response.status).toBe(409);
     expect(
-      calls.some((call) => call.sql.includes("INSERT INTO users (id, email, name, password_hash, password_salt)")),
-    ).toBe(false);
+      calls.filter((call) =>
+        call.sql.includes("INSERT INTO users (id, email, name, password_hash, password_salt)") &&
+        call.method === "run",
+      ).length,
+    ).toBe(1);
   });
 
   it("reports reclaimable email as available in check-availability", async () => {

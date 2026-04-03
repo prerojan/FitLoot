@@ -82,7 +82,7 @@ describe("onboarding routes", () => {
         },
       },
       {
-        match: "INSERT OR IGNORE INTO user_skills",
+        match: "INSERT INTO user_skills",
         run: { success: true, meta: {} },
       },
     ]);

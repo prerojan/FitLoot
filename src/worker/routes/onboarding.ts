@@ -213,15 +213,20 @@ async function persistOnboardingProfileState({
 
   const conditioning = data.initial_conditioning as ConditioningLevel;
   const maxTier = conditioningOrder(conditioning);
+  const isSupabaseDb =
+    (env.fitloot_db as D1Database & { __backend?: string }).__backend ===
+    "supabase";
   const [
     hasInitialPushupsColumn,
     hasInitialSitupsColumn,
     hasInitialSquatsColumn,
-  ] = await Promise.all([
-    hasTableColumn(env.fitloot_db, "user_profiles", "initial_pushups"),
-    hasTableColumn(env.fitloot_db, "user_profiles", "initial_situps"),
-    hasTableColumn(env.fitloot_db, "user_profiles", "initial_squats"),
-  ]);
+  ] = isSupabaseDb
+    ? [true, true, true]
+    : await Promise.all([
+        hasTableColumn(env.fitloot_db, "user_profiles", "initial_pushups"),
+        hasTableColumn(env.fitloot_db, "user_profiles", "initial_situps"),
+        hasTableColumn(env.fitloot_db, "user_profiles", "initial_squats"),
+      ]);
 
   const profileColumns = [
     "user_id",
@@ -356,19 +361,45 @@ async function persistOnboardingProfileState({
     .prepare("SELECT id, tier, level_required FROM skills")
     .all<{ id: number; tier: string; level_required: number }>();
 
-  for (const skill of initialSkills.results) {
-    if (
-      skillTierOrder(skill.tier) <= Math.max(1, maxTier) &&
-      Number(skill.level_required ?? 1) <= 1
-    ) {
-      await env.fitloot_db
-        .prepare(
-          `INSERT OR IGNORE INTO user_skills (user_id, skill_id, status, current_stage, total_reps, total_time, best_reps, unlocked_at, updated_at)
-          VALUES (?, ?, 'unlocked', 1, 0, 0, 0, datetime('now'), datetime('now'))`,
+  const unlockableSkillIds = initialSkills.results
+    .filter(
+      (skill) =>
+        skillTierOrder(skill.tier) <= Math.max(1, maxTier) &&
+        Number(skill.level_required ?? 1) <= 1,
+    )
+    .map((skill) => skill.id);
+
+  if (unlockableSkillIds.length > 0) {
+    const placeholders = unlockableSkillIds.map(() => "?").join(", ");
+    await env.fitloot_db
+      .prepare(
+        `INSERT INTO user_skills (
+          user_id,
+          skill_id,
+          status,
+          current_stage,
+          total_reps,
+          total_time,
+          best_reps,
+          unlocked_at,
+          updated_at
         )
-        .bind(userId, skill.id)
-        .run();
-    }
+        SELECT
+          ?,
+          id,
+          'unlocked',
+          1,
+          0,
+          0,
+          0,
+          datetime('now'),
+          datetime('now')
+        FROM skills
+        WHERE id IN (${placeholders})
+        ON CONFLICT(user_id, skill_id) DO NOTHING`,
+      )
+      .bind(userId, ...unlockableSkillIds)
+      .run();
   }
 
   const plan = await buildInitialTrainingPlan(
@@ -427,6 +458,36 @@ function respondOnboardingPersistenceError(
   return null;
 }
 
+function isTransientDatabaseError(error: unknown): boolean {
+  const message = getErrorMessage(error).toLowerCase();
+  return (
+    message.includes("query read timeout") ||
+    message.includes("timeout exceeded when trying to connect") ||
+    message.includes("read etimedout") ||
+    message.includes("socket hang up") ||
+    message.includes("connection terminated")
+  );
+}
+
+async function runWithTransientRetry(
+  task: () => Promise<void>,
+): Promise<void> {
+  const maxAttempts = 2;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      await task();
+      return;
+    } catch (error) {
+      if (!isTransientDatabaseError(error) || attempt >= maxAttempts) {
+        throw error;
+      }
+      await new Promise((resolve) => {
+        setTimeout(resolve, 150 * attempt);
+      });
+    }
+  }
+}
+
 // Registers the onboarding pipeline that persists profile state, training plans, and checkout intent.
 export function registerOnboardingRoutes(
   app: Hono<AppContext>,
@@ -469,22 +530,24 @@ export function registerOnboardingRoutes(
       }
 
       try {
-        await withTransaction(c.env.fitloot_db, async () => {
-          await persistOnboardingProfileState({
-            env: c.env,
-            userId: user.id,
-            data,
-            buildInitialTrainingPlan,
-            conditioningOrder,
-            ensureGoalStatsRow,
-            ensureUserCounterRow,
-            evaluateLevelTitles,
-            logUserEvent,
-            normalizeTrainingFrequencyInput,
-            skillTierOrder,
-            upsertTrainingPlan,
-          });
-        }, c.env);
+        await runWithTransientRetry(async () => {
+          await withTransaction(c.env.fitloot_db, async () => {
+            await persistOnboardingProfileState({
+              env: c.env,
+              userId: user.id,
+              data,
+              buildInitialTrainingPlan,
+              conditioningOrder,
+              ensureGoalStatsRow,
+              ensureUserCounterRow,
+              evaluateLevelTitles,
+              logUserEvent,
+              normalizeTrainingFrequencyInput,
+              skillTierOrder,
+              upsertTrainingPlan,
+            });
+          }, c.env);
+        });
       } catch (error) {
         const handled = respondOnboardingPersistenceError(c, error);
         if (handled) return handled;
@@ -530,47 +593,49 @@ export function registerOnboardingRoutes(
       try {
         let onboardingSnapshot: PersistedOnboardingSnapshot | null = null;
 
-        await withTransaction(c.env.fitloot_db, async () => {
-          onboardingSnapshot = await persistOnboardingProfileState({
-            env: c.env,
-            userId: user.id,
-            data,
-            buildInitialTrainingPlan,
-            conditioningOrder,
-            ensureGoalStatsRow,
-            ensureUserCounterRow,
-            evaluateLevelTitles,
-            logUserEvent,
-            normalizeTrainingFrequencyInput,
-            skillTierOrder,
-            upsertTrainingPlan,
-          });
+        await runWithTransientRetry(async () => {
+          await withTransaction(c.env.fitloot_db, async () => {
+            onboardingSnapshot = await persistOnboardingProfileState({
+              env: c.env,
+              userId: user.id,
+              data,
+              buildInitialTrainingPlan,
+              conditioningOrder,
+              ensureGoalStatsRow,
+              ensureUserCounterRow,
+              evaluateLevelTitles,
+              logUserEvent,
+              normalizeTrainingFrequencyInput,
+              skillTierOrder,
+              upsertTrainingPlan,
+            });
 
-          checkoutResult = await startCheckoutForUser(c.env.fitloot_db, c.env, {
-            userId: user.id,
-            planId: data.plan_id,
-            paymentMethod: data.payment_method,
-            cardNumber: data.card_number,
-            cardHolderName: data.card_holder_name,
-            cardExpiry: data.card_expiry,
-            promoCode: data.promo_code,
-            markOnboardingCompleted: false,
-          });
+            checkoutResult = await startCheckoutForUser(c.env.fitloot_db, c.env, {
+              userId: user.id,
+              planId: data.plan_id,
+              paymentMethod: data.payment_method,
+              cardNumber: data.card_number,
+              cardHolderName: data.card_holder_name,
+              cardExpiry: data.card_expiry,
+              promoCode: data.promo_code,
+              markOnboardingCompleted: false,
+            });
 
-          if (!onboardingSnapshot) {
-            throw new Error("ONBOARDING_SNAPSHOT_MISSING");
-          }
+            if (!onboardingSnapshot) {
+              throw new Error("ONBOARDING_SNAPSHOT_MISSING");
+            }
 
-          await logUserEvent(c.env.fitloot_db, user.id, "onboarding_submitted", {
-            conditioning: onboardingSnapshot.conditioning,
-            main_goal: onboardingSnapshot.primaryGoal,
-            goals: onboardingSnapshot.selectedGoals,
-            training_frequency: onboardingSnapshot.trainingFrequency,
-            plan_id: checkoutResult.plan_id,
-            plan_status: checkoutResult.plan_status,
-            amount: checkoutResult.amount,
-          });
-        }, c.env);
+            await logUserEvent(c.env.fitloot_db, user.id, "onboarding_submitted", {
+              conditioning: onboardingSnapshot.conditioning,
+              main_goal: onboardingSnapshot.primaryGoal,
+              goals: onboardingSnapshot.selectedGoals,
+              training_frequency: onboardingSnapshot.trainingFrequency,
+              plan_id: checkoutResult.plan_id,
+              plan_status: checkoutResult.plan_status,
+              amount: checkoutResult.amount,
+            });
+          }, c.env);
+        });
       } catch (error) {
         const handled = respondOnboardingPersistenceError(c, error);
         if (handled) return handled;

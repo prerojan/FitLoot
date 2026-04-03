@@ -1,7 +1,7 @@
 const DEFAULT_DEV_API_URL = "http://localhost:8787";
 const DEFAULT_CACHE_TTL_MS = 60_000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 20_000;
-const DEFAULT_MAX_PARALLEL_GET_REQUESTS = 6;
+const DEFAULT_MAX_PARALLEL_GET_REQUESTS = 4;
 
 const rawApiUrl = import.meta.env.VITE_API_URL?.trim() ?? "";
 const rawMaxParallelGetRequests =

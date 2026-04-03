@@ -12,6 +12,11 @@ import {
   isMissingSchemaError,
   schemaMismatchResponse,
 } from "../core/errors";
+import { deleteRuntimeSession } from "../core/runtimeSessionStore";
+import {
+  deleteRuntimeUserAuth,
+  upsertRuntimeUserAuth,
+} from "../core/runtimeUserAuthStore";
 import type {
   AppContext,
   UserAuthRecord,
@@ -60,6 +65,15 @@ function isTransientDatabaseError(error: unknown): boolean {
     message.includes("socket hang up") ||
     message.includes("connection terminated")
   );
+}
+
+function resolveRuntimeCacheDb(
+  c: import("hono").Context<AppContext>,
+): D1Database | null {
+  const runtimeDb = c.env.fitloot_runtime_db;
+  if (!runtimeDb) return null;
+  if (runtimeDb === c.env.fitloot_db) return null;
+  return runtimeDb;
 }
 
 // Route registration for account, session, and user identity endpoints.
@@ -135,8 +149,12 @@ export function registerAccountRoutes(
     }
 
     try {
-      const [profile, progression] = await Promise.all([
-        c.env.fitloot_db
+      let profile: Record<string, unknown> | null = null;
+      let progression: Record<string, unknown> | null = null;
+      let bootstrapDegraded = false;
+
+      try {
+        profile = await c.env.fitloot_db
           .prepare(
             `SELECT
               custom_primary_color,
@@ -149,23 +167,46 @@ export function registerAccountRoutes(
             WHERE user_id = ?`,
           )
           .bind(user.id)
-          .first<Record<string, unknown>>(),
-        c.env.fitloot_db
+          .first<Record<string, unknown>>();
+      } catch (profileError) {
+        if (!isTransientDatabaseError(profileError)) {
+          throw profileError;
+        }
+        bootstrapDegraded = true;
+        console.warn("[/api/app/bootstrap][profile]", {
+          message: getErrorMessage(profileError),
+          userId: user.id,
+        });
+      }
+
+      try {
+        progression = await c.env.fitloot_db
           .prepare(
             `SELECT
               level,
               xp,
-              next_level_xp,
+              CASE
+                WHEN COALESCE(level, 1) * 100 > 100 THEN COALESCE(level, 1) * 100
+                ELSE 100
+              END AS next_level_xp,
               current_streak,
               best_streak,
-              last_activity_date,
-              celebrate_level
+              last_activity_date
             FROM user_progression
             WHERE user_id = ?`,
           )
           .bind(user.id)
-          .first<Record<string, unknown>>(),
-      ]);
+          .first<Record<string, unknown>>();
+      } catch (progressionError) {
+        if (!isTransientDatabaseError(progressionError)) {
+          throw progressionError;
+        }
+        bootstrapDegraded = true;
+        console.warn("[/api/app/bootstrap][progression]", {
+          message: getErrorMessage(progressionError),
+          userId: user.id,
+        });
+      }
 
       let appOpenDegraded = false;
       try {
@@ -200,7 +241,7 @@ export function registerAccountRoutes(
             }
           : null,
         progression: progression ?? null,
-        app_open_degraded: appOpenDegraded,
+        app_open_degraded: appOpenDegraded || bootstrapDegraded,
       });
     } catch (error) {
       console.error("[/api/app/bootstrap]", {
@@ -303,6 +344,17 @@ export function registerAccountRoutes(
         }
 
         const updated = await getUserAuthRecordById(c.env.fitloot_db, user.id);
+        const runtimeCacheDb = resolveRuntimeCacheDb(c);
+        if (updated && runtimeCacheDb) {
+          c.executionCtx.waitUntil(
+            upsertRuntimeUserAuth(runtimeCacheDb, updated).catch((runtimeError) => {
+              console.warn("[/api/users/me][runtime-sync]", {
+                message: getErrorMessage(runtimeError),
+                userId: user.id,
+              });
+            }),
+          );
+        }
         return c.json(updated ?? c.get("user"));
       } catch (error) {
         console.error("[/api/users/me][patch]", {
@@ -328,7 +380,7 @@ export function registerAccountRoutes(
       return c.json(
         {
           error:
-            "Endpoint desativado para evitar atualização manual de plano. Use o fluxo de checkout.",
+            "Endpoint desativado para evitar atualizacao manual de plano. Use o fluxo de checkout.",
           code: "PLAN_ENDPOINT_DISABLED",
         },
         410,
@@ -339,9 +391,28 @@ export function registerAccountRoutes(
   app.get("/api/logout", async (c) => {
     const sessionId = getSessionIdFromCookieHeader(c.req.header("Cookie"));
     let accountReset = false;
+    let cleanupDegraded = false;
+    const runtimeSessionDb = resolveRuntimeCacheDb(c);
 
     if (sessionId) {
       try {
+        const deleteSessionInAllStores = async () => {
+          await c.env.fitloot_db
+            .prepare("DELETE FROM sessions WHERE id = ?")
+            .bind(sessionId)
+            .run();
+
+          if (runtimeSessionDb) {
+            try {
+              await deleteRuntimeSession(runtimeSessionDb, sessionId);
+            } catch (runtimeCleanupError) {
+              console.warn("[/api/logout][runtime-session-sync]", {
+                message: getErrorMessage(runtimeCleanupError),
+              });
+            }
+          }
+        };
+
         const session = await c.env.fitloot_db
           .prepare("SELECT user_id FROM sessions WHERE id = ?")
           .bind(sessionId)
@@ -354,35 +425,37 @@ export function registerAccountRoutes(
           );
           if (userRecord && shouldPurgeUserOnLogout(userRecord)) {
             await purgeUserAccountData(c.env.fitloot_db, session.user_id);
+            await deleteSessionInAllStores();
+            if (runtimeSessionDb) {
+              try {
+                await deleteRuntimeUserAuth(runtimeSessionDb, session.user_id);
+              } catch (runtimeCleanupError) {
+                console.warn("[/api/logout][runtime-user-sync]", {
+                  message: getErrorMessage(runtimeCleanupError),
+                });
+              }
+            }
             accountReset = true;
           } else {
-            await c.env.fitloot_db
-              .prepare("DELETE FROM sessions WHERE id = ?")
-              .bind(sessionId)
-              .run();
+            await deleteSessionInAllStores();
           }
         } else {
-          await c.env.fitloot_db
-            .prepare("DELETE FROM sessions WHERE id = ?")
-            .bind(sessionId)
-            .run();
+          await deleteSessionInAllStores();
         }
       } catch (error) {
         console.error("[/api/logout][cleanup]", {
           message: getErrorMessage(error),
         });
-        return c.json(
-          {
-            error: "Erro ao encerrar sessão",
-            code: "LOGOUT_CLEANUP_FAILED",
-          },
-          500,
-        );
+        cleanupDegraded = true;
       }
     }
 
     c.header("Set-Cookie", generateExpiredSessionCookie(c.req.url));
 
-    return c.json({ success: true, account_reset: accountReset });
+    return c.json({
+      success: true,
+      account_reset: accountReset,
+      cleanup_degraded: cleanupDegraded,
+    });
   });
 }
