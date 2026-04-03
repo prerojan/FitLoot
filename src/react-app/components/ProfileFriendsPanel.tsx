@@ -17,6 +17,8 @@ import {
   type FriendSearchResult as SearchResult,
 } from "@/react-app/services/friendsService";
 
+const ARENA_COMING_SOON_TITLE = "Arena em breve";
+
 export default function ProfileFriendsPanel() {
   const navigate = useNavigate();
   const [friends, setFriends] = useState<Friend[]>([]);
@@ -208,7 +210,7 @@ export default function ProfileFriendsPanel() {
         <div className="flex items-center justify-between">
           <h3 className="text-lg font-bold text-gray-900">Meus amigos ({friends.length})</h3>
           <Button variant="secondary" onClick={() => navigate(ROUTE_PATHS.minigames)}>
-            Ver Arena
+            {ARENA_COMING_SOON_TITLE}
           </Button>
         </div>
 

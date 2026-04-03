@@ -11,7 +11,7 @@ export const Titles = lazy(() => import("../pages/Titles"));
 export const Friends = lazy(() => import("../pages/Friends"));
 export const Shop = lazy(() => import("../pages/Shop"));
 export const Ranking = lazy(() => import("../pages/Ranking"));
-export const MiniGames = lazy(() => import("../pages/MiniGames"));
+export const MiniGames = lazy(() => import("../pages/Arena"));
 export const AIChat = lazy(() => import("../pages/AIChat"));
 export const Achievements = lazy(() => import("../pages/Achievements"));
 export const FoodAnalysis = lazy(() => import("../pages/FoodAnalysis"));

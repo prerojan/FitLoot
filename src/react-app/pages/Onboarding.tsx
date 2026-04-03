@@ -1085,7 +1085,10 @@ export default function Onboarding() {
       icon: Zap,
     };
   const conditioningLabel = selectedConditioning.label;
-  const heroName = profile.full_name.trim().split(" ")[0] || "Voce";
+  const heroName = profile.full_name.trim().split(/\s+/)[0] ?? "";
+  const heroPlanSummary = heroName
+    ? `${heroName}, seu plano vai combinar ${selectedGoal.label.toLowerCase()} com uma progress\u00e3o ${conditioningLabel.toLowerCase()}.`
+    : `Seu plano vai combinar ${selectedGoal.label.toLowerCase()} com uma progress\u00e3o ${conditioningLabel.toLowerCase()}.`;
   const { selected: injuryTokens, notes: injuryNotes } = splitCatalogValues(profile.injuries, INJURY_OPTIONS);
   const usernameStatusMessage = availabilityMessage(usernameAvailability);
   const emailStatusMessage = availabilityMessage(emailAvailability);
@@ -1591,7 +1594,7 @@ export default function Onboarding() {
                 Gerando seu <span className="text-[var(--app-primary-color)]">plano.</span>
               </>
             }
-            description="Estamos organizando a estrutura inicial com base na sua frequencia semanal."
+            description={"Estamos organizando a estrutura inicial com base na sua frequ\u00eancia semanal."}
           />
 
           <div className="fl-onboarding-surface-card flex min-h-[320px] flex-col items-center justify-center gap-5 text-center">
@@ -1601,7 +1604,7 @@ export default function Onboarding() {
                 Gerando seu plano personalizado...
               </p>
               <p className="text-sm leading-6 text-[var(--fl-onboarding-muted)]">
-                Em instantes voce vai ver como a sua rotina se transforma em progresso.
+                {"Em instantes voc\u00ea vai ver como a sua rotina se transforma em progresso."}
               </p>
             </div>
           </div>
@@ -1662,10 +1665,13 @@ export default function Onboarding() {
           step={11}
           title={
             <>
-              Seu plano esta <span className="text-[var(--app-primary-color)]">pronto.</span>
+              {"Seu plano est\u00e1 "}
+              <span className="text-[var(--app-primary-color)]">pronto.</span>
             </>
           }
-          description="Antes de criar sua conta, voce ja consegue visualizar como o plano vai se adaptar ao seu objetivo e ao seu ritmo."
+          description={
+            "Antes de criar sua conta, voc\u00ea j\u00e1 consegue visualizar como o plano vai se adaptar ao seu objetivo e ao seu ritmo."
+          }
         />
 
         <div className="fl-onboarding-hero-panel space-y-5">
@@ -1677,10 +1683,10 @@ export default function Onboarding() {
 
           <div>
             <h2 className="fl-onboarding-section-title">
-              {heroName}, seu plano vai combinar {selectedGoal.label.toLowerCase()} com uma progressao {conditioningLabel.toLowerCase()}.
+              {heroPlanSummary}
             </h2>
             <p className="mt-3 text-sm leading-7 text-[var(--fl-onboarding-muted)]">
-              Nas proximas semanas, voce vai desbloquear {goalPlanCopy(profile.main_goal)}. O ritmo inicial foi pensado para {conditioningPlanNarrative(profile.initial_conditioning)} e respeitar sua rotina de {weeklyFrequency} {weeklyFrequency === 1 ? "dia" : "dias"} por semana.
+              {`Nas pr\u00f3ximas semanas, voc\u00ea vai desbloquear ${goalPlanCopy(profile.main_goal)}. O ritmo inicial foi pensado para ${conditioningPlanNarrative(profile.initial_conditioning)} e respeitar sua rotina de ${weeklyFrequency} ${weeklyFrequency === 1 ? "dia" : "dias"} por semana.`}
             </p>
           </div>
         </div>

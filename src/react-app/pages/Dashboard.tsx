@@ -281,7 +281,7 @@ export default function Dashboard() {
   useEffect(() => {
     // Antecipa apenas o bundle das rotas mais acessadas.
     void import("@/react-app/pages/Profile");
-    void import("@/react-app/pages/MiniGames");
+    void import("@/react-app/pages/Arena");
     void import("@/react-app/pages/Friends");
     void import("@/react-app/pages/Shop");
     void import("@/react-app/pages/Ranking");

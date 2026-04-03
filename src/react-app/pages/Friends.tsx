@@ -29,6 +29,8 @@ import {
 } from "@/react-app/services/friendsService";
 
 type TabType = 'friends' | 'received' | 'sent';
+const ARENA_COMING_SOON_LABEL = "Em breve";
+const ARENA_COMING_SOON_TITLE = "Arena em breve";
 
 export default function Friends() {
   const { user } = useAuth();
@@ -288,11 +290,13 @@ export default function Friends() {
                               <span className="text-sm font-black" style={{ color: "var(--fl-color-text)" }}>{friend.friend_level}</span>
                               <button
                                 type="button"
-                                onClick={() => navigate(`${ROUTE_PATHS.minigames}?challenge=${friend.friend_user_id}`)}
-                                className="rounded-full px-4 py-2 text-[9px] font-black uppercase tracking-[0.18em]"
-                                style={{ backgroundColor: "var(--app-primary-color)", color: "var(--fl-nav-item-active-text)" }}
+                                disabled
+                                title={ARENA_COMING_SOON_TITLE}
+                                aria-label={ARENA_COMING_SOON_TITLE}
+                                className="cursor-not-allowed rounded-full px-4 py-2 text-[9px] font-black uppercase tracking-[0.18em] opacity-75"
+                                style={{ backgroundColor: "color-mix(in srgb, var(--app-primary-color) 28%, var(--fl-surface-muted))", color: "var(--fl-color-text-muted)" }}
                               >
-                                Desafiar
+                                {ARENA_COMING_SOON_LABEL}
                               </button>
                             </div>
                           </div>
@@ -326,11 +330,13 @@ export default function Friends() {
                         <div className="flex items-center gap-2">
                           <button
                             type="button"
-                            onClick={() => navigate(`${ROUTE_PATHS.minigames}?challenge=${friend.friend_user_id}`)}
-                            className="rounded-lg px-3 py-2 text-[9px] font-black uppercase tracking-[0.16em]"
-                            style={{ backgroundColor: "var(--app-primary-color)", color: "var(--fl-nav-item-active-text)" }}
+                            disabled
+                            title={ARENA_COMING_SOON_TITLE}
+                            aria-label={ARENA_COMING_SOON_TITLE}
+                            className="cursor-not-allowed rounded-lg px-3 py-2 text-[9px] font-black uppercase tracking-[0.16em] opacity-75"
+                            style={{ backgroundColor: "color-mix(in srgb, var(--app-primary-color) 22%, var(--fl-surface-muted))", color: "var(--fl-color-text-muted)" }}
                           >
-                            Duelo
+                            {ARENA_COMING_SOON_LABEL}
                           </button>
                           <button className="rounded-lg p-2 fl-theme-text-muted transition-opacity hover:opacity-85">
                             <MoreVertical className="w-4 h-4" />
@@ -445,7 +451,7 @@ export default function Friends() {
                 style={{ backgroundColor: 'var(--app-primary-color)', color: 'var(--fl-nav-item-active-text)' }}
                 onClick={() => navigate(ROUTE_PATHS.minigames)}
               >
-                Ir para Arena
+                {ARENA_COMING_SOON_TITLE}
               </button>
             </div>
           </section>
