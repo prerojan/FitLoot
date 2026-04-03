@@ -142,6 +142,7 @@ async function persistOnboardingProfileState({
     ),
   );
   const username = data.username.trim();
+  const normalizedUsername = username.toLowerCase();
   const fullName = data.full_name.trim();
   const primaryGoal = selectedGoals[0] ?? data.main_goal;
   const trainingFrequency = normalizeTrainingFrequencyInput(
@@ -155,9 +156,9 @@ async function persistOnboardingProfileState({
 
   const existingUsername = await env.fitloot_db
     .prepare(
-      "SELECT user_id FROM user_profiles WHERE username = ? LIMIT 1",
+      "SELECT user_id FROM user_profiles WHERE lower(username) = ? LIMIT 1",
     )
-    .bind(username)
+    .bind(normalizedUsername)
     .first<{ user_id: string | null }>();
 
   if (existingUsername?.user_id && existingUsername.user_id !== userId) {

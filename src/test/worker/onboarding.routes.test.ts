@@ -57,7 +57,7 @@ describe("onboarding routes", () => {
   it("persists onboarding profile state without starting checkout on /api/onboarding/profile", async () => {
     const { db } = createMockD1Database([
       {
-        match: "SELECT user_id FROM user_profiles WHERE username = ? LIMIT 1",
+        match: "SELECT user_id FROM user_profiles WHERE lower(username) = ? LIMIT 1",
         first: null,
       },
       {

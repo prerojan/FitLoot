@@ -198,6 +198,17 @@ export class DomainDbRouter {
       };
     }
 
+    // Core auth/session queries should prefer the write path to avoid
+    // read-replica lag or optional-read configuration drift during login/onboarding.
+    if (domain === "core") {
+      return {
+        domain,
+        target: "supabase_write",
+        readOnly,
+        tables,
+      };
+    }
+
     if (readOnly && this.enableReadPath) {
       return {
         domain,
@@ -215,4 +226,3 @@ export class DomainDbRouter {
     };
   }
 }
-

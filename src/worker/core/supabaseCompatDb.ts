@@ -526,7 +526,16 @@ export function isRetryableReadError(error: unknown): boolean {
     message.includes("connection terminated unexpectedly") ||
     message.includes("timeout exceeded when trying to connect") ||
     message.includes("read etimedout") ||
-    message.includes("socket hang up")
+    message.includes("socket hang up") ||
+    message.includes("connect etimedout") ||
+    message.includes("connect econnrefused") ||
+    message.includes("getaddrinfo enotfound") ||
+    message.includes("enotfound") ||
+    message.includes("password authentication failed") ||
+    message.includes("no pg_hba.conf entry") ||
+    (message.includes("role") && message.includes("does not exist")) ||
+    message.includes("self signed certificate") ||
+    message.includes("certificate has expired")
   );
 }
 

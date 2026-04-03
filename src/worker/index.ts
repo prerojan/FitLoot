@@ -1190,10 +1190,17 @@ function attachRuntimeDatabase(env: Env): Env {
   });
 
   if (topology === "hybrid") {
-    const supabaseReadDb = createSupabaseCompatDatabase(env, {
-      mode: "read",
-      fallbackToWriteConnection: true,
-    });
+    let supabaseReadDb: RuntimeDatabase | null = null;
+    try {
+      supabaseReadDb = createSupabaseCompatDatabase(env, {
+        mode: "read",
+        fallbackToWriteConnection: true,
+      });
+    } catch (error) {
+      console.warn("[hybrid-db][read-init-fallback]", {
+        message: getErrorMessage(error),
+      });
+    }
 
     return {
       ...env,
@@ -1218,6 +1225,7 @@ function attachRuntimeDatabase(env: Env): Env {
 const app = new Hono<AppContext>();
 
 const HOT_GET_CACHEABLE_PATHS = new Set<string>([
+  "/api/auth/check-availability",
   "/api/profile",
   "/api/progression",
   "/api/skills",
@@ -1229,6 +1237,10 @@ const HOT_GET_CACHEABLE_PATHS = new Set<string>([
   "/api/friends",
   "/api/friends/requests",
   "/api/metrics/today",
+]);
+
+const PUBLIC_HOT_CACHEABLE_PATHS = new Set<string>([
+  "/api/auth/check-availability",
 ]);
 
 type CachedResponseSnapshot = {
@@ -1271,9 +1283,21 @@ function resolveSessionScopedRequestKey(c: {
   };
 }): string | null {
   const sessionId = getSessionIdFromCookieHeader(c.req.header("Cookie"));
-  if (!sessionId) return null;
   const url = new URL(c.req.url);
-  return `${sessionId}:${c.req.path}:${url.search}`;
+  if (sessionId) {
+    return `${sessionId}:${c.req.path}:${url.search}`;
+  }
+
+  if (!PUBLIC_HOT_CACHEABLE_PATHS.has(c.req.path)) {
+    return null;
+  }
+
+  const ip =
+    c.req.header("CF-Connecting-IP")?.trim() ||
+    c.req.header("X-Forwarded-For")?.split(",")[0]?.trim() ||
+    "unknown";
+  const userAgent = (c.req.header("User-Agent") ?? "").trim();
+  return `anon:${ip}:${userAgent}:${c.req.path}:${url.search}`;
 }
 
 function cloneResponseSnapshot(snapshot: CachedResponseSnapshot): Response {

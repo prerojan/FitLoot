@@ -504,6 +504,13 @@ function buildOnboardingProfileSeedPayload(draft: OnboardingDraft) {
   };
 }
 
+type AvailabilityPayload = {
+  emailAvailable?: boolean | null;
+  usernameAvailable?: boolean | null;
+};
+
+const AVAILABILITY_CACHE_TTL_MS = 15_000;
+
 export default function Onboarding() {
   const { user, loading: authLoading, checkAuth } = useAuth();
   const navigate = useNavigate();
@@ -524,6 +531,12 @@ export default function Onboarding() {
   const emailReqRef = useRef(0);
   const planPreviewTimerRef = useRef<number | null>(null);
   const accountBootstrapRedirectRef = useRef(false);
+  const availabilityCacheRef = useRef<
+    Map<string, { expiresAt: number; payload: AvailabilityPayload }>
+  >(new Map());
+  const availabilityInflightRef = useRef<
+    Map<string, Promise<AvailabilityPayload | null>>
+  >(new Map());
 
   // Reaproveita o e-mail retornado do checkout quando o usuario volta ao onboarding.
   useEffect(() => {
@@ -572,6 +585,70 @@ export default function Onboarding() {
       }
     };
 
+  const requestAvailability = useCallback(
+    async (params: { email?: string; username?: string }): Promise<AvailabilityPayload | null> => {
+      const normalizedEmail = (params.email ?? "").trim().toLowerCase();
+      const normalizedUsername = (params.username ?? "").trim();
+      if (!normalizedEmail && !normalizedUsername) {
+        return { emailAvailable: null, usernameAvailable: null };
+      }
+
+      const query = new URLSearchParams();
+      if (normalizedEmail) query.set("email", normalizedEmail);
+      if (normalizedUsername) query.set("username", normalizedUsername);
+      const cacheKey = query.toString();
+      const now = Date.now();
+
+      const cached = availabilityCacheRef.current.get(cacheKey);
+      if (cached && cached.expiresAt > now) {
+        return cached.payload;
+      }
+      if (cached) {
+        availabilityCacheRef.current.delete(cacheKey);
+      }
+
+      const inflight = availabilityInflightRef.current.get(cacheKey);
+      if (inflight) {
+        return inflight;
+      }
+
+      const started = (async () => {
+        try {
+          const response = await api(`/api/auth/check-availability?${query.toString()}`, {
+            timeoutMs: 8_000,
+          });
+          if (!response.ok) return null;
+
+          const payload = (await response.json().catch(() => null)) as AvailabilityPayload | null;
+          if (!payload) return null;
+
+          if (normalizedEmail && typeof payload.emailAvailable !== "boolean") return null;
+          if (normalizedUsername && typeof payload.usernameAvailable !== "boolean") return null;
+
+          const safePayload: AvailabilityPayload = {
+            emailAvailable:
+              typeof payload.emailAvailable === "boolean" ? payload.emailAvailable : null,
+            usernameAvailable:
+              typeof payload.usernameAvailable === "boolean" ? payload.usernameAvailable : null,
+          };
+          availabilityCacheRef.current.set(cacheKey, {
+            payload: safePayload,
+            expiresAt: Date.now() + AVAILABILITY_CACHE_TTL_MS,
+          });
+          return safePayload;
+        } catch {
+          return null;
+        } finally {
+          availabilityInflightRef.current.delete(cacheKey);
+        }
+      })();
+
+      availabilityInflightRef.current.set(cacheKey, started);
+      return started;
+    },
+    [],
+  );
+
   const validateUsername = useCallback(async (rawUsername: string) => {
     const username = rawUsername.trim();
     if (!username) {
@@ -587,13 +664,10 @@ export default function Onboarding() {
     setUsernameAvailability({ status: "checking" });
 
     try {
-      const response = await api(`/api/auth/check-availability?username=${encodeURIComponent(username)}`, {
-        timeoutMs: 8_000,
-      });
-      const payload = (await response.json().catch(() => null)) as { usernameAvailable?: boolean | undefined } | null;
+      const payload = await requestAvailability({ username });
 
       if (requestId !== usernameReqRef.current) return false;
-      if (!response.ok || payload?.usernameAvailable === undefined) {
+      if (!payload || typeof payload.usernameAvailable !== "boolean") {
         setUsernameAvailability({ status: "invalid", message: "Nao foi possivel validar agora." });
         return false;
       }
@@ -610,7 +684,7 @@ export default function Onboarding() {
       }
       return false;
     }
-  }, []);
+  }, [requestAvailability]);
 
   const validateEmail = useCallback(async (rawEmail: string) => {
     const email = rawEmail.trim().toLowerCase();
@@ -628,13 +702,10 @@ export default function Onboarding() {
     setEmailAvailability({ status: "checking" });
 
     try {
-      const response = await api(`/api/auth/check-availability?email=${encodeURIComponent(email)}`, {
-        timeoutMs: 8_000,
-      });
-      const payload = (await response.json().catch(() => null)) as { emailAvailable?: boolean | undefined } | null;
+      const payload = await requestAvailability({ email });
 
       if (requestId !== emailReqRef.current) return false;
-      if (!response.ok || payload?.emailAvailable === undefined) {
+      if (!payload || typeof payload.emailAvailable !== "boolean") {
         setEmailAvailability({ status: "invalid", message: "Nao foi possivel validar agora." });
         return false;
       }
@@ -651,7 +722,7 @@ export default function Onboarding() {
       }
       return false;
     }
-  }, []);
+  }, [requestAvailability]);
 
   // Faz o debounce da disponibilidade do username durante a digitacao.
   useEffect(() => {
@@ -807,19 +878,63 @@ export default function Onboarding() {
     setStepLoading(true);
 
     try {
-      const [isEmailAvailable, isUsernameAvailable] = await Promise.all([
-        validateEmail(normalizedEmail),
-        validateUsername(trimmedUsername),
-      ]);
+      const submitEmailRequestId = ++emailReqRef.current;
+      const submitUsernameRequestId = ++usernameReqRef.current;
+      setEmailAvailability({ status: "checking" });
+      setUsernameAvailability({ status: "checking" });
 
-      if (!isEmailAvailable) {
-        setStepError("Use um e-mail disponivel para criar a conta.");
+      const availabilityPayload = await requestAvailability({
+        email: normalizedEmail,
+        username: trimmedUsername,
+      });
+
+      if (
+        !availabilityPayload ||
+        typeof availabilityPayload.emailAvailable !== "boolean" ||
+        typeof availabilityPayload.usernameAvailable !== "boolean"
+      ) {
+        if (submitEmailRequestId === emailReqRef.current) {
+          setEmailAvailability({
+            status: "invalid",
+            message: "Nao foi possivel validar agora.",
+          });
+        }
+        if (submitUsernameRequestId === usernameReqRef.current) {
+          setUsernameAvailability({
+            status: "invalid",
+            message: "Nao foi possivel validar agora.",
+          });
+        }
+        setStepError("Nao foi possivel validar disponibilidade agora. Tente novamente.");
         return;
       }
 
-      if (!isUsernameAvailable) {
+      if (!availabilityPayload.emailAvailable) {
+        if (submitEmailRequestId === emailReqRef.current) {
+          setEmailAvailability({
+            status: "unavailable",
+            message: "E-mail ja esta cadastrado.",
+          });
+        }
+        setStepError("Use um e-mail disponivel para criar a conta.");
+        return;
+      }
+      if (submitEmailRequestId === emailReqRef.current) {
+        setEmailAvailability({ status: "available" });
+      }
+
+      if (!availabilityPayload.usernameAvailable) {
+        if (submitUsernameRequestId === usernameReqRef.current) {
+          setUsernameAvailability({
+            status: "unavailable",
+            message: "Nome de usuario ja esta em uso.",
+          });
+        }
         setStepError("Use um nome de usuario disponivel para criar a conta.");
         return;
+      }
+      if (submitUsernameRequestId === usernameReqRef.current) {
+        setUsernameAvailability({ status: "available" });
       }
 
       const registerRes = await api("/api/auth/register", {

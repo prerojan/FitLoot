@@ -111,6 +111,7 @@ export function registerAuthRoutes(
   app.get("/api/auth/check-availability", async (c) => {
     const emailQuery = (c.req.query("email") || "").trim().toLowerCase();
     const usernameQuery = (c.req.query("username") || "").trim();
+    const normalizedUsernameQuery = usernameQuery.toLowerCase();
 
     if (!emailQuery && !usernameQuery) {
       return c.json(
@@ -124,6 +125,19 @@ export function registerAuthRoutes(
     }
 
     try {
+        const reusableByUserId = new Map<string, Promise<boolean>>();
+        const isReusableByUserId = async (userId: string): Promise<boolean> => {
+          const cached = reusableByUserId.get(userId);
+          if (cached) return cached;
+
+          const started = (async () => {
+            const existingUser = await getUserAuthRecordById(c.env.fitloot_db, userId);
+            return isReusableIncompleteAccount(existingUser);
+          })();
+          reusableByUserId.set(userId, started);
+          return started;
+        };
+
         const [emailExisting, usernameExisting] = await Promise.all([
           emailQuery
             ? c.env.fitloot_db
@@ -131,10 +145,10 @@ export function registerAuthRoutes(
                 .bind(emailQuery)
                 .first<{ id: string }>()
             : Promise.resolve(null),
-          usernameQuery
+          normalizedUsernameQuery
             ? c.env.fitloot_db
-                .prepare("SELECT user_id FROM user_profiles WHERE username = ?")
-                .bind(usernameQuery)
+                .prepare("SELECT user_id FROM user_profiles WHERE lower(username) = ?")
+                .bind(normalizedUsernameQuery)
                 .first<{ user_id: string }>()
             : Promise.resolve(null),
         ]);
@@ -144,21 +158,16 @@ export function registerAuthRoutes(
           if (!emailExisting?.id) {
             emailAvailable = true;
           } else {
-            const existingUser = await getUserAuthRecordById(c.env.fitloot_db, emailExisting.id);
-            emailAvailable = isReusableIncompleteAccount(existingUser);
+            emailAvailable = await isReusableByUserId(emailExisting.id);
           }
         }
 
         let usernameAvailable: boolean | null = null;
-        if (usernameQuery) {
+        if (normalizedUsernameQuery) {
           if (!usernameExisting?.user_id) {
             usernameAvailable = true;
           } else {
-            const existingUser = await getUserAuthRecordById(
-              c.env.fitloot_db,
-              usernameExisting.user_id,
-            );
-            usernameAvailable = isReusableIncompleteAccount(existingUser);
+            usernameAvailable = await isReusableByUserId(usernameExisting.user_id);
           }
         }
 
