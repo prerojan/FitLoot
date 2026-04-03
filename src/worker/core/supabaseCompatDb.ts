@@ -8,15 +8,7 @@ import {
 import { getErrorMessage } from "./errors";
 import type { Env } from "./types";
 
-type QueryTarget = Pick<Pool, "query"> | Pick<PoolClient, "query">;
-
 type RuntimeBackend = "d1" | "supabase";
-
-type TableRef = {
-  schema: string | null;
-  table: string;
-  cacheKey: string;
-};
 
 type CompiledSql = {
   sql: string;
@@ -546,50 +538,9 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function extractInsertTarget(sql: string): TableRef | null {
-  const match = /^\s*insert\s+into\s+([^\s(]+)/iu.exec(sql);
-  if (!match?.[1]) return null;
-
-  const cleaned = match[1].replace(/"/g, "");
-  const [schemaOrTable, maybeTable] = cleaned.split(".");
-  if (!schemaOrTable) return null;
-
-  if (maybeTable) {
-    const schema = schemaOrTable.trim().toLowerCase();
-    const table = maybeTable.trim().toLowerCase();
-    if (!schema || !table) return null;
-    return {
-      schema,
-      table,
-      cacheKey: `${schema}.${table}`,
-    };
-  }
-
-  const table = schemaOrTable.trim().toLowerCase();
-  if (!table) return null;
-  return {
-    schema: null,
-    table,
-    cacheKey: table,
-  };
-}
-
-function hasReturningClause(sql: string): boolean {
-  return /\breturning\b/iu.test(sql);
-}
-
-function isInsertStatement(sql: string): boolean {
-  return /^\s*insert\s+into\b/iu.test(sql);
-}
-
 function appendOnConflictDoNothing(sql: string): string {
   if (/\bon\s+conflict\b/iu.test(sql)) return sql;
   return `${stripTrailingSemicolon(sql)} ON CONFLICT DO NOTHING`;
-}
-
-function appendReturningId(sql: string): string {
-  if (hasReturningClause(sql)) return sql;
-  return `${stripTrailingSemicolon(sql)} RETURNING id`;
 }
 
 function resolveLastRowId<T extends QueryResultRow>(result: QueryResult<T>): number | null {
@@ -875,7 +826,6 @@ class SupabaseCompatDatabase {
 
   private transactionClient: PoolClient | null = null;
   private transactionDepth = 0;
-  private readonly tableIdColumnCache = new Map<string, boolean>();
 
   constructor(
     private readonly pool: Pool,
@@ -958,63 +908,9 @@ class SupabaseCompatDatabase {
     }
   }
 
-  private async hasIdColumn(target: TableRef): Promise<boolean> {
-    const cached = this.tableIdColumnCache.get(target.cacheKey);
-    if (typeof cached === "boolean") return cached;
-
-    try {
-      const queryTarget: QueryTarget = this.currentQueryTarget();
-      let result: QueryResult<Record<string, unknown>>;
-
-      if (target.schema) {
-        result = await queryTarget.query(
-          `SELECT 1
-             FROM information_schema.columns
-            WHERE table_schema = $1
-              AND table_name = $2
-              AND column_name = 'id'
-            LIMIT 1`,
-          [target.schema, target.table],
-        );
-      } else {
-        result = await queryTarget.query(
-          `SELECT 1
-             FROM information_schema.columns
-            WHERE table_name = $1
-              AND column_name = 'id'
-              AND table_schema NOT IN ('pg_catalog', 'information_schema')
-            LIMIT 1`,
-          [target.table],
-        );
-      }
-
-      const hasColumn = (result.rowCount ?? 0) > 0;
-      this.tableIdColumnCache.set(target.cacheKey, hasColumn);
-      return hasColumn;
-    } catch (error) {
-      if (!isRetryableReadError(error)) {
-        throw error;
-      }
-
-      // Metadata probes should never block writes on transient connectivity hiccups.
-      // In that case we skip RETURNING id optimization for this table and keep going.
-      this.tableIdColumnCache.set(target.cacheKey, false);
-      console.warn("[supabase-compat-db][id-column-probe]", {
-        message: getErrorMessage(error),
-        table: target.cacheKey,
-      });
-      return false;
-    }
-  }
-
-  private currentQueryTarget(): QueryTarget {
-    return this.transactionClient ?? this.pool;
-  }
-
   private async compileSql(
     originalSql: string,
     params: readonly unknown[],
-    mode: "first" | "all" | "run",
   ): Promise<CompiledSql> {
     let workingSql = originalSql;
 
@@ -1029,13 +925,6 @@ class SupabaseCompatDatabase {
       workingSql = appendOnConflictDoNothing(workingSql);
     }
 
-    if (mode === "run" && isInsertStatement(workingSql) && !hasReturningClause(workingSql)) {
-      const target = extractInsertTarget(workingSql);
-      if (target && (await this.hasIdColumn(target))) {
-        workingSql = appendReturningId(workingSql);
-      }
-    }
-
     return {
       sql: replaceQuestionMarkParams(workingSql),
       params,
@@ -1047,7 +936,7 @@ class SupabaseCompatDatabase {
     params: readonly unknown[],
     mode: "first" | "all" | "run",
   ): Promise<{ rows: T[]; rowCount: number; lastRowId: number | null }> {
-    const compiled = await this.compileSql(sql, params, mode);
+    const compiled = await this.compileSql(sql, params);
     const maxAttempts =
       !this.transactionClient && mode !== "run"
         ? this.retryTuning.maxReadAttempts

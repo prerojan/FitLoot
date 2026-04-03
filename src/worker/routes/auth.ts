@@ -56,6 +56,10 @@ function isConnectionTimeoutLike(error: unknown): boolean {
   );
 }
 
+async function sleep(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 // Registers the authentication surface responsible for account creation and session login.
 export function registerAuthRoutes(
   app: Hono<AppContext>,
@@ -85,31 +89,78 @@ export function registerAuthRoutes(
         const salt = crypto.randomUUID();
         const passwordHash = await hashPassword(data.password, salt);
         let userId = crypto.randomUUID();
+        let userInserted = false;
 
-        try {
-          await insertUser(userId);
-        } catch (insertError) {
-          if (!isUniqueConstraintError(insertError)) {
-            throw insertError;
+        for (let attempt = 1; attempt <= 2 && !userInserted; attempt += 1) {
+          try {
+            await insertUser(userId);
+            userInserted = true;
+            break;
+          } catch (insertError) {
+            if (isUniqueConstraintError(insertError)) {
+              const existing = await c.env.fitloot_db
+                .prepare("SELECT id FROM users WHERE lower(email) = ?")
+                .bind(normalizedEmail)
+                .first<{ id: string }>();
+
+              if (!existing?.id) {
+                throw insertError;
+              }
+
+              const existingUser = await getUserAuthRecordById(c.env.fitloot_db, existing.id);
+              if (!isReusableIncompleteAccount(existingUser)) {
+                return c.json({ error: "E-mail ja cadastrado" }, 409);
+              }
+
+              await purgeUserAccountData(c.env.fitloot_db, existing.id);
+              userId = crypto.randomUUID();
+              await insertUser(userId);
+              userInserted = true;
+              break;
+            }
+
+            if (!isConnectionTimeoutLike(insertError)) {
+              throw insertError;
+            }
+
+            const existingAfterTimeout = await c.env.fitloot_db
+              .prepare("SELECT id FROM users WHERE lower(email) = ?")
+              .bind(normalizedEmail)
+              .first<{ id: string }>()
+              .catch(() => null);
+
+            if (existingAfterTimeout?.id) {
+              const existingUser = await getUserAuthRecordById(
+                c.env.fitloot_db,
+                existingAfterTimeout.id,
+              ).catch(() => null);
+
+              if (existingUser && !isReusableIncompleteAccount(existingUser)) {
+                return c.json({ error: "E-mail ja cadastrado" }, 409);
+              }
+
+              userId = existingAfterTimeout.id;
+              await c.env.fitloot_db
+                .prepare(
+                  "UPDATE users SET name = ?, password_hash = ?, password_salt = ? WHERE id = ?",
+                )
+                .bind(data.name ?? "", passwordHash, salt, userId)
+                .run()
+                .catch(() => undefined);
+              userInserted = true;
+              break;
+            }
+
+            if (attempt >= 2) {
+              throw insertError;
+            }
+
+            await sleep(140 * attempt);
           }
+        }
 
-          const existing = await c.env.fitloot_db
-            .prepare("SELECT id FROM users WHERE lower(email) = ?")
-            .bind(normalizedEmail)
-            .first<{ id: string }>();
-
-          if (!existing?.id) {
-            throw insertError;
-          }
-
-          const existingUser = await getUserAuthRecordById(c.env.fitloot_db, existing.id);
-          if (!isReusableIncompleteAccount(existingUser)) {
-            return c.json({ error: "E-mail ja cadastrado" }, 409);
-          }
-
-          await purgeUserAccountData(c.env.fitloot_db, existing.id);
-          userId = crypto.randomUUID();
-          await insertUser(userId);
+        if (!userInserted) {
+          throw new Error("REGISTER_USER_INSERT_FAILED");
         }
 
         const isSupabaseDb =

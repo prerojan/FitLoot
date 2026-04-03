@@ -44,28 +44,24 @@ function createProfileDeps(overrides: Record<string, unknown> = {}) {
 
 describe("profile routes", () => {
   it("rebuilds the missing activated-account state when user onboarding rows are absent", async () => {
-    let profileSelectCount = 0;
     const { db } = createMockD1Database([
       {
+        match: "FROM user_profiles up",
+        first: null,
+      },
+      {
         match: "SELECT * FROM user_profiles WHERE user_id = ?",
-        first: () => {
-          profileSelectCount += 1;
-          if (profileSelectCount === 1) {
-            return null;
-          }
-
-          return {
-            user_id: TEST_USER.id,
-            username: "teste",
-            full_name: TEST_USER.name,
-            initial_conditioning: "iniciante",
-            injuries: "",
-            equipment: "",
-            main_goal: "saude_geral",
-            age: null,
-            gender: null,
-            goals_json: "[\"saude_geral\"]",
-          };
+        first: {
+          user_id: TEST_USER.id,
+          username: "teste",
+          full_name: TEST_USER.name,
+          initial_conditioning: "iniciante",
+          injuries: "",
+          equipment: "",
+          main_goal: "saude_geral",
+          age: null,
+          gender: null,
+          goals_json: "[\"saude_geral\"]",
         },
       },
       {

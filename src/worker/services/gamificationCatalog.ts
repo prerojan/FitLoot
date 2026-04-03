@@ -163,6 +163,15 @@ async function upsertSkillSeed(
   const insertedId = Number(result.meta.last_row_id ?? 0);
   if (insertedId > 0) {
     rememberNamedRow(skillRowsByKey, { id: insertedId, name: skill.name });
+    return;
+  }
+
+  const inserted = await db
+    .prepare("SELECT id FROM skills WHERE lower(name) = lower(?) LIMIT 1")
+    .bind(skill.name)
+    .first<{ id: number }>();
+  if (inserted?.id) {
+    rememberNamedRow(skillRowsByKey, { id: inserted.id, name: skill.name });
   }
 }
 
@@ -226,6 +235,15 @@ async function upsertTitleSeed(
   const insertedId = Number(result.meta.last_row_id ?? 0);
   if (insertedId > 0) {
     rememberNamedRow(titleRowsByKey, { id: insertedId, name: title.name });
+    return;
+  }
+
+  const inserted = await db
+    .prepare("SELECT id FROM titles WHERE lower(name) = lower(?) LIMIT 1")
+    .bind(title.name)
+    .first<{ id: number }>();
+  if (inserted?.id) {
+    rememberNamedRow(titleRowsByKey, { id: inserted.id, name: title.name });
   }
 }
 
@@ -303,6 +321,18 @@ async function upsertAchievementSeed(
   if (insertedId > 0) {
     rememberNamedRow(achievementRowsByKey, {
       id: insertedId,
+      name: achievement.name,
+    });
+    return;
+  }
+
+  const inserted = await db
+    .prepare("SELECT id FROM achievements WHERE lower(name) = lower(?) LIMIT 1")
+    .bind(achievement.name)
+    .first<{ id: number }>();
+  if (inserted?.id) {
+    rememberNamedRow(achievementRowsByKey, {
+      id: inserted.id,
       name: achievement.name,
     });
   }

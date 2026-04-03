@@ -125,6 +125,24 @@ function isMissingColumnError(error: unknown): boolean {
   );
 }
 
+function isTransientDatabaseError(error: unknown): boolean {
+  const message = (error instanceof Error ? error.message : String(error))
+    .toLowerCase()
+    .trim();
+  return (
+    message.includes("query read timeout") ||
+    message.includes("timeout exceeded when trying to connect") ||
+    message.includes("connection terminated") ||
+    message.includes("connect etimedout") ||
+    message.includes("read etimedout") ||
+    message.includes("socket hang up")
+  );
+}
+
+async function sleep(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function getUserAuthRecordByIdLegacy(
   db: D1Database,
   userId: string,
@@ -231,21 +249,32 @@ export async function getUserAuthRecordById(
   db: D1Database,
   userId: string,
 ): Promise<UserAuthRecord | null> {
-  if (authRecordQueryMode === "legacy") {
-    return getUserAuthRecordByIdLegacy(db, userId);
+  const maxAttempts = 2;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      if (authRecordQueryMode === "legacy") {
+        return await getUserAuthRecordByIdLegacy(db, userId);
+      }
+
+      const result = await getUserAuthRecordByIdModern(db, userId);
+      authRecordQueryMode = "modern";
+      return result;
+    } catch (error) {
+      if (isMissingColumnError(error)) {
+        authRecordQueryMode = "legacy";
+        continue;
+      }
+
+      const shouldRetry =
+        attempt < maxAttempts && isTransientDatabaseError(error);
+      if (!shouldRetry) {
+        throw error;
+      }
+      await sleep(120 * attempt);
+    }
   }
 
-  try {
-    const result = await getUserAuthRecordByIdModern(db, userId);
-    authRecordQueryMode = "modern";
-    return result;
-  } catch (error) {
-    if (!isMissingColumnError(error)) {
-      throw error;
-    }
-    authRecordQueryMode = "legacy";
-    return getUserAuthRecordByIdLegacy(db, userId);
-  }
+  return null;
 }
 
 async function updateUserPlanStateLegacy(

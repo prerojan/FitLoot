@@ -436,7 +436,7 @@ export function createAuthMiddleware({
           runtimeUserRecord = await readRuntimeUserAuth(
             runtimeFallbackDb,
             session.user_id,
-            { maxAgeMs: 45_000 },
+            { maxAgeMs: 180_000 },
           );
           if (runtimeUserRecord) {
             userRecord = runtimeUserRecord;

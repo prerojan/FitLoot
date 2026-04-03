@@ -283,12 +283,22 @@ export function registerProgressionRoutes(
         return c.json({ snapshot: existingSnapshot, status: "existing" });
       }
 
-      const newSnapshot = await c.env.fitloot_db
-        .prepare("SELECT * FROM progress_snapshots WHERE id = ?")
-        .bind(result.meta.last_row_id)
-        .first();
+      const newSnapshot = result.meta.last_row_id
+        ? await c.env.fitloot_db
+          .prepare("SELECT * FROM progress_snapshots WHERE id = ?")
+          .bind(result.meta.last_row_id)
+          .first()
+        : null;
 
-      return c.json({ snapshot: newSnapshot, status: "created" });
+      const resolvedSnapshot = newSnapshot
+        ?? await c.env.fitloot_db
+          .prepare(
+            "SELECT * FROM progress_snapshots WHERE user_id = ? AND snapshot_date = date('now') ORDER BY id DESC LIMIT 1",
+          )
+          .bind(user.id)
+          .first();
+
+      return c.json({ snapshot: resolvedSnapshot, status: "created" });
     } catch (error) {
       console.error("[/api/progress/snapshot]", error);
       return internalErrorResponse(c);
@@ -427,13 +437,25 @@ export function registerProgressionRoutes(
         await c.env.fitloot_db.prepare(updateQuery).bind(...attributeValues, user.id).run();
       }
 
-      const newBenchmark = await c.env.fitloot_db
-        .prepare("SELECT * FROM physical_benchmarks WHERE id = ?")
-        .bind(result.meta.last_row_id)
-        .first<PhysicalBenchmarkRow>();
+      const newBenchmark = result.meta.last_row_id
+        ? await c.env.fitloot_db
+          .prepare("SELECT * FROM physical_benchmarks WHERE id = ?")
+          .bind(result.meta.last_row_id)
+          .first<PhysicalBenchmarkRow>()
+        : null;
+      const resolvedBenchmark = newBenchmark
+        ?? await c.env.fitloot_db
+          .prepare(
+            `SELECT * FROM physical_benchmarks
+              WHERE user_id = ?
+              ORDER BY id DESC
+              LIMIT 1`,
+          )
+          .bind(user.id)
+          .first<PhysicalBenchmarkRow>();
 
       return c.json({
-        benchmark: newBenchmark,
+        benchmark: resolvedBenchmark,
         delta,
         attributes_updated: attributeUpdates.length > 0,
       });

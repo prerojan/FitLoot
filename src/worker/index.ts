@@ -408,6 +408,9 @@ const reconcilePendingSubscriptionForUser =
 
 // Constrói o middleware de sessão e plano usado pelas rotas protegidas.
 const authMiddleware = createAuthMiddleware({
+  catalogCacheTtlMs: 120_000,
+  sessionCacheTtlMs: 20_000,
+  userRecordCacheTtlMs: 60_000,
   cleanupSettledMissionsWithGuard,
   ensureCaminhadaLeveUserSkill: ensureCaminhadaLeveUserSkillService,
   ensureCatalogReady,
@@ -1251,6 +1254,7 @@ type CachedResponseSnapshot = {
 
 type CachedResponseEntry = {
   expiresAt: number;
+  staleUntil: number;
   snapshot: CachedResponseSnapshot;
 };
 
@@ -1300,10 +1304,18 @@ function resolveSessionScopedRequestKey(c: {
   return `anon:${ip}:${userAgent}:${c.req.path}:${url.search}`;
 }
 
-function cloneResponseSnapshot(snapshot: CachedResponseSnapshot): Response {
+function cloneResponseSnapshot(
+  snapshot: CachedResponseSnapshot,
+  options: { staleFallback?: boolean } = {},
+): Response {
+  const headers = new Headers(snapshot.headers);
+  if (options.staleFallback) {
+    headers.set("x-fitloot-cache", "stale-fallback");
+  }
+
   return new Response(snapshot.body.slice(0), {
     status: snapshot.status,
-    headers: new Headers(snapshot.headers),
+    headers,
   });
 }
 
@@ -1437,13 +1449,24 @@ app.use("/api/*", async (c, next) => {
       500,
       30_000,
     );
+    const staleTtlMs = readEnvInt(
+      c.env.HOT_GET_STALE_TTL_MS,
+      90_000,
+      5_000,
+      600_000,
+    );
     const now = Date.now();
     const cached = hotGetResponseCache.get(requestKey);
+    let staleSnapshot: CachedResponseSnapshot | null = null;
     if (cached && cached.expiresAt > now) {
       return cloneResponseSnapshot(cached.snapshot);
     }
     if (cached) {
-      hotGetResponseCache.delete(requestKey);
+      if (cached.staleUntil > now) {
+        staleSnapshot = cached.snapshot;
+      } else {
+        hotGetResponseCache.delete(requestKey);
+      }
     }
 
     const inflight = hotGetInflightRequests.get(requestKey);
@@ -1451,6 +1474,9 @@ app.use("/api/*", async (c, next) => {
       const sharedSnapshot = await inflight.promise;
       if (sharedSnapshot) {
         return cloneResponseSnapshot(sharedSnapshot);
+      }
+      if (staleSnapshot) {
+        return cloneResponseSnapshot(staleSnapshot, { staleFallback: true });
       }
       await next();
       return;
@@ -1471,7 +1497,10 @@ app.use("/api/*", async (c, next) => {
         hotGetResponseCache.set(requestKey, {
           snapshot,
           expiresAt: Date.now() + cacheTtlMs,
+          staleUntil: Date.now() + staleTtlMs,
         });
+      } else if (staleSnapshot && c.res.status >= 500) {
+        return cloneResponseSnapshot(staleSnapshot, { staleFallback: true });
       }
     } finally {
       hotGetInflightRequests.delete(requestKey);

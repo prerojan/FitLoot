@@ -240,11 +240,15 @@ async function repairActivatedProfileState({
   const injuries = typeof trainingPlanRow?.injuries === "string" ? trainingPlanRow.injuries : "";
   const equipment = typeof trainingPlanRow?.equipment === "string" ? trainingPlanRow.equipment : "";
 
-  const [hasAgeColumn, hasGenderColumn, hasGoalsJsonColumn] = await Promise.all([
-    hasTableColumn(db, "user_profiles", "age"),
-    hasTableColumn(db, "user_profiles", "gender"),
-    hasTableColumn(db, "user_profiles", "goals_json"),
-  ]);
+  const isSupabaseDb =
+    (db as D1Database & { __backend?: string }).__backend === "supabase";
+  const [hasAgeColumn, hasGenderColumn, hasGoalsJsonColumn] = isSupabaseDb
+    ? [true, true, true]
+    : await Promise.all([
+      hasTableColumn(db, "user_profiles", "age"),
+      hasTableColumn(db, "user_profiles", "gender"),
+      hasTableColumn(db, "user_profiles", "goals_json"),
+    ]);
 
   const columns = [
     "user_id",
