@@ -195,6 +195,7 @@ export const MissionSchema = z.object({
   difficulty_level: z.string().optional(),
   video_url: z.string().nullable().optional(),
   thumbnail_url: z.string().nullable().optional(),
+  cycle_date: z.string().nullable().optional(),
   xp_reward: z.number(),
   points_reward: z.number(),
   deadline: z.string().nullable(),

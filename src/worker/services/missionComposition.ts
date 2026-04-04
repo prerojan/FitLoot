@@ -15,6 +15,10 @@ import {
   shouldShowMissionDuration,
 } from "../../constants/missionMetrics";
 import { sanitizeMissionExerciseNames } from "./missionExerciseSelection";
+import {
+  nextMissionCycleStartIso,
+  resolveMissionTimeZone,
+} from "./missionCycle";
 
 export type MissionPeriod = "daily" | "weekly" | "monthly";
 
@@ -72,7 +76,11 @@ function normalizeMatchText(value: string): string {
 export function futureIsoForPeriod(
   period: MissionPeriod,
   reference = new Date(),
+  timeZone?: string | null,
 ): string {
+  if (typeof timeZone === "string" && timeZone.trim().length > 0) {
+    return nextMissionCycleStartIso(period, resolveMissionTimeZone(timeZone), reference);
+  }
   const date = new Date(reference);
 
   if (period === "daily") {

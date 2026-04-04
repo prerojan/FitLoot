@@ -18,6 +18,7 @@ export type MissionPayload = {
   title: string;
   description: string;
   goal?: string | null;
+  cycle_date?: string | null;
   metric_type: MissionMetricType;
   metric_value: number;
   metric_unit: string;
@@ -317,11 +318,11 @@ export function fallbackMissionsForPeriod(
     buildMissionPayload({
       period,
       titlePrefix,
-      exerciseName: "Alongamento Guiado",
-      muscle: "mobility",
+      exerciseName: "Glute Bridge",
+      muscle: "glutes",
       xp,
       points,
-      forceCategory: "stretching",
+      forceCategory: "strength",
     }),
     buildMissionPayload({
       period,

@@ -295,12 +295,36 @@ function uniqueMissionLabels(values: ReadonlyArray<string | null | undefined>): 
   return labels;
 }
 
+function isGenericMissionFocusLabel(value: string): boolean {
+  const normalized = (localizeMissionText(value) ?? value)
+    .trim()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  return normalized === "full body"
+    || normalized === "corpo inteiro"
+    || normalized === "superior"
+    || normalized === "inferior"
+    || normalized === "core";
+}
+
 export function resolveMissionFocusLabels(mission: Mission): string[] {
-  const labels = uniqueMissionLabels([
-    ...(Array.isArray(mission.muscle_groups) ? mission.muscle_groups : []),
+  const primaryLabels = uniqueMissionLabels([
     mission.exercise_target,
-    mission.exercise_body_part,
-    ...(Array.isArray(mission.exercise_secondary_muscles) ? mission.exercise_secondary_muscles.slice(0, 3) : []),
+    ...(Array.isArray(mission.muscle_groups) ? mission.muscle_groups : []),
+  ]);
+  const secondaryLabels = uniqueMissionLabels(
+    Array.isArray(mission.exercise_secondary_muscles)
+      ? mission.exercise_secondary_muscles.slice(0, 2)
+      : [],
+  );
+  const bodyPartLabels = uniqueMissionLabels([mission.exercise_body_part]).filter(
+    (label) => !isGenericMissionFocusLabel(label) || primaryLabels.length === 0,
+  );
+  const labels = uniqueMissionLabels([
+    ...primaryLabels,
+    ...secondaryLabels,
+    ...bodyPartLabels,
   ]);
   if (labels.length > 0) return labels.slice(0, 6);
   return [bodyAreaLabel(mission.body_area)];

@@ -79,7 +79,7 @@ export default function Friends() {
       navigate("/app");
       return;
     }
-    void loadFriends();
+    void loadFriends(true);
   }, [user, navigate, loadFriends]);
 
   useEffect(() => {

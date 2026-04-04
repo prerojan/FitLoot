@@ -28,6 +28,7 @@ type MissionGenerationProfileLike = {
   mainGoal: string;
   goals: string[];
   conditioning: string;
+  currentWeekday?: string | undefined;
   injuries: string;
   equipment: string;
   trainingFrequency: number;
@@ -494,8 +495,12 @@ export function createMissionBlueprintPlanningService(
         muscles: ["full body"],
         exercises: [],
       };
+    const currentDayKey =
+      typeof profile.currentWeekday === "string" && profile.currentWeekday.trim().length > 0
+        ? profile.currentWeekday
+        : deps.getCurrentWeekday();
     const currentDay =
-      profile.weeklyPlan[deps.getCurrentWeekday()] ?? fallbackDay;
+      profile.weeklyPlan[currentDayKey] ?? fallbackDay;
     const specialRule = options.isAiSpecial
       ? "Gere apenas missoes especiais em daily_missions. weekly_missions e monthly_missions devem ser arrays vazios."
       : "Gere um plano completo com daily_missions, weekly_missions e monthly_missions respeitando os limites informados.";
@@ -590,8 +595,12 @@ export function createMissionBlueprintPlanningService(
         muscles: ["full body"],
         exercises: [],
       };
+    const currentDayKey =
+      typeof profile.currentWeekday === "string" && profile.currentWeekday.trim().length > 0
+        ? profile.currentWeekday
+        : deps.getCurrentWeekday();
     const dayPlan =
-      profile.weeklyPlan[deps.getCurrentWeekday()] ?? fallbackDay;
+      profile.weeklyPlan[currentDayKey] ?? fallbackDay;
     const primaryMuscle = dayPlan.muscles[0] ?? "full body";
     const candidateEntries = deps.uniqueExercises([
       ...dayPlan.exercises.map((name) => ({ name, muscle: primaryMuscle })),

@@ -66,6 +66,9 @@ type MissionGenerationDeps<TProfile, TPlanDraft, TBlueprint, TMission> = {
     userId: string,
     missionOrigin: MissionOrigin,
   ) => Promise<ActiveCycleMissionCounts>;
+  getProfileTimeZone: (
+    profile: TProfile | null | undefined,
+  ) => string;
   hasTableColumn: (
     db: D1Database,
     tableName: string,
@@ -81,6 +84,11 @@ type MissionGenerationDeps<TProfile, TPlanDraft, TBlueprint, TMission> = {
     db: D1Database,
     userId: string,
   ) => Promise<TProfile | null>;
+  missionCycleDateKey: (
+    period: MissionPeriod,
+    timeZone: string,
+    reference?: Date,
+  ) => string;
   missionCycleStartIso: (
     period: MissionPeriod,
     reference?: Date,
@@ -194,7 +202,12 @@ export function createMissionGenerationService<
     db: D1Database,
     userId: string,
   ): Promise<void> {
-    const hasMissionStatusColumn = await deps.hasTableColumn(db, "missions", "status");
+    const profile = await deps.loadMissionGenerationProfile(env, db, userId);
+    const userTimeZone = deps.getProfileTimeZone(profile);
+    const [hasMissionStatusColumn, hasCycleDateColumn] = await Promise.all([
+      deps.hasTableColumn(db, "missions", "status"),
+      deps.hasTableColumn(db, "missions", "cycle_date"),
+    ]);
     const activeRegularCounts = await deps.getActiveCycleMissionCounts(
       db,
       userId,
@@ -229,8 +242,33 @@ export function createMissionGenerationService<
     };
 
     for (const period of periods) {
+      const cycleDate = deps.missionCycleDateKey(period, userTimeZone);
       const cycleStart = deps.missionCycleStartIso(period);
-      if (hasMissionStatusColumn) {
+      if (hasCycleDateColumn) {
+        if (hasMissionStatusColumn) {
+          await db.prepare(
+            `UPDATE missions
+               SET status = 'expired', updated_at = datetime('now')
+             WHERE user_id = ?
+               AND type = ?
+               AND is_completed = 0
+               AND COALESCE(mission_origin, 'regular') = 'regular'
+               AND COALESCE(status, 'pending') = 'pending'
+               AND COALESCE(cycle_date, substr(created_at, 1, 10)) < ?`,
+          ).bind(userId, period, cycleDate).run();
+        } else {
+          await db.prepare(
+            `UPDATE missions
+               SET deadline = datetime('now', '-1 second'),
+                   updated_at = datetime('now')
+             WHERE user_id = ?
+               AND type = ?
+               AND is_completed = 0
+               AND COALESCE(mission_origin, 'regular') = 'regular'
+               AND COALESCE(cycle_date, substr(created_at, 1, 10)) < ?`,
+          ).bind(userId, period, cycleDate).run();
+        }
+      } else if (hasMissionStatusColumn) {
         await db.prepare(
           `UPDATE missions
              SET status = 'expired', updated_at = datetime('now')
@@ -254,14 +292,23 @@ export function createMissionGenerationService<
         ).bind(userId, period, cycleStart).run();
       }
 
-      const generatedInCycle = await db.prepare(
-        `SELECT COUNT(*) as count
-         FROM missions
-         WHERE user_id = ?
-           AND type = ?
-           AND COALESCE(mission_origin, 'regular') = 'regular'
-           AND datetime(created_at) >= datetime(?)`
-      ).bind(userId, period, cycleStart).first<{ count: number }>();
+      const generatedInCycle = hasCycleDateColumn
+        ? await db.prepare(
+            `SELECT COUNT(*) as count
+             FROM missions
+             WHERE user_id = ?
+               AND type = ?
+               AND COALESCE(mission_origin, 'regular') = 'regular'
+               AND COALESCE(cycle_date, substr(created_at, 1, 10)) = ?`
+          ).bind(userId, period, cycleDate).first<{ count: number }>()
+        : await db.prepare(
+            `SELECT COUNT(*) as count
+             FROM missions
+             WHERE user_id = ?
+               AND type = ?
+               AND COALESCE(mission_origin, 'regular') = 'regular'
+               AND datetime(created_at) >= datetime(?)`
+          ).bind(userId, period, cycleStart).first<{ count: number }>();
 
       const existingCount = Number(generatedInCycle?.count ?? 0);
       const missingCount = Math.max(0, MISSION_LIMITS[period] - existingCount);

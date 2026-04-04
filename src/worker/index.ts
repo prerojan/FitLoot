@@ -166,6 +166,16 @@ import {
   createMissionRuntimeStateService,
   type MissionRefreshMode,
 } from "./services/missionRuntimeState";
+import { createRegularMissionRebuildService } from "./services/regularMissionRebuild";
+import {
+  currentDateKeyInTimeZone,
+  missionCycleDateByRow,
+  missionCycleDateKey,
+  missionCycleEndDateKey,
+  missionMonthKey,
+  resolveMissionTimeZone,
+  shiftMissionDateKey,
+} from "./services/missionCycle";
 import {
   createAiMissionGenerationService,
   type AiMissionGenerationResult,
@@ -844,9 +854,14 @@ const {
   ensureStructuredPeriodicMissionsFromExistingDailyBlueprints:
     missionPlanPersistenceService.ensureStructuredPeriodicMissionsFromExistingDailyBlueprints,
   getActiveCycleMissionCounts,
+  getProfileTimeZone: (profile) =>
+    resolveMissionTimeZone(
+      (profile as MissionGenerationProfileSnapshot | null | undefined)?.timeZone ?? null,
+    ),
   hasTableColumn,
   listCurrentCycleMissions,
   loadMissionGenerationProfile,
+  missionCycleDateKey,
   missionCycleStartIso,
   persistGeneratedMissionPlan: missionPlanPersistenceService.persistGeneratedMissionPlan,
   repairLegacyPeriodicMissions: missionPlanPersistenceService.repairLegacyPeriodicMissions,
@@ -862,6 +877,14 @@ const {
   ensurePeriodicMissions,
   ensureUserCounterRow: ensureUserCounterRowService,
   expirePendingMissionsAndUpdateStreak,
+});
+
+const {
+  runRegularMissionRebuildBatch,
+} = createRegularMissionRebuildService({
+  generateStructuredMissionPlanForUser,
+  getErrorMessage,
+  invalidateMissionListCache,
 });
 
 // Centraliza cache, locks e refresh periódico das missões fora do entrypoint.
@@ -1019,10 +1042,9 @@ async function expirePendingMissionsAndUpdateStreak(
   userId: string,
 ): Promise<void> {
   const now = new Date();
-  const today = now.toISOString().split("T")[0];
-  const yesterday = new Date(now.getTime() - 86_400_000)
-    .toISOString()
-    .split("T")[0];
+  const cycleSnapshot = await readUserMissionCycleSnapshot(db, userId, now);
+  const today = cycleSnapshot.daily;
+  const yesterday = cycleSnapshot.yesterday;
 
   let expired: { results: Array<{ id: number }> } = { results: [] };
   try {
@@ -1033,10 +1055,18 @@ async function expirePendingMissionsAndUpdateStreak(
           WHERE user_id = ?
             AND is_completed = 0
             AND COALESCE(status,'pending') = 'pending'
-            AND deadline IS NOT NULL
-            AND date(deadline) < date('now')`,
+            AND (
+              (type = 'daily' AND ${missionCycleDateSql()} < ?)
+              OR (type = 'weekly' AND ${missionCycleDateSql()} < ?)
+              OR (type = 'monthly' AND ${missionCycleDateSql()} < ?)
+            )`,
       )
-      .bind(userId)
+      .bind(
+        userId,
+        cycleSnapshot.daily,
+        cycleSnapshot.weekly,
+        cycleSnapshot.monthly,
+      )
       .all<{ id: number }>();
   } catch {
     // Compatibiliza a expiração com bancos ainda sem a coluna de status.
@@ -1068,8 +1098,9 @@ async function expirePendingMissionsAndUpdateStreak(
       `SELECT COUNT(*) as c
          FROM missions
         WHERE user_id = ?
+          AND type = 'daily'
           AND is_completed = 1
-          AND date(completed_at) = ?`,
+          AND ${missionCycleDateSql()} = ?`,
     )
     .bind(userId, today)
     .first<{ c: number }>();
@@ -1079,8 +1110,9 @@ async function expirePendingMissionsAndUpdateStreak(
       `SELECT COUNT(*) as c, MAX(completed_at) as last_time
          FROM missions
         WHERE user_id = ?
+          AND type = 'daily'
           AND is_completed = 1
-          AND date(completed_at) = ?`,
+          AND ${missionCycleDateSql()} = ?`,
     )
     .bind(userId, yesterday)
     .first<{ c: number; last_time: string | null }>();
@@ -1258,8 +1290,6 @@ const HOT_GET_CACHEABLE_PATHS = new Set<string>([
   "/api/shop/products",
   "/api/shop/orders",
   "/api/ai/recommendations",
-  "/api/friends",
-  "/api/friends/requests",
   "/api/metrics/today",
 ]);
 
@@ -1906,27 +1936,8 @@ async function ensureMonthlyCounterSchema(db: D1Database): Promise<void> {
   monthlyCounterSchemaCheckedAt = now;
 }
 
-function currentMonthKey(reference = new Date()): string {
-  const year = reference.getUTCFullYear();
-  const month = String(reference.getUTCMonth() + 1).padStart(2, "0");
-  return `${year}-${month}`;
-}
-
-function monthStartIso(reference = new Date()): string {
-  const year = reference.getUTCFullYear();
-  const month = reference.getUTCMonth();
-  return new Date(Date.UTC(year, month, 1, 0, 0, 0, 0)).toISOString();
-}
-
-function isoDateOnly(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  if (trimmed.length < 10) return null;
-  return trimmed.slice(0, 10);
-}
-
-function maxIsoDate(values: string[]): string {
-  return values.reduce((currentMax, candidate) => (candidate > currentMax ? candidate : currentMax));
+function currentMonthKey(reference = new Date(), timeZone = "UTC"): string {
+  return missionMonthKey(timeZone, reference);
 }
 
 function minIsoDate(values: string[]): string {
@@ -1935,21 +1946,21 @@ function minIsoDate(values: string[]): string {
 
 function resolvePeriodicMissionDateWindow(
   mission: Record<string, unknown>,
+  timeZone: string,
   reference = new Date(),
 ): { startDate: string; endDate: string } {
-  const today = reference.toISOString().slice(0, 10);
-  const createdAtDate = isoDateOnly(mission.created_at);
-  const deadlineDate = isoDateOnly(mission.deadline);
   const missionType = String(mission.type ?? "");
-  const defaultStartDate = missionType === "monthly"
-    ? monthStartIso(reference).slice(0, 10)
-    : createdAtDate ?? today;
-  const startDate = maxIsoDate(
-    [defaultStartDate, createdAtDate].filter((value): value is string => typeof value === "string" && value.length > 0),
+  const safePeriod: MissionPeriod =
+    missionType === "weekly" || missionType === "monthly" ? missionType : "daily";
+  const today = currentDateKeyInTimeZone(reference, timeZone);
+  const startDate = missionCycleDateByRow(
+    safePeriod,
+    typeof mission.cycle_date === "string" ? mission.cycle_date : null,
+    typeof mission.created_at === "string" ? mission.created_at : null,
+    timeZone,
   );
-  const endDate = minIsoDate(
-    [today, deadlineDate].filter((value): value is string => typeof value === "string" && value.length > 0),
-  );
+  const cycleEndDate = missionCycleEndDateKey(safePeriod, startDate);
+  const endDate = minIsoDate([today, cycleEndDate]);
 
   return {
     startDate,
@@ -1962,7 +1973,8 @@ async function readPeriodicMissionStepProgress(
   userId: string,
   mission: Record<string, unknown>,
 ): Promise<number> {
-  const { startDate, endDate } = resolvePeriodicMissionDateWindow(mission);
+  const timeZone = await readUserMissionTimeZone(db, userId);
+  const { startDate, endDate } = resolvePeriodicMissionDateWindow(mission, timeZone);
   const aggregate = await db.prepare(
     `SELECT COALESCE(SUM(steps), 0) as steps
        FROM daily_metrics
@@ -2016,8 +2028,10 @@ async function resolvePeriodicMissionProgressValue(
 
 async function recomputeMonthlyCounters(db: D1Database, userId: string, reference = new Date()): Promise<MonthlyCounterSnapshot> {
   await ensureMonthlyCounterSchema(db);
-  const monthKey = currentMonthKey(reference);
-  const monthStart = monthStartIso(reference);
+  const timeZone = await readUserMissionTimeZone(db, userId);
+  const monthKey = currentMonthKey(reference, timeZone);
+  const monthStartDate = missionCycleDateKey("monthly", timeZone, reference);
+  const monthEndDate = missionCycleEndDateKey("monthly", monthStartDate);
   const [hasMetricTypeColumn, hasMetricValueColumn] = await Promise.all([
     hasTableColumn(db, "missions", "metric_type"),
     hasTableColumn(db, "missions", "metric_value"),
@@ -2034,13 +2048,13 @@ async function recomputeMonthlyCounters(db: D1Database, userId: string, referenc
            ELSE 0
          END
        ), 0) as distance_meters,
-       COALESCE(COUNT(DISTINCT CASE WHEN is_completed = 1 AND type = 'daily' THEN date(completed_at) END), 0) as streak_days,
+       COALESCE(COUNT(DISTINCT CASE WHEN is_completed = 1 AND type = 'daily' THEN ${missionCycleDateSql()} END), 0) as streak_days,
        COALESCE(SUM(CASE WHEN is_completed = 1 AND type = 'weekly' AND ${metricTypeSql} = 'circuit_tasks' THEN 1 ELSE 0 END), 0) as weekly_circuits_completed
      FROM missions
      WHERE user_id = ?
-       AND completed_at IS NOT NULL
-       AND date(completed_at) >= date(?)`
-  ).bind(userId, monthStart).first<{
+       AND ${missionCycleDateSql()} >= ?
+       AND ${missionCycleDateSql()} <= ?`
+  ).bind(userId, monthStartDate, monthEndDate).first<{
     missions_completed: number;
     distance_meters: number;
     streak_days: number;
@@ -2079,7 +2093,8 @@ async function recomputeMonthlyCounters(db: D1Database, userId: string, referenc
 
 async function getMonthlyCounters(db: D1Database, userId: string): Promise<MonthlyCounterSnapshot> {
   await ensureMonthlyCounterSchema(db);
-  const monthKey = currentMonthKey();
+  const timeZone = await readUserMissionTimeZone(db, userId);
+  const monthKey = currentMonthKey(new Date(), timeZone);
   const row = await db.prepare(
     `SELECT month_key, missions_completed, distance_meters, streak_days, weekly_circuits_completed
      FROM user_monthly_counters
@@ -2100,10 +2115,11 @@ async function getMonthlyCounters(db: D1Database, userId: string): Promise<Month
       weekly_circuits_completed: Number(row.weekly_circuits_completed ?? 0),
     };
   }
-  return recomputeMonthlyCounters(db, userId);
+  return recomputeMonthlyCounters(db, userId, new Date());
 }
 
 async function updateMonthlyMissionProgress(userId: string, db: D1Database): Promise<void> {
+  const cycleSnapshot = await readUserMissionCycleSnapshot(db, userId);
   const counters = await recomputeMonthlyCounters(db, userId);
   const missionsHaveStatus = await hasTableColumn(db, "missions", "status");
   const hasProgressValueColumn = await hasTableColumn(db, "missions", "progress_value");
@@ -2118,7 +2134,14 @@ async function updateMonthlyMissionProgress(userId: string, db: D1Database): Pro
        AND (deadline IS NULL OR deadline > datetime('now'))`
   ).bind(userId).all<Record<string, unknown>>();
 
-  for (const mission of monthlyMissions.results) {
+  for (const mission of monthlyMissions.results.filter((row) =>
+    missionCycleDateByRow(
+      "monthly",
+      typeof row.cycle_date === "string" ? row.cycle_date : null,
+      typeof row.created_at === "string" ? row.created_at : null,
+      cycleSnapshot.timeZone,
+    ) === cycleSnapshot.monthly,
+  )) {
     const progress = await resolvePeriodicMissionProgressValue(userId, mission, db, {
       monthlyCounters: counters,
     });
@@ -2132,26 +2155,9 @@ async function updateMonthlyMissionProgress(userId: string, db: D1Database): Pro
     }
     if (progress < target) continue;
 
-    if (missionsHaveStatus) {
-      await db.prepare(
-        `UPDATE missions
-         SET is_completed = 1, status = 'completed', completed_at = datetime('now'), updated_at = datetime('now')
-       WHERE id = ? AND is_completed = 0`
-      ).bind(mission.id).run();
-    } else {
-      await db.prepare(
-        `UPDATE missions
-         SET is_completed = 1, completed_at = datetime('now'), updated_at = datetime('now')
-       WHERE id = ? AND is_completed = 0`
-      ).bind(mission.id).run();
-    }
-
-    const xpReward = Number(mission.xp_reward ?? 0);
-    const pointsReward = Number(mission.points_reward ?? 0);
-    if (xpReward > 0 || pointsReward > 0) {
-      await applyXpPointsAndResolveLevels(db, userId, xpReward, pointsReward);
-    }
-    await onMissionComplete(db, userId, Number(mission.id));
+    await completePeriodicMissionIfPending(db, userId, mission, {
+      missionsHaveStatus,
+    });
   }
 }
 
@@ -2200,6 +2206,60 @@ async function grantCircuitRewards(db: D1Database, userId: string, missionRow: R
   if (xpReward <= 0 && pointsReward <= 0) return;
 
   await applyXpPointsAndResolveLevels(db, userId, xpReward, pointsReward);
+}
+
+async function incrementMissionCompletedCounter(
+  db: D1Database,
+  userId: string,
+): Promise<void> {
+  await ensureUserCounterRow(db, userId);
+  await db.prepare(
+    `UPDATE user_event_counters
+        SET missions_completed = COALESCE(missions_completed, 0) + 1,
+            updated_at = datetime('now')
+      WHERE user_id = ?`,
+  ).bind(userId).run();
+}
+
+async function completePeriodicMissionIfPending(
+  db: D1Database,
+  userId: string,
+  missionRow: Record<string, unknown>,
+  options?: { missionsHaveStatus?: boolean | undefined },
+): Promise<boolean> {
+  const missionId = Number(missionRow.id ?? 0);
+  if (!Number.isInteger(missionId) || missionId <= 0) {
+    return false;
+  }
+
+  const missionsHaveStatus =
+    options?.missionsHaveStatus
+    ?? await hasTableColumn(db, "missions", "status");
+  const completionResult = missionsHaveStatus
+    ? await db.prepare(
+        `UPDATE missions
+            SET is_completed = 1,
+                status = 'completed',
+                completed_at = datetime('now'),
+                updated_at = datetime('now')
+          WHERE id = ? AND is_completed = 0`,
+      ).bind(missionId).run()
+    : await db.prepare(
+        `UPDATE missions
+            SET is_completed = 1,
+                completed_at = datetime('now'),
+                updated_at = datetime('now')
+          WHERE id = ? AND is_completed = 0`,
+      ).bind(missionId).run();
+
+  if (Number(completionResult.meta.changes ?? 0) === 0) {
+    return false;
+  }
+
+  await grantCircuitRewards(db, userId, missionRow);
+  await incrementMissionCompletedCounter(db, userId);
+  await onMissionComplete(db, userId, missionId);
+  return true;
 }
 
 function buildCompletedMissionMatchCandidates(completedMission: Record<string, unknown>): string[] {
@@ -2300,18 +2360,24 @@ function missionSubtaskMatchesCompletedMission(
 function isMissionCompletionWithinParentWindow(
   completedMission: Record<string, unknown>,
   parentMission: Record<string, unknown>,
+  timeZone: string,
 ): boolean {
-  const completedAt = typeof completedMission.completed_at === "string" ? completedMission.completed_at : "";
-  const parentCreatedAt = typeof parentMission.created_at === "string" ? parentMission.created_at : "";
-  const parentDeadline = typeof parentMission.deadline === "string" ? parentMission.deadline : "";
+  if (String(completedMission.type ?? "") !== "daily") {
+    return false;
+  }
 
-  if (completedAt.length === 0) return false;
-  if (parentCreatedAt.length > 0 && completedAt < parentCreatedAt) return false;
-  if (parentDeadline.length > 0 && completedAt > parentDeadline) return false;
-  return true;
+  const completedCycleDate = missionCycleDateByRow(
+    "daily",
+    typeof completedMission.cycle_date === "string" ? completedMission.cycle_date : null,
+    typeof completedMission.created_at === "string" ? completedMission.created_at : null,
+    timeZone,
+  );
+  const { startDate, endDate } = resolvePeriodicMissionDateWindow(parentMission, timeZone);
+  return completedCycleDate >= startDate && completedCycleDate <= endDate;
 }
 
 async function recomputeActivePeriodicMissionProgress(userId: string, db: D1Database): Promise<void> {
+  const cycleSnapshot = await readUserMissionCycleSnapshot(db, userId);
   const periodicRows = await db.prepare(
     `SELECT *
        FROM missions
@@ -2321,7 +2387,19 @@ async function recomputeActivePeriodicMissionProgress(userId: string, db: D1Data
         AND (deadline IS NULL OR deadline > datetime('now'))`,
   ).bind(userId).all<Record<string, unknown>>();
 
-  const activePeriodicMissions = Array.isArray(periodicRows.results) ? periodicRows.results : [];
+  const activePeriodicMissions = (Array.isArray(periodicRows.results) ? periodicRows.results : []).filter((row) => {
+    const missionType = row.type === "weekly" || row.type === "monthly"
+      ? row.type
+      : null;
+    if (!missionType) return false;
+    const cycleDate = missionCycleDateByRow(
+      missionType,
+      typeof row.cycle_date === "string" ? row.cycle_date : null,
+      typeof row.created_at === "string" ? row.created_at : null,
+      cycleSnapshot.timeZone,
+    );
+    return cycleDate === cycleSnapshot[missionType];
+  });
   if (activePeriodicMissions.length === 0) return;
 
   const completedDailyRows = await db.prepare(
@@ -2344,7 +2422,11 @@ async function recomputeActivePeriodicMissionProgress(userId: string, db: D1Data
     if (missionId <= 0) continue;
 
     const eligibleDailies = completedDailyMissions.filter((completedMission) =>
-      isMissionCompletionWithinParentWindow(completedMission, missionRow),
+      isMissionCompletionWithinParentWindow(
+        completedMission,
+        missionRow,
+        cycleSnapshot.timeZone,
+      ),
     );
     const subtasks = subtasksByParentId.get(missionId) ?? [];
 
@@ -2374,6 +2456,10 @@ async function recomputeActivePeriodicMissionProgress(userId: string, db: D1Data
 
       if (changed) {
         await refreshMissionFromSubtasks(db, userId, missionId);
+      } else if (subtasks.every((subtask) => subtask.is_completed)) {
+        await completePeriodicMissionIfPending(db, userId, missionRow, {
+          missionsHaveStatus,
+        });
       }
       continue;
     }
@@ -2397,27 +2483,9 @@ async function recomputeActivePeriodicMissionProgress(userId: string, db: D1Data
         continue;
       }
 
-      if (missionsHaveStatus) {
-        await db.prepare(
-          `UPDATE missions
-              SET is_completed = 1,
-                  status = 'completed',
-                  completed_at = datetime('now'),
-                  updated_at = datetime('now')
-            WHERE id = ? AND is_completed = 0`,
-        ).bind(missionId).run();
-      } else {
-        await db.prepare(
-          `UPDATE missions
-              SET is_completed = 1,
-                  completed_at = datetime('now'),
-                  updated_at = datetime('now')
-            WHERE id = ? AND is_completed = 0`,
-        ).bind(missionId).run();
-      }
-
-      await grantCircuitRewards(db, userId, missionRow);
-      await onMissionComplete(db, userId, missionId);
+      await completePeriodicMissionIfPending(db, userId, missionRow, {
+        missionsHaveStatus,
+      });
       continue;
     }
 
@@ -2447,7 +2515,14 @@ async function recomputeActivePeriodicMissionProgress(userId: string, db: D1Data
       };
     });
 
-    if (!changed) continue;
+    if (!changed) {
+      if (recomputedTasks.every((task) => task.completed)) {
+        await completePeriodicMissionIfPending(db, userId, missionRow, {
+          missionsHaveStatus,
+        });
+      }
+      continue;
+    }
 
     const progressValue = recomputedTasks.reduce(
       (total, task) => total + Math.min(task.required_count, task.current_count),
@@ -2474,27 +2549,9 @@ async function recomputeActivePeriodicMissionProgress(userId: string, db: D1Data
       continue;
     }
 
-    if (missionsHaveStatus) {
-      await db.prepare(
-        `UPDATE missions
-            SET is_completed = 1,
-                status = 'completed',
-                completed_at = datetime('now'),
-                updated_at = datetime('now')
-          WHERE id = ? AND is_completed = 0`,
-      ).bind(missionId).run();
-    } else {
-      await db.prepare(
-        `UPDATE missions
-            SET is_completed = 1,
-                completed_at = datetime('now'),
-                updated_at = datetime('now')
-          WHERE id = ? AND is_completed = 0`,
-      ).bind(missionId).run();
-    }
-
-    await grantCircuitRewards(db, userId, missionRow);
-    await onMissionComplete(db, userId, missionId);
+    await completePeriodicMissionIfPending(db, userId, missionRow, {
+      missionsHaveStatus,
+    });
   }
 }
 
@@ -2538,31 +2595,14 @@ async function refreshMissionFromSubtasks(
   if (!allCompleted) return;
 
   const missionsHaveStatus = await hasTableColumn(db, "missions", "status");
-  const completionResult = missionsHaveStatus
-    ? await db.prepare(
-        `UPDATE missions
-      SET is_completed = 1,
-          status = 'completed',
-          completed_at = datetime('now'),
-          updated_at = datetime('now')
-      WHERE id = ? AND is_completed = 0`
-      ).bind(parentMissionId).run()
-    : await db.prepare(
-        `UPDATE missions
-      SET is_completed = 1,
-          completed_at = datetime('now'),
-          updated_at = datetime('now')
-      WHERE id = ? AND is_completed = 0`
-      ).bind(parentMissionId).run();
-
-  if (Number(completionResult.meta.changes ?? 0) === 0) return;
-
-  await grantCircuitRewards(db, userId, missionRow);
-  await onMissionComplete(db, userId, parentMissionId);
+  await completePeriodicMissionIfPending(db, userId, missionRow, {
+    missionsHaveStatus,
+  });
 }
 
 async function updateMissionSubtaskProgress(userId: string, completedMission: Record<string, unknown>, db: D1Database) {
   await ensureMissionSubtaskSchema(db);
+  const cycleSnapshot = await readUserMissionCycleSnapshot(db, userId);
 
   const activeSubtasks = await db.prepare(
     `SELECT
@@ -2583,8 +2623,16 @@ async function updateMissionSubtaskProgress(userId: string, completedMission: Re
         AND m.type IN ('weekly', 'monthly')
         AND m.is_completed = 0
         AND (m.deadline IS NULL OR m.deadline > datetime('now'))
+        AND (
+          (m.type = 'weekly' AND ${missionCycleDateSql("m")} = ?)
+          OR (m.type = 'monthly' AND ${missionCycleDateSql("m")} = ?)
+        )
         AND ms.is_completed = 0`
-  ).bind(userId).all<MissionSubtaskRow>();
+  ).bind(
+    userId,
+    cycleSnapshot.weekly,
+    cycleSnapshot.monthly,
+  ).all<MissionSubtaskRow>();
 
   const touchedParentIds = new Set<number>();
   for (const row of Array.isArray(activeSubtasks.results) ? activeSubtasks.results : []) {
@@ -2609,17 +2657,19 @@ async function updateMissionSubtaskProgress(userId: string, completedMission: Re
 }
 
 async function updateCircuitProgress(userId: string, completedMission: Record<string, unknown>, db: D1Database) {
+  const cycleSnapshot = await readUserMissionCycleSnapshot(db, userId);
   const circuits = await db.prepare(
     `SELECT * FROM missions
       WHERE user_id = ?
         AND type = 'weekly'
         AND metric_type = 'circuit_tasks'
         AND is_completed = 0
+        AND ${missionCycleDateSql()} = ?
         AND NOT EXISTS (
           SELECT 1 FROM mission_subtasks ms WHERE ms.parent_mission_id = missions.id
         )
         AND (deadline IS NULL OR deadline > datetime('now'))`
-  ).bind(userId).all<Record<string, unknown>>();
+  ).bind(userId, cycleSnapshot.weekly).all<Record<string, unknown>>();
 
   for (const circuit of circuits.results) {
     const tasks = parseCircuitTaskField(circuit.circuit_tasks_json);
@@ -2661,23 +2711,7 @@ async function updateCircuitProgress(userId: string, completedMission: Record<st
     }
 
     if (allCompleted) {
-      const missionsHaveStatus = await hasTableColumn(db, "missions", "status");
-      if (missionsHaveStatus) {
-        await db.prepare(
-          `UPDATE missions
-           SET is_completed = 1, status = 'completed', completed_at = datetime('now'), updated_at = datetime('now')
-         WHERE id = ? AND is_completed = 0`
-        ).bind(circuit.id).run();
-      } else {
-        await db.prepare(
-          `UPDATE missions
-           SET is_completed = 1, completed_at = datetime('now'), updated_at = datetime('now')
-         WHERE id = ? AND is_completed = 0`
-        ).bind(circuit.id).run();
-      }
-
-      await grantCircuitRewards(db, userId, circuit);
-      await onMissionComplete(db, userId, Number(circuit.id));
+      await completePeriodicMissionIfPending(db, userId, circuit);
     }
   }
 }
@@ -3155,11 +3189,19 @@ async function insertMission(
   mission: MissionPayload,
   skillId: number | null,
 ): Promise<number | null> {
-  const [hasGoalColumn, hasAiSpecialColumn, hasExerciseDbIdColumn] = await Promise.all([
+  const [hasGoalColumn, hasAiSpecialColumn, hasExerciseDbIdColumn, hasCycleDateColumn] = await Promise.all([
     hasTableColumn(db, "missions", "goal"),
     hasTableColumn(db, "missions", "is_ai_special"),
     hasTableColumn(db, "missions", "exercise_db_id"),
+    hasTableColumn(db, "missions", "cycle_date"),
   ]);
+  const userTimeZone = hasCycleDateColumn
+    ? await readUserMissionTimeZone(db, userId)
+    : "UTC";
+  const cycleDate =
+    typeof mission.cycle_date === "string" && mission.cycle_date.trim().length >= 10
+      ? mission.cycle_date.trim().slice(0, 10)
+      : missionCycleDateKey(period, userTimeZone);
 
   const columns = [
     "user_id",
@@ -3272,6 +3314,12 @@ async function insertMission(
     }
   }
 
+  if (hasCycleDateColumn) {
+    columns.splice(columns.length - 1, 0, "cycle_date");
+    placeholders.splice(placeholders.length - 1, 0, "?");
+    values.push(cycleDate);
+  }
+
   placeholders[placeholders.length - 1] = "datetime('now')";
 
   const sql = `INSERT INTO missions (${columns.join(", ")}) VALUES (${placeholders.join(", ")})`;
@@ -3282,6 +3330,43 @@ async function insertMission(
 
 function getWeekdayPtBr(now = new Date()) {
   return ["domingo", "segunda", "terca", "quarta", "quinta", "sexta", "sabado"][now.getDay()];
+}
+
+async function readUserMissionTimeZone(
+  db: D1Database,
+  userId: string,
+): Promise<string> {
+  const row = await db.prepare(
+    "SELECT timezone FROM user_profiles WHERE user_id = ?",
+  ).bind(userId).first<{ timezone: string | null }>();
+  return resolveMissionTimeZone(row?.timezone);
+}
+
+async function readUserMissionCycleSnapshot(
+  db: D1Database,
+  userId: string,
+  reference = new Date(),
+): Promise<{
+  timeZone: string;
+  daily: string;
+  weekly: string;
+  monthly: string;
+  yesterday: string;
+}> {
+  const timeZone = await readUserMissionTimeZone(db, userId);
+  const daily = missionCycleDateKey("daily", timeZone, reference);
+  return {
+    timeZone,
+    daily,
+    weekly: missionCycleDateKey("weekly", timeZone, reference),
+    monthly: missionCycleDateKey("monthly", timeZone, reference),
+    yesterday: shiftMissionDateKey(daily, -1),
+  };
+}
+
+function missionCycleDateSql(columnPrefix = ""): string {
+  const prefix = columnPrefix.trim().length > 0 ? `${columnPrefix}.` : "";
+  return `COALESCE(${prefix}cycle_date, substr(${prefix}created_at, 1, 10))`;
 }
 
 // Reúne os adaptadores finais exigidos pela geração estruturada e pela IA.
@@ -3440,9 +3525,10 @@ async function getActiveCycleMissionCounts(
     hasAiSpecialColumn,
     hasMissionStatusColumn,
   );
+  const userTimeZone = await readUserMissionTimeZone(db, userId);
 
   for (const period of ["daily", "weekly", "monthly"] as const) {
-    const cycleStart = missionCycleStartIso(period);
+    const cycleDate = missionCycleDateKey(period, userTimeZone);
     const row = await db.prepare(
       `SELECT COUNT(*) as count
        FROM missions
@@ -3451,9 +3537,9 @@ async function getActiveCycleMissionCounts(
          ${scopeSql}
          AND is_completed = 0
          ${pendingStatusSql}
-         AND datetime(created_at) >= datetime(?)
+         AND ${missionCycleDateSql()} = ?
          AND (deadline IS NULL OR deadline > datetime('now'))`
-    ).bind(userId, period, cycleStart).first<{ count: number }>();
+    ).bind(userId, period, cycleDate).first<{ count: number }>();
     counts[period] = Number(row?.count ?? 0);
   }
 
@@ -3474,6 +3560,12 @@ async function listCurrentCycleMissions(
     hasAiSpecialColumn,
     hasMissionStatusColumn,
   );
+  const userTimeZone = await readUserMissionTimeZone(db, userId);
+  const cycleDates = {
+    daily: missionCycleDateKey("daily", userTimeZone),
+    weekly: missionCycleDateKey("weekly", userTimeZone),
+    monthly: missionCycleDateKey("monthly", userTimeZone),
+  };
   const rows = await db.prepare(
     `SELECT *
      FROM missions
@@ -3492,9 +3584,13 @@ async function listCurrentCycleMissions(
       if (mission.type !== "daily" && mission.type !== "weekly" && mission.type !== "monthly") {
         return false;
       }
-      const createdAt = Date.parse(String(mission.created_at ?? ""));
-      const cycleStart = Date.parse(missionCycleStartIso(mission.type));
-      return Number.isFinite(createdAt) ? createdAt >= cycleStart : true;
+      const cycleDate = missionCycleDateByRow(
+        mission.type,
+        typeof mission.cycle_date === "string" ? mission.cycle_date : null,
+        typeof mission.created_at === "string" ? mission.created_at : null,
+        userTimeZone,
+      );
+      return cycleDate === cycleDates[mission.type];
     })
     .map((mission) => missionSummaryFromNormalized(mission) as unknown as MissionPayload & { type: MissionPeriod });
 }
@@ -3753,6 +3849,13 @@ async function handleFetchWithGuard(request: Request, env: Env, ctx: ExecutionCo
   let runtimeEnv: Env = env;
   try {
     runtimeEnv = attachRuntimeDatabase(env);
+    ctx.waitUntil(
+      runRegularMissionRebuildBatch(runtimeEnv, runtimeEnv.fitloot_db).catch((error) => {
+        console.error("[worker][regular-mission-rebuild][fetch]", {
+          message: getErrorMessage(error),
+        });
+      }),
+    );
     return await app.fetch(request, runtimeEnv, ctx);
   } catch (error) {
     const errorMessage = getErrorMessage(error);
@@ -3818,6 +3921,13 @@ export default {
           message: getErrorMessage(error),
         });
       })
+    );
+    ctx.waitUntil(
+      runRegularMissionRebuildBatch(runtimeEnv, runtimeEnv.fitloot_db).catch((error) => {
+        console.error("[worker][regular-mission-rebuild][scheduled]", {
+          message: getErrorMessage(error),
+        });
+      }),
     );
   },
 };

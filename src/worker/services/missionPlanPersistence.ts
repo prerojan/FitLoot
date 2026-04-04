@@ -14,6 +14,7 @@ type MissionPlanProfileLike = {
   userId: string;
   mainGoal: string;
   conditioning: string;
+  timeZone: string;
   injuries: string;
   equipment: string;
   trainingFrequency: number;
@@ -82,7 +83,11 @@ type MissionPlanPersistenceDeps = {
     subtasks: readonly ResolvedMissionSubtaskLike[],
   ) => Promise<void>;
   extractExerciseName: (title: string) => string;
-  futureIsoForPeriod: (period: MissionPeriod) => string;
+  futureIsoForPeriod: (
+    period: MissionPeriod,
+    reference?: Date,
+    timeZone?: string,
+  ) => string;
   getMonthlyCounters: (
     db: D1Database,
     userId: string,
@@ -406,7 +411,11 @@ export function createMissionPlanPersistenceService(
           db,
           profile.userId,
           entry.blueprint.period,
-          deps.futureIsoForPeriod(entry.blueprint.period),
+          deps.futureIsoForPeriod(
+            entry.blueprint.period,
+            undefined,
+            profile.timeZone,
+          ),
           entry.mission,
           skillId,
         );

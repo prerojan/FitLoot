@@ -10,6 +10,11 @@ import type {
 import { sanitizeMissionExerciseNames } from "./missionExerciseSelection";
 import type { TrainingPlanChatPreferences } from "./trainingPlan";
 import { requestValidatedStructuredPlanWithRetry } from "./structuredPlanRetry";
+import {
+  missionCycleDateKey,
+  missionWeekdayPtBr,
+  resolveMissionTimeZone,
+} from "./missionCycle";
 
 type MissionPeriod = "daily" | "weekly" | "monthly";
 
@@ -46,6 +51,8 @@ export type MissionGenerationProfileSnapshot = {
   mainGoal: string;
   goals: string[];
   conditioning: ConditioningLevel;
+  timeZone: string;
+  currentWeekday: WeekdayPtBr;
   injuries: string;
   equipment: string;
   trainingFrequency: number;
@@ -425,13 +432,20 @@ export function createTrainingPlanOrchestrationService(
     }
 
     const conditioning = deps.normalizeConditioning(conditioningSource);
+    const timeZone = resolveMissionTimeZone(
+      typeof profile.timezone === "string" ? profile.timezone : null,
+    );
+    const currentWeekday = missionWeekdayPtBr(
+      new Date(),
+      timeZone,
+    ) as WeekdayPtBr;
     const injuries = typeof profile.injuries === "string" ? profile.injuries : "";
     const equipment = typeof profile.equipment === "string" ? profile.equipment : "";
     const goals = parseGoalsJson(deps.parseJsonStringArray, profile.goals_json, mainGoal);
     const completedCount = Number(historySummary?.completed_count ?? 0);
     const failedCount = Number(historySummary?.failed_count ?? 0);
     const completionRateValue = completionRate(completedCount, failedCount);
-    const weekKey = deps.currentWeekKey();
+    const weekKey = missionCycleDateKey("weekly", timeZone);
     const previousPlanRaw = deps.parseStoredPlanRecord(planRow?.weekly_plan_json);
     const chatPlanPreferences = deps.normalizeTrainingPlanChatPreferences(
       previousPlanRaw?.chat_preferences,
@@ -496,6 +510,8 @@ export function createTrainingPlanOrchestrationService(
       mainGoal,
       goals,
       conditioning,
+      timeZone,
+      currentWeekday,
       injuries,
       equipment,
       trainingFrequency: deps.normalizeTrainingFrequencyInput(

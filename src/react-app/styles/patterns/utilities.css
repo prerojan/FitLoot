@@ -1325,3 +1325,31 @@
 ::-webkit-scrollbar-thumb:hover {
   filter: brightness(0.94);
 }
+
+::-webkit-scrollbar:horizontal {
+  height: 0;
+}
+
+::-webkit-scrollbar-track:horizontal {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb:horizontal {
+  background: transparent;
+}
+
+.overflow-x-auto,
+.overflow-x-scroll,
+.no-scrollbar,
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.overflow-x-auto::-webkit-scrollbar,
+.overflow-x-scroll::-webkit-scrollbar,
+.no-scrollbar::-webkit-scrollbar,
+.scrollbar-hide::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}

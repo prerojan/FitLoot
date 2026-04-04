@@ -13,6 +13,29 @@ type PresenceRouteDeps = {
   getSessionIdFromCookieHeader: (cookieHeader: string | undefined) => string | null;
 };
 
+function resolveRuntimeFriendCacheDb(
+  c: Pick<import("hono").Context<AppContext>, "env">,
+): D1Database | null {
+  const runtimeDb = c.env.fitloot_runtime_db;
+  if (!runtimeDb) return null;
+  if (runtimeDb === c.env.fitloot_db) return null;
+  return runtimeDb;
+}
+
+async function clearRuntimeFriendSnapshots(
+  runtimeDb: D1Database,
+  userId: string,
+): Promise<void> {
+  await runtimeDb
+    .prepare(
+      `DELETE FROM runtime_friend_snapshots
+        WHERE user_id = ?
+           OR friend_user_id = ?`,
+    )
+    .bind(userId, userId)
+    .run();
+}
+
 function normalizePresenceVisibility(value: unknown): "friends" | "private" | "public" {
   const normalized = String(value ?? "").trim().toLowerCase();
   if (normalized === "private") return "private";
@@ -108,6 +131,12 @@ export function registerPresenceRoutes(
           .bind(user.id, visibility, sessionId, currentActivity)
           .run();
       });
+
+      const runtimeDb = resolveRuntimeFriendCacheDb(c);
+      if (runtimeDb) {
+        void clearRuntimeFriendSnapshots(runtimeDb, user.id).catch(() => undefined);
+      }
+
       return c.json({ success: true });
     } catch (error) {
       console.error("[/api/presence/heartbeat]", {
@@ -148,6 +177,12 @@ export function registerPresenceRoutes(
           .bind(user.id)
           .run();
       });
+
+      const runtimeDb = resolveRuntimeFriendCacheDb(c);
+      if (runtimeDb) {
+        void clearRuntimeFriendSnapshots(runtimeDb, user.id).catch(() => undefined);
+      }
+
       return c.json({ success: true });
     } catch (error) {
       console.error("[/api/presence/offline]", {

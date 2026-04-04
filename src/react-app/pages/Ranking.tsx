@@ -6,7 +6,7 @@ import LoadingBall from "@/react-app/components/LoadingBall";
 import { Avatar } from "@/react-app/components/ui/avatar";
 import { useAuth } from "@/react-app/auth/context";
 import { ApiRequestError, fetchAndCacheJson, readCachedJson } from "@/react-app/utils/api";
-import type { RankingPlayer, UserProfile } from "@/shared/types";
+import type { RankingPlayer, UserProfile, UserProgression } from "@/shared/types";
 
 type RankingMode = "global" | "friends";
 
@@ -50,11 +50,56 @@ function normalizeRankingEntry(player: RankingPlayer | FriendRankingRow): Rankin
   };
 }
 
+function sortRankingEntries(entries: RankingEntry[]): RankingEntry[] {
+  return [...entries].sort((left, right) => {
+    if (right.level !== left.level) {
+      return right.level - left.level;
+    }
+    if (right.xp !== left.xp) {
+      return right.xp - left.xp;
+    }
+    return left.username.localeCompare(right.username, "pt-BR", {
+      sensitivity: "base",
+    });
+  });
+}
+
+function mergeCurrentUserIntoFriendsRanking(
+  rankingEntries: RankingEntry[],
+  profile: UserProfile | null,
+  progression: UserProgression | null,
+  currentUserId: string | null,
+): RankingEntry[] {
+  if (!profile || !progression) {
+    return rankingEntries;
+  }
+
+  const selfEntry: RankingEntry = {
+    userId: currentUserId ?? profile.user_id,
+    username: profile.username,
+    full_name: profile.full_name,
+    level: progression.level,
+    xp: progression.xp,
+    current_streak: progression.current_streak,
+  };
+
+  const merged = rankingEntries.filter((entry) => {
+    if (selfEntry.userId && entry.userId) {
+      return entry.userId !== selfEntry.userId;
+    }
+    return entry.username !== selfEntry.username;
+  });
+
+  merged.push(selfEntry);
+  return sortRankingEntries(merged);
+}
+
 export default function Ranking() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [ranking, setRanking] = useState<RankingEntry[]>([]);
   const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [progression, setProgression] = useState<UserProgression | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<RankingMode>("global");
@@ -66,11 +111,20 @@ export default function Ranking() {
     const rankingPath = currentMode === "global" ? "/api/ranking/global" : "/api/friends";
     const cachedRanking = readCachedJson<Array<RankingPlayer | FriendRankingRow>>(rankingPath);
     const cachedProfile = readCachedJson<UserProfile>("/api/profile");
+    const cachedProgression = readCachedJson<UserProgression>("/api/progression");
 
     if (cachedRanking) {
-      const cachedList = Array.isArray(cachedRanking.data)
+      const normalizedCachedList = Array.isArray(cachedRanking.data)
         ? cachedRanking.data.map(normalizeRankingEntry)
         : [];
+      const cachedList = currentMode === "friends"
+        ? mergeCurrentUserIntoFriendsRanking(
+          normalizedCachedList,
+          cachedProfile?.data ?? null,
+          cachedProgression?.data ?? null,
+          user?.id ?? null,
+        )
+        : normalizedCachedList;
       setRanking(cachedList);
       setLoading(false);
     }
@@ -78,15 +132,32 @@ export default function Ranking() {
     if (cachedProfile) {
       setProfile(cachedProfile.data);
     }
+    if (cachedProgression) {
+      setProgression(cachedProgression.data);
+    }
 
     try {
-      const [nextRanking, nextProfile] = await Promise.all([
+      const [nextRanking, nextProfile, nextProgression] = await Promise.all([
         fetchAndCacheJson<Array<RankingPlayer | FriendRankingRow>>(rankingPath),
         fetchAndCacheJson<UserProfile>("/api/profile"),
+        fetchAndCacheJson<UserProgression>("/api/progression"),
       ]);
 
-      setRanking(Array.isArray(nextRanking) ? nextRanking.map(normalizeRankingEntry) : []);
+      const normalizedRanking = Array.isArray(nextRanking)
+        ? nextRanking.map(normalizeRankingEntry)
+        : [];
+      setRanking(
+        currentMode === "friends"
+          ? mergeCurrentUserIntoFriendsRanking(
+            normalizedRanking,
+            nextProfile,
+            nextProgression,
+            user?.id ?? null,
+          )
+          : normalizedRanking,
+      );
       setProfile(nextProfile);
+      setProgression(nextProgression);
     } catch (loadError) {
       if (loadError instanceof ApiRequestError && (loadError.status === 401 || loadError.status === 403)) {
         navigate("/app");
@@ -101,7 +172,7 @@ export default function Ranking() {
     } finally {
       setLoading(false);
     }
-  }, [navigate]);
+  }, [navigate, user?.id]);
 
   // Recarrega o ranking sempre que o modo ou a sessao mudam.
   useEffect(() => {

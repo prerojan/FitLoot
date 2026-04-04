@@ -57,6 +57,17 @@ function buildInflightGetKey(url: string): string {
   return `GET:${url}`;
 }
 
+function resolveClientTimeZone(): string | null {
+  try {
+    const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return typeof timeZone === "string" && timeZone.trim().length > 0
+      ? timeZone.trim()
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 async function acquireGetSlot(): Promise<void> {
   if (activeGetRequests < MAX_PARALLEL_GET_REQUESTS) {
     activeGetRequests += 1;
@@ -149,6 +160,12 @@ export async function api(path: string, options: ApiRequestOptions = {}) {
 
   if (shouldSendJsonContentType && !requestHeaders.has("Content-Type")) {
     requestHeaders.set("Content-Type", "application/json");
+  }
+  if (!requestHeaders.has("X-FitLoot-Timezone")) {
+    const clientTimeZone = resolveClientTimeZone();
+    if (clientTimeZone) {
+      requestHeaders.set("X-FitLoot-Timezone", clientTimeZone);
+    }
   }
 
   const controller = new AbortController();

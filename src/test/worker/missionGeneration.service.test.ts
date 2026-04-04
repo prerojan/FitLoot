@@ -48,6 +48,7 @@ function createRecordingDb(countByPeriod: Record<MissionPeriod, number>): Record
 
 function createService(params: {
   hasMissionStatusColumn: boolean;
+  hasCycleDateColumn?: boolean;
   countByPeriod: Record<MissionPeriod, number>;
 }) {
   const createMissionsForPeriod = vi.fn(async () => undefined);
@@ -66,14 +67,22 @@ function createService(params: {
       weekly: 1,
       monthly: 1,
     })),
+    getProfileTimeZone: vi.fn(() => "America/Sao_Paulo"),
     hasTableColumn: vi.fn(
       async (_db: D1Database, tableName: string, columnName: string) =>
         tableName === "missions" &&
-        columnName === "status" &&
-        params.hasMissionStatusColumn,
+        (
+          (columnName === "status" && params.hasMissionStatusColumn)
+          || (columnName === "cycle_date" && (params.hasCycleDateColumn ?? true))
+        ),
     ),
     listCurrentCycleMissions: vi.fn(async () => []),
     loadMissionGenerationProfile: vi.fn(async () => null),
+    missionCycleDateKey: vi.fn((period: MissionPeriod) => {
+      if (period === "daily") return "2026-03-31";
+      if (period === "weekly") return "2026-03-30";
+      return "2026-03-01";
+    }),
     missionCycleStartIso: vi.fn((period: MissionPeriod) => {
       if (period === "daily") return "2026-03-31T00:00:00.000Z";
       if (period === "weekly") return "2026-03-30T00:00:00.000Z";
@@ -194,9 +203,11 @@ describe("missionGeneration.generateStructuredMissionPlanForUser", () => {
         weekly: 0,
         monthly: 0,
       })),
+      getProfileTimeZone: vi.fn(() => "America/Sao_Paulo"),
       hasTableColumn: vi.fn(async () => true),
       listCurrentCycleMissions,
       loadMissionGenerationProfile: vi.fn(async () => ({ userId: "user-1" })),
+      missionCycleDateKey: vi.fn(() => "2026-03-31"),
       missionCycleStartIso: vi.fn(() => "2026-03-31T00:00:00.000Z"),
       persistGeneratedMissionPlan,
       repairLegacyPeriodicMissions: vi.fn(async () => undefined),

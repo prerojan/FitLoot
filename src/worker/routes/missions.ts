@@ -1,4 +1,4 @@
-import { Hono, type MiddlewareHandler } from "hono";
+import { Hono, type Context, type MiddlewareHandler } from "hono";
 import { zValidator } from "@hono/zod-validator";
 
 import {
@@ -12,7 +12,6 @@ import {
   resolveSupportedMissionExerciseName,
 } from "../../shared/exerciseCatalog";
 import { MISSION_LIMITS } from "../../constants/missionMetrics";
-import { assertString, safeGet } from "../../utils/typeHelpers";
 import { hasTableColumn } from "../core/database";
 import {
   getErrorMessage,
@@ -27,6 +26,12 @@ import {
   DEFAULT_SETTLED_MISSION_RETENTION_MODIFIER,
   SETTLED_MISSION_RETENTION_MODIFIER_BY_PERIOD,
 } from "../constants/missionRetention";
+import {
+  currentDateKeyInTimeZone,
+  resolveMissionTimeZone,
+  sanitizeMissionTimeZone,
+  shiftMissionDateKey,
+} from "../services/missionCycle";
 
 const MISSION_SCHEMA_CAPABILITY_TTL_MS = 5 * 60_000;
 
@@ -402,6 +407,70 @@ function missionListNeedsDailyCatalogRepair(
   return rows.some((row) => dailyMissionNeedsCatalogRepair(row, extractExerciseName));
 }
 
+function missionCycleDateSql(): string {
+  return "COALESCE(cycle_date, substr(created_at, 1, 10))";
+}
+
+function missionMetricTargetValue(
+  mission: Record<string, unknown>,
+): number {
+  return Math.max(
+    1,
+    Number(
+      mission.metric_value
+      ?? mission.target_reps
+      ?? mission.target_time
+      ?? 1,
+    ) || 1,
+  );
+}
+
+function normalizeCompletedMetricValueForMission(
+  mission: Record<string, unknown>,
+  missionMetricType: MissionMetricType,
+  rawCompletedValue: number,
+): number {
+  const targetValue = missionMetricTargetValue(mission);
+  if (!Number.isFinite(rawCompletedValue) || rawCompletedValue <= 0) {
+    return targetValue;
+  }
+
+  const normalizedValue = Math.round(rawCompletedValue);
+  switch (missionMetricType) {
+    case "repetitions":
+    case "sets_reps":
+    case "duration_seconds":
+    case "duration_minutes":
+    case "steps":
+    case "distance_meters":
+      return Math.min(targetValue, Math.max(1, normalizedValue));
+    default:
+      return targetValue;
+  }
+}
+
+async function readMissionRequestTimeZone(
+  c: Context<AppContext>,
+  userId: string,
+): Promise<string> {
+  const requestTimeZone = sanitizeMissionTimeZone(
+    c.req.header("X-FitLoot-Timezone"),
+  );
+  if (requestTimeZone) {
+    return requestTimeZone;
+  }
+
+  try {
+    const row = await c.env.fitloot_db
+      .prepare("SELECT timezone FROM user_profiles WHERE user_id = ?")
+      .bind(userId)
+      .first<{ timezone: string | null }>();
+    return resolveMissionTimeZone(row?.timezone);
+  } catch {
+    return "UTC";
+  }
+}
+
 // Registra listagem, detalhes, geração e conclusão de missões.
 export function registerMissionRoutes(
   app: Hono<AppContext>,
@@ -676,8 +745,7 @@ export function registerMissionRoutes(
       ) as NormalizedMissionRowLike;
       const shouldBypassCache =
         (cachedDetail.type === "weekly" || cachedDetail.type === "monthly")
-        && Number(cachedDetail.is_completed ?? 0) !== 1
-        && cachedDetail.circuit_tasks.length === 0;
+        && Number(cachedDetail.is_completed ?? 0) !== 1;
       if (!shouldBypassCache) {
         return c.json(cachedMissionDetail);
       }
@@ -821,7 +889,6 @@ export function registerMissionRoutes(
         !(
           (normalized.type === "weekly" || normalized.type === "monthly")
           && Number(normalized.is_completed ?? 0) !== 1
-          && normalized.circuit_tasks.length === 0
         );
       if (shouldCacheMissionDetail) {
         writeMissionDetailCache(
@@ -987,6 +1054,19 @@ export function registerMissionRoutes(
           );
         }
 
+        const missionTimeZone = await readMissionRequestTimeZone(c, user.id);
+        const today = currentDateKeyInTimeZone(new Date(), missionTimeZone);
+        const yesterday = shiftMissionDateKey(today, -1);
+        const missionMetricType = deps.normalizeMissionMetricType(
+          mission.metric_type,
+          mission.target_time,
+        );
+        const normalizedCompletedMetricValue = normalizeCompletedMetricValueForMission(
+          mission,
+          missionMetricType,
+          completedMetricValue,
+        );
+
         let streakMultiplier = 1;
         let xpGained = 0;
         let pointsGained = 0;
@@ -1053,20 +1133,11 @@ export function registerMissionRoutes(
               last_activity_date?: string | null;
             }>();
 
-          const today = assertString(
-            safeGet(new Date().toISOString().split("T"), 0),
-          );
           let newStreak = Number(progression?.current_streak || 0);
 
           // Recalcula streak apenas quando a atividade do dia ainda não foi registrada.
           if (progression?.last_activity_date !== today) {
             completionPhase = "calculate_streak";
-            const yesterday = assertString(
-              safeGet(
-                new Date(Date.now() - 86_400_000).toISOString().split("T"),
-                0,
-              ),
-            );
             newStreak = 1;
 
             if (progression?.last_activity_date === yesterday) {
@@ -1150,12 +1221,23 @@ export function registerMissionRoutes(
           );
 
           completionPhase = "lifecycle_streak";
-          const completedToday = await c.env.fitloot_db
-            .prepare(
-              "SELECT COUNT(*) as c FROM missions WHERE user_id = ? AND is_completed = 1 AND date(completed_at) = date('now')",
-            )
-            .bind(user.id)
-            .first<{ c: number }>();
+          const completedToday = await (async () => {
+            try {
+              return await c.env.fitloot_db
+                .prepare(
+                  `SELECT COUNT(*) as c
+                     FROM missions
+                    WHERE user_id = ?
+                      AND type = 'daily'
+                      AND is_completed = 1
+                      AND ${missionCycleDateSql()} = ?`,
+                )
+                .bind(user.id, today)
+                .first<{ c: number }>();
+            } catch {
+              return { c: 1 } satisfies { c: number };
+            }
+          })();
           await deps.runMissionLifecycleHookSafely(user.id, "streak_continued", () =>
             deps.onStreakContinued(
               c.env.fitloot_db,
@@ -1251,20 +1333,16 @@ export function registerMissionRoutes(
           }
 
           completionPhase = "update_skill_progress";
-          const missionMetricType = deps.normalizeMissionMetricType(
-            mission.metric_type,
-            mission.target_time,
-          );
           const repsForSkill =
             missionMetricType === "repetitions" ||
             missionMetricType === "sets_reps"
-              ? completedMetricValue
+              ? normalizedCompletedMetricValue
               : 0;
           const timeForSkill =
             missionMetricType === "duration_seconds"
-              ? completedMetricValue
+              ? normalizedCompletedMetricValue
               : missionMetricType === "duration_minutes"
-                ? completedMetricValue * 60
+                ? normalizedCompletedMetricValue * 60
                 : 0;
 
           const skillIdRaw = mission.skill_id;
@@ -1325,7 +1403,7 @@ export function registerMissionRoutes(
             const typeDelta = deps.computeMissionTypeAttributeDelta(
               mission,
               missionMetricType,
-              completedMetricValue,
+              normalizedCompletedMetricValue,
             );
             await deps.applyMissionAttributeDeltaToUser(
               c.env.fitloot_db,

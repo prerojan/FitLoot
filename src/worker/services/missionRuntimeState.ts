@@ -220,7 +220,7 @@ export function createMissionRuntimeStateService({
     const recomputePromise = (async () => {
       try {
         await recomputeActivePeriodicMissionProgress(userId, db);
-        clearMissionListCache(userId);
+        invalidateMissionListCache(userId);
         periodicProgressRecomputeLastRun.set(userId, Date.now());
       } finally {
         periodicProgressRecomputeLocks.delete(userId);
@@ -303,7 +303,7 @@ export function createMissionRuntimeStateService({
         await runMissionRefreshStepSafely(userId, "update_monthly_progress", () =>
           updateMonthlyMissionProgress(userId, db),
         );
-        clearMissionListCache(userId);
+        invalidateMissionListCache(userId);
         missionRefreshLastRun.set(userId, Date.now());
       } finally {
         missionRefreshLocks.delete(userId);

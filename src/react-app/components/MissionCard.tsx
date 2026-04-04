@@ -45,6 +45,23 @@ type MissionCardProps = {
   layout?: "default" | "compact";
 };
 
+function formatMissionCycleDate(value: string | null | undefined): string | null {
+  if (typeof value !== "string" || value.trim().length < 10) return null;
+  const [yearRaw, monthRaw, dayRaw] = value.trim().slice(0, 10).split("-");
+  const year = Number(yearRaw);
+  const month = Number(monthRaw);
+  const day = Number(dayRaw);
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) {
+    return null;
+  }
+  const reference = new Date(Date.UTC(year, month - 1, day, 12, 0, 0));
+  return new Intl.DateTimeFormat("pt-BR", {
+    day: "2-digit",
+    month: "short",
+    timeZone: "UTC",
+  }).format(reference);
+}
+
 function MissionCardComponent({ mission, onComplete, layout = "default" }: MissionCardProps) {
   const { setMissionDetailsOpen, setMissionExecutionOpen } = useAppChrome();
   const [showDetails, setShowDetails] = useState(false);
@@ -207,6 +224,10 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
   const detailMissionMediaStyle = resolveMissionMediaStyle(detailMissionMediaUrl);
   const detailIsTrackableWalkingMission = (detailMetricType === "steps" || detailMetricType === "distance_meters") && missionDetails.type === "daily";
   const detailIsCircuitMission = detailMetricType === "circuit_tasks";
+  const missionCycleDateLabel = useMemo(
+    () => formatMissionCycleDate(missionDetails.cycle_date),
+    [missionDetails.cycle_date],
+  );
   const showMissionDuration = shouldShowMissionDuration(mission.type)
     && typeof mission.duration_estimate_minutes === "number"
     && mission.duration_estimate_minutes > 0;
@@ -791,6 +812,12 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
           <span>{detailFocusLabels[0] ?? bodyAreaLabel(missionDetails.body_area)}</span>
           <Trophy className="w-3 h-3" />
           <span>{missionDetails.xp_reward} XP</span>
+          {missionCycleDateLabel ? (
+            <>
+              <Clock3 className="w-3 h-3" />
+              <span>{missionCycleDateLabel}</span>
+            </>
+          ) : null}
         </div>
       )}
     </>

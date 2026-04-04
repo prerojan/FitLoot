@@ -13,6 +13,11 @@ import {
   readRuntimeProfileProjection,
   upsertRuntimeProfileProjection,
 } from "../core/runtimeUserProjectionStore";
+import {
+  currentDateKeyInTimeZone,
+  resolveMissionTimeZone,
+  sanitizeMissionTimeZone,
+} from "../services/missionCycle";
 import type { AppContext, AuthUser, Env } from "../core/types";
 
 type FeedbackKind = "Sugestao" | "Bug" | "Elogio" | "Outro";
@@ -821,18 +826,41 @@ export function registerProfileRoutes(
       trainingFrequency,
     );
 
-    const dailyCycleStart = missionCycleStartIso("daily");
-    await c.env.fitloot_db
-      .prepare(
-        `DELETE FROM missions
-          WHERE user_id = ?
-            AND type = 'daily'
-            AND is_completed = 0
-            AND COALESCE(mission_origin, 'regular') = 'regular'
-            AND datetime(created_at) >= datetime(?)`,
-      )
-      .bind(user.id, dailyCycleStart)
-      .run();
+    const hasMissionCycleDate = await hasTableColumn(
+      c.env.fitloot_db,
+      "missions",
+      "cycle_date",
+    );
+    const missionTimeZone = resolveMissionTimeZone(
+      sanitizeMissionTimeZone(c.req.header("X-FitLoot-Timezone")),
+    );
+    if (hasMissionCycleDate) {
+      const dailyCycleDate = currentDateKeyInTimeZone(new Date(), missionTimeZone);
+      await c.env.fitloot_db
+        .prepare(
+          `DELETE FROM missions
+            WHERE user_id = ?
+              AND type = 'daily'
+              AND is_completed = 0
+              AND COALESCE(mission_origin, 'regular') = 'regular'
+              AND COALESCE(cycle_date, substr(created_at, 1, 10)) = ?`,
+        )
+        .bind(user.id, dailyCycleDate)
+        .run();
+    } else {
+      const dailyCycleStart = missionCycleStartIso("daily");
+      await c.env.fitloot_db
+        .prepare(
+          `DELETE FROM missions
+            WHERE user_id = ?
+              AND type = 'daily'
+              AND is_completed = 0
+              AND COALESCE(mission_origin, 'regular') = 'regular'
+              AND datetime(created_at) >= datetime(?)`,
+        )
+        .bind(user.id, dailyCycleStart)
+        .run();
+    }
     c.executionCtx.waitUntil(
       (async () => {
         try {

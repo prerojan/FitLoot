@@ -325,6 +325,7 @@ export function registerFriendsRoutes(
   app.get("/api/friends", authMiddleware, async (c) => {
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
+    c.header("Cache-Control", "no-store");
     const limit = Math.min(Math.max(Number(c.req.query("limit") ?? 120), 1), 300);
     const offset = Math.max(Number(c.req.query("offset") ?? 0), 0);
 
@@ -423,6 +424,7 @@ export function registerFriendsRoutes(
   app.get("/api/friends/requests", authMiddleware, async (c) => {
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
+    c.header("Cache-Control", "no-store");
     const limit = Math.min(Math.max(Number(c.req.query("limit") ?? 80), 1), 200);
     const offset = Math.max(Number(c.req.query("offset") ?? 0), 0);
 

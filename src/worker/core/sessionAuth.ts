@@ -16,6 +16,7 @@ import type {
   AppContext,
   UserAuthRecord,
 } from "./types";
+import { sanitizeMissionTimeZone } from "../services/missionCycle";
 
 type SessionCookieUser = {
   id: string;
@@ -617,6 +618,30 @@ export function createAuthMiddleware({
         plan_status: userRecord.plan_status,
         payment_method: userRecord.payment_method,
       });
+
+      const requestTimeZone = sanitizeMissionTimeZone(
+        c.req.header("X-FitLoot-Timezone"),
+      );
+      if (requestTimeZone) {
+        c.executionCtx.waitUntil(
+          c.env.fitloot_db
+            .prepare(
+              `UPDATE user_profiles
+                  SET timezone = ?,
+                      updated_at = datetime('now')
+                WHERE user_id = ?
+                  AND COALESCE(timezone, '') <> ?`,
+            )
+            .bind(requestTimeZone, userRecord.id, requestTimeZone)
+            .run()
+            .catch((error) => {
+              console.warn("[authMiddleware][timezone-sync]", {
+                userId: userRecord.id,
+                message: error instanceof Error ? error.message : String(error),
+              });
+            }),
+        );
+      }
 
       if (shouldRunHeavyBackground) {
         c.executionCtx.waitUntil(

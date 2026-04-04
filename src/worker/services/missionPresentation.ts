@@ -46,6 +46,7 @@ export type NormalizedMissionComputedFields = {
   goal: string | null;
   is_ai_special: number;
   progress_value: number | undefined;
+  cycle_date: string | null;
 };
 
 export type NormalizedMissionRow = Record<string, unknown> & NormalizedMissionComputedFields;
@@ -484,6 +485,12 @@ export function createMissionPresentationService({
       goal: localizedGoal,
       is_ai_special: Number(rawMission.is_ai_special ?? 0) === 1 ? 1 : 0,
       progress_value: progressValue,
+      cycle_date:
+        typeof rawMission.cycle_date === "string" && rawMission.cycle_date.trim().length >= 10
+          ? rawMission.cycle_date.trim().slice(0, 10)
+          : typeof rawMission.created_at === "string" && rawMission.created_at.trim().length >= 10
+            ? rawMission.created_at.trim().slice(0, 10)
+            : null,
       xp_reward: Math.max(0, toFiniteNumber(rawMission.xp_reward, 0)),
       points_reward: Math.max(0, toFiniteNumber(rawMission.points_reward, 0)),
       is_completed: Number(rawMission.is_completed ?? 0) === 1 ? 1 : 0,
@@ -531,6 +538,7 @@ export function createMissionPresentationService({
       mission_origin: mission.mission_origin,
       goal: mission.goal,
       is_ai_special: mission.is_ai_special,
+      cycle_date: mission.cycle_date,
       circuit_tasks: mission.circuit_tasks,
       difficulty_level: mission.difficulty_level,
       thumbnail_url: mission.thumbnail_url,

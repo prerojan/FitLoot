@@ -42,10 +42,20 @@ type StructuredMissionPlanDraftLike = {
   } | undefined;
 };
 
+type WeeklyPlanDayLike = {
+  focus: string;
+  muscles: string[];
+  exercises: string[];
+};
+
 type MissionGenerationProfileLike = {
+  mainGoal: string;
+  goals: string[];
   conditioning: string;
+  currentWeekday?: string | undefined;
   trainingFrequency: number;
   volumeMultiplier: number;
+  weeklyPlan?: Record<string, WeeklyPlanDayLike | undefined> | undefined;
 };
 
 type ResolvedMissionSubtaskLike = {
@@ -149,6 +159,102 @@ type MissionPlanValidationDeps = {
   toPositiveInt: (value: unknown, fallback: number) => number;
   toSafeString: (value: unknown, fallback: string) => string;
 };
+
+function resolveCurrentWeeklyPlanDay(
+  profile: MissionGenerationProfileLike,
+): WeeklyPlanDayLike {
+  const weeklyPlan =
+    typeof profile.weeklyPlan === "object" && profile.weeklyPlan !== null
+      ? profile.weeklyPlan
+      : {};
+  const currentWeekday =
+    typeof profile.currentWeekday === "string" && profile.currentWeekday.trim().length > 0
+      ? profile.currentWeekday.trim()
+      : "segunda";
+  const fallbackDay =
+    weeklyPlan.segunda
+    ?? Object.values(weeklyPlan).find(
+      (day): day is WeeklyPlanDayLike => Boolean(day),
+    )
+    ?? {
+      focus: "full body",
+      muscles: ["full body"],
+      exercises: [],
+    };
+  return weeklyPlan[currentWeekday] ?? fallbackDay;
+}
+
+function normalizePlannedMuscle(
+  requestedMuscle: string,
+  plannedDay: WeeklyPlanDayLike,
+  normalizeMatchText: (value: string) => string,
+): string {
+  const normalizedRequested = normalizeMatchText(requestedMuscle);
+  const matchingMuscle = plannedDay.muscles.find((candidate) =>
+    normalizeMatchText(candidate) === normalizedRequested,
+  );
+  if (matchingMuscle) {
+    return matchingMuscle;
+  }
+  return plannedDay.muscles[0] ?? requestedMuscle;
+}
+
+function resolveSupportedDailyExerciseDraft(
+  profile: MissionGenerationProfileLike,
+  draft: StructuredDailyMissionDraftLike,
+  fallbackName: string,
+  deps: Pick<MissionPlanValidationDeps, "normalizeMatchText" | "toSafeString">,
+): {
+  exerciseName: string | null;
+  muscleGroup: string;
+  exerciseType: string;
+  usedFallback: boolean;
+} {
+  const rawName = deps.toSafeString(draft.name, fallbackName);
+  const rawMuscleGroup = deps.toSafeString(draft.muscle_group, "full body");
+  const rawExerciseType = deps.toSafeString(draft.exercise_type, rawName);
+  const plannedDay = resolveCurrentWeeklyPlanDay(profile);
+  const plannedFocus = plannedDay.focus.trim().length > 0
+    ? plannedDay.focus
+    : rawExerciseType;
+  const muscleGroup = normalizePlannedMuscle(
+    rawMuscleGroup,
+    plannedDay,
+    deps.normalizeMatchText,
+  );
+  const plannedExercises = Array.isArray(plannedDay.exercises)
+    ? plannedDay.exercises.filter((value) => value.trim().length > 0)
+    : [];
+
+  const strictSupported =
+    resolveMissionExerciseForGeneration({
+      requestedName: rawName,
+      muscles: plannedDay.muscles.length > 0 ? plannedDay.muscles : [muscleGroup],
+      focus: plannedFocus,
+    })
+    ?? plannedExercises
+      .map((candidate) =>
+        resolveMissionExerciseForGeneration({
+          requestedName: candidate,
+          muscles: plannedDay.muscles.length > 0 ? plannedDay.muscles : [muscleGroup],
+          focus: plannedFocus,
+        }))
+      .find((candidate): candidate is string => typeof candidate === "string" && candidate.length > 0)
+    ?? resolveMissionExerciseForGeneration({
+      requestedName: rawName,
+      muscles: [muscleGroup],
+      focus: rawExerciseType,
+    });
+
+  return {
+    exerciseName: strictSupported ?? null,
+    muscleGroup,
+    exerciseType: plannedFocus,
+    usedFallback:
+      typeof strictSupported === "string" &&
+      deps.normalizeMatchText(strictSupported) !== deps.normalizeMatchText(rawName),
+  };
+}
 
 function splitNormalizedMatchTokens(normalizedValue: string): string[] {
   return normalizedValue
@@ -523,25 +629,23 @@ export function createMissionPlanValidationService(
     for (const draft of dailyDrafts.slice(0, options.dailyTarget + 3)) {
       totalCount += 1;
       const rawName = deps.toSafeString(draft.name, `Missao Diaria ${blueprints.length + 1}`);
-      const muscleGroup = deps.toSafeString(draft.muscle_group, "full body");
-      const exerciseType = deps.toSafeString(draft.exercise_type, rawName);
-      const supportedExerciseName =
-        resolveMissionExerciseForGeneration({
-          requestedName: rawName,
-          muscles: [muscleGroup],
-          focus: exerciseType,
-        })
-        ?? resolveMissionExerciseForGeneration({
-          requestedName: rawName,
-          muscles: ["full body"],
-          focus: "conditioning",
-        })
-        ?? rawName;
+      const {
+        exerciseName: supportedExerciseName,
+        muscleGroup,
+        exerciseType,
+        usedFallback,
+      } = resolveSupportedDailyExerciseDraft(
+        profile,
+        draft,
+        `Missao Diaria ${blueprints.length + 1}`,
+        deps,
+      );
+      if (!supportedExerciseName) {
+        invalidCount += 1;
+        continue;
+      }
       const name = resolveExerciseDisplayNamePt(supportedExerciseName) ?? rawName;
-      if (
-        deps.normalizeMatchText(rawName) !==
-        deps.normalizeMatchText(supportedExerciseName)
-      ) {
+      if (usedFallback) {
         invalidCount += 1;
       }
 
@@ -664,15 +768,19 @@ export function createMissionPlanValidationService(
         fallbackDraft.name,
         `Missao Diaria ${blueprints.length + 1}`,
       );
-      const muscleGroup = deps.toSafeString(fallbackDraft.muscle_group, "full body");
-      const exerciseType = String(fallbackDraft.exercise_type ?? rawName);
-      const supportedExerciseName =
-        resolveMissionExerciseForGeneration({
-          requestedName: rawName,
-          muscles: [muscleGroup],
-          focus: exerciseType,
-        })
-        ?? rawName;
+      const {
+        exerciseName: supportedExerciseName,
+        muscleGroup,
+        exerciseType,
+      } = resolveSupportedDailyExerciseDraft(
+        profile,
+        fallbackDraft,
+        `Missao Diaria ${blueprints.length + 1}`,
+        deps,
+      );
+      if (!supportedExerciseName) {
+        break;
+      }
       const name = resolveExerciseDisplayNamePt(supportedExerciseName) ?? rawName;
       const metricType = deps.structuredMetricTypeToMissionMetric(
         fallbackDraft.metric_type,
