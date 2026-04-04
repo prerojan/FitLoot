@@ -22,7 +22,6 @@ import { useAppChrome } from "@/react-app/contexts/appChrome";
 import WalkingMissionExecution from "./WalkingMissionExecution";
 import { MissionExecutionModal } from "./mission-card/MissionExecutionModal";
 import {
-  bodyAreaLabel,
   formatDifficultyLabel,
   formatGoal,
   formatProgressAmount,
@@ -85,6 +84,7 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
   const isWalkingMission = metricType === "steps" || metricType === "distance_meters";
   const isTrackableWalkingMission = isWalkingMission && mission.type === "daily";
   const circuitTasks = useMemo(() => resolveCircuitTasks(mission), [mission]);
+  const focusLabels = useMemo(() => resolveMissionFocusLabels(mission), [mission]);
   const hasTaskProgressMission = circuitTasks.length > 0;
   const autoProgressRequiredTotal = circuitTasks.reduce((total, task) => total + Math.max(1, task.required_count), 0);
   const autoProgressCurrentTotal = circuitTasks.reduce(
@@ -98,7 +98,7 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
     ? summarizeAutoProgressLabel(circuitTasks)
     : isAutoProgressMission
       ? missionGoalText
-      : resolveMissionFocusLabels(mission)[0] ?? bodyAreaLabel(mission.body_area);
+      : focusLabels[0] ?? missionGoalText;
   const hasCircuitProgress = circuitTasks.some((task) => task.current_count > 0);
   const isInProgress = !isFailed && !isCompleted && (missionStatus === "in_progress" || hasCircuitProgress);
   const visualState = isFailed ? "failed" : isCompleted ? "completed" : isInProgress ? "in_progress" : "available";
@@ -807,16 +807,22 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
 
       {/* Keeps a lightweight footer context visible while the detail modal is open. */}
       {showDetails && !detailIsAutoProgressMission && (
-        <div className="fl-z-modal fixed bottom-6 left-1/2 -translate-x-1/2 text-xs text-gray-500 flex items-center gap-2">
-          <MapPinned className="w-3 h-3" />
-          <span>{detailFocusLabels[0] ?? bodyAreaLabel(missionDetails.body_area)}</span>
-          <Trophy className="w-3 h-3" />
-          <span>{missionDetails.xp_reward} XP</span>
+        <div className="fl-z-modal fixed bottom-6 left-1/2 z-10 flex max-w-[calc(100vw-2rem)] -translate-x-1/2 flex-wrap items-center justify-center gap-x-3 gap-y-1.5 rounded-full bg-white/88 px-3 py-2 text-[11px] leading-tight text-gray-500 shadow-lg backdrop-blur-sm sm:max-w-[32rem] sm:text-xs">
+          {detailFocusLabels[0] ? (
+            <span className="flex min-w-0 max-w-full items-center gap-1 whitespace-nowrap">
+              <MapPinned className="h-3 w-3 shrink-0" />
+              <span className="max-w-[10rem] truncate sm:max-w-[14rem]">{detailFocusLabels[0]}</span>
+            </span>
+          ) : null}
+          <span className="flex items-center gap-1 whitespace-nowrap">
+            <Trophy className="h-3 w-3 shrink-0" />
+            <span>{missionDetails.xp_reward} XP</span>
+          </span>
           {missionCycleDateLabel ? (
-            <>
-              <Clock3 className="w-3 h-3" />
+            <span className="flex items-center gap-1 whitespace-nowrap">
+              <Clock3 className="h-3 w-3 shrink-0" />
               <span>{missionCycleDateLabel}</span>
-            </>
+            </span>
           ) : null}
         </div>
       )}

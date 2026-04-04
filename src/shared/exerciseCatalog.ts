@@ -353,6 +353,105 @@ type StrictSupportedMissionExerciseEntry = SupplementalExerciseCatalogEntry & {
   exerciseDbId: string;
 };
 
+const GENERIC_EXERCISE_TARGET_KEYS = new Set([
+  "upper",
+  "lower",
+  "core",
+  "full body",
+  "push",
+  "pull",
+  "cardio",
+  "mobility",
+  "flexibility",
+]);
+
+const CANONICAL_EXERCISE_TARGET_PRIORITY = new Map<string, number>([
+  ["chest", 10],
+  ["back", 11],
+  ["shoulders", 12],
+  ["triceps", 13],
+  ["biceps", 14],
+  ["glutes", 20],
+  ["quads", 21],
+  ["hamstrings", 22],
+  ["calves", 23],
+  ["waist", 30],
+  ["abs", 31],
+  ["hips", 32],
+  ["legs", 40],
+]);
+
+function normalizeExerciseMuscleKey(value: string): string {
+  return normalizeExerciseSeedLookup(value);
+}
+
+function mapExerciseMuscleKeyToPt(value: string): string | null {
+  switch (normalizeExerciseMuscleKey(value)) {
+    case "chest":
+      return "Peitoral";
+    case "back":
+      return "Costas";
+    case "shoulders":
+      return "Ombros";
+    case "triceps":
+      return "Tr\u00edceps";
+    case "biceps":
+      return "B\u00edceps";
+    case "glutes":
+      return "Gl\u00fateos";
+    case "quads":
+      return "Quadr\u00edceps";
+    case "hamstrings":
+      return "Posteriores";
+    case "calves":
+      return "Panturrilhas";
+    case "waist":
+    case "abs":
+      return "Abd\u00f4men";
+    case "hips":
+      return "Quadril";
+    case "legs":
+      return "Pernas";
+    default:
+      return null;
+  }
+}
+
+function resolveCanonicalExerciseTargetMuscleLabels(
+  entry: SupplementalExerciseCatalogEntry | null,
+): string[] {
+  if (!entry) return [];
+
+  const localized = entry.muscles
+    .map((muscle, index) => ({
+      key: normalizeExerciseMuscleKey(muscle),
+      label: mapExerciseMuscleKeyToPt(muscle),
+      index,
+    }))
+    .filter((item): item is { key: string; label: string; index: number } =>
+      Boolean(item.label) && !GENERIC_EXERCISE_TARGET_KEYS.has(item.key),
+    )
+    .sort((left, right) => {
+      const leftPriority = CANONICAL_EXERCISE_TARGET_PRIORITY.get(left.key) ?? 999;
+      const rightPriority = CANONICAL_EXERCISE_TARGET_PRIORITY.get(right.key) ?? 999;
+      if (leftPriority !== rightPriority) {
+        return leftPriority - rightPriority;
+      }
+      return left.index - right.index;
+    });
+
+  const deduped = new Set<string>();
+  const labels: string[] = [];
+  for (const item of localized) {
+    const normalizedLabel = normalizeExerciseSeedLookup(item.label);
+    if (deduped.has(normalizedLabel)) continue;
+    deduped.add(normalizedLabel);
+    labels.push(item.label);
+  }
+
+  return labels;
+}
+
 function isStrictSupportedMissionExerciseEntry(
   entry: SupplementalExerciseCatalogEntry | null,
 ): entry is StrictSupportedMissionExerciseEntry {
@@ -505,6 +604,21 @@ function resolveCatalogEntryByExerciseDbId(
   );
 
   return matchingEntry ?? null;
+}
+
+export function resolveExerciseTargetMuscleLabelsById(
+  exerciseDbId: string | null | undefined,
+): string[] {
+  const catalogEntry = resolveCatalogEntryByExerciseDbId(exerciseDbId);
+  const supportedEntry = resolveReplacementEntry(catalogEntry);
+  return resolveCanonicalExerciseTargetMuscleLabels(supportedEntry ?? catalogEntry);
+}
+
+export function resolveExerciseTargetMuscleLabels(
+  value: string | null | undefined,
+): string[] {
+  const supportedEntry = resolveStrictSupportedMissionExerciseEntry(value);
+  return resolveCanonicalExerciseTargetMuscleLabels(supportedEntry);
 }
 
 export function resolveExerciseMediaFallbackUrlById(exerciseDbId: string | null | undefined): string | null {

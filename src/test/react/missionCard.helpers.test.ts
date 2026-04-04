@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import type { Mission } from "../../shared/types";
-import { resolveMissionMediaUrl } from "../../react-app/components/mission-card/helpers";
+import {
+  resolveMissionFocusLabels,
+  resolveMissionMediaUrl,
+} from "../../react-app/components/mission-card/helpers";
 
 function buildMission(overrides?: Partial<Mission>): Mission {
   return {
@@ -115,5 +118,33 @@ describe("missionCard helpers - resolveMissionMediaUrl", () => {
     });
 
     expect(resolveMissionMediaUrl(mission)).toBeNull();
+  });
+});
+
+describe("missionCard helpers - resolveMissionFocusLabels", () => {
+  it("prefers canonical ExerciseDB target muscles over generic mission payload labels", () => {
+    const mission = buildMission({
+      exercise_db_id: "QChZi3x",
+      exercise_name: "Agachamento livre",
+      exercise_target: "Core",
+      muscle_groups: ["Corpo inteiro"],
+      exercise_secondary_muscles: ["Push"],
+      exercise_body_part: "Lower",
+    });
+
+    expect(resolveMissionFocusLabels(mission)).toEqual(["Gl\u00fateos", "Quadr\u00edceps", "Pernas"]);
+  });
+
+  it("uses the ExerciseDB-backed target even when the stored mission target is misleading", () => {
+    const mission = buildMission({
+      exercise_db_id: "I4hDWkc",
+      exercise_name: "Flexao tradicional",
+      exercise_target: "Parte superior",
+      muscle_groups: ["Push", "Corpo inteiro"],
+      exercise_secondary_muscles: ["Triceps"],
+      exercise_body_part: "Chest",
+    });
+
+    expect(resolveMissionFocusLabels(mission)).toEqual(["Peitoral"]);
   });
 });

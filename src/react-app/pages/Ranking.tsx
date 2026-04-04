@@ -217,28 +217,31 @@ export default function Ranking() {
                 Sua posicao atual
               </h2>
             </div>
-            <div className="flex flex-wrap items-center justify-between gap-4">
-              <div className="flex min-w-0 items-center gap-4">
-                <div className="size-14 overflow-hidden rounded-full border" style={{ borderColor: "var(--fl-border-soft)" }}>
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex min-w-0 flex-1 items-center gap-3 sm:gap-4">
+                <div className="size-12 overflow-hidden rounded-full border sm:size-14" style={{ borderColor: "var(--fl-border-soft)" }}>
                   <Avatar
                     name={currentUserEntry.username}
                     className="h-full w-full"
                   />
                 </div>
-                <div className="min-w-0">
-                  <p className="truncate text-lg font-bold tracking-tight">
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-[clamp(0.95rem,4vw,1.125rem)] font-bold tracking-tight">
                     Voce ({currentUserEntry.username})
                   </p>
-                  <p className="fl-theme-text-muted text-[10px] font-bold uppercase tracking-[0.2em]">
+                  <p className="fl-theme-text-muted text-[clamp(0.5rem,2.4vw,0.625rem)] font-bold uppercase tracking-[0.2em]">
                     {currentUserEntry.current_streak} dias de streak
                   </p>
                 </div>
               </div>
-              <div className="text-right">
-                <p className="text-3xl font-bold tracking-tight" style={{ color: "var(--app-primary-color)" }}>
+              <div className="min-w-0 border-t pt-3 text-left sm:border-t-0 sm:pt-0 sm:text-right">
+                <p
+                  className="text-[clamp(1.6rem,7vw,1.875rem)] font-bold tracking-tight"
+                  style={{ color: "var(--app-primary-color)" }}
+                >
                   #{currentUserPosition}
                 </p>
-                <p className="fl-theme-text-muted text-[10px] font-bold uppercase tracking-[0.2em]">
+                <p className="fl-theme-text-muted max-w-[14rem] text-[clamp(0.5rem,2.3vw,0.625rem)] font-bold uppercase tracking-[0.2em] sm:max-w-none">
                   {`${formatTrainingRankLabel(currentUserEntry.training_rank)} - Score ${currentUserEntry.training_rank_score}`}
                 </p>
               </div>
@@ -361,7 +364,7 @@ function PodiumCard({
         </div>
       </div>
       <div
-        className={`w-full rounded-t-[1.5rem] border-x border-t p-2 text-center sm:rounded-t-[2rem] sm:p-4 ${featured ? "h-20 sm:h-36" : "h-14 sm:h-24"}`}
+        className={`w-full rounded-t-[1.5rem] border-x border-t p-2 text-center sm:rounded-t-[2rem] sm:p-4 ${featured ? "h-28 sm:h-40" : "h-24 sm:h-30"}`}
         style={{
           borderColor: "var(--fl-border-soft)",
           backgroundColor: featured
@@ -373,6 +376,14 @@ function PodiumCard({
         <p className="mt-1 text-[10px] font-bold uppercase tracking-widest" style={{ color: "var(--app-primary-color)" }}>
           {formatTrainingRankLabel(entry.training_rank)}
         </p>
+        <div className="mt-2 space-y-1 text-center">
+          <p className="text-[9px] font-bold uppercase tracking-[0.15em] sm:text-[10px]">
+            LVL {entry.level}
+          </p>
+          <p className="fl-theme-text-muted text-[8px] font-bold uppercase tracking-[0.12em] sm:text-[9px]">
+            Score {entry.training_rank_score}
+          </p>
+        </div>
       </div>
     </div>
   );

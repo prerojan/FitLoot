@@ -1,6 +1,8 @@
 import type { CSSProperties } from "react";
 import { formatMissionGoal } from "@/constants/missionMetrics";
 import {
+  resolveExerciseTargetMuscleLabels,
+  resolveExerciseTargetMuscleLabelsById,
   resolveExerciseMediaFallbackUrlById,
 } from "@/shared/exerciseCatalog";
 import {
@@ -295,6 +297,21 @@ function uniqueMissionLabels(values: ReadonlyArray<string | null | undefined>): 
   return labels;
 }
 
+function uniqueLiteralLabels(values: ReadonlyArray<string | null | undefined>): string[] {
+  const seen = new Set<string>();
+  const labels: string[] = [];
+  for (const value of values) {
+    if (typeof value !== "string") continue;
+    const trimmed = value.trim();
+    if (trimmed.length === 0) continue;
+    const key = trimmed.toLocaleLowerCase("pt-BR");
+    if (seen.has(key)) continue;
+    seen.add(key);
+    labels.push(trimmed);
+  }
+  return labels;
+}
+
 function isGenericMissionFocusLabel(value: string): boolean {
   const normalized = (localizeMissionText(value) ?? value)
     .trim()
@@ -309,6 +326,18 @@ function isGenericMissionFocusLabel(value: string): boolean {
 }
 
 export function resolveMissionFocusLabels(mission: Mission): string[] {
+  const catalogPrimaryLabels = uniqueLiteralLabels([
+    ...resolveExerciseTargetMuscleLabelsById(mission.exercise_db_id),
+    ...(
+      typeof mission.exercise_db_id === "string" && mission.exercise_db_id.trim().length > 0
+        ? []
+        : resolveExerciseTargetMuscleLabels(mission.exercise_name)
+    ),
+  ]);
+  if (catalogPrimaryLabels.length > 0) {
+    return catalogPrimaryLabels.slice(0, 6);
+  }
+
   const primaryLabels = uniqueMissionLabels([
     mission.exercise_target,
     ...(Array.isArray(mission.muscle_groups) ? mission.muscle_groups : []),
@@ -327,6 +356,12 @@ export function resolveMissionFocusLabels(mission: Mission): string[] {
     ...bodyPartLabels,
   ]);
   if (labels.length > 0) return labels.slice(0, 6);
+  if (
+    (typeof mission.exercise_db_id === "string" && mission.exercise_db_id.trim().length > 0)
+    || (typeof mission.exercise_name === "string" && mission.exercise_name.trim().length > 0)
+  ) {
+    return [];
+  }
   return [bodyAreaLabel(mission.body_area)];
 }
 
