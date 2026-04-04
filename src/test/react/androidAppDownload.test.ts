@@ -25,6 +25,7 @@ describe("androidAppDownload", () => {
 
     expect(downloadInfo).not.toBeNull();
     expect(downloadInfo?.channel).toBe("release");
-    expect(downloadInfo?.href).toMatch(/^https:\/\/fitloot\.vercel\.app\/app-release\.apk\?v=/);
+    expect(downloadInfo?.href).toMatch(/^https:\/\/fitloot\.vercel\.app\/FitLoot\.apk\?v=/);
+    expect(downloadInfo?.fileName).toBe("FitLoot.apk");
   });
 });

@@ -45,8 +45,8 @@ describe("Home", () => {
       badge: "Acesso liberado",
       tone: "success",
       downloadLabel: "Baixar app Android",
-      downloadHref: "https://fitloot.vercel.app/app-release.apk?v=teste",
-      downloadFileName: "app-release.apk",
+      downloadHref: "https://fitloot.vercel.app/FitLoot.apk?v=teste",
+      downloadFileName: "FitLoot.apk",
     });
 
     render(
@@ -61,7 +61,7 @@ describe("Home", () => {
     ).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Baixar app Android/i })).toHaveAttribute(
       "href",
-      "https://fitloot.vercel.app/app-release.apk?v=teste",
+      "https://fitloot.vercel.app/FitLoot.apk?v=teste",
     );
 
     await user.click(screen.getByRole("button", { name: /Fechar/i }));

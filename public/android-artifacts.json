@@ -1,11 +1,11 @@
 {
-  "generatedAt": "2026-04-04T20:33:23.598Z",
+  "generatedAt": "2026-04-04T20:52:44.752Z",
   "byChannel": {
     "dev": {
       "channel": "dev",
       "label": "APK Android de desenvolvimento",
-      "publicPath": "/app-dev-debug.apk",
-      "fileName": "app-dev-debug.apk",
+      "publicPath": "/FitLoot-Dev.apk",
+      "fileName": "FitLoot-Dev.apk",
       "available": true,
       "sizeBytes": 9276014,
       "updatedAt": "2026-04-04T18:14:26.745Z",
@@ -14,8 +14,8 @@
     "internal": {
       "channel": "internal",
       "label": "APK Android interno",
-      "publicPath": "/app-internal-debug.apk",
-      "fileName": "app-internal-debug.apk",
+      "publicPath": "/FitLoot-Internal.apk",
+      "fileName": "FitLoot-Internal.apk",
       "available": true,
       "sizeBytes": 9256927,
       "updatedAt": "2026-04-04T00:19:18.472Z",
@@ -23,9 +23,9 @@
     },
     "release": {
       "channel": "release",
-      "label": "APK Android de producao",
-      "publicPath": "/app-release.apk",
-      "fileName": "app-release.apk",
+      "label": "APK Android FitLoot",
+      "publicPath": "/FitLoot.apk",
+      "fileName": "FitLoot.apk",
       "available": true,
       "sizeBytes": 2019830,
       "updatedAt": "2026-04-04T00:21:12.084Z",

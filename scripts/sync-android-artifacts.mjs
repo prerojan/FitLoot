@@ -30,8 +30,9 @@ const ARTIFACT_CONFIG = /** @type {const} */ ([
   {
     channel: "dev",
     label: "APK Android de desenvolvimento",
-    fileName: "app-dev-debug.apk",
-    publicPath: "/app-dev-debug.apk",
+    fileName: "FitLoot-Dev.apk",
+    publicPath: "/FitLoot-Dev.apk",
+    legacyAliases: ["app-dev-debug.apk"],
     candidates: [
       "android/app/build/outputs/apk/dev/debug/app-dev-debug.apk",
     ],
@@ -39,17 +40,19 @@ const ARTIFACT_CONFIG = /** @type {const} */ ([
   {
     channel: "internal",
     label: "APK Android interno",
-    fileName: "app-internal-debug.apk",
-    publicPath: "/app-internal-debug.apk",
+    fileName: "FitLoot-Internal.apk",
+    publicPath: "/FitLoot-Internal.apk",
+    legacyAliases: ["app-internal-debug.apk"],
     candidates: [
       "android/app/build/outputs/apk/internal/debug/app-internal-debug.apk",
     ],
   },
   {
     channel: "release",
-    label: "APK Android de producao",
-    fileName: "app-release.apk",
-    publicPath: "/app-release.apk",
+    label: "APK Android FitLoot",
+    fileName: "FitLoot.apk",
+    publicPath: "/FitLoot.apk",
+    legacyAliases: ["app-release.apk"],
     candidates: [
       "android/app/build/outputs/apk/prod/release/app-prod-release.apk",
       "android/app/build/outputs/apk/release/app-release.apk",
@@ -79,6 +82,19 @@ async function resolveSourceArtifact(candidates) {
   }
 
   return null;
+}
+
+async function resolvePublicFallbackArtifact(fileName) {
+  const publicFilePath = path.join(PUBLIC_DIR, fileName);
+  const publicFileStats = await fileExists(publicFilePath);
+  if (!publicFileStats) {
+    return null;
+  }
+
+  return {
+    absolutePath: publicFilePath,
+    stats: publicFileStats,
+  };
 }
 
 function buildDescriptor(config, resolvedSource) {
@@ -172,13 +188,24 @@ async function syncArtifacts() {
   };
 
   for (const artifact of ARTIFACT_CONFIG) {
-    const resolvedSource = await resolveSourceArtifact(artifact.candidates);
-    const publicFilePath = path.join(PUBLIC_DIR, artifact.fileName);
+    const resolvedSource =
+      (await resolveSourceArtifact(artifact.candidates)) ??
+      (await resolvePublicFallbackArtifact(artifact.fileName));
+    const publicFilePaths = [
+      path.join(PUBLIC_DIR, artifact.fileName),
+      ...(artifact.legacyAliases ?? []).map((alias) => path.join(PUBLIC_DIR, alias)),
+    ];
 
     if (resolvedSource) {
-      await copyFile(resolvedSource.absolutePath, publicFilePath);
+      for (const publicFilePath of publicFilePaths) {
+        if (resolvedSource.absolutePath !== publicFilePath) {
+          await copyFile(resolvedSource.absolutePath, publicFilePath);
+        }
+      }
     } else {
-      await rm(publicFilePath, { force: true });
+      for (const publicFilePath of publicFilePaths) {
+        await rm(publicFilePath, { force: true });
+      }
     }
 
     byChannel[artifact.channel] = buildDescriptor(artifact, resolvedSource);

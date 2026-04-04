@@ -72,7 +72,7 @@ describe("activationCompletion", () => {
         message: "Seu app ja pode ser baixado.",
         tone: "success",
         downloadLabel: "Baixar app Android",
-        downloadHref: "https://fitloot.vercel.app/app-release.apk?v=teste",
+        downloadHref: "https://fitloot.vercel.app/FitLoot.apk?v=teste",
       },
     });
 
