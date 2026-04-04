@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useRef } from "react";
 
 import {
   AUTHENTICATED_HINT_KEY,
@@ -53,107 +53,121 @@ export function useAuthBootstrap({
   setUser,
   setLoading,
 }: UseAuthBootstrapParams) {
+  const inflightBootstrapRef = useRef<Promise<void> | null>(null);
+
   return useCallback(async () => {
-    let restoredFromCache = false;
+    if (inflightBootstrapRef.current) {
+      return inflightBootstrapRef.current;
+    }
 
-    const hydrateCachedSession = (): void => {
-      if (typeof window === "undefined") return;
-      if (localStorage.getItem(AUTHENTICATED_HINT_KEY) !== "1") return;
+    const bootstrapTask = (async () => {
+      let restoredFromCache = false;
 
-      const cachedUser = readCachedJson<User>("/api/users/me", 5 * 60_000);
-      if (!cachedUser?.data?.id) return;
+      const hydrateCachedSession = (): void => {
+        if (typeof window === "undefined") return;
+        if (localStorage.getItem(AUTHENTICATED_HINT_KEY) !== "1") return;
 
-      restoredFromCache = true;
-      setUser(cachedUser.data);
+        const cachedUser = readCachedJson<User>("/api/users/me", 5 * 60_000);
+        if (!cachedUser?.data?.id) return;
 
-      const cachedProfile = readCachedJson<Record<string, unknown>>(
-        "/api/profile",
-        5 * 60_000,
-      );
-      if (cachedProfile?.data) {
-        applyProfileTheme(cachedProfile.data);
-      }
+        restoredFromCache = true;
+        setUser(cachedUser.data);
 
-      setLoading(false);
-    };
+        const cachedProfile = readCachedJson<Record<string, unknown>>(
+          "/api/profile",
+          5 * 60_000,
+        );
+        if (cachedProfile?.data) {
+          applyProfileTheme(cachedProfile.data);
+        }
 
-    try {
-      hydrateCachedSession();
+        setLoading(false);
+      };
 
-      // Encerra cedo quando nao faz sentido consultar a sessao atual.
-      if (!shouldProbeCurrentSession()) {
-        applyProfileTheme(null);
-        setUser(null);
-        return;
-      }
+      try {
+        hydrateCachedSession();
 
-      // Restaura sessao e bootstrap principal em uma unica ida ao backend.
-      const bootstrapResult = await fetchAuthBootstrap();
-      if (bootstrapResult.state === "unauthorized") {
-        clearPersistedAuthenticatedUserState();
-        setUser(null);
-        return;
-      }
-
-      if (bootstrapResult.state !== "ok") {
-        if (restoredFromCache) {
+        // Encerra cedo quando nao faz sentido consultar a sessao atual.
+        if (!shouldProbeCurrentSession()) {
+          applyProfileTheme(null);
+          setUser(null);
           return;
         }
 
-        const fallbackUser = await fetchCurrentUser();
-        if (!fallbackUser) {
+        // Restaura sessao e bootstrap principal em uma unica ida ao backend.
+        const bootstrapResult = await fetchAuthBootstrap();
+        if (bootstrapResult.state === "unauthorized") {
           clearPersistedAuthenticatedUserState();
           setUser(null);
           return;
         }
 
+        if (bootstrapResult.state !== "ok") {
+          if (restoredFromCache) {
+            return;
+          }
+
+          const fallbackUser = await fetchCurrentUser();
+          if (!fallbackUser) {
+            clearPersistedAuthenticatedUserState();
+            setUser(null);
+            return;
+          }
+
+          localStorage.setItem(AUTHENTICATED_HINT_KEY, "1");
+          setUser(fallbackUser);
+          applyProfileTheme(null);
+          void notifyAppOpen().catch(() => undefined);
+          return;
+        }
+
+        const bootstrap = bootstrapResult.payload;
+        const user = bootstrap.user;
+
         localStorage.setItem(AUTHENTICATED_HINT_KEY, "1");
-        setUser(fallbackUser);
-        applyProfileTheme(null);
+        setUser(user);
+
+        if (bootstrap.profile) {
+          applyProfileTheme(bootstrap.profile);
+          writeCachedJson("/api/profile", bootstrap.profile);
+        } else if (bootstrap.profile_theme) {
+          applyProfileTheme(bootstrap.profile_theme);
+        } else {
+          applyProfileTheme(null);
+        }
+
+        if (bootstrap.progression) {
+          writeCachedJson("/api/progression", bootstrap.progression);
+        }
+        writeCachedJson("/api/users/me", user);
+
+        if (user.onboarding_completed === 1 && hasPlanAccess(user)) {
+          prefetchCoreRoutes();
+        }
         void notifyAppOpen().catch(() => undefined);
-        return;
-      }
 
-      const bootstrap = bootstrapResult.payload;
-      const user = bootstrap.user;
-
-      localStorage.setItem(AUTHENTICATED_HINT_KEY, "1");
-      setUser(user);
-
-      if (bootstrap.profile) {
-        applyProfileTheme(bootstrap.profile);
-        writeCachedJson("/api/profile", bootstrap.profile);
-      } else if (bootstrap.profile_theme) {
-        applyProfileTheme(bootstrap.profile_theme);
-      } else {
-        applyProfileTheme(null);
+        // Entrega a conquista 404 pendente assim que a sessao volta a existir.
+        const pending404 =
+          localStorage.getItem(PENDING_404_ACHIEVEMENT_KEY) === "1";
+        if (pending404) {
+          void triggerRouteNotFoundAchievement().finally(() => {
+            localStorage.removeItem(PENDING_404_ACHIEVEMENT_KEY);
+          });
+        }
+      } catch {
+        if (restoredFromCache) {
+          return;
+        }
+        clearPersistedAuthenticatedUserState();
+        setUser(null);
+      } finally {
+        setLoading(false);
       }
+    })().finally(() => {
+      inflightBootstrapRef.current = null;
+    });
 
-      if (bootstrap.progression) {
-        writeCachedJson("/api/progression", bootstrap.progression);
-      }
-      writeCachedJson("/api/users/me", user);
-
-      if (user.onboarding_completed === 1 && hasPlanAccess(user)) {
-        prefetchCoreRoutes();
-      }
-      void notifyAppOpen().catch(() => undefined);
-
-      // Entrega a conquista 404 pendente assim que a sessao volta a existir.
-      const pending404 = localStorage.getItem(PENDING_404_ACHIEVEMENT_KEY) === "1";
-      if (pending404) {
-        void triggerRouteNotFoundAchievement().finally(() => {
-          localStorage.removeItem(PENDING_404_ACHIEVEMENT_KEY);
-        });
-      }
-    } catch {
-      if (restoredFromCache) {
-        return;
-      }
-      clearPersistedAuthenticatedUserState();
-      setUser(null);
-    } finally {
-      setLoading(false);
-    }
+    inflightBootstrapRef.current = bootstrapTask;
+    return bootstrapTask;
   }, [setLoading, setUser]);
 }

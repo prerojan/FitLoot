@@ -40,6 +40,11 @@ function normalizePath(path: string): string {
   return path.startsWith("/") ? path : `/${path}`;
 }
 
+export function resolveApiRequestUrl(path: string): string {
+  const requestPath = normalizePath(path);
+  return API_URL ? `${API_URL}${requestPath}` : requestPath;
+}
+
 function buildCacheKey(path: string): string {
   // Usa apenas GET como chave de leitura cacheada no cliente.
   return `GET:${normalizePath(path)}`;
@@ -121,7 +126,7 @@ async function handlePlanAccessRequired(response: Response): Promise<void> {
 export async function api(path: string, options: ApiRequestOptions = {}) {
   // Wrapper padrao de fetch com cookies, timeout e suporte a cancelamento externo.
   const requestPath = normalizePath(path);
-  const url = API_URL ? `${API_URL}${requestPath}` : requestPath;
+  const url = resolveApiRequestUrl(requestPath);
   const { timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS, headers, signal, ...restOptions } = options;
   const method = String(restOptions.method ?? "GET").toUpperCase();
   const requestHeaders = new Headers(headers ?? {});

@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const navigate = vi.fn();
 const logout = vi.fn();
 const apiMock = vi.fn();
+const completeActivationAndEnterApp = vi.fn(async () => ({ ok: true as const }));
 
 vi.mock("react-router", async () => {
   const actual = await vi.importActual<typeof import("react-router")>("react-router");
@@ -49,6 +50,17 @@ vi.mock("../../react-app/utils/api", () => ({
 
 vi.mock("../../react-app/utils/onboardingDraft", () => ({
   clearOnboardingDraft: vi.fn(),
+}));
+
+vi.mock("../../react-app/utils/activationCompletion", () => ({
+  completeActivationAndEnterApp: (
+    ...args: Parameters<typeof completeActivationAndEnterApp>
+  ) => completeActivationAndEnterApp(...args),
+  resolveActivationCompletionCopy: () => ({
+    localTitle: "Conta criada e acesso liberado",
+    localMessage: "Sua conta foi criada e o pagamento foi aprovado. Faca login para entrar no app.",
+    badge: "Acesso liberado",
+  }),
 }));
 
 import Checkout from "../../react-app/pages/Checkout";
@@ -98,6 +110,44 @@ describe("Checkout", () => {
     );
     expect(
       screen.getByText(/Falha controlada para validar o endpoint/i),
+    ).toBeInTheDocument();
+  });
+
+  it("returns onboarding activations to login with the queued success notice flow", async () => {
+    const user = userEvent.setup();
+
+    apiMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          checkout_status: "vip_active",
+          plan_status: "active",
+        }),
+        {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        },
+      ),
+    );
+
+    render(
+      <MemoryRouter>
+        <Checkout />
+      </MemoryRouter>,
+    );
+
+    await user.click(screen.getByRole("button", { name: /Continuar para o checkout/i }));
+
+    await waitFor(() => {
+      expect(completeActivationAndEnterApp).toHaveBeenCalledWith(
+        expect.objectContaining({
+          destinationPath: "/login",
+          finalizeSessionTransition: expect.any(Function),
+        }),
+      );
+    });
+
+    expect(
+      screen.getByRole("link", { name: /Baixar app Android/i }),
     ).toBeInTheDocument();
   });
 });

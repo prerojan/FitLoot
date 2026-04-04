@@ -90,7 +90,7 @@ describe("onboarding routes", () => {
     const deps = createOnboardingDeps();
     const app = new Hono<AppContext>();
     registerOnboardingRoutes(app, deps);
-    const { executionCtx } = createExecutionContext();
+    const { executionCtx, flush } = createExecutionContext();
 
     const response = await app.fetch(
       createJsonRequest("/api/onboarding/profile", {
@@ -118,6 +118,7 @@ describe("onboarding routes", () => {
     );
 
     const payload = await response.json();
+    await flush();
 
     expect(response.status).toBe(200);
     expect(payload).toEqual({
@@ -127,6 +128,7 @@ describe("onboarding routes", () => {
     expect(deps.buildInitialTrainingPlan).toHaveBeenCalled();
     expect(deps.upsertTrainingPlan).toHaveBeenCalled();
     expect(deps.startCheckoutForUser).not.toHaveBeenCalled();
-    expect(deps.ensurePeriodicMissions).not.toHaveBeenCalled();
+    expect(deps.ensurePeriodicMissions).toHaveBeenCalledWith(env, db, TEST_USER.id);
+    expect(deps.invalidateMissionListCache).toHaveBeenCalledWith(TEST_USER.id);
   });
 });

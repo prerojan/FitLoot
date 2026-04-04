@@ -1,4 +1,4 @@
-import { api } from "@/react-app/utils/api";
+import { api, resolveApiRequestUrl } from "@/react-app/utils/api";
 
 const DEFAULT_PRESENCE_INTERVAL_MS = 15_000;
 const OFFLINE_DEDUPE_WINDOW_MS = 3_000;
@@ -7,12 +7,49 @@ let inflightHeartbeat: Promise<void> | null = null;
 let inflightOffline: Promise<void> | null = null;
 let lastOfflineSentAt = 0;
 
+function canUseSameOriginBeaconTransport(requestUrl: string): boolean {
+  if (typeof window === "undefined" || typeof navigator === "undefined") {
+    return false;
+  }
+
+  if (typeof navigator.sendBeacon !== "function") {
+    return false;
+  }
+
+  try {
+    const resolvedUrl = new URL(requestUrl, window.location.origin);
+    return resolvedUrl.origin === window.location.origin;
+  } catch {
+    return false;
+  }
+}
+
+function trySendPresenceBeacon(
+  path: string,
+  payload?: Record<string, unknown>,
+): boolean {
+  const requestUrl = resolveApiRequestUrl(path);
+  if (!canUseSameOriginBeaconTransport(requestUrl)) {
+    return false;
+  }
+
+  const body = payload ? JSON.stringify(payload) : "{}";
+  return navigator.sendBeacon(
+    requestUrl,
+    new Blob([body], { type: "application/json" }),
+  );
+}
+
 function isDocumentVisible(): boolean {
   if (typeof document === "undefined") return true;
   return document.visibilityState === "visible";
 }
 
 async function sendPresenceHeartbeat(): Promise<void> {
+  if (trySendPresenceBeacon("/api/presence/heartbeat", { visibility: "friends" })) {
+    return;
+  }
+
   if (inflightHeartbeat) return inflightHeartbeat;
 
   inflightHeartbeat = api("/api/presence/heartbeat", {
@@ -37,6 +74,10 @@ async function sendPresenceOffline(): Promise<void> {
   if (inflightOffline) return inflightOffline;
 
   lastOfflineSentAt = now;
+  if (trySendPresenceBeacon("/api/presence/offline")) {
+    return;
+  }
+
   inflightOffline = api("/api/presence/offline", {
     method: "POST",
     keepalive: true,

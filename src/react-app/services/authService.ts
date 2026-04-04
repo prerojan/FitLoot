@@ -1,4 +1,4 @@
-import { api } from "@/react-app/utils/api";
+import { api, resolveApiRequestUrl } from "@/react-app/utils/api";
 import { ROUTE_PATHS } from "@/react-app/auth/constants";
 import { clearPersistedAuthenticatedUserState } from "@/react-app/auth/clientStateCleanup";
 import type { User } from "@/react-app/auth/types";
@@ -19,6 +19,27 @@ export type AuthBootstrapResult =
   | { state: "ok"; payload: AuthBootstrapPayload }
   | { state: "unauthorized" }
   | { state: "unavailable" };
+
+const APP_OPEN_MIN_INTERVAL_MS = 45_000;
+let lastAppOpenSentAt = 0;
+let inflightAppOpenRequest: Promise<void> | null = null;
+
+function canUseSameOriginBeaconTransport(requestUrl: string): boolean {
+  if (typeof window === "undefined" || typeof navigator === "undefined") {
+    return false;
+  }
+
+  if (typeof navigator.sendBeacon !== "function") {
+    return false;
+  }
+
+  try {
+    const resolvedUrl = new URL(requestUrl, window.location.origin);
+    return resolvedUrl.origin === window.location.origin;
+  } catch {
+    return false;
+  }
+}
 
 async function isMissingUserResponse(response: Response): Promise<boolean> {
   if (response.status !== 404) {
@@ -81,7 +102,44 @@ export async function fetchCurrentUser(): Promise<User | null> {
 
 export async function notifyAppOpen(): Promise<void> {
   // Notifica a abertura da app para contadores e rotinas do backend.
-  await api("/api/app/open", { method: "POST" });
+  const now = Date.now();
+  if (now - lastAppOpenSentAt < APP_OPEN_MIN_INTERVAL_MS) {
+    return;
+  }
+
+  if (inflightAppOpenRequest) {
+    return inflightAppOpenRequest;
+  }
+
+  const requestUrl = resolveApiRequestUrl("/api/app/open");
+  lastAppOpenSentAt = now;
+
+  if (canUseSameOriginBeaconTransport(requestUrl)) {
+    const beaconSent = navigator.sendBeacon(
+      requestUrl,
+      new Blob(["{}"], { type: "application/json" }),
+    );
+    if (beaconSent) {
+      return;
+    }
+  }
+
+  inflightAppOpenRequest = api("/api/app/open", {
+    method: "POST",
+    keepalive: true,
+    body: "{}",
+    timeoutMs: 10_000,
+  })
+    .then(() => undefined)
+    .catch((error) => {
+      lastAppOpenSentAt = 0;
+      throw error;
+    })
+    .finally(() => {
+      inflightAppOpenRequest = null;
+    });
+
+  return inflightAppOpenRequest;
 }
 
 type IdleDeadlineLike = {

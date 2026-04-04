@@ -90,8 +90,15 @@ describe("PaymentPending", () => {
       expect(completeActivationAndEnterApp).toHaveBeenCalled();
     });
 
+    expect(completeActivationAndEnterApp).toHaveBeenCalledWith(
+      expect.objectContaining({
+        destinationPath: "/login",
+        finalizeSessionTransition: expect.any(Function),
+      }),
+    );
+
     expect(
-      screen.getByText(/Preparando sua entrada no app/i),
+      screen.getByText(/Conta criada e acesso liberado/i),
     ).toBeInTheDocument();
     expect(navigate).not.toHaveBeenCalledWith("/home", { replace: true });
   });

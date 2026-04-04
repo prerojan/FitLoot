@@ -426,9 +426,25 @@ export default function Checkout() {
       ...downloadPayload,
     });
 
+    const shouldReturnToLogin = requiresOnboardingCheckout;
     const completionResult = await completeActivationAndEnterApp({
       navigate,
-      refreshAuth: checkAuth,
+      ...(shouldReturnToLogin
+        ? {
+            destinationPath: ROUTE_PATHS.login,
+            finalizeSessionTransition: async () => {
+              try {
+                await api("/api/logout");
+              } catch {
+                // A notificacao precisa sobreviver mesmo se o logout remoto falhar.
+              } finally {
+                logout();
+              }
+            },
+          }
+        : {
+            refreshAuth: checkAuth,
+          }),
       preEnterAppDelayMs: options?.skipDelay ? 0 : undefined,
       activationNotice: {
         title: completionCopy.localTitle,
@@ -837,6 +853,10 @@ export default function Checkout() {
         tone={statusPopup?.tone ?? "warning"}
         actionLabel={statusPopup?.actionLabel}
         onAction={statusPopup?.onAction}
+        downloadLabel={statusPopup?.downloadLabel}
+        downloadHref={statusPopup?.downloadHref}
+        downloadFileName={statusPopup?.downloadFileName}
+        closeLabel={statusPopup?.closeLabel}
         onClose={() => setStatusPopup(null)}
       />
     </div>

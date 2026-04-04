@@ -1022,6 +1022,7 @@ export default function Onboarding() {
 
       const registerRes = await api("/api/auth/register", {
         method: "POST",
+        timeoutMs: 30_000,
         body: JSON.stringify({
           email: normalizedEmail,
           password: credentials.password,
@@ -1046,6 +1047,7 @@ export default function Onboarding() {
       if (!sessionEstablishedFromRegister) {
         const loginRes = await api("/api/auth/login", {
           method: "POST",
+          timeoutMs: 30_000,
           body: JSON.stringify({ email: normalizedEmail, password: credentials.password }),
         });
 
@@ -1081,12 +1083,31 @@ export default function Onboarding() {
 
       localStorage.setItem("fitloot_authenticated_hint", "1");
       accountBootstrapRedirectRef.current = true;
-      await checkAuth();
 
-      const profileSeedRes = await api("/api/onboarding/profile", {
-        method: "POST",
-        body: JSON.stringify(buildOnboardingProfileSeedPayload(onboardingDraft)),
-      });
+      const [authRefreshResult, profileSeedResult] = await Promise.allSettled([
+        checkAuth(),
+        api("/api/onboarding/profile", {
+          method: "POST",
+          timeoutMs: 45_000,
+          body: JSON.stringify(buildOnboardingProfileSeedPayload(onboardingDraft)),
+        }),
+      ]);
+
+      if (authRefreshResult.status === "rejected") {
+        setStepError(
+          "Conta criada e sessao iniciada, mas nao foi possivel atualizar a sessao do app agora. Tente novamente em instantes.",
+        );
+        return;
+      }
+
+      if (profileSeedResult.status === "rejected") {
+        setStepError(
+          "Conta criada e sessao iniciada, mas nao foi possivel preparar seu onboarding para o checkout. Tente novamente em instantes.",
+        );
+        return;
+      }
+
+      const profileSeedRes = profileSeedResult.value;
 
       if (!profileSeedRes.ok) {
         const payload = (await profileSeedRes.json().catch(() => null)) as unknown;

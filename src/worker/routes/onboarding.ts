@@ -564,6 +564,20 @@ export function registerOnboardingRoutes(
         );
       }
 
+      c.executionCtx.waitUntil(
+        (async () => {
+          try {
+            await ensurePeriodicMissions(c.env, c.env.fitloot_db, user.id);
+            invalidateMissionListCache(user.id);
+          } catch (error) {
+            console.error("[/api/onboarding/profile][background-missions]", {
+              userId: user.id,
+              message: getErrorMessage(error),
+            });
+          }
+        })(),
+      );
+
       return c.json({ success: true, onboarding_ready: true }, 200);
     },
   );

@@ -15,10 +15,12 @@ export type ActivationCompletionCopy = {
 
 type CompleteActivationAndEnterAppParams = {
   navigate: NavigateFunction;
-  refreshAuth: () => Promise<void>;
+  refreshAuth?: (() => Promise<void>) | undefined;
+  finalizeSessionTransition?: (() => Promise<void>) | undefined;
   onBeforeEnterApp?: (() => void) | undefined;
   preEnterAppDelayMs?: number | undefined;
   activationNotice?: ActivationNotice | undefined;
+  destinationPath?: string | undefined;
 };
 
 type ActivationCompletionResult =
@@ -47,7 +49,7 @@ export function resolveActivationCompletionCopy(params: {
     return {
       localTitle: "Conta criada e VIP ativado",
       localMessage:
-        "Sua conta foi criada e o VIP foi ativado com sucesso. Preparando sua entrada no app.",
+        "Sua conta foi criada e o VIP foi ativado com sucesso. Faca login para entrar no app.",
       badge: "VIP ativo",
     };
   }
@@ -65,7 +67,7 @@ export function resolveActivationCompletionCopy(params: {
     return {
       localTitle: "Conta criada e acesso liberado",
       localMessage:
-        "Sua conta foi criada e o pagamento foi aprovado. Preparando sua entrada no app.",
+        "Sua conta foi criada e o pagamento foi aprovado. Faca login para entrar no app.",
       badge: "Acesso liberado",
     };
   }
@@ -87,12 +89,18 @@ export async function completeActivationAndEnterApp(
   await wait(params.preEnterAppDelayMs ?? DEFAULT_PRE_ENTER_APP_DELAY_MS);
 
   try {
-    await params.refreshAuth();
+    if (params.finalizeSessionTransition) {
+      await params.finalizeSessionTransition();
+    } else if (params.refreshAuth) {
+      await params.refreshAuth();
+    } else {
+      throw new Error("ACTIVATION_TRANSITION_HANDLER_MISSING");
+    }
   } catch {
     return {
       ok: false,
       errorMessage:
-        "A ativacao foi concluida, mas nao foi possivel atualizar sua sessao agora. Tente entrar no app novamente em instantes.",
+        "A ativacao foi concluida, mas nao foi possivel concluir a transicao da sua sessao agora. Tente novamente em instantes.",
     };
   }
 
@@ -100,6 +108,6 @@ export async function completeActivationAndEnterApp(
     queueActivationNotice(params.activationNotice);
   }
 
-  params.navigate(ROUTE_PATHS.app, { replace: true });
+  params.navigate(params.destinationPath ?? ROUTE_PATHS.app, { replace: true });
   return { ok: true };
 }

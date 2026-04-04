@@ -3,6 +3,7 @@ import {
   fetchAuthBootstrap,
   fetchCurrentUser,
   hasPlanAccess,
+  notifyAppOpen,
   resolveAuthenticatedStartRoute,
 } from "../../react-app/services/authService";
 
@@ -162,5 +163,29 @@ describe("authService routing", () => {
     expect(result).toBeNull();
     expect(localStorage.getItem("fitloot_authenticated_hint")).toBeNull();
     expect(localStorage.getItem("fitloot_ai_chat_u7")).toBeNull();
+  });
+
+  it("dedupes app-open background notifications while a request is inflight", async () => {
+    let resolveFetch: ((value: Response) => void) | null = null;
+    global.fetch = vi.fn(
+      () =>
+        new Promise<Response>((resolve) => {
+          resolveFetch = resolve;
+        }),
+    ) as typeof fetch;
+
+    const first = notifyAppOpen();
+    const second = notifyAppOpen();
+
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+
+    resolveFetch?.(
+      new Response(JSON.stringify({ success: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    await Promise.all([first, second]);
   });
 });

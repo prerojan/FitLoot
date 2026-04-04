@@ -142,9 +142,25 @@ export default function PaymentPending() {
         ...downloadPayload,
       });
 
+      const shouldReturnToLogin = user?.onboarding_completed !== 1;
       const completionResult = await completeActivationAndEnterApp({
         navigate,
-        refreshAuth: checkAuth,
+        ...(shouldReturnToLogin
+          ? {
+              destinationPath: ROUTE_PATHS.login,
+              finalizeSessionTransition: async () => {
+                try {
+                  await api("/api/logout");
+                } catch {
+                  // A navegacao local ainda precisa concluir mesmo sem logout remoto.
+                } finally {
+                  logout();
+                }
+              },
+            }
+          : {
+              refreshAuth: checkAuth,
+            }),
         onBeforeEnterApp: clearScheduledPoll,
         preEnterAppDelayMs: options?.skipDelay ? 0 : undefined,
         activationNotice: {
@@ -172,7 +188,7 @@ export default function PaymentPending() {
         ...(completionCopy.badge ? { badge: completionCopy.badge } : {}),
       });
     },
-    [checkAuth, clearScheduledPoll, navigate, user?.onboarding_completed],
+    [checkAuth, clearScheduledPoll, logout, navigate, user?.onboarding_completed],
   );
 
   const verifyStatus = useCallback(async (options: VerifyStatusOptions = {}) => {
@@ -387,6 +403,10 @@ export default function PaymentPending() {
         tone={statusPopup?.tone ?? "warning"}
         actionLabel={statusPopup?.actionLabel}
         onAction={statusPopup?.onAction}
+        downloadLabel={statusPopup?.downloadLabel}
+        downloadHref={statusPopup?.downloadHref}
+        downloadFileName={statusPopup?.downloadFileName}
+        closeLabel={statusPopup?.closeLabel}
         onClose={() => setStatusPopup(null)}
       />
     </div>

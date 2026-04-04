@@ -53,7 +53,7 @@ describe("activationCompletion", () => {
     expect(result).toEqual({
       ok: false,
       errorMessage:
-        "A ativacao foi concluida, mas nao foi possivel atualizar sua sessao agora. Tente entrar no app novamente em instantes.",
+        "A ativacao foi concluida, mas nao foi possivel concluir a transicao da sua sessao agora. Tente novamente em instantes.",
     });
     expect(navigate).not.toHaveBeenCalled();
     expect(refreshAuth).toHaveBeenCalled();
@@ -79,5 +79,29 @@ describe("activationCompletion", () => {
     expect(result).toEqual({ ok: true });
     expect(sessionStorage.getItem("fitloot_activation_notice")).toContain("Baixar app Android");
     expect(navigate).toHaveBeenCalledWith("/app", { replace: true });
+  });
+
+  it("supports returning to login after clearing the current session", async () => {
+    const navigate = vi.fn();
+    const finalizeSessionTransition = vi.fn(async () => undefined);
+
+    const result = await completeActivationAndEnterApp({
+      navigate,
+      finalizeSessionTransition,
+      destinationPath: "/login",
+      preEnterAppDelayMs: 0,
+      activationNotice: {
+        title: "Conta criada e acesso liberado",
+        message: "Faca login para entrar no app.",
+        tone: "success",
+        downloadLabel: "Baixar app Android",
+        downloadHref: "https://fitloot.vercel.app/FitLoot.apk",
+      },
+    });
+
+    expect(result).toEqual({ ok: true });
+    expect(finalizeSessionTransition).toHaveBeenCalled();
+    expect(sessionStorage.getItem("fitloot_activation_notice")).toContain("Baixar app Android");
+    expect(navigate).toHaveBeenCalledWith("/login", { replace: true });
   });
 });
