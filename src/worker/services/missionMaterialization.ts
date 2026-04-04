@@ -6,6 +6,7 @@ import type {
 import { repairKnownMojibakeString } from "../../shared/textEncoding";
 import {
   resolveExerciseMediaFallbackUrlById,
+  isSupportedRouteMissionExercise,
   resolveStrictSupportedMissionExerciseDbId,
 } from "../../shared/exerciseCatalog";
 import {
@@ -276,8 +277,13 @@ export function createMissionMaterializationService(deps: MissionMaterialization
     const strictExerciseDbId = resolveStrictSupportedMissionExerciseDbId(
       exerciseName,
     );
+    const isSupportedRouteMission = isSupportedRouteMissionExercise(exerciseName);
 
-    if (blueprint.missionOrigin === "regular" && !strictExerciseDbId) {
+    if (
+      blueprint.missionOrigin === "regular"
+      && !strictExerciseDbId
+      && !isSupportedRouteMission
+    ) {
       throw new Error(
         `REGULAR_DAILY_MISSION_REQUIRES_EXERCISE_DB_ID:${exerciseName}`,
       );
@@ -546,33 +552,39 @@ export function createMissionMaterializationService(deps: MissionMaterialization
 
   async function materializeMissionBlueprint(env: Env, profile: MissionGenerationProfileSnapshot, blueprint: MissionBlueprint): Promise<MissionPayload> {
     const config = deps.missionConfigByPeriod(blueprint.period);
-    const shouldEnrichWithExerciseApi = blueprint.period === "daily";
-    const dailyExerciseResolution = shouldEnrichWithExerciseApi
+    const dailyExerciseResolution = blueprint.period === "daily"
       ? resolveDailyExerciseForMaterialization(blueprint)
       : null;
     const supportedExerciseName = dailyExerciseResolution?.exerciseName ?? blueprint.exerciseName;
     const strictExerciseDbId = dailyExerciseResolution?.strictExerciseDbId ?? null;
+    const isRouteDailyMission =
+      blueprint.period === "daily"
+      && isSupportedRouteMissionExercise(supportedExerciseName);
+    const shouldEnrichWithExerciseApi =
+      blueprint.period === "daily" && !isRouteDailyMission;
     const strictExerciseGifUrl = strictExerciseDbId
       ? resolveExerciseMediaFallbackUrlById(strictExerciseDbId)
       : null;
     const [enriched, aiContext] = await Promise.all([
       shouldEnrichWithExerciseApi ? enrichExercise(supportedExerciseName, env).catch(() => null) : Promise.resolve(null),
-      getExerciseInstructionsFromAI(
-        supportedExerciseName,
-        blueprint.period === "daily" ? blueprint.metricType : "circuit_tasks",
-        profile.conditioning,
-        env,
-        blueprint.period,
-        {
-          mainGoal: profile.mainGoal,
-          injuries: profile.injuries,
-          equipment: profile.equipment,
-          level: profile.level,
-          completionRate: profile.completionRate,
-          capacitySummary: profile.capacitySummary,
-          attributes: profile.attributes,
-        },
-      ).catch(() => null),
+      isRouteDailyMission
+        ? Promise.resolve(null)
+        : getExerciseInstructionsFromAI(
+          supportedExerciseName,
+          blueprint.period === "daily" ? blueprint.metricType : "circuit_tasks",
+          profile.conditioning,
+          env,
+          blueprint.period,
+          {
+            mainGoal: profile.mainGoal,
+            injuries: profile.injuries,
+            equipment: profile.equipment,
+            level: profile.level,
+            completionRate: profile.completionRate,
+            capacitySummary: profile.capacitySummary,
+            attributes: profile.attributes,
+          },
+        ).catch(() => null),
     ]);
 
     const apiInstructionsEn = deps.normalizeInstructionList(enriched?.instructions, 8);

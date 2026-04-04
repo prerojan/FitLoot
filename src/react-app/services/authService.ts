@@ -2,12 +2,14 @@ import { api } from "@/react-app/utils/api";
 import { AUTHENTICATED_HINT_KEY, ROUTE_PATHS } from "@/react-app/auth/constants";
 import type { User } from "@/react-app/auth/types";
 import type { UserProfileTheme } from "@/react-app/types/profile";
+import type { UserProfile, UserProgression } from "@/shared/types";
 import { preloadProtectedRoute } from "@/react-app/routes/lazyPages";
 
 export type AuthBootstrapPayload = {
   user: User;
+  profile: UserProfile | null;
   profile_theme: UserProfileTheme | null;
-  progression: Record<string, unknown> | null;
+  progression: UserProgression | null;
   app_open_degraded?: boolean | undefined;
 };
 
@@ -54,43 +56,91 @@ type IdleDeadlineLike = {
 
 type IdleCallbackHandle = number;
 type IdleCallbackFn = (deadline: IdleDeadlineLike) => void;
+type NetworkInformationLike = {
+  effectiveType?: string | undefined;
+  saveData?: boolean | undefined;
+};
 
 type IdleWindow = Window & {
   requestIdleCallback?: (callback: IdleCallbackFn, options?: { timeout: number }) => IdleCallbackHandle;
   cancelIdleCallback?: (handle: IdleCallbackHandle) => void;
+  navigator: Navigator & {
+    connection?: NetworkInformationLike | undefined;
+  };
 };
 
-export function prefetchCoreRoutes(): void {
-  // On Android remote mode the WebView depends on network-delivered chunks.
-  // Preloading every authenticated route reduces the chance of URL-only
-  // navigations when connectivity drops after the dashboard is already open.
-  const loadCoreRoutes = () => {
-    void Promise.allSettled([
-      ROUTE_PATHS.home,
-      ROUTE_PATHS.profile,
-      ROUTE_PATHS.minigames,
-      ROUTE_PATHS.friends,
-      ROUTE_PATHS.shop,
-      ROUTE_PATHS.ranking,
-      ROUTE_PATHS.aiChat,
-      ROUTE_PATHS.foodAnalysis,
-      ROUTE_PATHS.achievements,
-      ROUTE_PATHS.titles,
-      ROUTE_PATHS.healthTest,
-    ].map((path) => preloadProtectedRoute(path)));
-  };
+const PRIMARY_PROTECTED_PREFETCH_PATHS = [
+  ROUTE_PATHS.home,
+  ROUTE_PATHS.profile,
+  ROUTE_PATHS.friends,
+  ROUTE_PATHS.ranking,
+  ROUTE_PATHS.minigames,
+] as const;
 
-  const idleWindow = window as IdleWindow;
+const SECONDARY_PROTECTED_PREFETCH_PATHS = [
+  ROUTE_PATHS.shop,
+  ROUTE_PATHS.aiChat,
+  ROUTE_PATHS.foodAnalysis,
+  ROUTE_PATHS.achievements,
+  ROUTE_PATHS.titles,
+  ROUTE_PATHS.healthTest,
+] as const;
+
+function preloadProtectedRoutes(paths: readonly string[]): void {
+  void Promise.allSettled(paths.map((path) => preloadProtectedRoute(path)));
+}
+
+function shouldPreloadSecondaryRoutes(win: IdleWindow): boolean {
+  const connection = win.navigator.connection;
+  if (!connection) {
+    return true;
+  }
+
+  if (connection.saveData) {
+    return false;
+  }
+
+  const effectiveType = String(connection.effectiveType ?? "").toLowerCase();
+  return effectiveType !== "slow-2g" && effectiveType !== "2g";
+}
+
+function scheduleIdlePreload(
+  idleWindow: IdleWindow,
+  paths: readonly string[],
+  options: {
+    idleTimeout: number;
+    fallbackDelay: number;
+  },
+): void {
   if (typeof idleWindow.requestIdleCallback === "function") {
     idleWindow.requestIdleCallback(() => {
-      loadCoreRoutes();
-    }, { timeout: 1500 });
+      preloadProtectedRoutes(paths);
+    }, { timeout: options.idleTimeout });
     return;
   }
 
   window.setTimeout(() => {
-    loadCoreRoutes();
-  }, 900);
+    preloadProtectedRoutes(paths);
+  }, options.fallbackDelay);
+}
+
+export function prefetchCoreRoutes(): void {
+  // Aquece primeiro apenas as rotas mais provaveis para evitar burst de chunks
+  // logo apos o bootstrap, e deixa o restante para um segundo passe em rede boa.
+  const idleWindow = window as IdleWindow;
+  scheduleIdlePreload(idleWindow, PRIMARY_PROTECTED_PREFETCH_PATHS, {
+    idleTimeout: 1200,
+    fallbackDelay: 700,
+  });
+
+  if (!shouldPreloadSecondaryRoutes(idleWindow)) {
+    return;
+  }
+
+  scheduleIdlePreload(idleWindow, SECONDARY_PROTECTED_PREFETCH_PATHS, {
+    idleTimeout: 3200,
+    fallbackDelay: 2400,
+  });
 }
 
 export function hasPlanAccess(user: User): boolean {

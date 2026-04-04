@@ -83,9 +83,11 @@ export function useAuthBootstrap({
       localStorage.setItem(AUTHENTICATED_HINT_KEY, "1");
       setUser(user);
 
-      if (bootstrap.profile_theme) {
+      if (bootstrap.profile) {
+        applyProfileTheme(bootstrap.profile);
+        writeCachedJson("/api/profile", bootstrap.profile);
+      } else if (bootstrap.profile_theme) {
         applyProfileTheme(bootstrap.profile_theme);
-        writeCachedJson("/api/profile", bootstrap.profile_theme);
       } else {
         applyProfileTheme(null);
       }

@@ -4,6 +4,7 @@ vi.mock("../../worker/services/exerciseEnrichment", () => ({
   enrichExercise: vi.fn(async () => null),
 }));
 
+import { enrichExercise } from "../../worker/services/exerciseEnrichment";
 import { resolveExerciseDisplayNamePt, resolveSupportedMissionExerciseName } from "../../shared/exerciseCatalog";
 import { createMissionMaterializationService } from "../../worker/services/missionMaterialization";
 import type { Env } from "../../worker/core/types";
@@ -14,9 +15,9 @@ function createService() {
       ...mission,
       metric_type: metricType,
       metric_value: metricValue,
-      metric_unit: "repetitions",
+      metric_unit: metricType === "distance_meters" ? "m" : "repetitions",
       target_reps: metricType === "sets_reps" ? metricValue : null,
-      target_time: null,
+      target_time: metricType === "distance_meters" ? null : null,
     }),
     buildCircuitTasks: () => [],
     buildMissionDescription: (exerciseName) => `Complete ${exerciseName}`,
@@ -29,20 +30,29 @@ function createService() {
     ],
     ensureInstructionSteps: (steps) => steps,
     estimateMissionDuration: () => 10,
-    getMissionMetricType: () => "sets_reps",
+    getMissionMetricType: (exerciseName) =>
+      /walking|running|caminhada|corrida/i.test(exerciseName)
+        ? "distance_meters"
+        : "sets_reps",
     inferAttributes: () => ["forca"],
     inferBodyArea: () => "lower",
-    inferExerciseType: () => "strength",
+    inferExerciseType: (category) =>
+      category === "walk" || category === "run" ? "cardio" : "strength",
     inferRestSeconds: () => 45,
     inferSets: () => 3,
-    isMissionMetricType: (value): value is "sets_reps" =>
-      value === "sets_reps",
+    isMissionMetricType: (value): value is "sets_reps" | "distance_meters" =>
+      value === "sets_reps" || value === "distance_meters",
     mergeUniqueStrings: (values, limit) =>
       Array.from(new Set(values.filter((value) => value.trim().length > 0))).slice(0, limit),
-    metricUnitByType: () => "repetitions",
-    metricValueByPeriod: () => 12,
+    metricUnitByType: (metricType) => (metricType === "distance_meters" ? "m" : "repetitions"),
+    metricValueByPeriod: (metricType) => (metricType === "distance_meters" ? 2000 : 12),
     missionConfigByPeriod: () => ({ titlePrefix: "Missao Diaria" }),
-    normalizeExerciseCategory: () => "strength",
+    normalizeExerciseCategory: (exerciseName) =>
+      /walking|caminhada/i.test(exerciseName)
+        ? "walk"
+        : /running|corrida/i.test(exerciseName)
+          ? "run"
+          : "strength",
     normalizeInstructionList: (value, limit = 8) =>
       Array.isArray(value)
         ? value.map((item) => String(item)).slice(0, limit)
@@ -54,7 +64,8 @@ function createService() {
         .toLowerCase()
         .trim(),
     parseJsonObjectFromModelContent: () => null,
-    resolveMetricTypeForCategory: () => "sets_reps",
+    resolveMetricTypeForCategory: (category) =>
+      category === "walk" || category === "run" ? "distance_meters" : "sets_reps",
     resolveExerciseApiBodyArea: () => "lower",
     resolveExerciseApiMuscleGroups: () => ["glutes"],
     resolveExerciseDisplayNamePt: (exerciseName) =>
@@ -122,5 +133,58 @@ describe("missionMaterialization.materializeMissionBlueprint", () => {
     expect(mission.exercise_db_id).toBe("QChZi3x");
     expect(mission.exercise_db_image_url).toContain("QChZi3x");
     expect(mission.image_url).toContain("QChZi3x");
+  });
+
+  it("keeps allowed route-based regular daily missions without requiring ExerciseDB metadata", async () => {
+    const service = createService();
+    vi.mocked(enrichExercise).mockClear();
+
+    const mission = await service.materializeMissionBlueprint(
+      {} as Env,
+      {
+        mainGoal: "melhora de cardio",
+        conditioning: "iniciante",
+        injuries: "",
+        equipment: "",
+        volumeMultiplier: 1,
+        level: 1,
+        completionRate: 0.8,
+        capacitySummary: "sem historico",
+        attributes: {
+          strength: 10,
+          constitution: 10,
+          vitality: 10,
+          dexterity: 10,
+          focus: 10,
+        },
+      },
+      {
+        period: "daily",
+        name: "Corrida leve no bairro",
+        description: "Mantenha um ritmo constante.",
+        goal: null,
+        exerciseName: "running",
+        muscle: "legs",
+        metricType: "distance_meters",
+        metricValue: 2400,
+        xpReward: 20,
+        pointsReward: 8,
+        difficultyLevel: "iniciante",
+        missionOrigin: "regular",
+        isAiSpecial: false,
+        compatibilityKey: "running",
+        compatibilityTerms: ["running", "cardio"],
+        subtasks: [],
+      },
+    );
+
+    expect(mission.title).toContain("Corrida leve");
+    expect(mission.metric_type).toBe("distance_meters");
+    expect(mission.exercise_name).toBe("Corrida leve");
+    expect(mission.exercise_db_id).toBeNull();
+    expect(mission.exercise_db_image_url).toBeNull();
+    expect(mission.image_url).toBeNull();
+    expect(mission.exercise_category).toBe("run");
+    expect(enrichExercise).not.toHaveBeenCalled();
   });
 });

@@ -42,9 +42,9 @@
     "wrangler": "^4.33.0"
   },
   "scripts": {
-    "build": "tsc -b && vite build",
+    "build": "npm run sync:android-artifacts && tsc -b && vite build",
     "cf-typegen": "wrangler types",
-    "check": "tsc && vite build && wrangler deploy --dry-run",
+    "check": "npm run sync:android-artifacts && tsc && vite build && wrangler deploy --dry-run",
     "dev": "vite",
     "dev:worker": "wrangler dev --local --port 8787",
     "dev:all": "bash -c \"npm run dev & npm run dev:worker\"",
@@ -58,6 +58,7 @@
     "check:lite": "node ./scripts/static-checks.mjs",
     "ai:check": "npm run check:lite",
     "validate": "npm run check:lite",
+    "sync:android-artifacts": "node ./scripts/sync-android-artifacts.mjs",
     "supabase:reset-clean-base": "node ./scripts/supabase/reset-clean-base.mjs",
     "supabase:bootstrap-catalog": "node --experimental-strip-types ./scripts/supabase/bootstrap-catalog.mjs",
     "supabase:generate-catalog-seed-sql": "node --experimental-strip-types ./scripts/supabase/generate-catalog-seed-sql.mjs",

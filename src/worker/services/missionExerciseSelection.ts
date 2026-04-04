@@ -1,6 +1,7 @@
 import {
   listAllStrictSupportedMissionExerciseNames,
   listSupportedMissionExerciseNamesByMuscle,
+  resolveSupportedRouteMissionExerciseName,
   resolveSupportedMissionExerciseName,
 } from "../../shared/exerciseCatalog";
 
@@ -24,8 +25,8 @@ const FOCUS_FALLBACKS: Record<string, readonly string[]> = {
   pull: ["triceps dip", "push-up", "front plank"],
   legs: ["air squat", "walking lunge", "glute bridge", "wall sit", "calf raise"],
   core: ["front plank", "3/4 sit-up", "crunch floor", "dead bug", "mountain climber"],
-  conditioning: ["burpee", "mountain climber", "air squat", "walking lunge"],
-  active_recovery: ["glute bridge", "dead bug", "wall sit", "calf raise"],
+  conditioning: ["running", "walking", "burpee", "mountain climber", "air squat", "walking lunge"],
+  active_recovery: ["walking", "glute bridge", "dead bug", "wall sit", "calf raise"],
   mobility: ["glute bridge", "dead bug", "wall sit", "calf raise"],
   rest: ["glute bridge", "dead bug", "wall sit", "calf raise"],
   skill: ["front plank", "dead bug", "push-up", "air squat"],
@@ -101,7 +102,9 @@ function pushSupportedExerciseName(
   limit: number,
 ): void {
   if (collector.length >= limit) return;
-  const resolved = resolveSupportedMissionExerciseName(rawName);
+  const resolved =
+    resolveSupportedMissionExerciseName(rawName)
+    ?? resolveSupportedRouteMissionExerciseName(rawName);
   if (!resolved) return;
   const key = normalizeMissionExerciseSelectionText(resolved);
   if (!key || seen.has(key)) return;

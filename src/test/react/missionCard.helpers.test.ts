@@ -160,4 +160,19 @@ describe("missionCard helpers - resolveMissionFocusLabels", () => {
 
     expect(resolveMissionFocusLabels(mission)).toEqual(["Corpo inteiro"]);
   });
+
+  it("resolves route-based cardio targets even without ExerciseDB metadata", () => {
+    const mission = buildMission({
+      exercise_db_id: null,
+      exercise_name: "Corrida leve",
+      exercise_target: null,
+      muscle_groups: [],
+      exercise_secondary_muscles: [],
+      exercise_body_part: null,
+      exercise_category: "run",
+      metric_type: "distance_meters",
+    });
+
+    expect(resolveMissionFocusLabels(mission)).toEqual(["Pernas"]);
+  });
 });

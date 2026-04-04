@@ -10,6 +10,7 @@ import {
 import {
   resolveExerciseDisplayNamePt,
   resolveExerciseMediaFallbackUrlById,
+  isSupportedRouteMissionExercise,
   resolveSupportedMissionExerciseName,
 } from "../shared/exerciseCatalog";
 
@@ -3376,12 +3377,23 @@ async function insertMission(
     ?? normalizedExerciseDbGifUrl
     ?? exerciseMediaFallbackUrl
     ?? null;
+  const isSupportedRouteDailyMission =
+    period === "daily"
+    && mission.mission_origin === "regular"
+    && isSupportedRouteMissionExercise(
+      typeof mission.exercise_name === "string" && mission.exercise_name.trim().length > 0
+        ? mission.exercise_name
+        : mission.title,
+    );
 
   if (period === "daily" && mission.mission_origin === "regular") {
-    if (!normalizedExerciseDbId) {
+    if (!normalizedExerciseDbId && !isSupportedRouteDailyMission) {
       throw new Error("REGULAR_DAILY_MISSION_REQUIRES_EXERCISE_DB_ID");
     }
-    if (!normalizedExerciseDbImageUrl || !normalizedImageUrl) {
+    if (
+      !isSupportedRouteDailyMission
+      && (!normalizedExerciseDbImageUrl || !normalizedImageUrl)
+    ) {
       throw new Error("REGULAR_DAILY_MISSION_REQUIRES_EXERCISE_DB_MEDIA");
     }
   }

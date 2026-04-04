@@ -1,6 +1,7 @@
 import type { NavigateFunction } from "react-router";
 
 import { ROUTE_PATHS } from "@/react-app/auth/constants";
+import { queueActivationNotice, type ActivationNotice } from "@/react-app/utils/activationNotice";
 import { clearOnboardingDraft } from "@/react-app/utils/onboardingDraft";
 
 export type ActivationFlowOrigin = "onboarding" | "checkout";
@@ -17,6 +18,7 @@ type CompleteActivationAndEnterAppParams = {
   refreshAuth: () => Promise<void>;
   onBeforeEnterApp?: (() => void) | undefined;
   preEnterAppDelayMs?: number | undefined;
+  activationNotice?: ActivationNotice | undefined;
 };
 
 type ActivationCompletionResult =
@@ -92,6 +94,10 @@ export async function completeActivationAndEnterApp(
       errorMessage:
         "A ativacao foi concluida, mas nao foi possivel atualizar sua sessao agora. Tente entrar no app novamente em instantes.",
     };
+  }
+
+  if (params.activationNotice) {
+    queueActivationNotice(params.activationNotice);
   }
 
   params.navigate(ROUTE_PATHS.app, { replace: true });

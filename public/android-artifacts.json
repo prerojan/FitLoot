@@ -1,0 +1,35 @@
+{
+  "generatedAt": "2026-04-04T18:33:04.950Z",
+  "byChannel": {
+    "dev": {
+      "channel": "dev",
+      "label": "APK Android de desenvolvimento",
+      "publicPath": "/app-dev-debug.apk",
+      "fileName": "app-dev-debug.apk",
+      "available": true,
+      "sizeBytes": 9276014,
+      "updatedAt": "2026-04-04T18:14:26.745Z",
+      "cacheBust": "1775326466744-9276014"
+    },
+    "internal": {
+      "channel": "internal",
+      "label": "APK Android interno",
+      "publicPath": "/app-internal-debug.apk",
+      "fileName": "app-internal-debug.apk",
+      "available": true,
+      "sizeBytes": 9256927,
+      "updatedAt": "2026-04-04T00:19:18.472Z",
+      "cacheBust": "1775261958471-9256927"
+    },
+    "release": {
+      "channel": "release",
+      "label": "APK Android de producao",
+      "publicPath": "/app-release.apk",
+      "fileName": "app-release.apk",
+      "available": true,
+      "sizeBytes": 2019830,
+      "updatedAt": "2026-04-04T00:21:12.084Z",
+      "cacheBust": "1775262072083-2019830"
+    }
+  }
+}

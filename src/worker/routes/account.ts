@@ -103,16 +103,31 @@ function resolveRuntimeCacheDb(
 const RUNTIME_BOOTSTRAP_PROJECTION_TTL_MS = 30_000;
 
 type BootstrapRuntimeProjection = {
-  showcased_achievements: unknown;
-  profile_theme: {
-    custom_primary_color: unknown;
-    custom_secondary_color: unknown;
-    custom_background_type: unknown;
-    custom_background_value: unknown;
-    custom_font: unknown;
-  } | null;
+  profile: Record<string, unknown> | null;
   progression: Record<string, unknown> | null;
 };
+
+function buildProfileThemeProjection(
+  profile: Record<string, unknown> | null | undefined,
+): {
+  custom_primary_color: unknown;
+  custom_secondary_color: unknown;
+  custom_background_type: unknown;
+  custom_background_value: unknown;
+  custom_font: unknown;
+} | null {
+  if (!profile) {
+    return null;
+  }
+
+  return {
+    custom_primary_color: profile.custom_primary_color ?? null,
+    custom_secondary_color: profile.custom_secondary_color ?? null,
+    custom_background_type: profile.custom_background_type ?? null,
+    custom_background_value: profile.custom_background_value ?? null,
+    custom_font: profile.custom_font ?? null,
+  };
+}
 
 // Route registration for account, session, and user identity endpoints.
 export function registerAccountRoutes(
@@ -196,6 +211,7 @@ export function registerAccountRoutes(
             RUNTIME_BOOTSTRAP_PROJECTION_TTL_MS,
           );
           if (cachedProjection) {
+            const profileTheme = buildProfileThemeProjection(cachedProjection.profile);
             return c.json({
               user: {
                 id: user.id,
@@ -203,13 +219,14 @@ export function registerAccountRoutes(
                 name: user.name,
                 avatar_url: user.avatar_url ?? undefined,
                 showcased_achievements:
-                  cachedProjection.showcased_achievements ?? null,
+                  cachedProjection.profile?.showcased_achievements ?? null,
                 onboarding_completed: user.onboarding_completed,
                 plan_id: user.plan_id,
                 plan_status: user.plan_status,
                 payment_method: user.payment_method,
               },
-              profile_theme: cachedProjection.profile_theme ?? null,
+              profile: cachedProjection.profile ?? null,
+              profile_theme: profileTheme,
               progression: cachedProjection.progression ?? null,
               app_open_degraded: false,
             });
@@ -229,13 +246,7 @@ export function registerAccountRoutes(
       try {
         profile = await c.env.fitloot_db
           .prepare(
-            `SELECT
-              custom_primary_color,
-              custom_secondary_color,
-              custom_background_type,
-              custom_background_value,
-              custom_font,
-              showcased_achievements
+            `SELECT *
             FROM user_profiles
             WHERE user_id = ?`,
           )
@@ -255,16 +266,7 @@ export function registerAccountRoutes(
       try {
         progression = await c.env.fitloot_db
           .prepare(
-            `SELECT
-              level,
-              xp,
-              CASE
-                WHEN COALESCE(level, 1) * 100 > 100 THEN COALESCE(level, 1) * 100
-                ELSE 100
-              END AS next_level_xp,
-              current_streak,
-              best_streak,
-              last_activity_date
+            `SELECT *
             FROM user_progression
             WHERE user_id = ?`,
           )
@@ -281,21 +283,12 @@ export function registerAccountRoutes(
         });
       }
 
-      const profileTheme = profile
-        ? {
-            custom_primary_color: profile.custom_primary_color ?? null,
-            custom_secondary_color: profile.custom_secondary_color ?? null,
-            custom_background_type: profile.custom_background_type ?? null,
-            custom_background_value: profile.custom_background_value ?? null,
-            custom_font: profile.custom_font ?? null,
-          }
-        : null;
+      const profileTheme = buildProfileThemeProjection(profile);
 
       if (runtimeCacheDb) {
         c.executionCtx.waitUntil(
           upsertRuntimeBootstrapProjection(runtimeCacheDb, user.id, {
-            showcased_achievements: profile?.showcased_achievements ?? null,
-            profile_theme: profileTheme,
+            profile: profile ?? null,
             progression: progression ?? null,
           }).catch((runtimeProjectionError) => {
             console.warn("[/api/app/bootstrap][runtime-write]", {
@@ -318,6 +311,7 @@ export function registerAccountRoutes(
           plan_status: user.plan_status,
           payment_method: user.payment_method,
         },
+        profile: profile ?? null,
         profile_theme: profileTheme,
         progression: progression ?? null,
         app_open_degraded: bootstrapDegraded,

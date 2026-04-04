@@ -4,6 +4,7 @@ import { useAuth } from "@/react-app/auth/context";
 import { useRewardNotifications } from "@/react-app/contexts/rewardNotifications";
 import { useDailyMetrics } from "@/react-app/hooks/useDailyMetrics";
 import AppPageShell from "@/react-app/components/AppPageShell";
+import PaymentStatusPopup from "@/react-app/components/PaymentStatusPopup";
 import MissionCard from "@/react-app/components/MissionCard";
 import AIRecommendations from "@/react-app/components/AIRecommendations";
 import AIMissionGenerator from "@/react-app/components/AIMissionGenerator";
@@ -20,7 +21,6 @@ import type {
 } from "@/shared/types";
 import {
   ApiRequestError,
-  clearJsonCache,
   fetchAndCacheJson,
   readCachedJson,
   writeCachedJson,
@@ -56,6 +56,7 @@ import {
   writePersistentStepMissionProgressState,
 } from "@/react-app/pages/dashboardUtils";
 import { navigateProtectedRoute } from "@/react-app/services/appNavigation";
+import { consumeActivationNotice, type ActivationNotice } from "@/react-app/utils/activationNotice";
 
 type DashboardLoadingState = {
   profile: boolean;
@@ -131,9 +132,17 @@ export default function Dashboard() {
   const [quickActionsOpen, setQuickActionsOpen] = useState(false);
   const quickActionsRef = useRef<HTMLDivElement | null>(null);
   const missionsRef = useRef<Mission[]>([]);
+  const [activationNotice, setActivationNotice] = useState<ActivationNotice | null>(null);
   const [persistentStepMissionProgress, setPersistentStepMissionProgress] =
     useState<PersistentStepMissionProgressState>({});
   const { metrics: consolidatedMetrics, loading: metricsLoading, refreshMetrics } = useDailyMetrics({ syncRemote: true });
+
+  useEffect(() => {
+    const queuedNotice = consumeActivationNotice();
+    if (queuedNotice) {
+      setActivationNotice(queuedNotice);
+    }
+  }, []);
 
   const setSectionLoading = useCallback((section: keyof DashboardLoadingState, value: boolean) => {
     setLoadingState((current) => ({ ...current, [section]: value }));
@@ -238,6 +247,10 @@ export default function Dashboard() {
         setMissions(Array.isArray(payload) ? payload : []);
       }),
       (async () => {
+        if (!forceRefresh && cacheAchievements && !cacheAchievements.stale) {
+          return;
+        }
+
         try {
           const payload = await fetchAndCacheJson<AchievementWithUnlock[]>("/api/achievements");
           setAchievements(Array.isArray(payload) ? payload : []);
@@ -301,23 +314,7 @@ export default function Dashboard() {
     void loadData();
   }, [user, navigate, loadData]);
 
-  useEffect(() => {
-    // Antecipa apenas o bundle das rotas mais acessadas.
-    void import("@/react-app/pages/Profile");
-    void import("@/react-app/pages/Arena");
-    void import("@/react-app/pages/Friends");
-    void import("@/react-app/pages/Shop");
-    void import("@/react-app/pages/Ranking");
-    void import("@/react-app/pages/AIChat");
-    void import("@/react-app/pages/FoodAnalysis");
-  }, []);
-
   const refreshData = useCallback(async () => {
-    clearJsonCache("/api/profile");
-    clearJsonCache("/api/progression");
-    clearJsonCache("/api/missions");
-    clearJsonCache("/api/metrics/today");
-    clearJsonCache("/api/titles");
     await Promise.all([
       loadData({ forceRefresh: true }),
       refreshMetrics({ forceApi: true, syncRemote: true }),
@@ -928,6 +925,19 @@ export default function Dashboard() {
           <Zap className={`h-6 w-6 transition-transform duration-200 ${quickActionsOpen ? "rotate-12" : ""}`} />
         </button>
       </div>
+
+      <PaymentStatusPopup
+        open={activationNotice !== null}
+        title={activationNotice?.title ?? ""}
+        message={activationNotice?.message ?? ""}
+        badge={activationNotice?.badge}
+        tone={activationNotice?.tone ?? "success"}
+        downloadLabel={activationNotice?.downloadLabel}
+        downloadHref={activationNotice?.downloadHref}
+        downloadFileName={activationNotice?.downloadFileName}
+        closeLabel={activationNotice?.closeLabel}
+        onClose={() => setActivationNotice(null)}
+      />
     </AppPageShell>
   );
 }

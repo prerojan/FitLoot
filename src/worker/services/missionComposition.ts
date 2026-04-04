@@ -324,7 +324,8 @@ export function fallbackExercisesByFocus(
   focus: string,
   muscles: string[],
 ): string[] {
-  // Fallback exercise catalogs must stay anchored to the curated ExerciseDB-backed set.
+  // Fallback catalogs stay constrained to the curated mission set, plus the
+  // explicitly allowed route-based cardio activities.
   return sanitizeMissionExerciseNames({
     requestedNames: [],
     muscles,
@@ -632,6 +633,15 @@ export function buildMissionDescription(
   }
   if (metricType === "distance_meters") {
     const km = (metricValue / 1000).toFixed(metricValue >= 1000 ? 1 : 0);
+    const normalizedExerciseName = normalizeMatchText(exerciseName);
+    if (
+      normalizedExerciseName.includes("walk")
+      || normalizedExerciseName.includes("caminha")
+    ) {
+      return ensureSentence(
+        `Percorra ${km} km em caminhada ativa, mantendo postura solta e ritmo constante`,
+      );
+    }
     return ensureSentence(
       `Cubra ${km} km de corrida ou trote sem perder a postura e o ritmo`,
     );

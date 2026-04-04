@@ -326,6 +326,10 @@ const Home: FC = () => {
         message={activationNotice?.message ?? ""}
         badge={activationNotice?.badge}
         tone={activationNotice?.tone ?? "success"}
+        downloadLabel={activationNotice?.downloadLabel}
+        downloadHref={activationNotice?.downloadHref}
+        downloadFileName={activationNotice?.downloadFileName}
+        closeLabel={activationNotice?.closeLabel}
         onClose={() => setActivationNotice(null)}
       />
     </div>

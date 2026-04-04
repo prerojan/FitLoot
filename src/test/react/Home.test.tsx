@@ -44,6 +44,9 @@ describe("Home", () => {
       message: "Sua conta foi criada e o pagamento foi aprovado. Faca login para entrar no app.",
       badge: "Acesso liberado",
       tone: "success",
+      downloadLabel: "Baixar app Android",
+      downloadHref: "https://fitloot.vercel.app/app-release.apk?v=teste",
+      downloadFileName: "app-release.apk",
     });
 
     render(
@@ -56,6 +59,10 @@ describe("Home", () => {
     expect(
       screen.getByText(/Faca login para entrar no app/i),
     ).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Baixar app Android/i })).toHaveAttribute(
+      "href",
+      "https://fitloot.vercel.app/app-release.apk?v=teste",
+    );
 
     await user.click(screen.getByRole("button", { name: /Fechar/i }));
 

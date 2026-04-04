@@ -58,4 +58,26 @@ describe("activationCompletion", () => {
     expect(navigate).not.toHaveBeenCalled();
     expect(refreshAuth).toHaveBeenCalled();
   });
+
+  it("queues the activation notice before redirecting when one is provided", async () => {
+    const navigate = vi.fn();
+    const refreshAuth = vi.fn(async () => undefined);
+
+    const result = await completeActivationAndEnterApp({
+      navigate,
+      refreshAuth,
+      preEnterAppDelayMs: 0,
+      activationNotice: {
+        title: "Conta criada e acesso liberado",
+        message: "Seu app ja pode ser baixado.",
+        tone: "success",
+        downloadLabel: "Baixar app Android",
+        downloadHref: "https://fitloot.vercel.app/app-release.apk?v=teste",
+      },
+    });
+
+    expect(result).toEqual({ ok: true });
+    expect(sessionStorage.getItem("fitloot_activation_notice")).toContain("Baixar app Android");
+    expect(navigate).toHaveBeenCalledWith("/app", { replace: true });
+  });
 });

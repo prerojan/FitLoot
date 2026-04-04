@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import BillingCycleSwitch from "@/react-app/components/BillingCycleSwitch";
 import LoadingBall from "@/react-app/components/LoadingBall";
-import PaymentStatusPopup from "@/react-app/components/PaymentStatusPopup";
+import PaymentStatusPopup, { type PaymentStatusPopupConfig } from "@/react-app/components/PaymentStatusPopup";
 import { AuthThemeHeader } from "@/react-app/theme/AuthThemeHeader";
 import { Input } from "@/react-app/components/ui/input";
 import { ROUTE_PATHS } from "@/react-app/auth/constants";
@@ -28,7 +28,9 @@ import {
 } from "@/react-app/constants/checkout";
 import { useAuth } from "@/react-app/auth/context";
 import { useTheme } from "@/react-app/contexts/theme";
+import { getAndroidDownloadInfoForCurrentEnvironment } from "@/react-app/services/androidAppDownload";
 import { fetchCurrentUser, hasPlanAccess } from "@/react-app/services/authService";
+import { getHostContext } from "@/react-app/services/runtime/hostRuntime";
 import { api } from "@/react-app/utils/api";
 import {
   completeActivationAndEnterApp,
@@ -223,14 +225,7 @@ export default function Checkout() {
   const [error, setError] = useState<string | null>(null);
   const [activationConfirmed, setActivationConfirmed] = useState(false);
   const [activationCompletionInProgress, setActivationCompletionInProgress] = useState(false);
-  const [statusPopup, setStatusPopup] = useState<{
-    title: string;
-    message: string;
-    badge?: string;
-    tone: "success" | "warning" | "error";
-    actionLabel?: string;
-    onAction?: (() => void) | undefined;
-  } | null>(null);
+  const [statusPopup, setStatusPopup] = useState<PaymentStatusPopupConfig | null>(null);
   const promoValidationRequestIdRef = useRef(0);
   const promoValidationCodeRef = useRef("");
   const promoValidationPromiseRef = useRef<Promise<PromoValidationResult | null> | null>(null);
@@ -252,6 +247,9 @@ export default function Checkout() {
     promoValidationResult,
     promoValidationCodeRef.current,
   );
+  const androidDownloadInfo = useMemo(() => {
+    return getHostContext().platform === "android" ? null : getAndroidDownloadInfoForCurrentEnvironment();
+  }, []);
 
   useEffect(() => {
     // Redireciona usuarios que ja possuem acesso ou pagamento pendente.
@@ -408,19 +406,37 @@ export default function Checkout() {
       origin: requiresOnboardingCheckout ? "onboarding" : "checkout",
       outcome,
     });
+    const successMessage = androidDownloadInfo
+      ? `${completionCopy.localMessage} O APK Android deste ambiente ja esta disponivel para download.`
+      : completionCopy.localMessage;
+    const downloadPayload = androidDownloadInfo
+      ? {
+          downloadLabel: "Baixar app Android",
+          downloadHref: androidDownloadInfo.href,
+          downloadFileName: androidDownloadInfo.fileName,
+        }
+      : {};
 
     setActivationCompletionInProgress(true);
     setStatusPopup({
       title: completionCopy.localTitle,
-      message: completionCopy.localMessage,
+      message: successMessage,
       tone: "success",
       ...(completionCopy.badge ? { badge: completionCopy.badge } : {}),
+      ...downloadPayload,
     });
 
     const completionResult = await completeActivationAndEnterApp({
       navigate,
       refreshAuth: checkAuth,
       preEnterAppDelayMs: options?.skipDelay ? 0 : undefined,
+      activationNotice: {
+        title: completionCopy.localTitle,
+        message: successMessage,
+        tone: "success",
+        ...(completionCopy.badge ? { badge: completionCopy.badge } : {}),
+        ...downloadPayload,
+      },
     });
 
     if (completionResult.ok) {

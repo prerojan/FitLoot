@@ -8,6 +8,7 @@ import {
   type RewardNotification,
 } from "../../shared/types";
 import {
+  isSupportedRouteMissionExercise,
   resolveStrictSupportedMissionExerciseDbId,
   resolveSupportedMissionExerciseName,
 } from "../../shared/exerciseCatalog";
@@ -384,10 +385,15 @@ function dailyMissionNeedsCatalogRepair(
   const sourceExerciseName = extractDailyMissionRepairSource(row, extractExerciseName);
   const canonicalExerciseName = resolveSupportedMissionExerciseName(sourceExerciseName);
   const canonicalExerciseDbId = resolveStrictSupportedMissionExerciseDbId(sourceExerciseName);
+  const isSupportedRouteMission = isSupportedRouteMissionExercise(sourceExerciseName);
   const explicitExerciseDbId =
     typeof row.exercise_db_id === "string" && row.exercise_db_id.trim().length > 0
       ? row.exercise_db_id.trim()
       : null;
+
+  if (isSupportedRouteMission) {
+    return false;
+  }
 
   if (!canonicalExerciseName || !canonicalExerciseDbId) {
     return true;

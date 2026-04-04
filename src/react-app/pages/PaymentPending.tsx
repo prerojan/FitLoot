@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
-import PaymentStatusPopup from "@/react-app/components/PaymentStatusPopup";
+import PaymentStatusPopup, { type PaymentStatusPopupConfig } from "@/react-app/components/PaymentStatusPopup";
 import LoadingBall from "@/react-app/components/LoadingBall";
 import { ROUTE_PATHS } from "@/react-app/auth/constants";
 import { useAuth } from "@/react-app/auth/context";
+import { getAndroidDownloadInfoForCurrentEnvironment } from "@/react-app/services/androidAppDownload";
 import { hasPlanAccess } from "@/react-app/services/authService";
+import { getHostContext } from "@/react-app/services/runtime/hostRuntime";
 import { api } from "@/react-app/utils/api";
 import {
   completeActivationAndEnterApp,
@@ -57,14 +59,10 @@ export default function PaymentPending() {
   const [method, setMethod] = useState<PaymentMethod>("card");
   const [activationConfirmed, setActivationConfirmed] = useState(false);
   const [activationCompletionInProgress, setActivationCompletionInProgress] = useState(false);
-  const [statusPopup, setStatusPopup] = useState<{
-    title: string;
-    message: string;
-    badge?: string;
-    tone: "success" | "warning" | "error";
-    actionLabel?: string;
-    onAction?: (() => void) | undefined;
-  } | null>(null);
+  const [statusPopup, setStatusPopup] = useState<PaymentStatusPopupConfig | null>(null);
+  const androidDownloadInfo = useMemo(() => {
+    return getHostContext().platform === "android" ? null : getAndroidDownloadInfoForCurrentEnvironment();
+  }, []);
 
   const clearScheduledPoll = useCallback(() => {
     // Cancela o timer atual antes de reagendar qualquer consulta.
@@ -123,14 +121,25 @@ export default function PaymentPending() {
         origin: user?.onboarding_completed === 1 ? "checkout" : "onboarding",
         outcome: "paid",
       });
+      const successMessage = androidDownloadInfo
+        ? `${completionCopy.localMessage} O APK Android deste ambiente ja esta disponivel para download.`
+        : completionCopy.localMessage;
+      const downloadPayload = androidDownloadInfo
+        ? {
+            downloadLabel: "Baixar app Android",
+            downloadHref: androidDownloadInfo.href,
+            downloadFileName: androidDownloadInfo.fileName,
+          }
+        : {};
 
       setActivationConfirmed(true);
       setActivationCompletionInProgress(true);
       setStatusPopup({
         title: completionCopy.localTitle,
-        message: completionCopy.localMessage,
+        message: successMessage,
         tone: "success",
         ...(completionCopy.badge ? { badge: completionCopy.badge } : {}),
+        ...downloadPayload,
       });
 
       const completionResult = await completeActivationAndEnterApp({
@@ -138,6 +147,13 @@ export default function PaymentPending() {
         refreshAuth: checkAuth,
         onBeforeEnterApp: clearScheduledPoll,
         preEnterAppDelayMs: options?.skipDelay ? 0 : undefined,
+        activationNotice: {
+          title: completionCopy.localTitle,
+          message: successMessage,
+          tone: "success",
+          ...(completionCopy.badge ? { badge: completionCopy.badge } : {}),
+          ...downloadPayload,
+        },
       });
 
       if (completionResult.ok) {

@@ -30,6 +30,7 @@ type AppProps = {
 export default function App({ initialThemeMode = DEFAULT_APP_THEME_MODE }: AppProps) {
   const hostContext = getHostContext();
   const RouterComponent = hostContext.webMode === "bundled" ? HashRouter : BrowserRouter;
+  const shouldRenderVercelTelemetry = hostContext.platform !== "android";
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [themeMode, setThemeModeState] = useState<AppThemeMode>(initialThemeMode);
@@ -132,8 +133,8 @@ export default function App({ initialThemeMode = DEFAULT_APP_THEME_MODE }: AppPr
               <AppRoutes />
             </Suspense>
 
-            <Analytics />
-            <SpeedInsights />
+            {shouldRenderVercelTelemetry ? <Analytics /> : null}
+            {shouldRenderVercelTelemetry ? <SpeedInsights /> : null}
           </RouterComponent>
           {offlineRouteBlocked ? (
             <div className="fl-z-toast fixed inset-x-0 bottom-24 flex justify-center px-4 md:bottom-6">

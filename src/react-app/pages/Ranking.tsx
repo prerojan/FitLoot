@@ -92,16 +92,31 @@ export default function Ranking() {
     }
 
     try {
-      const [nextRanking, nextProfile] = await Promise.all([
-        fetchAndCacheJson<RankingPlayer[]>(rankingPath),
-        fetchAndCacheJson<UserProfile>("/api/profile"),
-      ]);
+      const shouldFetch = (entry: { stale: boolean } | null): boolean => !entry || entry.stale;
+      const requests: Promise<void>[] = [];
 
-      const normalizedRanking = Array.isArray(nextRanking)
-        ? sortRankingEntries(nextRanking.map(normalizeRankingEntry))
-        : [];
-      setRanking(normalizedRanking);
-      setProfile(nextProfile);
+      if (shouldFetch(cachedRanking)) {
+        requests.push(
+          fetchAndCacheJson<RankingPlayer[]>(rankingPath).then((payload) => {
+            const normalizedRanking = Array.isArray(payload)
+              ? sortRankingEntries(payload.map(normalizeRankingEntry))
+              : [];
+            setRanking(normalizedRanking);
+          }),
+        );
+      }
+
+      if (shouldFetch(cachedProfile)) {
+        requests.push(
+          fetchAndCacheJson<UserProfile>("/api/profile").then((payload) => {
+            setProfile(payload);
+          }),
+        );
+      }
+
+      if (requests.length > 0) {
+        await Promise.all(requests);
+      }
     } catch (loadError) {
       if (loadError instanceof ApiRequestError && (loadError.status === 401 || loadError.status === 403)) {
         navigate("/app");

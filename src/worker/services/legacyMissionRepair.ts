@@ -3,6 +3,7 @@ import type {
   MissionMetricType,
 } from "../../shared/types";
 import {
+  isSupportedRouteMissionExercise,
   resolveExerciseDisplayNamePt,
   resolveExerciseMediaFallbackUrlById,
   resolvePreferredExerciseDbId,
@@ -426,6 +427,10 @@ export function createLegacyMissionRepairService(deps: LegacyMissionRepairDeps) 
           missionIdsToRegenerate.push(missionId);
           repairedCount += 1;
         }
+        continue;
+      }
+
+      if (isSupportedRouteMissionExercise(exerciseName)) {
         continue;
       }
 

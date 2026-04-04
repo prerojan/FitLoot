@@ -232,6 +232,11 @@ const supplementalExerciseCatalogBySlug = new Map(
   supplementalExerciseCatalog.map((entry) => [entry.slug, entry] as const),
 );
 
+const REGULAR_ROUTE_MISSION_SLUGS = new Set([
+  "walking-active",
+  "running-light",
+]);
+
 function stripExerciseSeedDiacritics(value: string): string {
   return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 }
@@ -347,6 +352,14 @@ function resolveReplacementEntry(
   if (entry.supportedForMission) return entry;
   if (!entry.replacementSlug) return null;
   return supplementalExerciseCatalogBySlug.get(entry.replacementSlug) ?? null;
+}
+
+function resolveSupportedRouteMissionExerciseEntry(
+  value: string | null | undefined,
+): SupplementalExerciseCatalogEntry | null {
+  const entry = resolveReplacementEntry(resolveSupplementalExerciseCatalogEntry(value));
+  if (!entry) return null;
+  return REGULAR_ROUTE_MISSION_SLUGS.has(entry.slug) ? entry : null;
 }
 
 type StrictSupportedMissionExerciseEntry = SupplementalExerciseCatalogEntry & {
@@ -607,6 +620,18 @@ export function resolveSupportedMissionExerciseName(value: string | null | undef
   return supportedSupplemental?.searchTerms[0] ?? null;
 }
 
+export function resolveSupportedRouteMissionExerciseName(
+  value: string | null | undefined,
+): string | null {
+  return resolveSupportedRouteMissionExerciseEntry(value)?.searchTerms[0] ?? null;
+}
+
+export function isSupportedRouteMissionExercise(
+  value: string | null | undefined,
+): boolean {
+  return resolveSupportedRouteMissionExerciseEntry(value) !== null;
+}
+
 export function resolveStrictSupportedMissionExerciseDbId(value: string | null | undefined): string | null {
   return resolveStrictSupportedMissionExerciseEntry(value)?.exerciseDbId ?? null;
 }
@@ -646,7 +671,9 @@ export function resolveExerciseTargetMuscleLabelsById(
 export function resolveExerciseTargetMuscleLabels(
   value: string | null | undefined,
 ): string[] {
-  const supportedEntry = resolveStrictSupportedMissionExerciseEntry(value);
+  const supportedEntry =
+    resolveStrictSupportedMissionExerciseEntry(value)
+    ?? resolveSupportedRouteMissionExerciseEntry(value);
   return resolveCanonicalExerciseTargetMuscleLabels(supportedEntry);
 }
 

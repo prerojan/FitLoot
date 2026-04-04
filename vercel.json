@@ -30,6 +30,33 @@
           "value": "public, max-age=86400, stale-while-revalidate=86400"
         }
       ]
+    },
+    {
+      "source": "/app-dev-debug.apk",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=86400, stale-while-revalidate=86400"
+        }
+      ]
+    },
+    {
+      "source": "/app-internal-debug.apk",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=86400, stale-while-revalidate=86400"
+        }
+      ]
+    },
+    {
+      "source": "/android-artifacts.json",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=3600, stale-while-revalidate=86400"
+        }
+      ]
     }
   ],
   "rewrites": [

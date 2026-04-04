@@ -3,6 +3,10 @@ export type ActivationNotice = {
   message: string;
   badge?: string | undefined;
   tone: "success" | "warning" | "error";
+  closeLabel?: string | undefined;
+  downloadLabel?: string | undefined;
+  downloadHref?: string | undefined;
+  downloadFileName?: string | undefined;
 };
 
 const ACTIVATION_NOTICE_KEY = "fitloot_activation_notice";
@@ -15,6 +19,10 @@ function isActivationNotice(value: unknown): value is ActivationNotice {
     typeof record.title === "string" &&
     typeof record.message === "string" &&
     (typeof record.badge === "undefined" || typeof record.badge === "string") &&
+    (typeof record.closeLabel === "undefined" || typeof record.closeLabel === "string") &&
+    (typeof record.downloadLabel === "undefined" || typeof record.downloadLabel === "string") &&
+    (typeof record.downloadHref === "undefined" || typeof record.downloadHref === "string") &&
+    (typeof record.downloadFileName === "undefined" || typeof record.downloadFileName === "string") &&
     (tone === "success" || tone === "warning" || tone === "error")
   );
 }

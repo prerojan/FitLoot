@@ -94,7 +94,7 @@ type FallbackMissionPayloadBuilder = (params: {
 const METRIC_TYPE_MAP: Record<MissionExerciseCategory, MissionMetricType> = {
   plank: "duration_seconds",
   isometric: "duration_seconds",
-  walk: "steps",
+  walk: "distance_meters",
   run: "distance_meters",
   yoga: "duration_minutes",
   stretching: "duration_minutes",

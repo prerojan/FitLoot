@@ -135,15 +135,36 @@ export default function Titles() {
     if (hasCache) setLoading(false);
 
     try {
-      const [nextTitles, nextProfile, nextProgression] = await Promise.all([
-        fetchAndCacheJson<TitleWithUnlock[]>("/api/titles"),
-        fetchAndCacheJson<UserProfile>("/api/profile"),
-        fetchAndCacheJson<UserProgression>("/api/progression"),
-      ]);
+      const shouldFetch = (entry: { stale: boolean } | null): boolean => !entry || entry.stale;
+      const requests: Promise<void>[] = [];
 
-      setTitles(Array.isArray(nextTitles) ? sanitizeTitlesForDisplay(nextTitles) : []);
-      setProfile(nextProfile);
-      setProgression(nextProgression);
+      if (shouldFetch(cachedTitles)) {
+        requests.push(
+          fetchAndCacheJson<TitleWithUnlock[]>("/api/titles").then((payload) => {
+            setTitles(Array.isArray(payload) ? sanitizeTitlesForDisplay(payload) : []);
+          }),
+        );
+      }
+
+      if (shouldFetch(cachedProfile)) {
+        requests.push(
+          fetchAndCacheJson<UserProfile>("/api/profile").then((payload) => {
+            setProfile(payload);
+          }),
+        );
+      }
+
+      if (shouldFetch(cachedProgression)) {
+        requests.push(
+          fetchAndCacheJson<UserProgression>("/api/progression").then((payload) => {
+            setProgression(payload);
+          }),
+        );
+      }
+
+      if (requests.length > 0) {
+        await Promise.all(requests);
+      }
     } catch (loadError) {
       if (loadError instanceof ApiRequestError && (loadError.status === 401 || loadError.status === 403)) {
         navigate("/app", { replace: true });

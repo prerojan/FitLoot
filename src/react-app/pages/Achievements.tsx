@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import AppPageShell from "@/react-app/components/AppPageShell";
 import PageLoader from "@/react-app/components/PageLoader";
-import { api, clearJsonCache, fetchAndCacheJson } from "@/react-app/utils/api";
+import { api, clearJsonCache, fetchAndCacheJson, readCachedJson } from "@/react-app/utils/api";
 import type { AchievementWithUnlock, UserProfile, UserProgression } from "@/shared/types";
 import { getAchievementShowcaseStyle, resolveShowcasedAchievement, sanitizeAchievementsForDisplay } from "@/react-app/utils/achievementShowcase";
 
@@ -73,16 +73,56 @@ export default function Achievements() {
   const [honorStatus, setHonorStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
   const loadData = useCallback(async () => {
-    try {
-      const [nextAchievements, nextProfile, nextProgression] = await Promise.all([
-        fetchAndCacheJson<AchievementWithUnlock[]>("/api/achievements"),
-        fetchAndCacheJson<UserProfile>("/api/profile"),
-        fetchAndCacheJson<UserProgression>("/api/progression"),
-      ]);
+    const cachedAchievements = readCachedJson<AchievementWithUnlock[]>("/api/achievements");
+    const cachedProfile = readCachedJson<UserProfile>("/api/profile");
+    const cachedProgression = readCachedJson<UserProgression>("/api/progression");
 
-      setAchievements(Array.isArray(nextAchievements) ? sanitizeAchievementsForDisplay(nextAchievements) : []);
-      setProfile(nextProfile);
-      setProgression(nextProgression);
+    if (cachedAchievements) {
+      setAchievements(Array.isArray(cachedAchievements.data) ? sanitizeAchievementsForDisplay(cachedAchievements.data) : []);
+    }
+    if (cachedProfile) {
+      setProfile(cachedProfile.data);
+    }
+    if (cachedProgression) {
+      setProgression(cachedProgression.data);
+    }
+
+    const hasCache = Boolean(cachedAchievements && cachedProfile && cachedProgression);
+    if (hasCache) {
+      setLoading(false);
+    }
+
+    try {
+      const shouldFetch = (entry: { stale: boolean } | null): boolean => !entry || entry.stale;
+      const requests: Promise<void>[] = [];
+
+      if (shouldFetch(cachedAchievements)) {
+        requests.push(
+          fetchAndCacheJson<AchievementWithUnlock[]>("/api/achievements").then((payload) => {
+            setAchievements(Array.isArray(payload) ? sanitizeAchievementsForDisplay(payload) : []);
+          }),
+        );
+      }
+
+      if (shouldFetch(cachedProfile)) {
+        requests.push(
+          fetchAndCacheJson<UserProfile>("/api/profile").then((payload) => {
+            setProfile(payload);
+          }),
+        );
+      }
+
+      if (shouldFetch(cachedProgression)) {
+        requests.push(
+          fetchAndCacheJson<UserProgression>("/api/progression").then((payload) => {
+            setProgression(payload);
+          }),
+        );
+      }
+
+      if (requests.length > 0) {
+        await Promise.all(requests);
+      }
     } catch (loadError) {
       console.error("Error loading achievements:", loadError);
     } finally {
