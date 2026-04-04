@@ -207,3 +207,25 @@ export async function deleteRuntimeHttpCacheBySession(
     .bind(sessionId)
     .run();
 }
+
+export async function deleteRuntimeHttpCacheBySessionPaths(
+  db: D1Database,
+  sessionId: string,
+  paths: readonly string[],
+): Promise<void> {
+  const normalizedPaths = [...new Set(paths.filter((path) => path.trim().length > 0))];
+  if (normalizedPaths.length === 0) {
+    return;
+  }
+
+  await ensureRuntimeHttpCacheSchema(db);
+  const placeholders = normalizedPaths.map(() => "?").join(", ");
+  await db
+    .prepare(
+      `DELETE FROM runtime_http_cache
+        WHERE session_id = ?
+          AND path IN (${placeholders})`,
+    )
+    .bind(sessionId, ...normalizedPaths)
+    .run();
+}

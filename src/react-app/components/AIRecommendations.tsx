@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Lightbulb, Sparkles, Target, TrendingUp } from "lucide-react";
-import { api } from "@/react-app/utils/api";
+import {
+  ApiRequestError,
+  fetchAndCacheJson,
+  readCachedJson,
+} from "@/react-app/utils/api";
 import LoadingBall from "@/react-app/components/LoadingBall";
 
 type Recommendations = {
@@ -30,6 +34,12 @@ function msUntilNextLocalMidnight(): number {
   const nextMidnight = new Date(now);
   nextMidnight.setHours(24, 0, 0, 0);
   return Math.max(60_000, nextMidnight.getTime() - now.getTime());
+}
+
+const RECOMMENDATIONS_MIN_CACHE_TTL_MS = 5 * 60_000;
+
+function resolveRecommendationsCacheTtlMs(): number {
+  return Math.max(RECOMMENDATIONS_MIN_CACHE_TTL_MS, msUntilNextLocalMidnight());
 }
 
 function parseRecommendations(raw: unknown): Recommendations | null {
@@ -127,16 +137,30 @@ export default function AIRecommendations() {
 
   // Carrega a recomendacao atual e marca quando o backend entrou em modo degradado.
   const loadRecommendations = useCallback(async () => {
-    try {
-      setLoading(true);
-      setError(null);
+    const cached = readCachedJson<RecommendationApiPayload>(
+      "/api/ai/recommendations",
+      resolveRecommendationsCacheTtlMs(),
+    );
 
-      const response = await api("/api/ai/recommendations");
-      if (!response.ok) {
-        throw new Error("Falha ao carregar recomendacoes");
+    if (cached?.data) {
+      const parsedCached = parseRecommendations(cached.data.recommendations);
+      if (parsedCached) {
+        setRecommendations(parsedCached);
+        setDegraded(Boolean(cached.data.degraded));
+        setLoading(false);
+      }
+    }
+
+    try {
+      if (!cached) {
+        setLoading(true);
+      }
+      setError(null);
+      if (cached && !cached.stale) {
+        return;
       }
 
-      const data = (await response.json()) as RecommendationApiPayload;
+      const data = await fetchAndCacheJson<RecommendationApiPayload>("/api/ai/recommendations");
       const parsed = parseRecommendations(data.recommendations);
       if (!parsed) {
         throw new Error("Payload de recomendacoes invalido");
@@ -144,8 +168,14 @@ export default function AIRecommendations() {
 
       setRecommendations(parsed);
       setDegraded(Boolean(data.degraded));
-    } catch {
-      setError("Nao foi possivel carregar as recomendacoes agora.");
+    } catch (error) {
+      if (!(cached?.data)) {
+        setError(
+          error instanceof ApiRequestError && error.message.trim().length > 0
+            ? error.message
+            : "Nao foi possivel carregar as recomendacoes agora.",
+        );
+      }
     } finally {
       setLoading(false);
     }

@@ -3,6 +3,11 @@ type RuntimeProjectionRecord = {
   updated_at: number;
 };
 
+export type RuntimeProjectionScope =
+  | "bootstrap"
+  | "profile"
+  | `dashboard:${string}`;
+
 const RUNTIME_PROJECTION_SCHEMA_TTL_MS = 60_000;
 const RUNTIME_PROJECTION_CLEANUP_INTERVAL_MS = 60_000;
 const RUNTIME_PROJECTION_RETENTION_MS = 24 * 60 * 60 * 1000;
@@ -301,4 +306,48 @@ export async function deleteRuntimeUserProjections(
     .prepare("DELETE FROM runtime_dashboard_projection WHERE user_id = ?")
     .bind(userId)
     .run();
+}
+
+export async function deleteRuntimeUserProjectionScopes(
+  db: D1Database,
+  userId: string,
+  scopes: readonly RuntimeProjectionScope[],
+): Promise<void> {
+  const normalizedScopes = [...new Set(scopes)];
+  if (normalizedScopes.length === 0) {
+    return;
+  }
+
+  await ensureRuntimeProjectionSchema(db);
+
+  if (normalizedScopes.includes("profile")) {
+    await db
+      .prepare("DELETE FROM runtime_profile_projection WHERE user_id = ?")
+      .bind(userId)
+      .run();
+  }
+
+  if (normalizedScopes.includes("bootstrap")) {
+    await db
+      .prepare("DELETE FROM runtime_bootstrap_projection WHERE user_id = ?")
+      .bind(userId)
+      .run();
+  }
+
+  const dashboardKeys = normalizedScopes
+    .filter((scope): scope is `dashboard:${string}` => scope.startsWith("dashboard:"))
+    .map((scope) => scope.slice("dashboard:".length))
+    .filter((key) => key.length > 0);
+
+  if (dashboardKeys.length > 0) {
+    const placeholders = dashboardKeys.map(() => "?").join(", ");
+    await db
+      .prepare(
+        `DELETE FROM runtime_dashboard_projection
+          WHERE user_id = ?
+            AND projection_key IN (${placeholders})`,
+      )
+      .bind(userId, ...dashboardKeys)
+      .run();
+  }
 }

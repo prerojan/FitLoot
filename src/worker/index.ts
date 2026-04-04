@@ -85,10 +85,15 @@ import {
 } from "./core/sessionAuth";
 import {
   deleteRuntimeHttpCacheBySession,
+  deleteRuntimeHttpCacheBySessionPaths,
   readRuntimeHttpCache,
   upsertRuntimeHttpCache,
 } from "./core/runtimeHttpCacheStore";
-import { deleteRuntimeUserProjections } from "./core/runtimeUserProjectionStore";
+import {
+  deleteRuntimeUserProjectionScopes,
+  deleteRuntimeUserProjections,
+} from "./core/runtimeUserProjectionStore";
+import { resolveRequestInvalidationPlan } from "./core/requestInvalidationPlan";
 import { registerFriendsRoutes } from "./routes/friends";
 import { registerHealthRoutes } from "./routes/health";
 import { registerMetricsRoutes } from "./routes/metrics";
@@ -1432,6 +1437,28 @@ function invalidateSessionScopedHotCache(sessionId: string): void {
   }
 }
 
+function invalidateSessionScopedHotCachePaths(
+  sessionId: string,
+  paths: readonly string[],
+): void {
+  const normalizedPaths = [...new Set(paths.filter((path) => path.trim().length > 0))];
+  if (normalizedPaths.length === 0) {
+    return;
+  }
+
+  const prefix = `${sessionId}:`;
+  for (const key of hotGetResponseCache.keys()) {
+    if (!key.startsWith(prefix)) {
+      continue;
+    }
+
+    const matchedPath = normalizedPaths.some((path) => key.startsWith(`${prefix}${path}:`));
+    if (matchedPath) {
+      hotGetResponseCache.delete(key);
+    }
+  }
+}
+
 app.onError((error, c) => {
   console.error("[worker][unhandled]", {
     path: c.req.path,
@@ -1646,21 +1673,25 @@ app.use("/api/*", async (c, next) => {
 
   await next();
 
-  const shouldInvalidateMutationCache =
-    method !== "GET" &&
-    method !== "HEAD" &&
-    method !== "OPTIONS";
-  const shouldInvalidateLogoutCache = method === "GET" && c.req.path === "/api/logout";
-  const shouldInvalidateAfterRequest =
-    c.res.status < 500 &&
-    (shouldInvalidateMutationCache || shouldInvalidateLogoutCache);
-
-  if (shouldInvalidateAfterRequest && sessionId) {
-    invalidateSessionScopedHotCache(sessionId);
+  if (c.res.status >= 500) {
+    return;
   }
 
-  if (shouldInvalidateAfterRequest && runtimeHotCacheDb) {
-    if (sessionId) {
+  const invalidationPlan = resolveRequestInvalidationPlan(method, c.req.path);
+  const shouldInvalidateAllHotCache = invalidationPlan.hotCachePaths === "all";
+  const hotCachePaths =
+    invalidationPlan.hotCachePaths === "all" ? [] : invalidationPlan.hotCachePaths;
+
+  if (sessionId) {
+    if (shouldInvalidateAllHotCache) {
+      invalidateSessionScopedHotCache(sessionId);
+    } else if (hotCachePaths.length > 0) {
+      invalidateSessionScopedHotCachePaths(sessionId, hotCachePaths);
+    }
+  }
+
+  if (runtimeHotCacheDb && sessionId) {
+    if (shouldInvalidateAllHotCache) {
       c.executionCtx.waitUntil(
         deleteRuntimeHttpCacheBySession(runtimeHotCacheDb, sessionId).catch((runtimeCacheError) => {
           console.warn("[hot-get-cache][runtime-invalidate]", {
@@ -1669,21 +1700,56 @@ app.use("/api/*", async (c, next) => {
           });
         }),
       );
-    }
-
-    const requestUser = tryGetRequestUser(c);
-    if (requestUser?.id) {
+    } else if (hotCachePaths.length > 0) {
       c.executionCtx.waitUntil(
-        deleteRuntimeUserProjections(runtimeHotCacheDb, requestUser.id).catch(
-          (runtimeProjectionError) => {
-            console.warn("[runtime-projections][invalidate]", {
+        deleteRuntimeHttpCacheBySessionPaths(runtimeHotCacheDb, sessionId, hotCachePaths).catch(
+          (runtimeCacheError) => {
+            console.warn("[hot-get-cache][runtime-invalidate-paths]", {
               path: c.req.path,
-              userId: requestUser.id,
-              message: getErrorMessage(runtimeProjectionError),
+              message: getErrorMessage(runtimeCacheError),
             });
           },
         ),
       );
+    }
+  }
+
+  if (runtimeHotCacheDb) {
+    const requestUser = tryGetRequestUser(c);
+    if (requestUser?.id) {
+      const shouldInvalidateAllProjections = invalidationPlan.runtimeProjectionScopes === "all";
+      const projectionScopes =
+        invalidationPlan.runtimeProjectionScopes === "all"
+          ? []
+          : invalidationPlan.runtimeProjectionScopes;
+
+      if (shouldInvalidateAllProjections) {
+        c.executionCtx.waitUntil(
+          deleteRuntimeUserProjections(runtimeHotCacheDb, requestUser.id).catch(
+            (runtimeProjectionError) => {
+              console.warn("[runtime-projections][invalidate]", {
+                path: c.req.path,
+                userId: requestUser.id,
+                message: getErrorMessage(runtimeProjectionError),
+              });
+            },
+          ),
+        );
+      } else if (projectionScopes.length > 0) {
+        c.executionCtx.waitUntil(
+          deleteRuntimeUserProjectionScopes(
+            runtimeHotCacheDb,
+            requestUser.id,
+            projectionScopes,
+          ).catch((runtimeProjectionError) => {
+            console.warn("[runtime-projections][invalidate-scopes]", {
+              path: c.req.path,
+              userId: requestUser.id,
+              message: getErrorMessage(runtimeProjectionError),
+            });
+          }),
+        );
+      }
     }
   }
 });
