@@ -8,6 +8,7 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.view.View
@@ -50,6 +51,9 @@ class MainActivity : AppCompatActivity() {
     private var pendingGeolocationOrigin: String? = null
     private var pendingGeolocationCallback: GeolocationPermissions.Callback? = null
     private var isNetworkCallbackRegistered = false
+    private var hasMainFrameLoadFailed = false
+    private var hasRetriedWithProductionHost = false
+    private var activeWebAppUrl: String = FitLootWebAppConfig.webAppUrl
 
     private val connectivityManager by lazy {
         getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager
@@ -123,12 +127,19 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        binding.webViewRetryButton.setOnClickListener {
+            setupWebView()
+        }
 
         setupWebView()
         registerNetworkCallback()
     }
 
     private fun setupWebView(): Boolean {
+        hasMainFrameLoadFailed = false
+        hasRetriedWithProductionHost = false
+        activeWebAppUrl = FitLootWebAppConfig.resolveInitialWebAppUrl(isProbablyEmulator())
+        Log.i(TAG, "Loading FitLoot web shell from $activeWebAppUrl")
         val createdWebView = runCatching { WebView(this) }.getOrElse { error ->
             Log.e(TAG, "Failed to instantiate WebView", error)
             showWebViewUnavailable(error)
@@ -237,10 +248,26 @@ class MainActivity : AppCompatActivity() {
             onGeolocationPermissionRequest = { origin, callback ->
                 handleGeolocationPermissionRequest(origin, callback)
             },
+            onPageStarted = { url ->
+                Log.i(TAG, "WebView started loading $url")
+            },
+            onPageFinished = { url ->
+                Log.i(TAG, "WebView finished loading $url")
+                if (!hasMainFrameLoadFailed) {
+                    showWebViewReady()
+                }
+            },
+            onPageLoadFailed = { failingUrl, reason ->
+                if (tryRecoverFromDevTimeout(createdWebView, failingUrl, reason)) {
+                    return@configure
+                }
+                hasMainFrameLoadFailed = true
+                showWebLoadFailed(failingUrl, reason)
+            },
         )
 
         createdWebView.addJavascriptInterface(webAppInterface, NativeBridgeContract.BRIDGE_NAME)
-        FitLootWebViewConfigurator.loadHome(createdWebView)
+        createdWebView.loadUrl(activeWebAppUrl)
         locationTracker.emitPermissionStatus()
         dispatchNetworkStatusChanged()
         return true
@@ -255,6 +282,73 @@ class MainActivity : AppCompatActivity() {
             } else {
                 "Nao foi possivel iniciar a camada web do FitLoot neste aparelho. Atualize o Android System WebView ou o Google Chrome e tente novamente."
             }
+    }
+
+    private fun showWebViewReady() {
+        binding.webViewContainer.visibility = View.VISIBLE
+        binding.webViewFallback.visibility = View.GONE
+    }
+
+    private fun showWebLoadFailed(failingUrl: String?, reason: String) {
+        Log.e(TAG, "Displaying fallback for failed web load. url=$failingUrl reason=$reason")
+        binding.webViewContainer.visibility = View.GONE
+        binding.webViewFallback.visibility = View.VISIBLE
+
+        val normalizedFailingUrl = failingUrl ?: FitLootWebAppConfig.webAppUrl
+        val baseMessage = StringBuilder().apply {
+            append("Nao foi possivel carregar o FitLoot em ")
+            append(normalizedFailingUrl)
+            append(". ")
+            append(reason)
+        }
+
+        if (FitLootWebAppConfig.isDevBuild) {
+            baseMessage.append("\n\nNo devDebug em aparelho fisico, confirme que o webapp esta rodando com 'npm run dev -- --host 0.0.0.0' e que o host configurado em FITLOOT_DEV_WEB_BASE_URL aponta para o IP do computador na mesma rede.")
+            baseMessage.append("\nHosts permitidos: ")
+            baseMessage.append(FitLootWebAppConfig.allowedHostsAsText())
+        }
+
+        binding.webViewFallbackMessage.text = baseMessage.toString()
+    }
+
+    private fun tryRecoverFromDevTimeout(
+        webView: WebView,
+        failingUrl: String?,
+        reason: String,
+    ): Boolean {
+        if (!FitLootWebAppConfig.isDevBuild || hasRetriedWithProductionHost) {
+            return false
+        }
+
+        val normalizedFailingUrl = failingUrl ?: activeWebAppUrl
+        val isLocalDevUrl = normalizedFailingUrl.startsWith(FitLootWebAppConfig.webBaseUrl)
+        if (!isLocalDevUrl || activeWebAppUrl == FitLootWebAppConfig.productionWebAppUrl) {
+            return false
+        }
+
+        Log.w(
+            TAG,
+            "Dev host load failed for $normalizedFailingUrl ($reason). Falling back to ${FitLootWebAppConfig.productionWebAppUrl}",
+        )
+
+        hasRetriedWithProductionHost = true
+        hasMainFrameLoadFailed = false
+        activeWebAppUrl = FitLootWebAppConfig.productionWebAppUrl
+        binding.webViewContainer.visibility = View.VISIBLE
+        binding.webViewFallback.visibility = View.GONE
+        webView.loadUrl(activeWebAppUrl)
+        return true
+    }
+
+    private fun isProbablyEmulator(): Boolean {
+        return Build.FINGERPRINT.startsWith("generic") ||
+            Build.FINGERPRINT.startsWith("unknown") ||
+            Build.MODEL.contains("google_sdk") ||
+            Build.MODEL.contains("Emulator") ||
+            Build.MODEL.contains("Android SDK built for x86") ||
+            Build.MANUFACTURER.contains("Genymotion") ||
+            (Build.BRAND.startsWith("generic") && Build.DEVICE.startsWith("generic")) ||
+            "google_sdk" == Build.PRODUCT
     }
 
     private fun requestAppPermissions() {

@@ -7,7 +7,7 @@ import { useAuth } from "@/react-app/auth/context";
 import { hasPlanAccess } from "@/react-app/services/authService";
 import { api } from "@/react-app/utils/api";
 import {
-  completeActivationAndReturnToLogin,
+  completeActivationAndEnterApp,
   resolveActivationCompletionCopy,
 } from "@/react-app/utils/activationCompletion";
 import { clearOnboardingDraft } from "@/react-app/utils/onboardingDraft";
@@ -44,7 +44,7 @@ function formatAmount(amountInCents: number | null): string | null {
 }
 
 export default function PaymentPending() {
-  const { user, logout } = useAuth();
+  const { user, checkAuth, logout } = useAuth();
   const navigate = useNavigate();
   const pollTimerRef = useRef<number | null>(null);
   const pollAttemptRef = useRef(0);
@@ -130,15 +130,14 @@ export default function PaymentPending() {
         title: completionCopy.localTitle,
         message: completionCopy.localMessage,
         tone: "success",
-        ...(completionCopy.loginNotice.badge ? { badge: completionCopy.loginNotice.badge } : {}),
+        ...(completionCopy.badge ? { badge: completionCopy.badge } : {}),
       });
 
-      const completionResult = await completeActivationAndReturnToLogin({
+      const completionResult = await completeActivationAndEnterApp({
         navigate,
-        logout,
-        notice: completionCopy.loginNotice,
-        onBeforeLogout: clearScheduledPoll,
-        preLogoutDelayMs: options?.skipDelay ? 0 : undefined,
+        refreshAuth: checkAuth,
+        onBeforeEnterApp: clearScheduledPoll,
+        preEnterAppDelayMs: options?.skipDelay ? 0 : undefined,
       });
 
       if (completionResult.ok) {
@@ -150,14 +149,14 @@ export default function PaymentPending() {
         title: completionCopy.localTitle,
         message: completionResult.errorMessage,
         tone: "error",
-        actionLabel: "Tentar encerrar sessao novamente",
+        actionLabel: "Tentar entrar novamente",
         onAction: () => {
           void finalizeActivatedAccess({ skipDelay: true });
         },
-        ...(completionCopy.loginNotice.badge ? { badge: completionCopy.loginNotice.badge } : {}),
+        ...(completionCopy.badge ? { badge: completionCopy.badge } : {}),
       });
     },
-    [clearScheduledPoll, logout, navigate, user?.onboarding_completed],
+    [checkAuth, clearScheduledPoll, navigate, user?.onboarding_completed],
   );
 
   const verifyStatus = useCallback(async (options: VerifyStatusOptions = {}) => {
@@ -317,10 +316,10 @@ export default function PaymentPending() {
           {activationCompletionInProgress ? (
             <span className="inline-flex items-center gap-2">
               <LoadingBall size="sm" />
-              Encerrando sessao para ir ao login
+              Entrando no app
             </span>
           ) : activationConfirmed ? (
-            "Tentar encerrar sessao novamente"
+            "Tentar entrar novamente"
           ) : checking ? (
             <span className="inline-flex items-center gap-2">
               <LoadingBall size="sm" />

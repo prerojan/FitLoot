@@ -4,16 +4,22 @@ import android.annotation.SuppressLint
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.util.Log
+import android.webkit.ConsoleMessage
 import android.webkit.GeolocationPermissions
 import android.webkit.PermissionRequest
 import android.webkit.ValueCallback
+import android.webkit.WebResourceError
 import android.webkit.WebChromeClient
+import android.webkit.WebResourceResponse
 import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import com.fitloot.BuildConfig
 
 object FitLootWebViewConfigurator {
+    private const val TAG = "FitLootWebView"
 
     @SuppressLint("SetJavaScriptEnabled")
     fun configure(
@@ -22,7 +28,14 @@ object FitLootWebViewConfigurator {
         onShowFileChooser: (ValueCallback<Array<Uri>>?, WebChromeClient.FileChooserParams?) -> Boolean,
         onPermissionRequest: (PermissionRequest) -> Unit,
         onGeolocationPermissionRequest: (String, GeolocationPermissions.Callback) -> Unit,
+        onPageStarted: (String?) -> Unit,
+        onPageFinished: (String?) -> Unit,
+        onPageLoadFailed: (String?, String) -> Unit,
     ) {
+        if (BuildConfig.DEBUG) {
+            WebView.setWebContentsDebuggingEnabled(true)
+        }
+
         webView.settings.apply {
             javaScriptEnabled = true
             domStorageEnabled = true
@@ -40,6 +53,14 @@ object FitLootWebViewConfigurator {
         }
 
         webView.webViewClient = object : WebViewClient() {
+            override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
+                onPageStarted(url)
+            }
+
+            override fun onPageFinished(view: WebView?, url: String?) {
+                onPageFinished(url)
+            }
+
             override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
                 val targetUri = request?.url ?: return false
                 val targetUrl = targetUri.toString()
@@ -49,6 +70,38 @@ object FitLootWebViewConfigurator {
 
                 openExternalUrl(Intent(Intent.ACTION_VIEW, targetUri))
                 return true
+            }
+
+            override fun onReceivedError(
+                view: WebView?,
+                request: WebResourceRequest?,
+                error: WebResourceError?,
+            ) {
+                super.onReceivedError(view, request, error)
+                if (request?.isForMainFrame != true) {
+                    return
+                }
+
+                val failingUrl = request.url?.toString()
+                val description = error?.description?.toString()?.ifBlank { null } ?: "Falha ao carregar o webapp."
+                Log.e(TAG, "Main frame load failed for $failingUrl: $description")
+                onPageLoadFailed(failingUrl, description)
+            }
+
+            override fun onReceivedHttpError(
+                view: WebView?,
+                request: WebResourceRequest?,
+                errorResponse: WebResourceResponse?,
+            ) {
+                super.onReceivedHttpError(view, request, errorResponse)
+                if (request?.isForMainFrame != true) {
+                    return
+                }
+
+                val failingUrl = request.url?.toString()
+                val reason = "HTTP ${errorResponse?.statusCode ?: 0} ao carregar o webapp."
+                Log.e(TAG, "Main frame HTTP error for $failingUrl: $reason")
+                onPageLoadFailed(failingUrl, reason)
             }
         }
 
@@ -75,6 +128,23 @@ object FitLootWebViewConfigurator {
                 }
 
                 onGeolocationPermissionRequest(origin, callback)
+            }
+
+            override fun onConsoleMessage(consoleMessage: ConsoleMessage?): Boolean {
+                if (consoleMessage == null) {
+                    return super.onConsoleMessage(null)
+                }
+
+                val renderedMessage =
+                    "${consoleMessage.messageLevel()} ${consoleMessage.sourceId()}:${consoleMessage.lineNumber()} ${consoleMessage.message()}"
+
+                when (consoleMessage.messageLevel()) {
+                    ConsoleMessage.MessageLevel.ERROR -> Log.e(TAG, renderedMessage)
+                    ConsoleMessage.MessageLevel.WARNING -> Log.w(TAG, renderedMessage)
+                    else -> Log.d(TAG, renderedMessage)
+                }
+
+                return super.onConsoleMessage(consoleMessage)
             }
         }
     }

@@ -1,12 +1,6 @@
 import type { NavigateFunction } from "react-router";
 
 import { ROUTE_PATHS } from "@/react-app/auth/constants";
-import type { ActivationNotice } from "@/react-app/utils/activationNotice";
-import {
-  clearActivationNotice,
-  queueActivationNotice,
-} from "@/react-app/utils/activationNotice";
-import { api } from "@/react-app/utils/api";
 import { clearOnboardingDraft } from "@/react-app/utils/onboardingDraft";
 
 export type ActivationFlowOrigin = "onboarding" | "checkout";
@@ -15,22 +9,21 @@ export type ActivationOutcome = "vip" | "paid";
 export type ActivationCompletionCopy = {
   localTitle: string;
   localMessage: string;
-  loginNotice: ActivationNotice;
+  badge?: string;
 };
 
-type CompleteActivationAndReturnToLoginParams = {
+type CompleteActivationAndEnterAppParams = {
   navigate: NavigateFunction;
-  logout: () => void;
-  notice: ActivationNotice;
-  onBeforeLogout?: (() => void) | undefined;
-  preLogoutDelayMs?: number | undefined;
+  refreshAuth: () => Promise<void>;
+  onBeforeEnterApp?: (() => void) | undefined;
+  preEnterAppDelayMs?: number | undefined;
 };
 
 type ActivationCompletionResult =
   | { ok: true }
   | { ok: false; errorMessage: string };
 
-const DEFAULT_PRE_LOGOUT_DELAY_MS = 650;
+const DEFAULT_PRE_ENTER_APP_DELAY_MS = 650;
 
 function wait(delayMs: number): Promise<void> {
   if (!Number.isFinite(delayMs) || delayMs <= 0) {
@@ -52,14 +45,8 @@ export function resolveActivationCompletionCopy(params: {
     return {
       localTitle: "Conta criada e VIP ativado",
       localMessage:
-        "Sua conta foi criada e o VIP foi ativado com sucesso. Encerrando sua sessao para levar voce ao login.",
-      loginNotice: {
-        title: "Conta criada e VIP ativado",
-        message:
-          "Sua conta foi criada e o VIP foi ativado com sucesso. Faca login para entrar no app.",
-        badge: "VIP ativo",
-        tone: "success",
-      },
+        "Sua conta foi criada e o VIP foi ativado com sucesso. Preparando sua entrada no app.",
+      badge: "VIP ativo",
     };
   }
 
@@ -67,13 +54,8 @@ export function resolveActivationCompletionCopy(params: {
     return {
       localTitle: "VIP ativado com sucesso",
       localMessage:
-        "Seu VIP foi ativado com sucesso. Encerrando sua sessao para levar voce ao login.",
-      loginNotice: {
-        title: "VIP ativado com sucesso",
-        message: "Seu VIP foi ativado com sucesso. Faca login para entrar no app.",
-        badge: "VIP ativo",
-        tone: "success",
-      },
+        "Seu VIP foi ativado com sucesso. Preparando sua entrada no app.",
+      badge: "VIP ativo",
     };
   }
 
@@ -81,54 +63,37 @@ export function resolveActivationCompletionCopy(params: {
     return {
       localTitle: "Conta criada e acesso liberado",
       localMessage:
-        "Sua conta foi criada e o pagamento foi aprovado. Encerrando sua sessao para levar voce ao login.",
-      loginNotice: {
-        title: "Conta criada e acesso liberado",
-        message:
-          "Sua conta foi criada e o pagamento foi aprovado. Faca login para entrar no app.",
-        badge: "Acesso liberado",
-        tone: "success",
-      },
+        "Sua conta foi criada e o pagamento foi aprovado. Preparando sua entrada no app.",
+      badge: "Acesso liberado",
     };
   }
 
   return {
     localTitle: "Pagamento aprovado",
     localMessage:
-      "Seu pagamento foi aprovado e o acesso foi liberado. Encerrando sua sessao para levar voce ao login.",
-    loginNotice: {
-      title: "Pagamento aprovado",
-      message: "Seu acesso foi liberado com sucesso. Faca login para entrar no app.",
-      badge: "Acesso liberado",
-      tone: "success",
-    },
+      "Seu pagamento foi aprovado e o acesso foi liberado. Preparando sua entrada no app.",
+    badge: "Acesso liberado",
   };
 }
 
-export async function completeActivationAndReturnToLogin(
-  params: CompleteActivationAndReturnToLoginParams,
+export async function completeActivationAndEnterApp(
+  params: CompleteActivationAndEnterAppParams,
 ): Promise<ActivationCompletionResult> {
-  params.onBeforeLogout?.();
+  params.onBeforeEnterApp?.();
   clearOnboardingDraft();
-  queueActivationNotice(params.notice);
 
-  await wait(params.preLogoutDelayMs ?? DEFAULT_PRE_LOGOUT_DELAY_MS);
+  await wait(params.preEnterAppDelayMs ?? DEFAULT_PRE_ENTER_APP_DELAY_MS);
 
   try {
-    const response = await api("/api/logout");
-    if (!response.ok) {
-      throw new Error(`logout_failed:${response.status}`);
-    }
+    await params.refreshAuth();
   } catch {
-    clearActivationNotice();
     return {
       ok: false,
       errorMessage:
-        "A ativacao foi concluida, mas nao foi possivel encerrar a sessao com seguranca. Tente novamente para ir ao login.",
+        "A ativacao foi concluida, mas nao foi possivel atualizar sua sessao agora. Tente entrar no app novamente em instantes.",
     };
   }
 
-  params.logout();
-  params.navigate(ROUTE_PATHS.login, { replace: true });
+  params.navigate(ROUTE_PATHS.app, { replace: true });
   return { ok: true };
 }

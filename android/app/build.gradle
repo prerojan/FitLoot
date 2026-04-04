@@ -1,6 +1,5 @@
 plugins {
     id 'com.android.application'
-    id 'org.jetbrains.kotlin.android'
 }
 
 def releaseStoreFile = (findProperty("FITLOOT_ANDROID_KEYSTORE") ?: System.getenv("FITLOOT_ANDROID_KEYSTORE"))?.toString()
@@ -17,8 +16,8 @@ def devAllowedHosts = explicitDevAllowedHosts ?: [devWebUri.host, "localhost", "
     .join(",")
 
 android {
-    namespace 'com.fitloot'
-    compileSdk 34
+    namespace = 'com.fitloot'
+    compileSdk = 34
 
     signingConfigs {
         debug {}
@@ -35,15 +34,15 @@ android {
     }
 
     defaultConfig {
-        applicationId "com.fitloot"
-        minSdk 26
-        targetSdk 34
-        versionCode 1
-        versionName "1.0"
+        applicationId = "com.fitloot"
+        minSdk = 26
+        targetSdk = 34
+        versionCode = 1
+        versionName = "1.0"
 
-        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
-            useSupportLibrary true
+            useSupportLibrary = true
         }
     }
 
@@ -51,9 +50,9 @@ android {
 
     productFlavors {
         dev {
-            dimension "environment"
-            applicationIdSuffix ".dev"
-            versionNameSuffix "-dev"
+            dimension = "environment"
+            applicationIdSuffix = ".dev"
+            versionNameSuffix = "-dev"
             buildConfigField "String", "WEB_BASE_URL", "\"${devWebBaseUrl}\""
             buildConfigField "String", "ALLOWED_HOSTS", "\"${devAllowedHosts}\""
             buildConfigField "String", "WEB_MODE", '"remote"'
@@ -62,9 +61,9 @@ android {
         }
 
         internal {
-            dimension "environment"
-            applicationIdSuffix ".internal"
-            versionNameSuffix "-internal"
+            dimension = "environment"
+            applicationIdSuffix = ".internal"
+            versionNameSuffix = "-internal"
             buildConfigField "String", "WEB_BASE_URL", '"https://fitloot.vercel.app"'
             buildConfigField "String", "ALLOWED_HOSTS", '"fitloot.vercel.app"'
             buildConfigField "String", "WEB_MODE", '"remote"'
@@ -73,7 +72,7 @@ android {
         }
 
         prod {
-            dimension "environment"
+            dimension = "environment"
             buildConfigField "String", "WEB_BASE_URL", '"https://fitloot.vercel.app"'
             buildConfigField "String", "ALLOWED_HOSTS", '"fitloot.vercel.app"'
             buildConfigField "String", "WEB_MODE", '"remote"'
@@ -84,25 +83,22 @@ android {
 
     buildTypes {
         debug {
-            debuggable true
+            debuggable = true
         }
         release {
-            minifyEnabled true
-            shrinkResources true
+            minifyEnabled = true
+            shrinkResources = true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
-            signingConfig signingConfigs.release
+            signingConfig = signingConfigs.release
         }
     }
     compileOptions {
-        sourceCompatibility JavaVersion.VERSION_17
-        targetCompatibility JavaVersion.VERSION_17
-    }
-    kotlinOptions {
-        jvmTarget = '17'
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
     }
     buildFeatures {
-        viewBinding true
-        buildConfig true
+        viewBinding = true
+        buildConfig = true
     }
 }
 

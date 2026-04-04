@@ -61,6 +61,44 @@ export function getPasswordMismatchMessage(password: string, confirmPassword: st
   return "As senhas nao coincidem";
 }
 
+function extractOnboardingErrorMessage(value: unknown): string | null {
+  if (typeof value === "string") {
+    const trimmedValue = value.trim();
+    return trimmedValue || null;
+  }
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const nestedMessage = extractOnboardingErrorMessage(item);
+      if (nestedMessage) return nestedMessage;
+    }
+    return null;
+  }
+
+  if (value && typeof value === "object") {
+    if ("error" in value) {
+      const nestedMessage = extractOnboardingErrorMessage((value as { error?: unknown }).error);
+      if (nestedMessage) return nestedMessage;
+    }
+
+    if ("message" in value) {
+      const nestedMessage = extractOnboardingErrorMessage((value as { message?: unknown }).message);
+      if (nestedMessage) return nestedMessage;
+    }
+
+    if ("issues" in value) {
+      const nestedMessage = extractOnboardingErrorMessage((value as { issues?: unknown }).issues);
+      if (nestedMessage) return nestedMessage;
+    }
+  }
+
+  return null;
+}
+
+export function resolveOnboardingErrorMessage(value: unknown, fallback: string): string {
+  return extractOnboardingErrorMessage(value) ?? fallback;
+}
+
 export function goalPlanCopy(goal: ProfileStep["main_goal"]) {
   switch (goal) {
     case "perder_peso":

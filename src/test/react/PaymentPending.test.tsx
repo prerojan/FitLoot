@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const navigate = vi.fn();
 const logout = vi.fn();
 const apiMock = vi.fn();
-const completeActivationAndReturnToLogin = vi.fn(async () => ({ ok: true as const }));
+const completeActivationAndEnterApp = vi.fn(async () => ({ ok: true as const }));
 
 vi.mock("react-router", async () => {
   const actual = await vi.importActual<typeof import("react-router")>("react-router");
@@ -27,6 +27,7 @@ vi.mock("../../react-app/auth/context", () => ({
       plan_status: "pending" as const,
       payment_method: "pix" as const,
     },
+    checkAuth: vi.fn(async () => undefined),
     logout,
   }),
 }));
@@ -40,18 +41,13 @@ vi.mock("../../react-app/utils/onboardingDraft", () => ({
 }));
 
 vi.mock("../../react-app/utils/activationCompletion", () => ({
-  completeActivationAndReturnToLogin: (
-    ...args: Parameters<typeof completeActivationAndReturnToLogin>
-  ) => completeActivationAndReturnToLogin(...args),
+  completeActivationAndEnterApp: (
+    ...args: Parameters<typeof completeActivationAndEnterApp>
+  ) => completeActivationAndEnterApp(...args),
   resolveActivationCompletionCopy: () => ({
     localTitle: "Conta criada e acesso liberado",
-    localMessage: "Sua conta foi criada e o pagamento foi aprovado. Encerrando sua sessao para levar voce ao login.",
-    loginNotice: {
-      title: "Conta criada e acesso liberado",
-      message: "Sua conta foi criada e o pagamento foi aprovado. Faca login para entrar no app.",
-      badge: "Acesso liberado",
-      tone: "success" as const,
-    },
+    localMessage: "Sua conta foi criada e o pagamento foi aprovado. Preparando sua entrada no app.",
+    badge: "Acesso liberado",
   }),
 }));
 
@@ -91,11 +87,11 @@ describe("PaymentPending", () => {
     });
 
     await waitFor(() => {
-      expect(completeActivationAndReturnToLogin).toHaveBeenCalled();
+      expect(completeActivationAndEnterApp).toHaveBeenCalled();
     });
 
     expect(
-      screen.getByText(/Encerrando sua sessao para levar voce ao login/i),
+      screen.getByText(/Preparando sua entrada no app/i),
     ).toBeInTheDocument();
     expect(navigate).not.toHaveBeenCalledWith("/home", { replace: true });
   });

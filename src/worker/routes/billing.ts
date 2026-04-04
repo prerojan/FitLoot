@@ -414,7 +414,7 @@ export function registerBillingRoutes(
               cardHolderName: data.card_holder_name,
               cardExpiry: data.card_expiry,
               promoCode: data.promo_code,
-              markOnboardingCompleted: false,
+              markOnboardingCompleted: true,
             }),
           c.env,
         );

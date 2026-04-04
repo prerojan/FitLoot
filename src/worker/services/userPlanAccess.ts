@@ -85,7 +85,7 @@ export function resolvePlanRedirectPath(
 
 export function shouldPurgeUserOnLogout(user: UserAuthRecord): boolean {
   return (
-    Number(user.onboarding_completed) !== 1 ||
+    Number(user.onboarding_completed) !== 1 &&
     !hasPlanAccess(user.plan_id, user.plan_status)
   );
 }

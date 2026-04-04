@@ -31,7 +31,7 @@ import { useTheme } from "@/react-app/contexts/theme";
 import { fetchCurrentUser, hasPlanAccess } from "@/react-app/services/authService";
 import { api } from "@/react-app/utils/api";
 import {
-  completeActivationAndReturnToLogin,
+  completeActivationAndEnterApp,
   resolveActivationCompletionCopy,
   type ActivationOutcome,
 } from "@/react-app/utils/activationCompletion";
@@ -204,7 +204,7 @@ function PlanCard({
 
 export default function Checkout() {
   const navigate = useNavigate();
-  const { user, logout } = useAuth();
+  const { user, checkAuth, logout } = useAuth();
   const { themeMode, toggleThemeMode } = useTheme();
   const requiresOnboardingCheckout = user ? !hasStartedCheckoutFlow(user) && user.onboarding_completed !== 1 : false;
   const [planId, setPlanId] = useState<CheckoutPlanId>(
@@ -414,14 +414,13 @@ export default function Checkout() {
       title: completionCopy.localTitle,
       message: completionCopy.localMessage,
       tone: "success",
-      ...(completionCopy.loginNotice.badge ? { badge: completionCopy.loginNotice.badge } : {}),
+      ...(completionCopy.badge ? { badge: completionCopy.badge } : {}),
     });
 
-    const completionResult = await completeActivationAndReturnToLogin({
+    const completionResult = await completeActivationAndEnterApp({
       navigate,
-      logout,
-      notice: completionCopy.loginNotice,
-      preLogoutDelayMs: options?.skipDelay ? 0 : undefined,
+      refreshAuth: checkAuth,
+      preEnterAppDelayMs: options?.skipDelay ? 0 : undefined,
     });
 
     if (completionResult.ok) {
@@ -433,11 +432,11 @@ export default function Checkout() {
       title: completionCopy.localTitle,
       message: completionResult.errorMessage,
       tone: "error",
-      actionLabel: "Tentar encerrar sessao novamente",
+      actionLabel: "Tentar entrar novamente",
       onAction: () => {
         void finalizeConfirmedActivation(outcome, { skipDelay: true });
       },
-      ...(completionCopy.loginNotice.badge ? { badge: completionCopy.loginNotice.badge } : {}),
+      ...(completionCopy.badge ? { badge: completionCopy.badge } : {}),
     });
   };
 
@@ -768,9 +767,9 @@ export default function Checkout() {
                       className="flex h-14 w-full items-center justify-center gap-2 rounded-[1.2rem] bg-[var(--app-primary-color)] px-5 text-base font-black text-black transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       {activationCompletionInProgress
-                        ? "Encerrando sessao para ir ao login..."
+                        ? "Entrando no app..."
                         : activationConfirmed
-                          ? "Tentar ir ao login novamente"
+                          ? "Tentar entrar novamente"
                         : loading
                         ? isVipPromoValidated
                           ? "Ativando VIP..."

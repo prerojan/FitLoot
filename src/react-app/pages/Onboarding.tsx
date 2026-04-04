@@ -38,6 +38,7 @@ import {
   getPasswordMismatchMessage,
   goalPlanCopy,
   mergeCatalogValues,
+  resolveOnboardingErrorMessage,
   splitCatalogValues,
   toneClass,
 } from "./onboarding/helpers";
@@ -1022,13 +1023,13 @@ export default function Onboarding() {
       });
 
       if (!profileSeedRes.ok) {
-        const payload = (await profileSeedRes.json().catch(() => null)) as
-          | { error?: string | undefined }
-          | null;
+        const payload = (await profileSeedRes.json().catch(() => null)) as unknown;
 
         setStepError(
-          payload?.error ??
+          resolveOnboardingErrorMessage(
+            payload,
             "Conta criada e sessao iniciada, mas nao foi possivel preparar seu onboarding para o checkout. Tente novamente em instantes.",
+          ),
         );
         return;
       }
@@ -1092,8 +1093,10 @@ export default function Onboarding() {
   const { selected: injuryTokens, notes: injuryNotes } = splitCatalogValues(profile.injuries, INJURY_OPTIONS);
   const usernameStatusMessage = availabilityMessage(usernameAvailability);
   const emailStatusMessage = availabilityMessage(emailAvailability);
-  const isExistingAccountError = stepError?.includes("cadastrado") ?? false;
-  const requiresManualLoginAfterCreation = stepError?.includes("Faca login para continuar no pagamento") ?? false;
+  const stepErrorMessage = stepError ? resolveOnboardingErrorMessage(stepError, "") : null;
+  const isExistingAccountError = stepErrorMessage?.includes("cadastrado") ?? false;
+  const requiresManualLoginAfterCreation =
+    stepErrorMessage?.includes("Faca login para continuar no pagamento") ?? false;
   const trimmedFullName = profile.full_name.trim();
   const trimmedUsername = profile.username.trim();
   const normalizedEmail = credentials.email.trim().toLowerCase();
@@ -1860,9 +1863,9 @@ export default function Onboarding() {
         <main className="relative z-10 flex flex-1 flex-col items-center justify-start px-0 pb-12 pt-6">
           <div className="w-full max-w-[540px]">
             {/* Mensagem global para erros de etapa sem quebrar o fluxo visual. */}
-            {stepError ? (
+            {stepErrorMessage ? (
               <div className="mb-6">
-                <StatusMessage message={stepError} />
+                <StatusMessage message={stepErrorMessage} />
               </div>
             ) : null}
 
