@@ -78,12 +78,13 @@ object FitLootWebViewConfigurator {
                 error: WebResourceError?,
             ) {
                 super.onReceivedError(view, request, error)
+                val failingUrl = request?.url?.toString()
+                val description = error?.description?.toString()?.ifBlank { null } ?: "Falha ao carregar o webapp."
                 if (request?.isForMainFrame != true) {
+                    Log.w(TAG, "Subresource load failed for $failingUrl: $description")
                     return
                 }
 
-                val failingUrl = request.url?.toString()
-                val description = error?.description?.toString()?.ifBlank { null } ?: "Falha ao carregar o webapp."
                 Log.e(TAG, "Main frame load failed for $failingUrl: $description")
                 onPageLoadFailed(failingUrl, description)
             }
@@ -94,12 +95,13 @@ object FitLootWebViewConfigurator {
                 errorResponse: WebResourceResponse?,
             ) {
                 super.onReceivedHttpError(view, request, errorResponse)
+                val failingUrl = request?.url?.toString()
+                val reason = "HTTP ${errorResponse?.statusCode ?: 0} ao carregar o webapp."
                 if (request?.isForMainFrame != true) {
+                    Log.w(TAG, "Subresource HTTP error for $failingUrl: $reason")
                     return
                 }
 
-                val failingUrl = request.url?.toString()
-                val reason = "HTTP ${errorResponse?.statusCode ?: 0} ao carregar o webapp."
                 Log.e(TAG, "Main frame HTTP error for $failingUrl: $reason")
                 onPageLoadFailed(failingUrl, reason)
             }

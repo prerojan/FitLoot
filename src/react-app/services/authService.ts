@@ -2,6 +2,7 @@ import { api } from "@/react-app/utils/api";
 import { AUTHENTICATED_HINT_KEY, ROUTE_PATHS } from "@/react-app/auth/constants";
 import type { User } from "@/react-app/auth/types";
 import type { UserProfileTheme } from "@/react-app/types/profile";
+import { preloadProtectedRoute } from "@/react-app/routes/lazyPages";
 
 export type AuthBootstrapPayload = {
   user: User;
@@ -60,14 +61,23 @@ type IdleWindow = Window & {
 };
 
 export function prefetchCoreRoutes(): void {
-  // Antecipar as rotas principais reduz o tempo percebido depois do login.
+  // On Android remote mode the WebView depends on network-delivered chunks.
+  // Preloading every authenticated route reduces the chance of URL-only
+  // navigations when connectivity drops after the dashboard is already open.
   const loadCoreRoutes = () => {
-    void Promise.all([
-      import(`@/react-app/pages/Dashboard`),
-      import(`@/react-app/pages/Profile`),
-      import(`@/react-app/pages/Arena`),
-      import(`@/react-app/pages/Friends`),
-    ]);
+    void Promise.allSettled([
+      ROUTE_PATHS.home,
+      ROUTE_PATHS.profile,
+      ROUTE_PATHS.minigames,
+      ROUTE_PATHS.friends,
+      ROUTE_PATHS.shop,
+      ROUTE_PATHS.ranking,
+      ROUTE_PATHS.aiChat,
+      ROUTE_PATHS.foodAnalysis,
+      ROUTE_PATHS.achievements,
+      ROUTE_PATHS.titles,
+      ROUTE_PATHS.healthTest,
+    ].map((path) => preloadProtectedRoute(path)));
   };
 
   const idleWindow = window as IdleWindow;

@@ -1,6 +1,7 @@
 import { useNavigate } from "react-router";
 import { ShoppingBag, Swords, Target, TrendingUp, User } from "lucide-react";
 import { ROUTE_PATHS } from "@/react-app/auth/constants";
+import { navigateProtectedRoute } from "@/react-app/services/appNavigation";
 
 interface BottomNavProps {
   active: "missions" | "shop" | "arena" | "ranking" | "profile";
@@ -29,7 +30,9 @@ export default function BottomNav({ active }: BottomNavProps) {
               <button
                 key={id}
                 type="button"
-                onClick={() => navigate(path)}
+                onClick={() => {
+                  void navigateProtectedRoute(navigate, path);
+                }}
                 className={`fl-bottom-nav-item ${isActive ? "fl-bottom-nav-item-active" : ""}`}
                 aria-label={label}
               >

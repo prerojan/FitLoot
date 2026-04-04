@@ -20,6 +20,7 @@ import { hasPlanAccess } from "@/react-app/services/authService";
 import { startPresenceHeartbeat } from "@/react-app/services/presenceService";
 import { getHostContext } from "@/react-app/services/runtime/hostRuntime";
 import { offlineSyncService } from "@/react-app/services/runtime/offlineSyncService";
+import { OFFLINE_ROUTE_BLOCKED_EVENT } from "@/react-app/services/appNavigation";
 import AppRoutes from "./routes/AppRoutes";
 import RouteLoader from "./routes/RouteLoader";
 
@@ -35,6 +36,7 @@ export default function App({ initialThemeMode = DEFAULT_APP_THEME_MODE }: AppPr
   const [themeMode, setThemeModeState] = useState<AppThemeMode>(initialThemeMode);
   const [missionDetailsOpen, setMissionDetailsOpen] = useState(false);
   const [missionExecutionOpen, setMissionExecutionOpen] = useState(false);
+  const [offlineRouteBlocked, setOfflineRouteBlocked] = useState(false);
 
   const checkAuth = useAuthBootstrap({ setUser, setLoading });
   const setThemeMode = useCallback((mode: AppThemeMode) => {
@@ -69,6 +71,25 @@ export default function App({ initialThemeMode = DEFAULT_APP_THEME_MODE }: AppPr
     return startPresenceHeartbeat();
   }, [user, user?.id, user?.onboarding_completed, user?.plan_id, user?.plan_status]);
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    let timeoutId = 0;
+    const handleOfflineRouteBlocked = () => {
+      setOfflineRouteBlocked(true);
+      window.clearTimeout(timeoutId);
+      timeoutId = window.setTimeout(() => {
+        setOfflineRouteBlocked(false);
+      }, 3200);
+    };
+
+    window.addEventListener(OFFLINE_ROUTE_BLOCKED_EVENT, handleOfflineRouteBlocked as EventListener);
+    return () => {
+      window.clearTimeout(timeoutId);
+      window.removeEventListener(OFFLINE_ROUTE_BLOCKED_EVENT, handleOfflineRouteBlocked as EventListener);
+    };
+  }, []);
+
   return (
     <ThemeContext.Provider value={{ themeMode, setThemeMode, toggleThemeMode }}>
       <AppChromeContext.Provider
@@ -88,6 +109,20 @@ export default function App({ initialThemeMode = DEFAULT_APP_THEME_MODE }: AppPr
             <Analytics />
             <SpeedInsights />
           </RouterComponent>
+          {offlineRouteBlocked ? (
+            <div className="fl-z-toast fixed inset-x-0 bottom-24 flex justify-center px-4 md:bottom-6">
+              <div
+                className="rounded-full border px-4 py-3 text-center text-xs font-bold uppercase tracking-[0.14em] shadow-xl"
+                style={{
+                  borderColor: "color-mix(in srgb, #f59e0b 28%, transparent)",
+                  background: "color-mix(in srgb, var(--fl-surface-strong) 94%, transparent)",
+                  color: "var(--fl-color-text)",
+                }}
+              >
+                Sem internet para abrir esta tela agora.
+              </div>
+            </div>
+          ) : null}
         </AuthContext.Provider>
       </AppChromeContext.Provider>
     </ThemeContext.Provider>

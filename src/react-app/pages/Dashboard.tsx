@@ -45,6 +45,7 @@ import {
   isMissionCompleted,
   sortMissions,
 } from "@/react-app/pages/dashboardUtils";
+import { navigateProtectedRoute } from "@/react-app/services/appNavigation";
 
 type DashboardLoadingState = {
   profile: boolean;
@@ -511,7 +512,7 @@ export default function Dashboard() {
   }, []);
   const handleQuickAction = useCallback((path: string) => {
     setQuickActionsOpen(false);
-    navigate(path);
+    void navigateProtectedRoute(navigate, path);
   }, [navigate]);
 
   const xpDisplayValue = Math.max(0, progression?.xp ?? 0);

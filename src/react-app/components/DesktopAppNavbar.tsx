@@ -15,6 +15,7 @@ import {
   readCachedJson,
 } from "@/react-app/utils/api";
 import { cn } from "@/react-app/utils";
+import { navigateProtectedRoute } from "@/react-app/services/appNavigation";
 
 type DesktopAppNavbarProps = {
   profile?: UserProfile | null | undefined;
@@ -116,7 +117,14 @@ export default function DesktopAppNavbar({
     >
       <div className="fl-app-container grid grid-cols-[auto_1fr_auto] items-center gap-4 py-4 lg:gap-6">
         {/* Marca e atalho principal de retorno ao dashboard. */}
-        <button type="button" onClick={() => navigate(ROUTE_PATHS.dashboard)} className="flex min-w-0 items-center gap-3 lg:gap-4" aria-label="Abrir dashboard">
+        <button
+          type="button"
+          onClick={() => {
+            void navigateProtectedRoute(navigate, ROUTE_PATHS.dashboard);
+          }}
+          className="flex min-w-0 items-center gap-3 lg:gap-4"
+          aria-label="Abrir dashboard"
+        >
           <div className="shrink-0" style={{ color: "var(--app-primary-color)" }}>
             <svg fill="none" viewBox="0 0 48 48" className="h-8 w-8" xmlns="http://www.w3.org/2000/svg">
               <path d="M4 4H17.3334V17.3334H30.6666V30.6666H44V44H4V4Z" fill="currentColor" />
@@ -148,7 +156,9 @@ export default function DesktopAppNavbar({
                 <button
                   key={item.id}
                   type="button"
-                  onClick={() => navigate(item.path)}
+                  onClick={() => {
+                    void navigateProtectedRoute(navigate, item.path);
+                  }}
                   className="flex items-center gap-2 rounded-2xl px-3 py-3 text-sm font-bold transition-colors hover:opacity-85 lg:px-4"
                   style={isActive ? {
                     background: "var(--app-primary-color)",
@@ -168,7 +178,9 @@ export default function DesktopAppNavbar({
         <div className="flex items-center gap-3 lg:gap-4">
           <button
             type="button"
-            onClick={() => navigate(ROUTE_PATHS.profile, { state: { openSettings: true } })}
+            onClick={() => {
+              void navigateProtectedRoute(navigate, ROUTE_PATHS.profile, { state: { openSettings: true } });
+            }}
             className="flex h-11 w-11 items-center justify-center rounded-full"
             style={{
               background:
@@ -180,7 +192,14 @@ export default function DesktopAppNavbar({
           >
             <MaterialIcon name="settings" filled className="text-2xl" />
           </button>
-          <button type="button" onClick={() => navigate(ROUTE_PATHS.profile)} className="rounded-full" aria-label="Abrir perfil">
+          <button
+            type="button"
+            onClick={() => {
+              void navigateProtectedRoute(navigate, ROUTE_PATHS.profile);
+            }}
+            className="rounded-full"
+            aria-label="Abrir perfil"
+          >
             <span className="flex rounded-full border-2 p-[2px]" style={{ borderColor: "var(--app-primary-color)" }}>
               <Avatar src={user?.avatar_url ?? null} name={avatarName} className="h-10 w-10 object-cover" />
             </span>
