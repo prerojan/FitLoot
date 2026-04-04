@@ -931,10 +931,28 @@ export default function Dashboard() {
             style={PANEL_STYLE}
           >
             <span
-              className="flex h-10 w-10 items-center justify-center rounded-full"
-              style={{ background: "color-mix(in srgb, var(--app-primary-color) 18%, transparent)", color: "var(--app-primary-color)" }}
+              className="relative flex h-10 w-10 items-center justify-center overflow-hidden rounded-2xl border"
+              style={{
+                borderColor: "color-mix(in srgb, var(--app-primary-color) 26%, transparent)",
+                background:
+                  "linear-gradient(135deg, color-mix(in srgb, var(--app-primary-color) 24%, transparent), color-mix(in srgb, var(--app-secondary-color) 16%, transparent))",
+                color: "var(--app-primary-color)",
+                boxShadow: "inset 0 1px 0 rgba(255,255,255,0.18), 0 10px 18px rgba(var(--app-primary-color-rgb), 0.12)",
+              }}
             >
-              <Camera className="h-5 w-5" />
+              <span
+                aria-hidden="true"
+                className="absolute inset-[3px] rounded-[0.85rem]"
+                style={{
+                  background: "radial-gradient(circle at 30% 30%, rgba(255,255,255,0.22), transparent 62%)",
+                }}
+              />
+              <Camera className="relative h-5 w-5" strokeWidth={2.3} />
+              <span
+                aria-hidden="true"
+                className="absolute bottom-1.5 right-1.5 h-1.5 w-1.5 rounded-full"
+                style={{ background: "color-mix(in srgb, var(--app-secondary-color) 82%, white)" }}
+              />
             </span>
             <span style={{ color: "var(--fl-color-text)" }}>Analisar Alimento</span>
           </button>

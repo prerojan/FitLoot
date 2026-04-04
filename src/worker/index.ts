@@ -4056,13 +4056,6 @@ async function handleFetchWithGuard(request: Request, env: Env, ctx: ExecutionCo
   let runtimeEnv: Env = env;
   try {
     runtimeEnv = attachRuntimeDatabase(env);
-    ctx.waitUntil(
-      runRegularMissionRebuildBatch(runtimeEnv, runtimeEnv.fitloot_db).catch((error) => {
-        console.error("[worker][regular-mission-rebuild][fetch]", {
-          message: getErrorMessage(error),
-        });
-      }),
-    );
     return await app.fetch(request, runtimeEnv, ctx);
   } catch (error) {
     const errorMessage = getErrorMessage(error);

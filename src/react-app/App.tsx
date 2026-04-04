@@ -89,6 +89,33 @@ export default function App({ initialThemeMode = DEFAULT_APP_THEME_MODE }: AppPr
     };
   }, []);
 
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof document === "undefined") return;
+
+    const root = document.documentElement;
+    let timeoutId = 0;
+
+    const revealScrollbars = () => {
+      root.classList.add("fl-scrollbars-active");
+      window.clearTimeout(timeoutId);
+      timeoutId = window.setTimeout(() => {
+        root.classList.remove("fl-scrollbars-active");
+      }, 900);
+    };
+
+    document.addEventListener("scroll", revealScrollbars, { capture: true, passive: true });
+    window.addEventListener("wheel", revealScrollbars, { passive: true });
+    window.addEventListener("touchmove", revealScrollbars, { passive: true });
+
+    return () => {
+      window.clearTimeout(timeoutId);
+      root.classList.remove("fl-scrollbars-active");
+      document.removeEventListener("scroll", revealScrollbars, true);
+      window.removeEventListener("wheel", revealScrollbars);
+      window.removeEventListener("touchmove", revealScrollbars);
+    };
+  }, []);
+
   return (
     <ThemeContext.Provider value={{ themeMode, setThemeMode, toggleThemeMode }}>
       <AppChromeContext.Provider

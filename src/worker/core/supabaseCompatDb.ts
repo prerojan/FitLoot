@@ -954,14 +954,13 @@ class SupabaseCompatDatabase {
           result = await this.transactionClient.query<T>(compiled.sql, [...compiled.params]);
         } else {
           // Acquire a pooled client explicitly so we can evict broken sockets on
-          // query failure while still reusing healthy ones.
+          // query failure while still reusing healthy ones. Healthy sockets must
+          // go back to the pool; destroying them on every success creates
+          // connection churn and turns simple reads into repeated reconnects.
           const client = await this.pool.connect();
           try {
             result = await client.query<T>(compiled.sql, [...compiled.params]);
-            // Hyperdrive+pooler can intermittently hand back stale sockets across
-            // edge invocations. Releasing as broken forces fresh checkout and
-            // removes recurring first-query read timeouts.
-            client.release(true);
+            client.release();
           } catch (queryError) {
             client.release(true);
             throw queryError;
