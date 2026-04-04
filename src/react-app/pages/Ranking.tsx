@@ -11,6 +11,7 @@ import type { RankingPlayer, UserProfile } from "@/shared/types";
 type RankingMode = "global" | "friends";
 
 type FriendRankingRow = {
+  friend_user_id: string;
   friend_username: string;
   friend_full_name: string;
   friend_level: number;
@@ -19,6 +20,7 @@ type FriendRankingRow = {
 };
 
 type RankingEntry = {
+  userId?: string | undefined;
   username: string;
   full_name: string;
   level: number;
@@ -30,6 +32,7 @@ function normalizeRankingEntry(player: RankingPlayer | FriendRankingRow): Rankin
   // Unifica o formato do ranking global e do ranking entre amigos.
   if ("friend_username" in player) {
     return {
+      userId: player.friend_user_id,
       username: player.friend_username,
       full_name: player.friend_full_name,
       level: player.friend_level,
@@ -113,11 +116,15 @@ export default function Ranking() {
   const currentUsername = profile?.username ?? null;
   const top3 = ranking.slice(0, 3);
   const others = ranking.slice(3);
-  const currentUserEntry = currentUsername
-    ? ranking.find((entry) => entry.username === currentUsername) ?? null
-    : null;
-  const currentUserPosition = currentUsername
-    ? ranking.findIndex((entry) => entry.username === currentUsername) + 1
+  const isCurrentUserEntry = useCallback((entry: RankingEntry) => {
+    if (entry.userId && user?.id) return entry.userId === user.id;
+    if (currentUsername) return entry.username === currentUsername;
+    return false;
+  }, [currentUsername, user?.id]);
+
+  const currentUserEntry = ranking.find(isCurrentUserEntry) ?? null;
+  const currentUserPosition = currentUserEntry
+    ? ranking.findIndex((entry) => isCurrentUserEntry(entry)) + 1
     : 0;
 
   if (loading && ranking.length === 0) {
@@ -233,7 +240,7 @@ export default function Ranking() {
 
           {others.map((player, index) => {
             const position = index + 4;
-            const isCurrentUser = player.username === currentUsername;
+            const isCurrentUser = isCurrentUserEntry(player);
 
             return (
               <div

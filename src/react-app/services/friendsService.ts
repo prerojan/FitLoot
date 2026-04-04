@@ -1,6 +1,6 @@
 import { api } from "@/react-app/utils/api";
 
-const FRIENDS_CACHE_TTL_MS = 60_000;
+const FRIENDS_CACHE_TTL_MS = 10_000;
 
 export type Friend = {
   id: number;
@@ -198,3 +198,13 @@ export async function respondFriendRequest(
   clearFriendsCache();
 }
 
+export async function removeFriend(friendUserId: string): Promise<void> {
+  const response = await api(`/api/friends/${encodeURIComponent(friendUserId)}`, {
+    method: "DELETE",
+  });
+  await assertSuccessfulResponse(
+    response,
+    "Nao foi possivel remover este amigo.",
+  );
+  clearFriendsCache();
+}

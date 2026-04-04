@@ -10,7 +10,8 @@ type FriendsRouteDeps = {
   withTransaction: WithTransaction;
 };
 
-const RUNTIME_FRIEND_PROJECTION_TTL_MS = 45_000;
+const RUNTIME_FRIEND_PROJECTION_TTL_MS = 10_000;
+const FRIEND_ONLINE_WINDOW_MS = 10 * 60 * 1000;
 let runtimeFriendProjectionSchemaReady = false;
 
 async function ensureRuntimeFriendProjectionSchema(runtimeDb: D1Database): Promise<void> {
@@ -113,6 +114,20 @@ async function writeRuntimeFriendProjection(
         ),
     );
   }
+  await runtimeDb.batch(statements);
+}
+
+async function clearRuntimeFriendProjection(
+  runtimeDb: D1Database,
+  ...userIds: string[]
+): Promise<void> {
+  const uniqueUserIds = [...new Set(userIds.filter(Boolean))];
+  if (uniqueUserIds.length === 0) return;
+
+  await ensureRuntimeFriendProjectionSchema(runtimeDb);
+  const statements = uniqueUserIds.map((userId) =>
+    runtimeDb.prepare("DELETE FROM runtime_friend_snapshots WHERE user_id = ?").bind(userId),
+  );
   await runtimeDb.batch(statements);
 }
 
@@ -297,6 +312,13 @@ export function registerFriendsRoutes(
       )
       .bind(user.id, friendId, friendId, user.id)
       .run();
+
+    if (c.env.fitloot_runtime_db) {
+      void clearRuntimeFriendProjection(c.env.fitloot_runtime_db, user.id, friendId).catch(
+        () => undefined,
+      );
+    }
+
     return c.json({ success: true });
   });
 
@@ -382,11 +404,11 @@ export function registerFriendsRoutes(
         .bind(user.id, limit, offset)
         .all();
 
-      const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+      const onlineWindowStart = new Date(Date.now() - FRIEND_ONLINE_WINDOW_MS).toISOString();
       const friendsWithOnlineStatus = friends.results.map((friend) => ({
         ...friend,
         is_online: friend.last_activity_date
-          ? new Date(friend.last_activity_date as string) > new Date(fiveMinutesAgo)
+          ? new Date(friend.last_activity_date as string) > new Date(onlineWindowStart)
           : false,
       }));
 

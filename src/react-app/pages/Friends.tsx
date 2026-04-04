@@ -22,6 +22,7 @@ import {
   fetchFriendsBundle,
   type Friend,
   FriendsApiError,
+  removeFriend as removeFriendApi,
   respondFriendRequest as respondFriendRequestApi,
   searchUsersByUsername,
   sendFriendRequest as sendFriendRequestApi,
@@ -44,6 +45,8 @@ export default function Friends() {
   const [loading, setLoading] = useState(true);
   const [searching, setSearching] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [activeMenuFriendId, setActiveMenuFriendId] = useState<number | null>(null);
+  const [removingFriendUserId, setRemovingFriendUserId] = useState<string | null>(null);
 
   const handleFriendsError = useCallback((rawError: unknown, fallbackMessage: string) => {
     if (rawError instanceof FriendsApiError) {
@@ -82,15 +85,48 @@ export default function Friends() {
   useEffect(() => {
     if (!user) return;
 
-    const timer = window.setInterval(() => {
+    const refreshVisibleFriends = () => {
       if (document.visibilityState !== "visible") return;
       void loadFriends(true);
-    }, 40_000);
+    };
+
+    const timer = window.setInterval(() => {
+      refreshVisibleFriends();
+    }, 15_000);
+
+    window.addEventListener("focus", refreshVisibleFriends);
+    document.addEventListener("visibilitychange", refreshVisibleFriends);
 
     return () => {
       window.clearInterval(timer);
+      window.removeEventListener("focus", refreshVisibleFriends);
+      document.removeEventListener("visibilitychange", refreshVisibleFriends);
     };
   }, [user, loadFriends]);
+
+  useEffect(() => {
+    if (activeMenuFriendId === null) return;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Element)) {
+        setActiveMenuFriendId(null);
+        return;
+      }
+
+      const menuRoot = target.closest("[data-friend-menu-root]");
+      if (menuRoot?.getAttribute("data-friend-menu-root") === String(activeMenuFriendId)) {
+        return;
+      }
+
+      setActiveMenuFriendId(null);
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+    };
+  }, [activeMenuFriendId]);
 
   const searchUsers = async () => {
     if (!searchQuery.trim()) {
@@ -128,6 +164,25 @@ export default function Friends() {
       await loadFriends(true);
     } catch (error) {
       handleFriendsError(error, "Nao foi possivel responder a solicitacao.");
+    }
+  };
+
+  const handleRemoveFriend = async (friend: Friend) => {
+    const confirmed = window.confirm(`Remover ${friend.friend_username} da sua lista de amigos?`);
+    if (!confirmed) return;
+
+    setRemovingFriendUserId(friend.friend_user_id);
+    setActiveMenuFriendId(null);
+
+    try {
+      await removeFriendApi(friend.friend_user_id);
+      await loadFriends(true);
+    } catch (error) {
+      handleFriendsError(error, "Nao foi possivel remover este amigo agora.");
+    } finally {
+      setRemovingFriendUserId((current) => (
+        current === friend.friend_user_id ? null : current
+      ));
     }
   };
 
@@ -258,10 +313,39 @@ export default function Friends() {
                   {onlineFriends.length > 0 ? (
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5 min-w-0">
                       {onlineFriends.map((friend) => (
-                        <div key={friend.id} className="fl-theme-surface rounded-[1.5rem] sm:rounded-[2rem] p-4 sm:p-5 group hover:border-primary/30 transition-all relative overflow-hidden min-w-0">
-                          <div className="absolute top-0 right-0 p-3 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <button className="fl-theme-text-muted transition-opacity hover:opacity-85"><MoreVertical className="w-4 h-4" /></button>
+                        <div
+                          key={friend.id}
+                          data-friend-menu-root={friend.id}
+                          className="fl-theme-surface rounded-[1.5rem] sm:rounded-[2rem] p-4 sm:p-5 group hover:border-primary/30 transition-all relative overflow-hidden min-w-0"
+                        >
+                          <div className="absolute top-0 right-0 p-3 opacity-100 transition-opacity">
+                            <button
+                              type="button"
+                              onClick={() => setActiveMenuFriendId((current) => current === friend.id ? null : friend.id)}
+                              className="fl-theme-text-muted transition-opacity hover:opacity-85"
+                              aria-label={`Abrir menu de ${friend.friend_username}`}
+                            >
+                              <MoreVertical className="w-4 h-4" />
+                            </button>
                           </div>
+                          {activeMenuFriendId === friend.id ? (
+                            <div
+                              className="absolute right-3 top-12 z-20 min-w-[10.5rem] rounded-2xl border p-2 shadow-2xl"
+                              style={{
+                                backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 96%, transparent)",
+                                borderColor: "var(--fl-border-soft)",
+                              }}
+                            >
+                              <button
+                                type="button"
+                                onClick={() => { void handleRemoveFriend(friend); }}
+                                disabled={removingFriendUserId === friend.friend_user_id}
+                                className="flex w-full items-center justify-center rounded-xl px-3 py-2 text-[10px] font-black uppercase tracking-[0.16em] text-red-500 transition-colors hover:bg-red-500/10 disabled:opacity-60"
+                              >
+                                {removingFriendUserId === friend.friend_user_id ? "Removendo..." : "Remover amigo"}
+                              </button>
+                            </div>
+                          ) : null}
                           <div className="flex items-center gap-4 mb-4">
                             <div className="relative size-14 shrink-0">
                               <div className="w-full h-full rounded-full border-2 overflow-hidden shadow-[0_0_15px_rgba(var(--app-primary-color-rgb),0.2)]" style={{ borderColor: 'var(--app-primary-color)' }}>
@@ -315,9 +399,13 @@ export default function Friends() {
                     <h2 className="text-[10px] font-bold uppercase tracking-[0.3em]" style={{ color: "var(--fl-color-text-muted)" }}>Offline — {offlineFriends.length}</h2>
                   </div>
                   
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {offlineFriends.map((friend) => (
-                      <div key={friend.id} className="fl-theme-surface-muted rounded-xl p-4 flex items-center justify-between opacity-60 hover:opacity-100 transition-all">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {offlineFriends.map((friend) => (
+                      <div
+                        key={friend.id}
+                        data-friend-menu-root={friend.id}
+                        className="fl-theme-surface-muted relative rounded-xl p-4 flex items-center justify-between opacity-60 hover:opacity-100 transition-all"
+                      >
                         <div className="flex items-center gap-4">
                           <div className="size-11 overflow-hidden rounded-full border grayscale" style={{ borderColor: "var(--fl-border-soft)" }}>
                             <Avatar name={friend.friend_username} className="w-full h-full" />
@@ -338,10 +426,33 @@ export default function Friends() {
                           >
                             {ARENA_COMING_SOON_LABEL}
                           </button>
-                          <button className="rounded-lg p-2 fl-theme-text-muted transition-opacity hover:opacity-85">
+                          <button
+                            type="button"
+                            onClick={() => setActiveMenuFriendId((current) => current === friend.id ? null : friend.id)}
+                            className="rounded-lg p-2 fl-theme-text-muted transition-opacity hover:opacity-85"
+                            aria-label={`Abrir menu de ${friend.friend_username}`}
+                          >
                             <MoreVertical className="w-4 h-4" />
                           </button>
                         </div>
+                        {activeMenuFriendId === friend.id ? (
+                          <div
+                            className="absolute right-4 top-14 z-20 min-w-[10.5rem] rounded-2xl border p-2 shadow-2xl"
+                            style={{
+                              backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 96%, transparent)",
+                              borderColor: "var(--fl-border-soft)",
+                            }}
+                          >
+                            <button
+                              type="button"
+                              onClick={() => { void handleRemoveFriend(friend); }}
+                              disabled={removingFriendUserId === friend.friend_user_id}
+                              className="flex w-full items-center justify-center rounded-xl px-3 py-2 text-[10px] font-black uppercase tracking-[0.16em] text-red-500 transition-colors hover:bg-red-500/10 disabled:opacity-60"
+                            >
+                              {removingFriendUserId === friend.friend_user_id ? "Removendo..." : "Remover amigo"}
+                            </button>
+                          </div>
+                        ) : null}
                       </div>
                     ))}
                   </div>

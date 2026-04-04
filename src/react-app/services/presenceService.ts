@@ -1,6 +1,6 @@
 import { api } from "@/react-app/utils/api";
 
-const DEFAULT_PRESENCE_INTERVAL_MS = 35_000;
+const DEFAULT_PRESENCE_INTERVAL_MS = 15_000;
 const OFFLINE_DEDUPE_WINDOW_MS = 3_000;
 
 let inflightHeartbeat: Promise<void> | null = null;
@@ -60,7 +60,7 @@ export function startPresenceHeartbeat(
   let timer: number | null = null;
   let stopped = false;
 
-  const safeInterval = Math.max(30_000, Math.min(45_000, Math.floor(intervalMs)));
+  const safeInterval = Math.max(12_000, Math.min(25_000, Math.floor(intervalMs)));
 
   const tick = () => {
     if (stopped || !isDocumentVisible()) return;
@@ -74,6 +74,11 @@ export function startPresenceHeartbeat(
     }
   };
 
+  const onFocus = () => {
+    if (stopped) return;
+    tick();
+  };
+
   const onPageHide = () => {
     if (stopped) return;
     void sendPresenceOffline().catch(() => undefined);
@@ -84,6 +89,8 @@ export function startPresenceHeartbeat(
   }, safeInterval);
 
   document.addEventListener("visibilitychange", onVisibilityChange);
+  window.addEventListener("focus", onFocus);
+  window.addEventListener("pageshow", onFocus);
   window.addEventListener("pagehide", onPageHide);
   window.addEventListener("beforeunload", onPageHide);
   tick();
@@ -95,6 +102,8 @@ export function startPresenceHeartbeat(
       timer = null;
     }
     document.removeEventListener("visibilitychange", onVisibilityChange);
+    window.removeEventListener("focus", onFocus);
+    window.removeEventListener("pageshow", onFocus);
     window.removeEventListener("pagehide", onPageHide);
     window.removeEventListener("beforeunload", onPageHide);
     void sendPresenceOffline().catch(() => undefined);

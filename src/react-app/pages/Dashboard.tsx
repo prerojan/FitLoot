@@ -103,6 +103,12 @@ function resolveMissionsApiPath(forceRefresh: boolean, cachedMissions: Mission[]
   return forceRefresh ? "/api/missions?refresh=1" : "/api/missions";
 }
 
+function isStepProgressMission(mission: Mission): boolean {
+  const hasCircuitTasks = Array.isArray(mission.circuit_tasks) && mission.circuit_tasks.length > 0;
+  const goalText = typeof mission.goal === "string" ? mission.goal.toLowerCase() : "";
+  return !hasCircuitTasks && (mission.metric_type === "steps" || goalText.includes("passos"));
+}
+
 export default function Dashboard() {
   const { user } = useAuth();
   const { pushRewardNotifications } = useRewardNotifications();
@@ -126,7 +132,11 @@ export default function Dashboard() {
   const [quickActionsOpen, setQuickActionsOpen] = useState(false);
   const quickActionsRef = useRef<HTMLDivElement | null>(null);
   const missionsRef = useRef<Mission[]>([]);
-  const periodicStepProgressRef = useRef<number | null>(null);
+  const latestStepsValueRef = useRef(0);
+  const [stepMissionSnapshot, setStepMissionSnapshot] = useState<{
+    stepsAtSnapshot: number;
+    progressByMissionId: Record<number, number>;
+  } | null>(null);
   const { metrics: consolidatedMetrics, loading: metricsLoading, refreshMetrics } = useDailyMetrics({ syncRemote: true });
 
   const setSectionLoading = useCallback((section: keyof DashboardLoadingState, value: boolean) => {
@@ -410,45 +420,112 @@ export default function Dashboard() {
     }
   }, [pushRewardNotifications, refreshData, user?.id]);
 
+  const stepsValue = consolidatedMetrics?.steps ?? 0;
+  const caloriesValue = consolidatedMetrics?.caloriesBurned ?? 0;
+  const stepsProgress = clamp((stepsValue / STEPS_TARGET) * 100, 0, 100);
+  const stepMissionProgressSignature = useMemo(
+    () =>
+      missions
+        .filter((mission) => isStepProgressMission(mission) && mission.is_completed !== 1)
+        .map((mission) => `${mission.id}:${Number(mission.progress_value ?? 0)}`)
+        .join("|"),
+    [missions],
+  );
+
+  useEffect(() => {
+    latestStepsValueRef.current = stepsValue;
+  }, [stepsValue]);
+
+  useEffect(() => {
+    if (metricsLoading) {
+      return;
+    }
+
+    const progressByMissionId = missions.reduce<Record<number, number>>((accumulator, mission) => {
+      if (!isStepProgressMission(mission) || mission.is_completed === 1) {
+        return accumulator;
+      }
+
+      accumulator[Number(mission.id)] = Math.max(0, Number(mission.progress_value ?? 0));
+      return accumulator;
+    }, {});
+
+    setStepMissionSnapshot({
+      stepsAtSnapshot: latestStepsValueRef.current,
+      progressByMissionId,
+    });
+  }, [metricsLoading, missions, stepMissionProgressSignature]);
+
+  const missionsWithLiveStepProgress = useMemo(() => {
+    if (!stepMissionSnapshot) {
+      return missions;
+    }
+
+    const stepDelta = Math.max(0, stepsValue - stepMissionSnapshot.stepsAtSnapshot);
+    if (stepDelta <= 0) {
+      return missions;
+    }
+
+    return missions.map((mission) => {
+      if (!isStepProgressMission(mission) || mission.is_completed === 1) {
+        return mission;
+      }
+
+      const missionTarget = Math.max(
+        1,
+        Number(
+          mission.metric_value
+          ?? mission.target_reps
+          ?? mission.target_time
+          ?? 1,
+        ),
+      );
+      const baseProgress =
+        stepMissionSnapshot.progressByMissionId[Number(mission.id)]
+        ?? Math.max(0, Number(mission.progress_value ?? 0));
+
+      return {
+        ...mission,
+        progress_value: Math.min(missionTarget, baseProgress + stepDelta),
+      };
+    });
+  }, [missions, stepMissionSnapshot, stepsValue]);
+
   const allDailyMissions = useMemo(
     () => sortMissions(
-      missions.filter(
+      missionsWithLiveStepProgress.filter(
         (mission) =>
           mission.type === "daily" &&
           !isAiSpecialMission(mission) &&
           !isExpiredMission(mission),
       ),
     ),
-    [isAiSpecialMission, isExpiredMission, missions],
+    [isAiSpecialMission, isExpiredMission, missionsWithLiveStepProgress],
   );
   const visibleDailyMissions = useMemo(() => allDailyMissions.slice(0, 3), [allDailyMissions]);
   const aiSpecialMissions = useMemo(
     () =>
       sortMissions(
-        missions.filter(
+        missionsWithLiveStepProgress.filter(
           (mission) =>
             isAiSpecialMission(mission) &&
             mission.is_completed !== 1 &&
             !isExpiredMission(mission),
         ),
       ),
-    [isAiSpecialMission, isExpiredMission, missions],
+    [isAiSpecialMission, isExpiredMission, missionsWithLiveStepProgress],
   );
   const weeklyMissions = useMemo(
-    () => sortMissions(missions.filter((mission) => mission.type === "weekly" && mission.is_completed !== 1 && !isExpiredMission(mission) && !isAiSpecialMission(mission))),
-    [isAiSpecialMission, isExpiredMission, missions],
+    () => sortMissions(missionsWithLiveStepProgress.filter((mission) => mission.type === "weekly" && mission.is_completed !== 1 && !isExpiredMission(mission) && !isAiSpecialMission(mission))),
+    [isAiSpecialMission, isExpiredMission, missionsWithLiveStepProgress],
   );
   const monthlyMissions = useMemo(
-    () => sortMissions(missions.filter((mission) => mission.type === "monthly" && mission.is_completed !== 1 && !isExpiredMission(mission) && !isAiSpecialMission(mission))),
-    [isAiSpecialMission, isExpiredMission, missions],
+    () => sortMissions(missionsWithLiveStepProgress.filter((mission) => mission.type === "monthly" && mission.is_completed !== 1 && !isExpiredMission(mission) && !isAiSpecialMission(mission))),
+    [isAiSpecialMission, isExpiredMission, missionsWithLiveStepProgress],
   );
   const hasPeriodicStepMissions = useMemo(
     () =>
-      [...weeklyMissions, ...monthlyMissions].some((mission) => {
-        const hasCircuitTasks = Array.isArray(mission.circuit_tasks) && mission.circuit_tasks.length > 0;
-        const goalText = typeof mission.goal === "string" ? mission.goal.toLowerCase() : "";
-        return !hasCircuitTasks && (mission.metric_type === "steps" || goalText.includes("passos"));
-      }),
+      [...weeklyMissions, ...monthlyMissions].some((mission) => isStepProgressMission(mission)),
     [monthlyMissions, weeklyMissions],
   );
   useEffect(() => {
@@ -475,8 +552,8 @@ export default function Dashboard() {
     };
   }, [hasPeriodicStepMissions, refreshMissionProgress]);
   const expiredMissions = useMemo(
-    () => sortMissions(missions.filter((mission) => isExpiredMission(mission) && mission.is_completed !== 1 && !isAiSpecialMission(mission))),
-    [isAiSpecialMission, isExpiredMission, missions],
+    () => sortMissions(missionsWithLiveStepProgress.filter((mission) => isExpiredMission(mission) && mission.is_completed !== 1 && !isAiSpecialMission(mission))),
+    [isAiSpecialMission, isExpiredMission, missionsWithLiveStepProgress],
   );
   const expiredMissionRefreshDelay = useMemo(
     () => resolveExpiredMissionRefreshDelay(expiredMissions),
@@ -509,35 +586,6 @@ export default function Dashboard() {
   const levelValue = progression?.level ?? 1;
   const xpForNextLevel = Math.max(100, levelValue * 100);
   const xpProgress = clamp((Math.max(0, progression?.xp ?? 0) / xpForNextLevel) * 100, 0, 100);
-  const stepsValue = consolidatedMetrics?.steps ?? 0;
-  const caloriesValue = consolidatedMetrics?.caloriesBurned ?? 0;
-  const stepsProgress = clamp((stepsValue / STEPS_TARGET) * 100, 0, 100);
-
-  useEffect(() => {
-    if (!hasPeriodicStepMissions) {
-      periodicStepProgressRef.current = null;
-      return;
-    }
-
-    if (metricsLoading) {
-      return;
-    }
-
-    const previousSteps = periodicStepProgressRef.current;
-    periodicStepProgressRef.current = stepsValue;
-
-    if (previousSteps === null || previousSteps === stepsValue) {
-      return;
-    }
-
-    const timeoutId = window.setTimeout(() => {
-      void refreshMissionProgress();
-    }, 750);
-
-    return () => {
-      window.clearTimeout(timeoutId);
-    };
-  }, [hasPeriodicStepMissions, metricsLoading, refreshMissionProgress, stepsValue]);
 
   const todayKey = useMemo(() => formatDateKey(new Date()), []);
   const calendarDates = useMemo(() => buildCenteredDates(new Date(), 2), []);
