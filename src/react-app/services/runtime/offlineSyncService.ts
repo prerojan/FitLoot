@@ -62,6 +62,11 @@ export type OfflineSyncState = {
   lastError: string | null;
 };
 
+export type OfflineMissionSyncedDetail = {
+  missionIds: number[];
+  syncedAt: string;
+};
+
 export type MissionSyncResponse = {
   success: boolean;
   xpGained?: number;
@@ -80,6 +85,7 @@ type MetricsCursor = {
 const OFFLINE_QUEUE_STORAGE_KEY = "fitloot.offline-sync.queue.v1";
 const METRICS_CURSOR_STORAGE_KEY = "fitloot.offline-sync.metrics-cursor.v1";
 const FLUSH_EVENT_NAME = "fitloot:offline-sync-flushed";
+const MISSION_SYNCED_EVENT_NAME = "fitloot:offline-missions-synced";
 const DEFAULT_BATCH_SIZE = 40;
 
 function canUseStorage(): boolean {
@@ -113,6 +119,11 @@ function resolveOfflineSource(): OfflineOperationSource {
 }
 
 function isOnline(): boolean {
+  const hostContext = getHostContext();
+  if (hostContext.platform === "android") {
+    return hostContext.networkOnline !== false;
+  }
+
   return typeof navigator === "undefined" ? true : navigator.onLine !== false;
 }
 
@@ -145,6 +156,7 @@ class OfflineSyncService {
   private listeners = new Set<(state: OfflineSyncState) => void>();
   private flushInFlight: Promise<void> | null = null;
   private started = false;
+  private networkOnline = isOnline();
   private unsubscribeNetwork: (() => void) | null = null;
   private unsubscribeLifecycle: (() => void) | null = null;
 
@@ -176,6 +188,7 @@ class OfflineSyncService {
 
     this.started = true;
     this.unsubscribeNetwork = subscribeToNetworkStatus((status) => {
+      this.networkOnline = status.online;
       if (status.online) {
         void this.flush();
       }
@@ -237,7 +250,19 @@ class OfflineSyncService {
       },
     };
 
-    if (isOnline()) {
+    const existingQueuedOperation = this.findMissionOperation(params.missionId, params.userId);
+    if (existingQueuedOperation) {
+      const queuedOperation = this.enqueueMissionOperation(operation);
+      if (this.networkOnline) {
+        void this.flush();
+      }
+      return {
+        status: "queued",
+        operationId: queuedOperation.operationId,
+      };
+    }
+
+    if (this.networkOnline) {
       try {
         const result = await this.flushMissionOperation(operation);
         this.dispatchFlushEvent();
@@ -247,22 +272,22 @@ class OfflineSyncService {
           result,
         };
       } catch (error) {
-        this.enqueueOperation({
+        const queuedOperation = this.enqueueMissionOperation({
           ...operation,
           syncStatus: "failed",
           lastError: error instanceof Error ? error.message : "Falha ao sincronizar missao.",
         });
         return {
           status: "queued",
-          operationId: operation.operationId,
+          operationId: queuedOperation.operationId,
         };
       }
     }
 
-    this.enqueueOperation(operation);
+    const queuedOperation = this.enqueueMissionOperation(operation);
     return {
       status: "queued",
-      operationId: operation.operationId,
+      operationId: queuedOperation.operationId,
     };
   }
 
@@ -331,21 +356,24 @@ class OfflineSyncService {
       calories: nextCalories,
     });
 
-    if (isOnline()) {
-      await this.flush();
+    if (this.networkOnline) {
+      void this.flush();
     }
   }
 
   getPendingMissionIds(): Set<number> {
     return new Set(
       this.state.operations
-        .filter((operation): operation is MissionQueuedOperation => operation.type === "mission_completed")
+        .filter(
+          (operation): operation is MissionQueuedOperation =>
+            operation.type === "mission_completed" && operation.syncStatus === "pending",
+        )
         .map((operation) => operation.payload.mission_id),
     );
   }
 
   async flush(): Promise<void> {
-    if (!isOnline()) {
+    if (!this.networkOnline) {
       return;
     }
 
@@ -374,11 +402,13 @@ class OfflineSyncService {
 
     const nextQueue = [...operations];
     let flushedAnyOperation = false;
+    const syncedMissionIds = new Set<number>();
 
     for (const operation of operations.filter((item): item is MissionQueuedOperation => item.type === "mission_completed")) {
       try {
         await this.flushMissionOperation(operation);
         flushedAnyOperation = true;
+        syncedMissionIds.add(operation.payload.mission_id);
         this.removeOperationFromQueue(nextQueue, operation.operationId);
       } catch (error) {
         this.markOperationFailed(
@@ -424,6 +454,10 @@ class OfflineSyncService {
 
     if (flushedAnyOperation) {
       this.dispatchFlushEvent();
+    }
+
+    if (syncedMissionIds.size > 0) {
+      this.dispatchMissionSyncedEvent(Array.from(syncedMissionIds));
     }
   }
 
@@ -517,6 +551,46 @@ class OfflineSyncService {
     writeStorageValue(OFFLINE_QUEUE_STORAGE_KEY, nextQueue);
   }
 
+  private enqueueMissionOperation(operation: MissionQueuedOperation): MissionQueuedOperation {
+    const nextQueue = [...this.state.operations];
+    const existingIndex = nextQueue.findIndex(
+      (item) =>
+        item.type === "mission_completed" &&
+        item.payload.mission_id === operation.payload.mission_id &&
+        item.userId === operation.userId,
+    );
+
+    if (existingIndex >= 0) {
+      const existing = nextQueue[existingIndex] as MissionQueuedOperation;
+      const nextOperation: MissionQueuedOperation = {
+        ...existing,
+        source: operation.source,
+        confidence: operation.confidence,
+        syncStatus: "pending",
+        payload: operation.payload,
+        lastError: null,
+        userId: operation.userId ?? existing.userId,
+      };
+      nextQueue[existingIndex] = nextOperation;
+      this.replaceQueue(nextQueue);
+      this.setState({
+        ...this.state,
+        operations: nextQueue,
+        lastError: null,
+      });
+      return nextOperation;
+    }
+
+    nextQueue.push(operation);
+    this.replaceQueue(nextQueue);
+    this.setState({
+      ...this.state,
+      operations: nextQueue,
+      lastError: null,
+    });
+    return operation;
+  }
+
   private enqueueOperation(operation: QueuedOfflineOperation): void {
     const nextQueue = [...this.state.operations, operation];
     this.replaceQueue(nextQueue);
@@ -525,6 +599,20 @@ class OfflineSyncService {
       operations: nextQueue,
       lastError: null,
     });
+  }
+
+  private findMissionOperation(
+    missionId: number,
+    userId?: string | undefined,
+  ): MissionQueuedOperation | null {
+    return (
+      this.state.operations.find(
+        (operation): operation is MissionQueuedOperation =>
+          operation.type === "mission_completed" &&
+          operation.payload.mission_id === missionId &&
+          operation.userId === userId,
+      ) ?? null
+    );
   }
 
   private removeOperationFromQueue(
@@ -568,6 +656,21 @@ class OfflineSyncService {
     window.dispatchEvent(new CustomEvent(FLUSH_EVENT_NAME));
   }
 
+  private dispatchMissionSyncedEvent(missionIds: number[]): void {
+    if (typeof window === "undefined" || missionIds.length === 0) {
+      return;
+    }
+
+    window.dispatchEvent(
+      new CustomEvent<OfflineMissionSyncedDetail>(MISSION_SYNCED_EVENT_NAME, {
+        detail: {
+          missionIds,
+          syncedAt: new Date().toISOString(),
+        },
+      }),
+    );
+  }
+
   private setState(nextState: OfflineSyncState): void {
     this.state = nextState;
     this.listeners.forEach((listener) => listener(this.state));
@@ -576,6 +679,7 @@ class OfflineSyncService {
 
 export const offlineSyncService = new OfflineSyncService();
 export const OFFLINE_SYNC_FLUSH_EVENT = FLUSH_EVENT_NAME;
+export const OFFLINE_MISSION_SYNCED_EVENT = MISSION_SYNCED_EVENT_NAME;
 
 export function shouldFlushOnLifecycle(state: HostLifecycleState): boolean {
   return state === "foreground";
