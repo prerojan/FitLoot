@@ -20,6 +20,7 @@ type RankingEntry = {
   training_rank: TrainingRank;
   training_rank_score: number;
 };
+const SECONDARY_PROFILE_CACHE_TTL_MS = 5 * 60_000;
 
 function normalizeRankingEntry(player: RankingPlayer): RankingEntry {
   return {
@@ -77,7 +78,7 @@ export default function Ranking() {
 
     const rankingPath = currentMode === "global" ? "/api/ranking/global" : "/api/ranking/friends";
     const cachedRanking = readCachedJson<RankingPlayer[]>(rankingPath);
-    const cachedProfile = readCachedJson<UserProfile>("/api/profile");
+    const cachedProfile = readCachedJson<UserProfile>("/api/profile", SECONDARY_PROFILE_CACHE_TTL_MS);
 
     if (cachedRanking) {
       const normalizedCachedList = Array.isArray(cachedRanking.data)
@@ -107,7 +108,7 @@ export default function Ranking() {
         );
       }
 
-      if (shouldFetch(cachedProfile)) {
+      if (!cachedProfile) {
         secondaryTasks.push(() =>
           fetchAndCacheJson<UserProfile>("/api/profile").then((payload) => {
             setProfile(payload);
@@ -239,31 +240,31 @@ export default function Ranking() {
                 Sua posicao atual
               </h2>
             </div>
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex min-w-0 flex-1 items-center gap-3 sm:gap-4">
-                <div className="size-12 overflow-hidden rounded-full border sm:size-14" style={{ borderColor: "var(--fl-border-soft)" }}>
+            <div className="flex min-w-0 flex-nowrap items-center justify-between gap-2 sm:gap-4">
+              <div className="flex min-w-0 flex-1 flex-nowrap items-center gap-2 sm:gap-4">
+                <div className="size-10 shrink-0 overflow-hidden rounded-full border sm:size-14" style={{ borderColor: "var(--fl-border-soft)" }}>
                   <Avatar
                     name={currentUserEntry.username}
                     className="h-full w-full"
                   />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-[clamp(0.95rem,4vw,1.125rem)] font-bold tracking-tight">
+                  <p className="truncate whitespace-nowrap text-[clamp(0.72rem,3vw,1.125rem)] font-bold tracking-tight">
                     Voce ({currentUserEntry.username})
                   </p>
-                  <p className="fl-theme-text-muted text-[clamp(0.5rem,2.4vw,0.625rem)] font-bold uppercase tracking-[0.2em]">
+                  <p className="fl-theme-text-muted truncate whitespace-nowrap text-[clamp(0.38rem,1.7vw,0.625rem)] font-bold uppercase tracking-[0.14em] sm:tracking-[0.2em]">
                     {currentUserEntry.current_streak} dias de streak
                   </p>
                 </div>
               </div>
-              <div className="min-w-0 border-t pt-3 text-left sm:border-t-0 sm:pt-0 sm:text-right">
+              <div className="min-w-0 shrink-0 text-right">
                 <p
-                  className="text-[clamp(1.6rem,7vw,1.875rem)] font-bold tracking-tight"
+                  className="whitespace-nowrap text-[clamp(1.1rem,5vw,1.875rem)] font-bold tracking-tight"
                   style={{ color: "var(--app-primary-color)" }}
                 >
                   #{currentUserPosition}
                 </p>
-                <p className="fl-theme-text-muted max-w-[14rem] text-[clamp(0.5rem,2.3vw,0.625rem)] font-bold uppercase tracking-[0.2em] sm:max-w-none">
+                <p className="fl-theme-text-muted whitespace-nowrap text-[clamp(0.36rem,1.55vw,0.625rem)] font-bold uppercase tracking-[0.12em] sm:tracking-[0.2em]">
                   {`${formatTrainingRankLabel(currentUserEntry.training_rank)} - Score ${currentUserEntry.training_rank_score}`}
                 </p>
               </div>

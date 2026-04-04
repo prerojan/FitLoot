@@ -9,6 +9,7 @@ import {
   schemaMismatchResponse,
 } from "../core/errors";
 import {
+  deleteRuntimeDashboardProjection,
   readRuntimeDashboardProjection,
   upsertRuntimeDashboardProjection,
 } from "../core/runtimeUserProjectionStore";
@@ -70,6 +71,8 @@ type ProgressionRouteDeps = {
 };
 
 const RUNTIME_DASHBOARD_PROJECTION_TTL_MS = 20_000;
+const RUNTIME_BENCHMARKS_PROJECTION_TTL_MS = 60_000;
+const RUNTIME_SKILLS_AVAILABLE_PROJECTION_TTL_MS = 60_000;
 
 function resolveRuntimeProjectionDb(
   c: import("hono").Context<AppContext>,
@@ -433,6 +436,7 @@ export function registerProgressionRoutes(
   app.post("/api/benchmarks", authMiddleware, async (c) => {
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
+    const runtimeProjectionDb = resolveRuntimeProjectionDb(c);
 
     try {
       const body = await c.req.json();
@@ -557,6 +561,20 @@ export function registerProgressionRoutes(
           .bind(user.id)
           .first<PhysicalBenchmarkRow>();
 
+      if (runtimeProjectionDb) {
+        c.executionCtx.waitUntil(
+          Promise.allSettled([
+            deleteRuntimeDashboardProjection(runtimeProjectionDb, user.id, "benchmarks"),
+            deleteRuntimeDashboardProjection(runtimeProjectionDb, user.id, "attributes"),
+          ]).catch((runtimeProjectionError) => {
+            console.warn("[/api/benchmarks][runtime-invalidate]", {
+              userId: user.id,
+              message: getErrorMessage(runtimeProjectionError),
+            });
+          }),
+        );
+      }
+
       return c.json({
         benchmark: resolvedBenchmark,
         delta,
@@ -571,8 +589,28 @@ export function registerProgressionRoutes(
   app.get("/api/benchmarks", authMiddleware, async (c) => {
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
+    const runtimeProjectionDb = resolveRuntimeProjectionDb(c);
 
     try {
+      if (runtimeProjectionDb) {
+        try {
+          const cachedBenchmarks = await readRuntimeDashboardProjection<{ benchmarks: PhysicalBenchmarkWithDelta[] }>(
+            runtimeProjectionDb,
+            user.id,
+            "benchmarks",
+            RUNTIME_BENCHMARKS_PROJECTION_TTL_MS,
+          );
+          if (cachedBenchmarks) {
+            return c.json(cachedBenchmarks);
+          }
+        } catch (runtimeProjectionError) {
+          console.warn("[/api/benchmarks][runtime-read]", {
+            userId: user.id,
+            message: getErrorMessage(runtimeProjectionError),
+          });
+        }
+      }
+
       const benchmarks = await c.env.fitloot_db
         .prepare(`
           SELECT * FROM physical_benchmarks 
@@ -608,7 +646,24 @@ export function registerProgressionRoutes(
         },
       );
 
-      return c.json({ benchmarks: results });
+      const responsePayload = { benchmarks: results };
+      if (runtimeProjectionDb) {
+        c.executionCtx.waitUntil(
+          upsertRuntimeDashboardProjection(
+            runtimeProjectionDb,
+            user.id,
+            "benchmarks",
+            responsePayload,
+          ).catch((runtimeProjectionError) => {
+            console.warn("[/api/benchmarks][runtime-write]", {
+              userId: user.id,
+              message: getErrorMessage(runtimeProjectionError),
+            });
+          }),
+        );
+      }
+
+      return c.json(responsePayload);
     } catch (error) {
       console.error("[/api/benchmarks]", error);
       return internalErrorResponse(c);
@@ -637,23 +692,65 @@ export function registerProgressionRoutes(
   app.get("/api/skills/available", authMiddleware, async (c) => {
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
+    const runtimeProjectionDb = resolveRuntimeProjectionDb(c);
 
-    const progression = await c.env.fitloot_db
-      .prepare("SELECT level FROM user_progression WHERE user_id = ?")
-      .bind(user.id)
-      .first();
+    try {
+      if (runtimeProjectionDb) {
+        try {
+          const cachedAvailableSkills = await readRuntimeDashboardProjection<unknown[]>(
+            runtimeProjectionDb,
+            user.id,
+            "skills_available",
+            RUNTIME_SKILLS_AVAILABLE_PROJECTION_TTL_MS,
+          );
+          if (cachedAvailableSkills) {
+            return c.json(Array.isArray(cachedAvailableSkills) ? cachedAvailableSkills : []);
+          }
+        } catch (runtimeProjectionError) {
+          console.warn("[/api/skills/available][runtime-read]", {
+            userId: user.id,
+            message: getErrorMessage(runtimeProjectionError),
+          });
+        }
+      }
 
-    const availableSkills = await c.env.fitloot_db
-      .prepare(
-        `SELECT s.* FROM skills s
-        WHERE COALESCE(s.level_required, s.required_level) <= ?
-        AND s.id NOT IN (SELECT skill_id FROM user_skills WHERE user_id = ?)
-        ORDER BY COALESCE(s.level_required, s.required_level), s.id`,
-      )
-      .bind(progression?.level || 1, user.id)
-      .all();
+      const progression = await c.env.fitloot_db
+        .prepare("SELECT level FROM user_progression WHERE user_id = ?")
+        .bind(user.id)
+        .first();
 
-    return c.json(availableSkills.results);
+      const availableSkills = await c.env.fitloot_db
+        .prepare(
+          `SELECT s.* FROM skills s
+          WHERE COALESCE(s.level_required, s.required_level) <= ?
+          AND s.id NOT IN (SELECT skill_id FROM user_skills WHERE user_id = ?)
+          ORDER BY COALESCE(s.level_required, s.required_level), s.id`,
+        )
+        .bind(progression?.level || 1, user.id)
+        .all();
+
+      const responsePayload = Array.isArray(availableSkills.results) ? availableSkills.results : [];
+      if (runtimeProjectionDb) {
+        c.executionCtx.waitUntil(
+          upsertRuntimeDashboardProjection(
+            runtimeProjectionDb,
+            user.id,
+            "skills_available",
+            responsePayload,
+          ).catch((runtimeProjectionError) => {
+            console.warn("[/api/skills/available][runtime-write]", {
+              userId: user.id,
+              message: getErrorMessage(runtimeProjectionError),
+            });
+          }),
+        );
+      }
+
+      return c.json(responsePayload);
+    } catch (error) {
+      console.error("[/api/skills/available]", error);
+      return internalErrorResponse(c);
+    }
   });
 
   app.post("/api/skills/:id/stage/complete", authMiddleware, async (c) => {

@@ -25,6 +25,7 @@ import { repairKnownMojibakeString } from "@/shared/textEncoding";
 
 type TitleFilter = "ALL" | "COMUM" | "INCOMUM" | "RARO" | "MITICO" | "SECRETO";
 type NormalizedRarity = Exclude<TitleFilter, "ALL">;
+const SECONDARY_PROFILE_CACHE_TTL_MS = 5 * 60_000;
 
 const RARITY_CONFIG: Record<NormalizedRarity, { color: string; label: string }> = {
   COMUM: { color: "#94a3b8", label: "Comum" },
@@ -122,8 +123,8 @@ export default function Titles() {
     setStatus(null);
 
     const cachedTitles = readCachedJson<TitleWithUnlock[]>("/api/titles");
-    const cachedProfile = readCachedJson<UserProfile>("/api/profile");
-    const cachedProgression = readCachedJson<UserProgression>("/api/progression");
+    const cachedProfile = readCachedJson<UserProfile>("/api/profile", SECONDARY_PROFILE_CACHE_TTL_MS);
+    const cachedProgression = readCachedJson<UserProgression>("/api/progression", SECONDARY_PROFILE_CACHE_TTL_MS);
 
     if (cachedTitles) {
       setTitles(Array.isArray(cachedTitles.data) ? sanitizeTitlesForDisplay(cachedTitles.data) : []);
@@ -147,7 +148,7 @@ export default function Titles() {
         );
       }
 
-      if (shouldFetch(cachedProfile)) {
+      if (!cachedProfile) {
         secondaryTasks.push(() =>
           fetchAndCacheJson<UserProfile>("/api/profile").then((payload) => {
             setProfile(payload);
@@ -155,7 +156,7 @@ export default function Titles() {
         );
       }
 
-      if (shouldFetch(cachedProgression)) {
+      if (!cachedProgression) {
         secondaryTasks.push(() =>
           fetchAndCacheJson<UserProgression>("/api/progression").then((payload) => {
             setProgression(payload);

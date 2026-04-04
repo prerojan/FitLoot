@@ -75,6 +75,7 @@ const DEFAULT_LOADING_STATE: DashboardLoadingState = {
 };
 
 const EXPIRED_MISSION_AUTO_CLEANUP_MS = 2 * 60_000;
+const DASHBOARD_SECONDARY_CACHE_TTL_MS = 5 * 60_000;
 
 // Detecta progresso inconsistente para forcar reconciliacao com o worker.
 function progressionHasXpOverflow(p: Pick<UserProgression, "xp" | "level">): boolean {
@@ -155,8 +156,8 @@ export default function Dashboard() {
     const cacheProfile = readCachedJson<UserProfile>("/api/profile");
     const cacheProgression = readCachedJson<UserProgression>("/api/progression");
     const cacheMissions = readCachedJson<Mission[]>("/api/missions");
-    const cacheAchievements = readCachedJson<AchievementWithUnlock[]>("/api/achievements");
-    const cacheTitles = readCachedJson<Array<Title & { is_active?: number | undefined }>>("/api/titles");
+    const cacheAchievements = readCachedJson<AchievementWithUnlock[]>("/api/achievements", DASHBOARD_SECONDARY_CACHE_TTL_MS);
+    const cacheTitles = readCachedJson<Array<Title & { is_active?: number | undefined }>>("/api/titles", DASHBOARD_SECONDARY_CACHE_TTL_MS);
     const cachedMissionList = Array.isArray(cacheMissions?.data) ? cacheMissions.data : null;
     const missionsApiPath = resolveMissionsApiPath(forceRefresh, cachedMissionList);
     const shouldForceMissionRefresh = missionsApiPath !== "/api/missions";
@@ -220,7 +221,7 @@ export default function Dashboard() {
       }
     };
 
-    await Promise.all([
+    const primaryTasks: Array<Promise<void>> = [
       runRequest<UserProfile>("profile", "/api/profile", Boolean(cacheProfile), Boolean(cacheProfile?.stale), setProfile, () => {
         if (Number(user?.onboarding_completed ?? 0) !== 1) {
           shouldRedirectToOnboarding = true;
@@ -243,27 +244,50 @@ export default function Dashboard() {
           }
         },
       ),
-      runRequest<Mission[]>("missions", missionsApiPath, Boolean(cacheMissions), shouldForceMissionRefresh || Boolean(cacheMissions?.stale), (payload) => {
-        setMissions(Array.isArray(payload) ? payload : []);
-      }),
-      (async () => {
-        if (!forceRefresh && cacheAchievements && !cacheAchievements.stale) {
-          return;
-        }
+      runRequest<Mission[]>(
+        "missions",
+        missionsApiPath,
+        Boolean(cacheMissions),
+        shouldForceMissionRefresh || Boolean(cacheMissions?.stale),
+        (payload) => {
+          setMissions(Array.isArray(payload) ? payload : []);
+        },
+      ),
+    ];
 
-        try {
-          const payload = await fetchAndCacheJson<AchievementWithUnlock[]>("/api/achievements");
-          setAchievements(Array.isArray(payload) ? payload : []);
-        } catch (requestError) {
-          if (requestError instanceof ApiRequestError && (requestError.status === 401 || requestError.status === 403)) {
-            shouldRedirectToApp = true;
+    await Promise.all(primaryTasks);
+
+    const secondaryTasks: Array<Promise<void>> = [];
+    if (forceRefresh || !cacheAchievements) {
+      secondaryTasks.push(
+        (async () => {
+          try {
+            const payload = await fetchAndCacheJson<AchievementWithUnlock[]>("/api/achievements");
+            setAchievements(Array.isArray(payload) ? payload : []);
+          } catch (requestError) {
+            if (requestError instanceof ApiRequestError && (requestError.status === 401 || requestError.status === 403)) {
+              shouldRedirectToApp = true;
+            }
           }
-        }
-      })(),
-      runRequest<Array<Title & { is_active?: number | undefined }>>("titles", "/api/titles", Boolean(cacheTitles), Boolean(cacheTitles?.stale), (payload) => {
-        setActiveTitle((Array.isArray(payload) ? payload : []).find((title) => title.is_active === 1) ?? null);
-      }),
-    ]);
+        })(),
+      );
+    }
+
+    if (forceRefresh || !cacheTitles) {
+      secondaryTasks.push(
+        runRequest<Array<Title & { is_active?: number | undefined }>>(
+          "titles",
+          "/api/titles",
+          Boolean(cacheTitles),
+          Boolean(cacheTitles?.stale),
+          (payload) => {
+            setActiveTitle((Array.isArray(payload) ? payload : []).find((title) => title.is_active === 1) ?? null);
+          },
+        ),
+      );
+    } else {
+      setSectionLoading("titles", false);
+    }
 
     if (shouldRedirectToApp) {
       navigate("/app");
@@ -276,6 +300,10 @@ export default function Dashboard() {
     }
 
     if (hasRequestError) return;
+
+    if (secondaryTasks.length > 0) {
+      void Promise.allSettled(secondaryTasks);
+    }
   }, [navigate, setSectionLoading, user]);
 
   useEffect(() => {
@@ -887,28 +915,10 @@ export default function Dashboard() {
             style={PANEL_STYLE}
           >
             <span
-              className="relative flex h-10 w-10 items-center justify-center overflow-hidden rounded-2xl border"
-              style={{
-                borderColor: "color-mix(in srgb, var(--app-primary-color) 26%, transparent)",
-                background:
-                  "linear-gradient(135deg, color-mix(in srgb, var(--app-primary-color) 24%, transparent), color-mix(in srgb, var(--app-secondary-color) 16%, transparent))",
-                color: "var(--app-primary-color)",
-                boxShadow: "inset 0 1px 0 rgba(255,255,255,0.18), 0 10px 18px rgba(var(--app-primary-color-rgb), 0.12)",
-              }}
+              className="flex h-10 w-10 items-center justify-center rounded-full"
+              style={{ background: "color-mix(in srgb, var(--app-primary-color) 18%, transparent)", color: "var(--app-primary-color)" }}
             >
-              <span
-                aria-hidden="true"
-                className="absolute inset-[3px] rounded-[0.85rem]"
-                style={{
-                  background: "radial-gradient(circle at 30% 30%, rgba(255,255,255,0.22), transparent 62%)",
-                }}
-              />
-              <Camera className="relative h-5 w-5" strokeWidth={2.3} />
-              <span
-                aria-hidden="true"
-                className="absolute bottom-1.5 right-1.5 h-1.5 w-1.5 rounded-full"
-                style={{ background: "color-mix(in srgb, var(--app-secondary-color) 82%, white)" }}
-              />
+              <Camera className="h-5 w-5" />
             </span>
             <span style={{ color: "var(--fl-color-text)" }}>Analisar Alimento</span>
           </button>

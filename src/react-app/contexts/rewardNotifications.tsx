@@ -29,6 +29,8 @@ const RewardNotificationsContext =
   });
 
 const TOAST_DURATION_MS = 4_500;
+const INITIAL_REFRESH_DELAY_MS = 1_500;
+const MIN_REFRESH_INTERVAL_MS = 15_000;
 
 function sortIncomingNotifications(
   notifications: readonly RewardNotification[],
@@ -78,6 +80,8 @@ export function RewardNotificationsProvider({
   const { user } = useAuth();
   const [queue, setQueue] = useState<RewardNotification[]>([]);
   const processedIdsRef = useRef<Set<number>>(new Set());
+  const refreshInFlightRef = useRef<Promise<void> | null>(null);
+  const lastRefreshAtRef = useRef(0);
   const hasUnlockedAccess = user ? hasPlanAccess(user) : false;
 
   const acknowledgeNotifications = useCallback(async (ids: number[]) => {
@@ -125,39 +129,82 @@ export function RewardNotificationsProvider({
 
   const refreshRewardNotifications = useCallback(async () => {
     if (!user || !hasUnlockedAccess) return;
-
-    try {
-      const response = await api("/api/reward-notifications/pending");
-
-      if (response.status === 401 || response.status === 403 || response.status === 402) {
-        return;
-      }
-
-      if (!response.ok) {
-        throw new Error("Failed to load reward notifications");
-      }
-
-      const payload = (await response.json()) as RewardNotification[];
-      pushRewardNotifications(payload);
-    } catch (error) {
-      console.error("Error loading reward notifications:", error);
+    if (refreshInFlightRef.current) {
+      return refreshInFlightRef.current;
     }
+
+    const now = Date.now();
+    if (now - lastRefreshAtRef.current < MIN_REFRESH_INTERVAL_MS) {
+      return;
+    }
+
+    const refreshTask = (async () => {
+      try {
+        const response = await api("/api/reward-notifications/pending");
+
+        if (response.status === 401 || response.status === 403 || response.status === 402) {
+          return;
+        }
+
+        if (!response.ok) {
+          throw new Error("Failed to load reward notifications");
+        }
+
+        const payload = (await response.json()) as RewardNotification[];
+        lastRefreshAtRef.current = Date.now();
+        pushRewardNotifications(payload);
+      } catch (error) {
+        console.error("Error loading reward notifications:", error);
+      } finally {
+        refreshInFlightRef.current = null;
+      }
+    })();
+
+    refreshInFlightRef.current = refreshTask;
+    await refreshTask;
   }, [hasUnlockedAccess, pushRewardNotifications, user]);
 
   useEffect(() => {
     if (!user || !hasUnlockedAccess) {
       setQueue([]);
       processedIdsRef.current = new Set();
+      refreshInFlightRef.current = null;
+      lastRefreshAtRef.current = 0;
       return;
     }
 
-    void refreshRewardNotifications();
+    const idleWindow = window as Window & {
+      requestIdleCallback?: (
+        callback: () => void,
+        options?: { timeout: number },
+      ) => number;
+      cancelIdleCallback?: (handle: number) => void;
+    };
+    let timeoutId: number | null = null;
+    let idleHandle: number | null = null;
+
+    if (typeof idleWindow.requestIdleCallback === "function") {
+      idleHandle = idleWindow.requestIdleCallback(() => {
+        void refreshRewardNotifications();
+      }, { timeout: INITIAL_REFRESH_DELAY_MS });
+    } else {
+      timeoutId = window.setTimeout(() => {
+        void refreshRewardNotifications();
+      }, INITIAL_REFRESH_DELAY_MS);
+    }
+
     const handleRefreshRequest = () => {
       void refreshRewardNotifications();
     };
 
     window.addEventListener("fitloot:refresh-rewards", handleRefreshRequest);
     return () => {
+      if (idleHandle !== null && typeof idleWindow.cancelIdleCallback === "function") {
+        idleWindow.cancelIdleCallback(idleHandle);
+      }
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+      }
       window.removeEventListener(
         "fitloot:refresh-rewards",
         handleRefreshRequest,

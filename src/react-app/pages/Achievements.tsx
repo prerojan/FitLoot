@@ -23,6 +23,7 @@ import { getAchievementShowcaseStyle, resolveShowcasedAchievement, sanitizeAchie
 
 type RarityFilter = "ALL" | "COMUM" | "INCOMUM" | "RARO" | "MITICO" | "SECRETO";
 type NormalizedRarity = Exclude<RarityFilter, "ALL">;
+const SECONDARY_PROFILE_CACHE_TTL_MS = 5 * 60_000;
 
 const RARITY_CONFIG: Record<NormalizedRarity, { color: string; label: string }> = {
   COMUM: { color: "#94a3b8", label: "Comum" },
@@ -74,8 +75,8 @@ export default function Achievements() {
 
   const loadData = useCallback(async () => {
     const cachedAchievements = readCachedJson<AchievementWithUnlock[]>("/api/achievements");
-    const cachedProfile = readCachedJson<UserProfile>("/api/profile");
-    const cachedProgression = readCachedJson<UserProgression>("/api/progression");
+    const cachedProfile = readCachedJson<UserProfile>("/api/profile", SECONDARY_PROFILE_CACHE_TTL_MS);
+    const cachedProgression = readCachedJson<UserProgression>("/api/progression", SECONDARY_PROFILE_CACHE_TTL_MS);
 
     if (cachedAchievements) {
       setAchievements(Array.isArray(cachedAchievements.data) ? sanitizeAchievementsForDisplay(cachedAchievements.data) : []);
@@ -105,7 +106,7 @@ export default function Achievements() {
         );
       }
 
-      if (shouldFetch(cachedProfile)) {
+      if (!cachedProfile) {
         secondaryTasks.push(() =>
           fetchAndCacheJson<UserProfile>("/api/profile").then((payload) => {
             setProfile(payload);
@@ -113,7 +114,7 @@ export default function Achievements() {
         );
       }
 
-      if (shouldFetch(cachedProgression)) {
+      if (!cachedProgression) {
         secondaryTasks.push(() =>
           fetchAndCacheJson<UserProgression>("/api/progression").then((payload) => {
             setProgression(payload);

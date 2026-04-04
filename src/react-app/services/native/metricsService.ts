@@ -219,7 +219,9 @@ class MetricsService {
     }
 
     void stepsService.startTracking().catch(() => undefined);
-    void this.refresh({ syncRemote: true });
+    // The first dashboard/profile subscriber should not compete with the main
+    // app bootstrap by publishing a remote metrics snapshot immediately.
+    void this.refresh({ syncRemote: false });
 
     this.unsubscribeSteps = stepsService.subscribeToSteps(
       (snapshot) => {

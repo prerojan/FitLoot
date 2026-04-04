@@ -43,6 +43,8 @@ import { applyProfileTheme } from "@/react-app/theme/profileTheme";
 
 const FEEDBACK_TYPES = ["Sugestao", "Bug", "Elogio", "Outro"] as const;
 type FeedbackType = (typeof FEEDBACK_TYPES)[number];
+const PROFILE_SECONDARY_CACHE_TTL_MS = 5 * 60_000;
+const PROFILE_BENCHMARKS_CACHE_TTL_MS = 15 * 60_000;
 
 type BenchmarkDelta = {
   pushups_delta: number;
@@ -182,10 +184,10 @@ export default function Profile() {
     const cachedAttributes = readCachedJson<UserAttributes>("/api/attributes");
     const cachedProgression = readCachedJson<UserProgression>("/api/progression");
     const cachedSkills = readCachedJson<SkillWithProgress[]>("/api/skills");
-    const cachedAvailableSkills = readCachedJson<Skill[]>("/api/skills/available");
-    const cachedAchievements = readCachedJson<AchievementWithUnlock[]>("/api/achievements");
-    const cachedTitles = readCachedJson<TitleWithUnlock[]>("/api/titles");
-    const cachedBenchmarks = readCachedJson<BenchmarksResponse>("/api/benchmarks");
+    const cachedAvailableSkills = readCachedJson<Skill[]>("/api/skills/available", PROFILE_SECONDARY_CACHE_TTL_MS);
+    const cachedAchievements = readCachedJson<AchievementWithUnlock[]>("/api/achievements", PROFILE_SECONDARY_CACHE_TTL_MS);
+    const cachedTitles = readCachedJson<TitleWithUnlock[]>("/api/titles", PROFILE_SECONDARY_CACHE_TTL_MS);
+    const cachedBenchmarks = readCachedJson<BenchmarksResponse>("/api/benchmarks", PROFILE_BENCHMARKS_CACHE_TTL_MS);
 
     if (cachedProfile) syncProfileThemeState(cachedProfile.data);
     if (cachedAttributes) setAttributes(cachedAttributes.data);
@@ -240,28 +242,28 @@ export default function Profile() {
           }),
         );
       }
-      if (shouldFetch(cachedAvailableSkills)) {
+      if (!cachedAvailableSkills) {
         secondaryTasks.push(() =>
           fetchAndCacheJson<Skill[]>("/api/skills/available").then((payload) => {
             setAvailableSkills(Array.isArray(payload) ? payload : []);
           }),
         );
       }
-      if (shouldFetch(cachedAchievements)) {
+      if (!cachedAchievements) {
         secondaryTasks.push(() =>
           fetchAndCacheJson<AchievementWithUnlock[]>("/api/achievements").then((payload) => {
             setAchievements(Array.isArray(payload) ? sanitizeAchievementsForDisplay(payload) : []);
           }),
         );
       }
-      if (shouldFetch(cachedTitles)) {
+      if (!cachedTitles) {
         secondaryTasks.push(() =>
           fetchAndCacheJson<TitleWithUnlock[]>("/api/titles").then((payload) => {
             setTitles(Array.isArray(payload) ? payload : []);
           }),
         );
       }
-      if (shouldFetch(cachedBenchmarks)) {
+      if (!cachedBenchmarks) {
         secondaryTasks.push(() =>
           fetchAndCacheJson<BenchmarksResponse>("/api/benchmarks")
             .catch(() => ({ benchmarks: [] } satisfies BenchmarksResponse))
