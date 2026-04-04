@@ -511,6 +511,11 @@ type AvailabilityPayload = {
   usernameAvailable?: boolean | null;
 };
 
+type StableAvailabilityCacheEntry = {
+  value: string;
+  status: "checking" | "available" | "unavailable";
+};
+
 const AVAILABILITY_CACHE_TTL_MS = 15_000;
 
 export default function Onboarding() {
@@ -539,6 +544,8 @@ export default function Onboarding() {
   const availabilityInflightRef = useRef<
     Map<string, Promise<AvailabilityPayload | null>>
   >(new Map());
+  const usernameValidationCacheRef = useRef<StableAvailabilityCacheEntry | null>(null);
+  const emailValidationCacheRef = useRef<StableAvailabilityCacheEntry | null>(null);
 
   // Reaproveita o e-mail retornado do checkout quando o usuario volta ao onboarding.
   useEffect(() => {
@@ -574,6 +581,8 @@ export default function Onboarding() {
     });
 
     if (field === "email") {
+      emailReqRef.current += 1;
+      emailValidationCacheRef.current = null;
       setEmailAvailability({ status: "idle" });
     }
   };
@@ -583,6 +592,8 @@ export default function Onboarding() {
       const nextValue = e.target.value;
       setProfile((currentProfile) => ({ ...currentProfile, [field]: nextValue }));
       if (field === "username") {
+        usernameReqRef.current += 1;
+        usernameValidationCacheRef.current = null;
         setUsernameAvailability({ status: "idle" });
       }
     };
@@ -619,7 +630,14 @@ export default function Onboarding() {
           const response = await api(`/api/auth/check-availability?${query.toString()}`, {
             timeoutMs: 8_000,
           });
-          if (!response.ok) return null;
+          if (!response.ok) {
+            console.warn("[onboarding][check-availability]", {
+              status: response.status,
+              hasEmail: Boolean(normalizedEmail),
+              hasUsername: Boolean(normalizedUsername),
+            });
+            return null;
+          }
 
           const payload = (await response.json().catch(() => null)) as AvailabilityPayload | null;
           if (!payload) return null;
@@ -638,7 +656,12 @@ export default function Onboarding() {
             expiresAt: Date.now() + AVAILABILITY_CACHE_TTL_MS,
           });
           return safePayload;
-        } catch {
+        } catch (error) {
+          console.warn("[onboarding][check-availability]", {
+            hasEmail: Boolean(normalizedEmail),
+            hasUsername: Boolean(normalizedUsername),
+            message: error instanceof Error ? error.message : String(error),
+          });
           return null;
         } finally {
           availabilityInflightRef.current.delete(cacheKey);
@@ -651,96 +674,130 @@ export default function Onboarding() {
     [],
   );
 
-  const validateUsername = useCallback(async (rawUsername: string) => {
+  const validateUsername = useCallback(async (
+    rawUsername: string,
+    options?: { force?: boolean },
+  ) => {
+    const force = options?.force === true;
     const username = rawUsername.trim();
-    const companionEmailRaw = credentials.email.trim().toLowerCase();
-    const companionEmail = EMAIL_REGEX.test(companionEmailRaw)
-      ? companionEmailRaw
-      : undefined;
     if (!username) {
+      usernameValidationCacheRef.current = null;
       setUsernameAvailability({ status: "idle" });
       return true;
     }
     if (username.length < 3) {
+      usernameValidationCacheRef.current = null;
       setUsernameAvailability({ status: "invalid", message: "Minimo de 3 caracteres." });
       return false;
     }
 
+    const cachedValidation = usernameValidationCacheRef.current;
+    if (!force && cachedValidation && cachedValidation.value === username) {
+      if (cachedValidation.status === "checking") {
+        return false;
+      }
+      if (cachedValidation.status === "available") {
+        setUsernameAvailability({ status: "available" });
+        return true;
+      }
+
+      setUsernameAvailability({ status: "unavailable", message: "Nome de usuario ja esta em uso." });
+      return false;
+    }
+
     const requestId = ++usernameReqRef.current;
+    usernameValidationCacheRef.current = { value: username, status: "checking" };
     setUsernameAvailability({ status: "checking" });
 
     try {
-      const availabilityParams: { email?: string; username?: string } = { username };
-      if (companionEmail) {
-        availabilityParams.email = companionEmail;
-      }
-      const payload = await requestAvailability(availabilityParams);
+      const payload = await requestAvailability({ username });
 
       if (requestId !== usernameReqRef.current) return false;
       if (!payload || typeof payload.usernameAvailable !== "boolean") {
+        usernameValidationCacheRef.current = null;
         setUsernameAvailability({ status: "invalid", message: "Nao foi possivel validar agora." });
         return false;
       }
       if (!payload.usernameAvailable) {
+        usernameValidationCacheRef.current = { value: username, status: "unavailable" };
         setUsernameAvailability({ status: "unavailable", message: "Nome de usuario ja esta em uso." });
         return false;
       }
 
+      usernameValidationCacheRef.current = { value: username, status: "available" };
       setUsernameAvailability({ status: "available" });
       return true;
     } catch {
       if (requestId === usernameReqRef.current) {
+        usernameValidationCacheRef.current = null;
         setUsernameAvailability({ status: "invalid", message: "Erro de conexao ao validar." });
       }
       return false;
     }
-  }, [credentials.email, requestAvailability]);
+  }, [requestAvailability]);
 
-  const validateEmail = useCallback(async (rawEmail: string) => {
+  const validateEmail = useCallback(async (
+    rawEmail: string,
+    options?: { force?: boolean },
+  ) => {
+    const force = options?.force === true;
     const email = rawEmail.trim().toLowerCase();
-    const companionUsernameRaw = profile.username.trim();
-    const companionUsername = companionUsernameRaw.length >= 3
-      ? companionUsernameRaw
-      : undefined;
     if (!email) {
+      emailValidationCacheRef.current = null;
       setEmailAvailability({ status: "idle" });
       return true;
     }
 
     if (!EMAIL_REGEX.test(email)) {
+      emailValidationCacheRef.current = null;
       setEmailAvailability({ status: "invalid", message: "E-mail invalido." });
       return false;
     }
 
+    const cachedValidation = emailValidationCacheRef.current;
+    if (!force && cachedValidation && cachedValidation.value === email) {
+      if (cachedValidation.status === "checking") {
+        return false;
+      }
+      if (cachedValidation.status === "available") {
+        setEmailAvailability({ status: "available" });
+        return true;
+      }
+
+      setEmailAvailability({ status: "unavailable", message: "E-mail ja esta cadastrado." });
+      return false;
+    }
+
     const requestId = ++emailReqRef.current;
+    emailValidationCacheRef.current = { value: email, status: "checking" };
     setEmailAvailability({ status: "checking" });
 
     try {
-      const availabilityParams: { email?: string; username?: string } = { email };
-      if (companionUsername) {
-        availabilityParams.username = companionUsername;
-      }
-      const payload = await requestAvailability(availabilityParams);
+      const payload = await requestAvailability({ email });
 
       if (requestId !== emailReqRef.current) return false;
       if (!payload || typeof payload.emailAvailable !== "boolean") {
+        emailValidationCacheRef.current = null;
         setEmailAvailability({ status: "invalid", message: "Nao foi possivel validar agora." });
         return false;
       }
       if (!payload.emailAvailable) {
+        emailValidationCacheRef.current = { value: email, status: "unavailable" };
         setEmailAvailability({ status: "unavailable", message: "E-mail ja esta cadastrado." });
         return false;
       }
 
+      emailValidationCacheRef.current = { value: email, status: "available" };
       setEmailAvailability({ status: "available" });
       return true;
     } catch {
       if (requestId === emailReqRef.current) {
+        emailValidationCacheRef.current = null;
         setEmailAvailability({ status: "invalid", message: "Erro de conexao ao validar." });
       }
       return false;
     }
-  }, [profile.username, requestAvailability]);
+  }, [requestAvailability]);
 
   // Faz o debounce da disponibilidade do username durante a digitacao.
   useEffect(() => {
@@ -898,6 +955,8 @@ export default function Onboarding() {
     try {
       const submitEmailRequestId = ++emailReqRef.current;
       const submitUsernameRequestId = ++usernameReqRef.current;
+      emailValidationCacheRef.current = { value: normalizedEmail, status: "checking" };
+      usernameValidationCacheRef.current = { value: trimmedUsername, status: "checking" };
       setEmailAvailability({ status: "checking" });
       setUsernameAvailability({ status: "checking" });
 
@@ -912,12 +971,14 @@ export default function Onboarding() {
         typeof availabilityPayload.usernameAvailable !== "boolean"
       ) {
         if (submitEmailRequestId === emailReqRef.current) {
+          emailValidationCacheRef.current = null;
           setEmailAvailability({
             status: "invalid",
             message: "Nao foi possivel validar agora.",
           });
         }
         if (submitUsernameRequestId === usernameReqRef.current) {
+          usernameValidationCacheRef.current = null;
           setUsernameAvailability({
             status: "invalid",
             message: "Nao foi possivel validar agora.",
@@ -929,6 +990,7 @@ export default function Onboarding() {
 
       if (!availabilityPayload.emailAvailable) {
         if (submitEmailRequestId === emailReqRef.current) {
+          emailValidationCacheRef.current = { value: normalizedEmail, status: "unavailable" };
           setEmailAvailability({
             status: "unavailable",
             message: "E-mail ja esta cadastrado.",
@@ -938,11 +1000,13 @@ export default function Onboarding() {
         return;
       }
       if (submitEmailRequestId === emailReqRef.current) {
+        emailValidationCacheRef.current = { value: normalizedEmail, status: "available" };
         setEmailAvailability({ status: "available" });
       }
 
       if (!availabilityPayload.usernameAvailable) {
         if (submitUsernameRequestId === usernameReqRef.current) {
+          usernameValidationCacheRef.current = { value: trimmedUsername, status: "unavailable" };
           setUsernameAvailability({
             status: "unavailable",
             message: "Nome de usuario ja esta em uso.",
@@ -952,6 +1016,7 @@ export default function Onboarding() {
         return;
       }
       if (submitUsernameRequestId === usernameReqRef.current) {
+        usernameValidationCacheRef.current = { value: trimmedUsername, status: "available" };
         setUsernameAvailability({ status: "available" });
       }
 

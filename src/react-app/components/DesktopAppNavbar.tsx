@@ -58,6 +58,15 @@ export default function DesktopAppNavbar({
   // Hidrata o chrome da navegacao com cache e refresh em segundo plano.
   useEffect(() => {
     let cancelled = false;
+    let timeoutId: number | null = null;
+    let idleHandle: number | null = null;
+    const idleWindow = window as Window & {
+      requestIdleCallback?: (
+        callback: () => void,
+        options?: { timeout: number },
+      ) => number;
+      cancelIdleCallback?: (handle: number) => void;
+    };
 
     const hydrateChrome = async () => {
       const cachedProfile = readCachedJson<UserProfile>("/api/profile");
@@ -71,36 +80,84 @@ export default function DesktopAppNavbar({
         setLevelLoading(false);
       }
 
-      try {
-        // Avoid repeated background refreshes across route transitions.
-        // We only fetch when there is no cached snapshot at all.
-        if (!profile && !cachedProfile) {
-          const payload = await fetchAndCacheJson<UserProfile>("/api/profile");
-          if (!cancelled) {
-            setResolvedProfile(payload);
-          }
+      const needsProfileFetch =
+        Boolean(user?.id) &&
+        !profile &&
+        !cachedProfile &&
+        !user?.name &&
+        !user?.avatar_url;
+      const needsProgressionFetch = Boolean(user?.id) && !progression && !cachedProgression;
+
+      if (!needsProfileFetch && !needsProgressionFetch) {
+        return;
+      }
+
+      const runRefresh = async () => {
+        const tasks: Array<Promise<void>> = [];
+
+        if (needsProfileFetch) {
+          tasks.push(
+            fetchAndCacheJson<UserProfile>("/api/profile")
+              .then((payload) => {
+                if (!cancelled) {
+                  setResolvedProfile(payload);
+                }
+              })
+              .catch(() => undefined),
+          );
         }
 
-        if (!progression && !cachedProgression) {
-          const payload = await fetchAndCacheJson<UserProgression>("/api/progression");
-          if (!cancelled) {
-            setResolvedProgression(payload);
+        if (needsProgressionFetch) {
+          tasks.push(
+            fetchAndCacheJson<UserProgression>("/api/progression")
+              .then((payload) => {
+                if (!cancelled) {
+                  setResolvedProgression(payload);
+                }
+              })
+              .catch(() => undefined)
+              .finally(() => {
+                if (!cancelled) {
+                  setLevelLoading(false);
+                }
+              }),
+          );
+        }
+
+        if (tasks.length === 0) {
+          if (!cancelled && needsProgressionFetch) {
             setLevelLoading(false);
           }
+          return;
         }
-      } catch {
-        if (!cancelled && !cachedProgression) {
-          setLevelLoading(false);
-        }
+
+        await Promise.allSettled(tasks);
+      };
+
+      if (typeof idleWindow.requestIdleCallback === "function") {
+        idleHandle = idleWindow.requestIdleCallback(() => {
+          void runRefresh();
+        }, { timeout: 1_500 });
+        return;
       }
+
+      timeoutId = window.setTimeout(() => {
+        void runRefresh();
+      }, 900);
     };
 
     void hydrateChrome();
 
     return () => {
       cancelled = true;
+      if (idleHandle !== null && typeof idleWindow.cancelIdleCallback === "function") {
+        idleWindow.cancelIdleCallback(idleHandle);
+      }
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+      }
     };
-  }, [profile, progression, user?.id]);
+  }, [profile, progression, user?.avatar_url, user?.id, user?.name]);
 
   const avatarName = resolvedProfile?.full_name ?? user?.name ?? resolvedProfile?.username ?? "FitLoot";
 

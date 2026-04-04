@@ -80,6 +80,7 @@ const ATTRIBUTE_META = [
 ] as const;
 
 const RECENT_UNLOCK_WINDOW_MS = 10 * 60 * 1000;
+const LEVEL_UP_MODAL_SECONDARY_CACHE_TTL_MS = 5 * 60_000;
 
 // Keeps the unlock spotlight focused on the immediate level-up window.
 function isRecentUnlock(value: string | null | undefined): boolean {
@@ -108,31 +109,78 @@ export default function LevelUpModal({ level, onClose }: LevelUpModalProps) {
   const [titles, setTitles] = useState<LevelUpTitle[]>(
     () => readCachedJson<LevelUpTitle[]>("/api/titles")?.data ?? [],
   );
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => !(
+    readCachedJson<UserProgression>("/api/progression") ||
+    readCachedJson<UserAttributes>("/api/attributes") ||
+    readCachedJson<LevelUpSkill[]>("/api/skills", LEVEL_UP_MODAL_SECONDARY_CACHE_TTL_MS) ||
+    readCachedJson<LevelUpTitle[]>("/api/titles", LEVEL_UP_MODAL_SECONDARY_CACHE_TTL_MS)
+  ));
   const [shareStatus, setShareStatus] = useState<string | null>(null);
-  const { metrics } = useDailyMetrics({ syncRemote: true });
+  const { metrics } = useDailyMetrics({ syncRemote: false });
 
   // Refreshes the cached progression snapshot while preserving a fast first paint.
   useEffect(() => {
     let cancelled = false;
 
     const hydrate = async () => {
+      const cachedProgression = readCachedJson<UserProgression>("/api/progression");
+      const cachedAttributes = readCachedJson<UserAttributes>("/api/attributes");
+      const cachedSkills = readCachedJson<LevelUpSkill[]>("/api/skills", LEVEL_UP_MODAL_SECONDARY_CACHE_TTL_MS);
+      const cachedTitles = readCachedJson<LevelUpTitle[]>("/api/titles", LEVEL_UP_MODAL_SECONDARY_CACHE_TTL_MS);
+
+      const shouldFetch = (entry: { stale: boolean } | null): boolean => !entry || entry.stale;
+      const refreshTasks: Array<Promise<void>> = [];
+
+      if (shouldFetch(cachedProgression)) {
+        refreshTasks.push(
+          fetchAndCacheJson<UserProgression>("/api/progression")
+            .then((payload) => {
+              if (!cancelled) {
+                setProgression(payload);
+              }
+            })
+            .catch(() => undefined),
+        );
+      }
+
+      if (shouldFetch(cachedAttributes)) {
+        refreshTasks.push(
+          fetchAndCacheJson<UserAttributes>("/api/attributes")
+            .then((payload) => {
+              if (!cancelled) {
+                setAttributes(payload);
+              }
+            })
+            .catch(() => undefined),
+        );
+      }
+
+      if (shouldFetch(cachedSkills)) {
+        refreshTasks.push(
+          fetchAndCacheJson<LevelUpSkill[]>("/api/skills")
+            .then((payload) => {
+              if (!cancelled) {
+                setSkills(Array.isArray(payload) ? payload : []);
+              }
+            })
+            .catch(() => undefined),
+        );
+      }
+
+      if (shouldFetch(cachedTitles)) {
+        refreshTasks.push(
+          fetchAndCacheJson<LevelUpTitle[]>("/api/titles")
+            .then((payload) => {
+              if (!cancelled) {
+                setTitles(Array.isArray(payload) ? payload : []);
+              }
+            })
+            .catch(() => undefined),
+        );
+      }
+
       try {
-        const [nextProgression, nextAttributes, nextSkills, nextTitles] = await Promise.all([
-          fetchAndCacheJson<UserProgression>("/api/progression"),
-          fetchAndCacheJson<UserAttributes>("/api/attributes"),
-          fetchAndCacheJson<LevelUpSkill[]>("/api/skills"),
-          fetchAndCacheJson<LevelUpTitle[]>("/api/titles"),
-        ]);
-
-        if (cancelled) return;
-
-        setProgression(nextProgression);
-        setAttributes(nextAttributes);
-        setSkills(Array.isArray(nextSkills) ? nextSkills : []);
-        setTitles(Array.isArray(nextTitles) ? nextTitles : []);
-      } catch {
-        // Keeps the modal usable with cached data if one of the requests fails.
+        await Promise.allSettled(refreshTasks);
       } finally {
         if (!cancelled) {
           setLoading(false);
