@@ -29,7 +29,7 @@ import {
   ensurePortugueseExerciseLabel,
   ensurePortugueseInstructionList,
 } from "./instructionLocalization";
-import { resolveMissionExerciseForGeneration } from "./missionExerciseSelection";
+import { sanitizeMissionExerciseNames } from "./missionExerciseSelection";
 
 type MissionPeriod = "daily" | "weekly" | "monthly";
 
@@ -249,6 +249,46 @@ function exerciseMatchesUnlockedSkill(
 }
 
 export function createMissionMaterializationService(deps: MissionMaterializationDeps) {
+  function resolveDailyExerciseForMaterialization(
+    blueprint: MissionBlueprint,
+  ): {
+    exerciseName: string;
+    strictExerciseDbId: string | null;
+  } {
+    const strictSupportedExerciseName =
+      sanitizeMissionExerciseNames({
+        requestedNames: [blueprint.exerciseName],
+        muscles: [blueprint.muscle],
+        focus: [blueprint.name, blueprint.description, blueprint.muscle].join(" "),
+        limit: 1,
+        fallbackOrder: ["focus", "muscles", "catalog"],
+      })[0]
+      ?? deps.resolveSupportedMissionExerciseName(blueprint.exerciseName)
+      ?? null;
+
+    if (blueprint.missionOrigin === "regular" && !strictSupportedExerciseName) {
+      throw new Error(
+        `REGULAR_DAILY_MISSION_UNSUPPORTED_EXERCISE:${blueprint.exerciseName}`,
+      );
+    }
+
+    const exerciseName = strictSupportedExerciseName ?? blueprint.exerciseName;
+    const strictExerciseDbId = resolveStrictSupportedMissionExerciseDbId(
+      exerciseName,
+    );
+
+    if (blueprint.missionOrigin === "regular" && !strictExerciseDbId) {
+      throw new Error(
+        `REGULAR_DAILY_MISSION_REQUIRES_EXERCISE_DB_ID:${exerciseName}`,
+      );
+    }
+
+    return {
+      exerciseName,
+      strictExerciseDbId,
+    };
+  }
+
   function extractExerciseName(title: string): string {
     const normalized = title.trim();
     if (!normalized.includes(":")) return normalized;
@@ -507,20 +547,11 @@ export function createMissionMaterializationService(deps: MissionMaterialization
   async function materializeMissionBlueprint(env: Env, profile: MissionGenerationProfileSnapshot, blueprint: MissionBlueprint): Promise<MissionPayload> {
     const config = deps.missionConfigByPeriod(blueprint.period);
     const shouldEnrichWithExerciseApi = blueprint.period === "daily";
-    const supportedExerciseName = shouldEnrichWithExerciseApi
-      ? (
-        resolveMissionExerciseForGeneration({
-          requestedName: blueprint.exerciseName,
-          muscles: [blueprint.muscle],
-          focus: blueprint.description,
-        })
-        ?? deps.resolveSupportedMissionExerciseName(blueprint.exerciseName)
-        ?? blueprint.exerciseName
-      )
-      : blueprint.exerciseName;
-    const strictExerciseDbId = shouldEnrichWithExerciseApi
-      ? resolveStrictSupportedMissionExerciseDbId(supportedExerciseName)
+    const dailyExerciseResolution = shouldEnrichWithExerciseApi
+      ? resolveDailyExerciseForMaterialization(blueprint)
       : null;
+    const supportedExerciseName = dailyExerciseResolution?.exerciseName ?? blueprint.exerciseName;
+    const strictExerciseDbId = dailyExerciseResolution?.strictExerciseDbId ?? null;
     const strictExerciseGifUrl = strictExerciseDbId
       ? resolveExerciseMediaFallbackUrlById(strictExerciseDbId)
       : null;

@@ -1,9 +1,12 @@
 import { MISSION_LIMITS } from "../../constants/missionMetrics";
+import { hasTableColumn } from "../core/database";
 import type { Env } from "../core/types";
 
 const REGULAR_MISSION_REBUILD_JOB_KEY = "regular_mission_cycle_rebuild_v1";
 const REGULAR_MISSION_REBUILD_BATCH_SIZE = 25;
 const REGULAR_MISSION_REBUILD_LOCK_TTL_MS = 15 * 60_000;
+const REGULAR_MISSION_REBUILD_RUN_BUDGET_MS = 20_000;
+const REGULAR_MISSION_REBUILD_PER_USER_TIMEOUT_MS = 15_000;
 
 type StructuredGenerationOptions = {
   isAiSpecial: boolean;
@@ -24,13 +27,63 @@ type RegularMissionRebuildDeps = {
 };
 
 type MaintenanceJobRow = {
-  cursor_user_id: string | null;
+  cursor: string | null;
   status: string | null;
-  processed_count: number | null;
+  processedCount: number;
+  lastError: string | null;
   started_at: string | null;
 };
 
-async function ensureMaintenanceJobSchema(db: D1Database): Promise<void> {
+type MaintenanceJobSchema = "generic" | "legacy";
+
+type MaintenanceJobPayload = {
+  processedCount?: number;
+  lastError?: string | null;
+};
+
+function parseMaintenanceJobPayload(value: string | null | undefined): MaintenanceJobPayload {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    return {};
+  }
+
+  try {
+    const parsed = JSON.parse(value) as MaintenanceJobPayload | null;
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function serializeMaintenanceJobPayload(payload: MaintenanceJobPayload): string {
+  const normalized: MaintenanceJobPayload = {};
+  const processedCount = Number(payload.processedCount ?? 0);
+  if (Number.isFinite(processedCount) && processedCount > 0) {
+    normalized.processedCount = processedCount;
+  }
+  if (typeof payload.lastError === "string" && payload.lastError.trim().length > 0) {
+    normalized.lastError = payload.lastError.trim();
+  }
+  return JSON.stringify(normalized);
+}
+
+async function ensureMaintenanceJobSchema(db: D1Database): Promise<MaintenanceJobSchema> {
+  await db.prepare(
+    `CREATE TABLE IF NOT EXISTS maintenance_jobs (
+       job_key TEXT PRIMARY KEY,
+       status TEXT NOT NULL DEFAULT 'pending',
+       cursor TEXT,
+       payload_json TEXT NOT NULL DEFAULT '{}',
+       started_at TEXT,
+       completed_at TEXT,
+       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+     )`,
+  ).run();
+
+  const hasGenericCursor = await hasTableColumn(db, "maintenance_jobs", "cursor");
+  if (hasGenericCursor) {
+    return "generic";
+  }
+
   await db.prepare(
     `CREATE TABLE IF NOT EXISTS maintenance_jobs (
        job_key TEXT PRIMARY KEY,
@@ -43,11 +96,52 @@ async function ensureMaintenanceJobSchema(db: D1Database): Promise<void> {
        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
      )`,
   ).run();
+
+  return "legacy";
 }
 
 export function createRegularMissionRebuildService(
   deps: RegularMissionRebuildDeps,
 ) {
+  async function withTimeout<T>(
+    promise: Promise<T>,
+    timeoutMs: number,
+    message: string,
+  ): Promise<T> {
+    let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+    const timeoutPromise = new Promise<T>((_resolve, reject) => {
+      timeoutHandle = setTimeout(() => {
+        reject(new Error(message));
+      }, timeoutMs);
+    });
+
+    try {
+      return await Promise.race([promise, timeoutPromise]);
+    } finally {
+      if (timeoutHandle !== null) {
+        clearTimeout(timeoutHandle);
+      }
+    }
+  }
+
+  function createDeterministicRebuildEnv(env: Env): Env {
+    return {
+      ...env,
+      HUGGING_FACE_API_KEY: undefined,
+      HF_TOKEN: undefined,
+    };
+  }
+
+  function buildBatchErrorSummary(
+    failedUsers: number,
+    batchSize: number,
+    firstFailureMessage: string | null,
+  ): string | null {
+    return failedUsers > 0
+      ? `batch_failed_users=${failedUsers}/${batchSize}; first=${firstFailureMessage ?? "UNKNOWN"}`
+      : null;
+  }
+
   function isStaleRunningJob(value: string | null | undefined): boolean {
     if (typeof value !== "string" || value.trim().length === 0) {
       return true;
@@ -61,70 +155,140 @@ export function createRegularMissionRebuildService(
 
   async function acquireJobState(
     db: D1Database,
+    schema: MaintenanceJobSchema,
   ): Promise<MaintenanceJobRow | null> {
-    await ensureMaintenanceJobSchema(db);
-    await db.prepare(
-      `INSERT INTO maintenance_jobs (
-         job_key,
-         cursor_user_id,
-         status,
-         processed_count,
-         updated_at
-       ) VALUES (?, NULL, 'pending', 0, datetime('now'))
-       ON CONFLICT(job_key) DO NOTHING`,
-    ).bind(REGULAR_MISSION_REBUILD_JOB_KEY).run();
+    if (schema === "generic") {
+      await db.prepare(
+        `INSERT INTO maintenance_jobs (
+           job_key,
+           status,
+           cursor,
+           payload_json,
+           updated_at
+         ) VALUES (?, 'pending', NULL, '{}', datetime('now'))
+         ON CONFLICT(job_key) DO NOTHING`,
+      ).bind(REGULAR_MISSION_REBUILD_JOB_KEY).run();
+    } else {
+      await db.prepare(
+        `INSERT INTO maintenance_jobs (
+           job_key,
+           cursor_user_id,
+           status,
+           processed_count,
+           updated_at
+         ) VALUES (?, NULL, 'pending', 0, datetime('now'))
+         ON CONFLICT(job_key) DO NOTHING`,
+      ).bind(REGULAR_MISSION_REBUILD_JOB_KEY).run();
+    }
 
-    const current = await db.prepare(
-      `SELECT cursor_user_id, status, processed_count, started_at
-         FROM maintenance_jobs
-        WHERE job_key = ?`,
-    ).bind(REGULAR_MISSION_REBUILD_JOB_KEY).first<MaintenanceJobRow>();
+    const current = schema === "generic"
+      ? await db.prepare(
+        `SELECT cursor as cursor_value, payload_json, status, started_at
+           FROM maintenance_jobs
+          WHERE job_key = ?`,
+      ).bind(REGULAR_MISSION_REBUILD_JOB_KEY).first<{
+        cursor_value: string | null;
+        payload_json: string | null;
+        status: string | null;
+        started_at: string | null;
+      }>()
+      : await db.prepare(
+        `SELECT cursor_user_id as cursor_value, status, processed_count, last_error, started_at
+           FROM maintenance_jobs
+          WHERE job_key = ?`,
+      ).bind(REGULAR_MISSION_REBUILD_JOB_KEY).first<{
+        cursor_value: string | null;
+        status: string | null;
+        processed_count: number | null;
+        last_error: string | null;
+        started_at: string | null;
+      }>();
 
     if (!current) {
       return null;
     }
-    if (current.status === "completed") {
+    const genericPayload = schema === "generic"
+      ? parseMaintenanceJobPayload(
+        (current as { payload_json?: string | null }).payload_json ?? null,
+      )
+      : {};
+    const normalizedCurrent: MaintenanceJobRow = {
+      cursor: (current as { cursor_value?: string | null }).cursor_value ?? null,
+      status: current.status ?? null,
+      processedCount: schema === "generic"
+        ? Number(genericPayload.processedCount ?? 0)
+        : Number((current as { processed_count?: number | null }).processed_count ?? 0),
+      lastError: schema === "generic"
+        ? (typeof genericPayload.lastError === "string" ? genericPayload.lastError : null)
+        : ((current as { last_error?: string | null }).last_error ?? null),
+      started_at: current.started_at ?? null,
+    };
+
+    if (normalizedCurrent.status === "completed") {
       return null;
     }
-    if (current.status === "running" && !isStaleRunningJob(current.started_at)) {
+    if (normalizedCurrent.status === "running" && !isStaleRunningJob(normalizedCurrent.started_at)) {
       return null;
     }
 
-    const claim = await db.prepare(
-      `UPDATE maintenance_jobs
-          SET status = 'running',
-              started_at = datetime('now'),
-              finished_at = NULL,
-              last_error = NULL,
-              updated_at = datetime('now')
-        WHERE job_key = ?
-          AND (
-            status != 'running'
-            OR started_at IS NULL
-            OR datetime(started_at) < datetime('now', '-15 minutes')
-          )`,
-    ).bind(REGULAR_MISSION_REBUILD_JOB_KEY).run();
+    const claim = schema === "generic"
+      ? await db.prepare(
+        `UPDATE maintenance_jobs
+            SET status = 'running',
+                started_at = datetime('now'),
+                completed_at = NULL,
+                payload_json = ?,
+                updated_at = datetime('now')
+          WHERE job_key = ?
+            AND (
+              status != 'running'
+              OR started_at IS NULL
+              OR datetime(started_at) < datetime('now', '-15 minutes')
+            )`,
+      ).bind(
+        serializeMaintenanceJobPayload({
+          processedCount: normalizedCurrent.processedCount,
+          lastError: null,
+        }),
+        REGULAR_MISSION_REBUILD_JOB_KEY,
+      ).run()
+      : await db.prepare(
+        `UPDATE maintenance_jobs
+            SET status = 'running',
+                started_at = datetime('now'),
+                finished_at = NULL,
+                last_error = NULL,
+                updated_at = datetime('now')
+          WHERE job_key = ?
+            AND (
+              status != 'running'
+              OR started_at IS NULL
+              OR datetime(started_at) < datetime('now', '-15 minutes')
+            )`,
+      ).bind(REGULAR_MISSION_REBUILD_JOB_KEY).run();
 
     if (Number(claim.meta.changes ?? 0) === 0) {
       return null;
     }
 
-    return current;
+    return normalizedCurrent;
   }
 
   async function loadUserBatch(
     db: D1Database,
     cursorUserId: string | null,
   ): Promise<string[]> {
+    const normalizedCursor = typeof cursorUserId === "string"
+      ? cursorUserId.trim()
+      : "";
     const rows = await db.prepare(
       `SELECT user_id
          FROM user_profiles
-        WHERE (? IS NULL OR user_id > ?)
+        WHERE user_id > ?
         ORDER BY user_id
         LIMIT ?`,
     ).bind(
-      cursorUserId,
-      cursorUserId,
+      normalizedCursor,
       REGULAR_MISSION_REBUILD_BATCH_SIZE,
     ).all<{ user_id: string }>();
 
@@ -158,17 +322,42 @@ export function createRegularMissionRebuildService(
 
   async function markBatchSuccess(
     db: D1Database,
+    schema: MaintenanceJobSchema,
     params: {
       nextCursor: string | null;
       processedCount: number;
       completed: boolean;
+      lastError?: string | null;
     },
   ): Promise<void> {
+    if (schema === "generic") {
+      await db.prepare(
+        `UPDATE maintenance_jobs
+            SET cursor = ?,
+                payload_json = ?,
+                status = ?,
+                completed_at = CASE WHEN ? = 1 THEN datetime('now') ELSE NULL END,
+                updated_at = datetime('now')
+          WHERE job_key = ?`,
+      ).bind(
+        params.nextCursor,
+        serializeMaintenanceJobPayload({
+          processedCount: params.processedCount,
+          lastError: params.lastError ?? null,
+        }),
+        params.completed ? "completed" : "pending",
+        params.completed ? 1 : 0,
+        REGULAR_MISSION_REBUILD_JOB_KEY,
+      ).run();
+      return;
+    }
+
     await db.prepare(
       `UPDATE maintenance_jobs
           SET cursor_user_id = ?,
               processed_count = ?,
               status = ?,
+              last_error = ?,
               finished_at = CASE WHEN ? = 1 THEN datetime('now') ELSE NULL END,
               updated_at = datetime('now')
         WHERE job_key = ?`,
@@ -176,6 +365,7 @@ export function createRegularMissionRebuildService(
       params.nextCursor,
       params.processedCount,
       params.completed ? "completed" : "pending",
+      params.lastError ?? null,
       params.completed ? 1 : 0,
       REGULAR_MISSION_REBUILD_JOB_KEY,
     ).run();
@@ -183,8 +373,28 @@ export function createRegularMissionRebuildService(
 
   async function markBatchFailure(
     db: D1Database,
+    schema: MaintenanceJobSchema,
+    currentState: MaintenanceJobRow | null,
     error: unknown,
   ): Promise<void> {
+    const message = deps.getErrorMessage(error);
+    if (schema === "generic") {
+      await db.prepare(
+        `UPDATE maintenance_jobs
+            SET status = 'pending',
+                payload_json = ?,
+                updated_at = datetime('now')
+          WHERE job_key = ?`,
+      ).bind(
+        serializeMaintenanceJobPayload({
+          processedCount: Number(currentState?.processedCount ?? 0),
+          lastError: message,
+        }),
+        REGULAR_MISSION_REBUILD_JOB_KEY,
+      ).run();
+      return;
+    }
+
     await db.prepare(
       `UPDATE maintenance_jobs
           SET status = 'pending',
@@ -192,7 +402,7 @@ export function createRegularMissionRebuildService(
               updated_at = datetime('now')
         WHERE job_key = ?`,
     ).bind(
-      deps.getErrorMessage(error),
+      message,
       REGULAR_MISSION_REBUILD_JOB_KEY,
     ).run();
   }
@@ -201,57 +411,101 @@ export function createRegularMissionRebuildService(
     env: Env,
     db: D1Database,
   ): Promise<boolean> {
-    const jobState = await acquireJobState(db);
+    const schema = await ensureMaintenanceJobSchema(db);
+    const jobState = await acquireJobState(db, schema);
     if (!jobState) {
       return false;
     }
 
     try {
-      const userBatch = await loadUserBatch(db, jobState.cursor_user_id ?? null);
+      const rebuildEnv = createDeterministicRebuildEnv(env);
+      const userBatch = await loadUserBatch(db, jobState.cursor ?? null);
+      let failedUsers = 0;
+      let firstFailureMessage: string | null = null;
+      let processedCount = Number(jobState.processedCount ?? 0);
+      let lastProcessedCursor = jobState.cursor ?? null;
+      const runStartedAt = Date.now();
       if (userBatch.length === 0) {
-        await markBatchSuccess(db, {
-          nextCursor: jobState.cursor_user_id ?? null,
-          processedCount: Number(jobState.processed_count ?? 0),
+        await markBatchSuccess(db, schema, {
+          nextCursor: jobState.cursor ?? null,
+          processedCount,
           completed: true,
+          lastError: null,
         });
         return false;
       }
 
-      for (const userId of userBatch) {
+      for (let index = 0; index < userBatch.length; index += 1) {
+        const userId = userBatch[index]!;
         await purgeRegularMissionsForUser(db, userId);
         deps.invalidateMissionListCache(userId);
 
         try {
-          await deps.generateStructuredMissionPlanForUser(
-            env,
-            db,
-            userId,
-            {
-              isAiSpecial: false,
-              dailyTarget: MISSION_LIMITS.daily,
-              weeklyTarget: MISSION_LIMITS.weekly,
-              monthlyTarget: MISSION_LIMITS.monthly,
-            },
+          const generationResult = await withTimeout(
+            deps.generateStructuredMissionPlanForUser(
+              rebuildEnv,
+              db,
+              userId,
+              {
+                isAiSpecial: false,
+                dailyTarget: MISSION_LIMITS.daily,
+                weeklyTarget: MISSION_LIMITS.weekly,
+                monthlyTarget: MISSION_LIMITS.monthly,
+              },
+            ),
+            REGULAR_MISSION_REBUILD_PER_USER_TIMEOUT_MS,
+            `REGULAR_MISSION_REBUILD_TIMEOUT:${userId}`,
           );
+          if ((generationResult as { missions?: unknown[] | null }).missions?.length === 0) {
+            failedUsers += 1;
+            firstFailureMessage ??= "MISSION_GENERATION_RESULT_EMPTY";
+          }
         } catch (error) {
+          failedUsers += 1;
+          firstFailureMessage ??= deps.getErrorMessage(error);
           console.error("[missions][regular-rebuild][user]", {
             userId,
             message: deps.getErrorMessage(error),
           });
         }
+
+        processedCount += 1;
+        lastProcessedCursor = userId;
+
+        const remainingUsers = userBatch.length - index - 1;
+        if (
+          remainingUsers > 0
+          && Date.now() - runStartedAt >= REGULAR_MISSION_REBUILD_RUN_BUDGET_MS
+        ) {
+          await markBatchSuccess(db, schema, {
+            nextCursor: lastProcessedCursor,
+            processedCount,
+            completed: false,
+            lastError: buildBatchErrorSummary(
+              failedUsers,
+              processedCount - Number(jobState.processedCount ?? 0),
+              firstFailureMessage,
+            ),
+          });
+          return true;
+        }
       }
 
-      const nextCursor = userBatch[userBatch.length - 1] ?? jobState.cursor_user_id ?? null;
-      const processedCount = Number(jobState.processed_count ?? 0) + userBatch.length;
+      const nextCursor = lastProcessedCursor;
       const completed = userBatch.length < REGULAR_MISSION_REBUILD_BATCH_SIZE;
-      await markBatchSuccess(db, {
+      await markBatchSuccess(db, schema, {
         nextCursor,
         processedCount,
         completed,
+        lastError: buildBatchErrorSummary(
+          failedUsers,
+          processedCount - Number(jobState.processedCount ?? 0),
+          firstFailureMessage,
+        ),
       });
       return true;
     } catch (error) {
-      await markBatchFailure(db, error);
+      await markBatchFailure(db, schema, jobState, error);
       throw error;
     }
   }

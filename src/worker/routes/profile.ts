@@ -843,7 +843,7 @@ export function registerProfileRoutes(
               AND type = 'daily'
               AND is_completed = 0
               AND COALESCE(mission_origin, 'regular') = 'regular'
-              AND COALESCE(cycle_date, substr(created_at, 1, 10)) = ?`,
+              AND COALESCE(cycle_date, substr(CAST(created_at AS TEXT), 1, 10)) = ?`,
         )
         .bind(user.id, dailyCycleDate)
         .run();

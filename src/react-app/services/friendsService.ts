@@ -12,6 +12,7 @@ export type Friend = {
   friend_streak: number;
   status?: string | undefined;
   is_online?: boolean | undefined;
+  last_heartbeat_at?: string | null | undefined;
 };
 
 export type FriendSearchResult = {
@@ -64,8 +65,53 @@ async function parseApiErrorMessage(
   return payload?.error?.trim() || fallbackMessage;
 }
 
+function coerceBoolean(value: unknown): boolean | undefined {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value > 0;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (["1", "true", "t", "yes", "online"].includes(normalized)) return true;
+    if (["0", "false", "f", "no", "offline"].includes(normalized)) return false;
+  }
+  return undefined;
+}
+
+function isRecentHeartbeat(value: unknown, windowMs = 10 * 60 * 1000): boolean {
+  if (typeof value !== "string" || value.trim().length === 0) return false;
+  const parsed = Date.parse(value);
+  if (!Number.isFinite(parsed)) return false;
+  return Date.now() - parsed <= windowMs;
+}
+
+function normalizeFriend(raw: unknown): Friend | null {
+  if (!raw || typeof raw !== "object") return null;
+
+  const friend = raw as Record<string, unknown>;
+  const lastHeartbeatAt =
+    typeof friend.last_heartbeat_at === "string" && friend.last_heartbeat_at.trim().length > 0
+      ? friend.last_heartbeat_at
+      : null;
+  const normalizedIsOnline = coerceBoolean(friend.is_online) ?? isRecentHeartbeat(lastHeartbeatAt);
+
+  return {
+    id: Number(friend.id ?? 0),
+    friend_user_id: String(friend.friend_user_id ?? ""),
+    friend_username: String(friend.friend_username ?? ""),
+    friend_full_name: String(friend.friend_full_name ?? friend.friend_username ?? ""),
+    friend_level: Math.max(0, Number(friend.friend_level ?? 0)),
+    friend_xp: Math.max(0, Number(friend.friend_xp ?? 0)),
+    friend_streak: Math.max(0, Number(friend.friend_streak ?? 0)),
+    status: typeof friend.status === "string" ? friend.status : undefined,
+    is_online: normalizedIsOnline,
+    last_heartbeat_at: lastHeartbeatAt,
+  };
+}
+
 function toFriendsArray(payload: unknown): Friend[] {
-  return Array.isArray(payload) ? (payload as Friend[]) : [];
+  if (!Array.isArray(payload)) return [];
+  return payload
+    .map(normalizeFriend)
+    .filter((friend): friend is Friend => friend !== null && friend.friend_user_id.length > 0);
 }
 
 async function assertSuccessfulResponse(

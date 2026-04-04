@@ -254,7 +254,7 @@ export function createMissionGenerationService<
                AND is_completed = 0
                AND COALESCE(mission_origin, 'regular') = 'regular'
                AND COALESCE(status, 'pending') = 'pending'
-               AND COALESCE(cycle_date, substr(created_at, 1, 10)) < ?`,
+               AND COALESCE(cycle_date, substr(CAST(created_at AS TEXT), 1, 10)) < ?`,
           ).bind(userId, period, cycleDate).run();
         } else {
           await db.prepare(
@@ -265,7 +265,7 @@ export function createMissionGenerationService<
                AND type = ?
                AND is_completed = 0
                AND COALESCE(mission_origin, 'regular') = 'regular'
-               AND COALESCE(cycle_date, substr(created_at, 1, 10)) < ?`,
+               AND COALESCE(cycle_date, substr(CAST(created_at AS TEXT), 1, 10)) < ?`,
           ).bind(userId, period, cycleDate).run();
         }
       } else if (hasMissionStatusColumn) {
@@ -299,7 +299,7 @@ export function createMissionGenerationService<
              WHERE user_id = ?
                AND type = ?
                AND COALESCE(mission_origin, 'regular') = 'regular'
-               AND COALESCE(cycle_date, substr(created_at, 1, 10)) = ?`
+               AND COALESCE(cycle_date, substr(CAST(created_at AS TEXT), 1, 10)) = ?`
           ).bind(userId, period, cycleDate).first<{ count: number }>()
         : await db.prepare(
             `SELECT COUNT(*) as count

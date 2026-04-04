@@ -352,6 +352,7 @@ export function registerFriendsRoutes(
             pr.level as friend_level,
             pr.xp as friend_xp,
             pr.current_streak as friend_streak,
+            fp.last_heartbeat_at,
             COALESCE(fp.is_online, 0) as is_online
           FROM friendships f
           INNER JOIN user_profiles up
@@ -394,7 +395,7 @@ export function registerFriendsRoutes(
         .prepare(
           `SELECT f.id, COALESCE(f.friend_id, f.friend_user_id) as friend_user_id, up.username as friend_username,
             up.full_name as friend_full_name, pr.level as friend_level, pr.xp as friend_xp,
-            pr.current_streak as friend_streak, pr.last_activity_date
+            pr.current_streak as friend_streak, pr.last_activity_date as last_heartbeat_at
           FROM friendships f
           INNER JOIN user_profiles up ON COALESCE(f.friend_id, f.friend_user_id) = up.user_id
           INNER JOIN user_progression pr ON COALESCE(f.friend_id, f.friend_user_id) = pr.user_id
@@ -408,8 +409,8 @@ export function registerFriendsRoutes(
       const onlineWindowStart = new Date(Date.now() - FRIEND_ONLINE_WINDOW_MS).toISOString();
       const friendsWithOnlineStatus = friends.results.map((friend) => ({
         ...friend,
-        is_online: friend.last_activity_date
-          ? new Date(friend.last_activity_date as string) > new Date(onlineWindowStart)
+        is_online: friend.last_heartbeat_at
+          ? new Date(friend.last_heartbeat_at as string) > new Date(onlineWindowStart)
           : false,
       }));
 

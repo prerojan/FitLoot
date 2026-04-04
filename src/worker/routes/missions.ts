@@ -408,7 +408,7 @@ function missionListNeedsDailyCatalogRepair(
 }
 
 function missionCycleDateSql(): string {
-  return "COALESCE(cycle_date, substr(created_at, 1, 10))";
+  return "COALESCE(cycle_date, substr(CAST(created_at AS TEXT), 1, 10))";
 }
 
 function missionMetricTargetValue(

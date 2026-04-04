@@ -47,4 +47,10 @@ describe("instructionLocalization", () => {
     expect(hollowLabel).toBe("Isometria concava");
     expect(/\b(?:dead|bug|hollow|hold)\b/i.test(`${deadBugLabel} ${hollowLabel}`)).toBe(false);
   });
+
+  it("preserves supported catalog labels even when the name is commonly english", () => {
+    const label = ensurePortugueseExerciseLabel("Burpee");
+
+    expect(label).toBe("Burpee");
+  });
 });

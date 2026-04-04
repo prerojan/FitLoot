@@ -9,6 +9,7 @@ import {
 } from "../shared/types";
 import {
   resolveExerciseDisplayNamePt,
+  resolveExerciseMediaFallbackUrlById,
   resolveSupportedMissionExerciseName,
 } from "../shared/exerciseCatalog";
 
@@ -3202,6 +3203,32 @@ async function insertMission(
     typeof mission.cycle_date === "string" && mission.cycle_date.trim().length >= 10
       ? mission.cycle_date.trim().slice(0, 10)
       : missionCycleDateKey(period, userTimeZone);
+  const normalizedExerciseDbId =
+    typeof mission.exercise_db_id === "string" && mission.exercise_db_id.trim().length > 0
+      ? mission.exercise_db_id.trim()
+      : null;
+  const exerciseMediaFallbackUrl = resolveExerciseMediaFallbackUrlById(
+    normalizedExerciseDbId,
+  );
+  const normalizedExerciseDbGifUrl =
+    mission.exercise_db_gif_url ?? exerciseMediaFallbackUrl ?? null;
+  const normalizedExerciseDbImageUrl =
+    mission.exercise_db_image_url ?? exerciseMediaFallbackUrl ?? null;
+  const normalizedImageUrl =
+    mission.image_url
+    ?? normalizedExerciseDbImageUrl
+    ?? normalizedExerciseDbGifUrl
+    ?? exerciseMediaFallbackUrl
+    ?? null;
+
+  if (period === "daily" && mission.mission_origin === "regular") {
+    if (!normalizedExerciseDbId) {
+      throw new Error("REGULAR_DAILY_MISSION_REQUIRES_EXERCISE_DB_ID");
+    }
+    if (!normalizedExerciseDbImageUrl || !normalizedImageUrl) {
+      throw new Error("REGULAR_DAILY_MISSION_REQUIRES_EXERCISE_DB_MEDIA");
+    }
+  }
 
   const columns = [
     "user_id",
@@ -3269,15 +3296,15 @@ async function insertMission(
     JSON.stringify(mission.instructions),
     JSON.stringify(mission.exercise_instructions_en),
     JSON.stringify(mission.exercise_instructions_pt),
-    mission.exercise_db_id,
-    mission.exercise_db_gif_url,
-    mission.exercise_db_image_url,
+    normalizedExerciseDbId,
+    normalizedExerciseDbGifUrl,
+    normalizedExerciseDbImageUrl,
     mission.exercise_name,
     mission.exercise_equipment,
     mission.exercise_body_part,
     mission.exercise_target,
     JSON.stringify(mission.exercise_secondary_muscles),
-    mission.image_url,
+    normalizedImageUrl,
     JSON.stringify(mission.muscle_groups),
     mission.exercise_type,
     mission.body_area,
@@ -3336,10 +3363,19 @@ async function readUserMissionTimeZone(
   db: D1Database,
   userId: string,
 ): Promise<string> {
-  const row = await db.prepare(
-    "SELECT timezone FROM user_profiles WHERE user_id = ?",
-  ).bind(userId).first<{ timezone: string | null }>();
-  return resolveMissionTimeZone(row?.timezone);
+  try {
+    const hasTimeZoneColumn = await hasTableColumn(db, "user_profiles", "timezone");
+    if (!hasTimeZoneColumn) {
+      return "UTC";
+    }
+
+    const row = await db.prepare(
+      "SELECT timezone FROM user_profiles WHERE user_id = ?",
+    ).bind(userId).first<{ timezone: string | null }>();
+    return resolveMissionTimeZone(row?.timezone);
+  } catch {
+    return "UTC";
+  }
 }
 
 async function readUserMissionCycleSnapshot(
@@ -3366,7 +3402,7 @@ async function readUserMissionCycleSnapshot(
 
 function missionCycleDateSql(columnPrefix = ""): string {
   const prefix = columnPrefix.trim().length > 0 ? `${columnPrefix}.` : "";
-  return `COALESCE(${prefix}cycle_date, substr(${prefix}created_at, 1, 10))`;
+  return `COALESCE(${prefix}cycle_date, substr(CAST(${prefix}created_at AS TEXT), 1, 10))`;
 }
 
 // Reúne os adaptadores finais exigidos pela geração estruturada e pela IA.

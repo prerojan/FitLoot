@@ -69,8 +69,14 @@ export function ensurePortugueseExerciseLabel(
   value: string | null | undefined,
 ): string {
   const rawValue = typeof value === "string" ? value : "";
+  const resolvedCatalogLabel = normalizeWhitespace(
+    String(resolveExerciseDisplayNamePt(rawValue) ?? ""),
+  );
+  if (resolvedCatalogLabel.length > 0) {
+    return resolvedCatalogLabel;
+  }
+
   const candidateLabels = [
-    resolveExerciseDisplayNamePt(rawValue),
     localizeExerciseCatalogText(rawValue),
     localizeMissionText(rawValue),
   ];

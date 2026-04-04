@@ -196,8 +196,8 @@ export default function Friends() {
     );
   }
 
-  const onlineFriends = friends.filter(f => f.is_online);
-  const offlineFriends = friends.filter(f => !f.is_online);
+  const onlineFriends = friends.filter((friend) => friend.is_online === true);
+  const offlineFriends = friends.filter((friend) => friend.is_online !== true);
 
   return (
     <AppPageShell bottomNavActive="arena" className="fl-theme-page">
