@@ -176,7 +176,6 @@ import {
   createMissionRuntimeStateService,
   type MissionRefreshMode,
 } from "./services/missionRuntimeState";
-import { createRegularMissionRebuildService } from "./services/regularMissionRebuild";
 import {
   currentDateKeyInTimeZone,
   missionCycleDateByRow,
@@ -889,14 +888,6 @@ const {
   expirePendingMissionsAndUpdateStreak,
 });
 
-const {
-  runRegularMissionRebuildBatch,
-} = createRegularMissionRebuildService({
-  generateStructuredMissionPlanForUser,
-  getErrorMessage,
-  invalidateMissionListCache,
-});
-
 const activatedProfileRecoveryService = createActivatedProfileRecoveryService({
   buildInitialTrainingPlan: buildInitialTrainingPlanService,
   ensureGoalStatsRow: ensureGoalStatsRowService,
@@ -1293,11 +1284,7 @@ const app = new Hono<AppContext>();
 
 const HOT_GET_CACHEABLE_PATHS = new Set<string>([
   "/api/auth/check-availability",
-  "/api/app/bootstrap",
   "/api/users/me",
-  "/api/profile",
-  "/api/attributes",
-  "/api/progression",
   "/api/skills",
   "/api/skills/available",
   "/api/titles",
@@ -4121,13 +4108,6 @@ export default {
           message: getErrorMessage(error),
         });
       })
-    );
-    ctx.waitUntil(
-      runRegularMissionRebuildBatch(runtimeEnv, runtimeEnv.fitloot_db).catch((error) => {
-        console.error("[worker][regular-mission-rebuild][scheduled]", {
-          message: getErrorMessage(error),
-        });
-      }),
     );
   },
 };
