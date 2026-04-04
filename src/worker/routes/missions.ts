@@ -436,6 +436,23 @@ function missionMetricTargetValue(
   );
 }
 
+function resolveStoredMissionProgressValue(
+  mission: Record<string, unknown>,
+  normalizedMission?: { progress_value?: number | undefined },
+): number | null {
+  const rawProgressValue = normalizedMission?.progress_value ?? mission.progress_value;
+  if (rawProgressValue === null || rawProgressValue === undefined) {
+    return null;
+  }
+
+  const parsed = Number(rawProgressValue);
+  if (!Number.isFinite(parsed)) {
+    return null;
+  }
+
+  return Math.min(missionMetricTargetValue(mission), Math.max(0, parsed));
+}
+
 function normalizeCompletedMetricValueForMission(
   mission: Record<string, unknown>,
   missionMetricType: MissionMetricType,
@@ -683,7 +700,24 @@ export function registerMissionRoutes(
           unknown
         >[],
       );
-      const monthlyCounters = await getMonthlyCounters(c.env.fitloot_db, user.id);
+      const requiresLivePeriodicFallback = missionList.some((row) => {
+        const normalizedMission = normalizeMissionRow(
+          row as Record<string, unknown>,
+        ) as NormalizedMissionRowLike;
+        const isPeriodic = row.type === "weekly" || row.type === "monthly";
+        return (
+          isPeriodic &&
+          normalizedMission.circuit_tasks.length === 0 &&
+          Number(row.is_completed ?? 0) !== 1 &&
+          resolveStoredMissionProgressValue(
+            row as Record<string, unknown>,
+            normalizedMission,
+          ) === null
+        );
+      });
+      const monthlyCounters = requiresLivePeriodicFallback
+        ? await getMonthlyCounters(c.env.fitloot_db, user.id)
+        : null;
       // Completa o progresso das missões mensais quando ele depende de contadores agregados.
       const withProgress = await Promise.all(missionList.map(async (row) => {
         const rawMission = row as Record<string, unknown>;
@@ -699,14 +733,10 @@ export function registerMissionRoutes(
         }
 
         const isCompleted = Number(rawMission.is_completed ?? 0) === 1;
-        const target = Math.max(
-          1,
-          Number(
-            rawMission.metric_value
-            ?? rawMission.target_reps
-            ?? rawMission.target_time
-            ?? 1,
-          ),
+        const target = missionMetricTargetValue(rawMission);
+        const storedProgress = resolveStoredMissionProgressValue(
+          rawMission,
+          normalizedMission,
         );
         return {
           ...normalizedMission,
@@ -714,11 +744,15 @@ export function registerMissionRoutes(
             target,
             isCompleted
               ? target
+              : storedProgress !== null
+                ? storedProgress
               : await resolvePeriodicMissionProgressValue(
                   user.id,
                   rawMission,
                   c.env.fitloot_db,
-                  isMonthly ? monthlyCounters : undefined,
+                  isMonthly
+                    ? monthlyCounters ?? undefined
+                    : undefined,
                 ),
           ),
         };
@@ -763,9 +797,13 @@ export function registerMissionRoutes(
       const cachedDetail = normalizeMissionRow(
         cachedMissionDetail,
       ) as NormalizedMissionRowLike;
+      const hasStoredProgress =
+        resolveStoredMissionProgressValue(cachedMissionDetail, cachedDetail) !== null;
       const shouldBypassCache =
         (cachedDetail.type === "weekly" || cachedDetail.type === "monthly")
-        && Number(cachedDetail.is_completed ?? 0) !== 1;
+        && Number(cachedDetail.is_completed ?? 0) !== 1
+        && cachedDetail.circuit_tasks.length === 0
+        && !hasStoredProgress;
       if (!shouldBypassCache) {
         return c.json(cachedMissionDetail);
       }
@@ -797,30 +835,26 @@ export function registerMissionRoutes(
         Number(normalized.is_completed ?? 0) !== 1 &&
         normalized.circuit_tasks.length === 0
       ) {
-        const monthlyCounters = normalized.type === "monthly"
-          ? await getMonthlyCounters(
-              c.env.fitloot_db,
+        const storedProgress = resolveStoredMissionProgressValue(row, normalized);
+        if (storedProgress !== null) {
+          normalized.progress_value = storedProgress;
+        } else {
+          const monthlyCounters = normalized.type === "monthly"
+            ? await getMonthlyCounters(
+                c.env.fitloot_db,
+                user.id,
+              )
+            : undefined;
+          normalized.progress_value = Math.min(
+            missionMetricTargetValue(row),
+            await resolvePeriodicMissionProgressValue(
               user.id,
-            )
-          : undefined;
-        const target = Math.max(
-          1,
-          Number(
-            row.metric_value
-            ?? row.target_reps
-            ?? row.target_time
-            ?? 1,
-          ),
-        );
-        normalized.progress_value = Math.min(
-          target,
-          await resolvePeriodicMissionProgressValue(
-            user.id,
-            row,
-            c.env.fitloot_db,
-            monthlyCounters,
-          ),
-        );
+              row,
+              c.env.fitloot_db,
+              monthlyCounters,
+            ),
+          );
+        }
       }
 
       const enSteps = normalized.exercise_instructions_en;
@@ -907,8 +941,10 @@ export function registerMissionRoutes(
 
       const shouldCacheMissionDetail =
         !(
-          (normalized.type === "weekly" || normalized.type === "monthly")
-          && Number(normalized.is_completed ?? 0) !== 1
+          (normalized.type === "weekly" || normalized.type === "monthly") &&
+          Number(normalized.is_completed ?? 0) !== 1 &&
+          normalized.circuit_tasks.length === 0 &&
+          resolveStoredMissionProgressValue(row, normalized) === null
         );
       if (shouldCacheMissionDetail) {
         writeMissionDetailCache(

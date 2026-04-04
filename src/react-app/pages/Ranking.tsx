@@ -93,10 +93,11 @@ export default function Ranking() {
 
     try {
       const shouldFetch = (entry: { stale: boolean } | null): boolean => !entry || entry.stale;
-      const requests: Promise<void>[] = [];
+      const primaryTasks: Array<() => Promise<void>> = [];
+      const secondaryTasks: Array<() => Promise<void>> = [];
 
       if (shouldFetch(cachedRanking)) {
-        requests.push(
+        primaryTasks.push(() =>
           fetchAndCacheJson<RankingPlayer[]>(rankingPath).then((payload) => {
             const normalizedRanking = Array.isArray(payload)
               ? sortRankingEntries(payload.map(normalizeRankingEntry))
@@ -107,15 +108,21 @@ export default function Ranking() {
       }
 
       if (shouldFetch(cachedProfile)) {
-        requests.push(
+        secondaryTasks.push(() =>
           fetchAndCacheJson<UserProfile>("/api/profile").then((payload) => {
             setProfile(payload);
           }),
         );
       }
 
-      if (requests.length > 0) {
-        await Promise.all(requests);
+      if (primaryTasks.length > 0) {
+        await Promise.all(primaryTasks.map((task) => task()));
+      }
+
+      setLoading(false);
+
+      if (secondaryTasks.length > 0) {
+        void Promise.allSettled(secondaryTasks.map((task) => task()));
       }
     } catch (loadError) {
       if (loadError instanceof ApiRequestError && (loadError.status === 401 || loadError.status === 403)) {

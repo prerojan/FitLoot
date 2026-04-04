@@ -15,7 +15,7 @@ import {
   prefetchCoreRoutes,
 } from "../../services/authService";
 import { applyProfileTheme } from "../../theme/profileTheme";
-import { writeCachedJson } from "../../utils/api";
+import { readCachedJson, writeCachedJson } from "../../utils/api";
 
 interface UseAuthBootstrapParams {
   setUser: (user: User | null) => void;
@@ -53,7 +53,32 @@ export function useAuthBootstrap({
   setLoading,
 }: UseAuthBootstrapParams) {
   return useCallback(async () => {
+    let restoredFromCache = false;
+
+    const hydrateCachedSession = (): void => {
+      if (typeof window === "undefined") return;
+      if (localStorage.getItem(AUTHENTICATED_HINT_KEY) !== "1") return;
+
+      const cachedUser = readCachedJson<User>("/api/users/me", 5 * 60_000);
+      if (!cachedUser?.data?.id) return;
+
+      restoredFromCache = true;
+      setUser(cachedUser.data);
+
+      const cachedProfile = readCachedJson<Record<string, unknown>>(
+        "/api/profile",
+        5 * 60_000,
+      );
+      if (cachedProfile?.data) {
+        applyProfileTheme(cachedProfile.data);
+      }
+
+      setLoading(false);
+    };
+
     try {
+      hydrateCachedSession();
+
       // Encerra cedo quando nao faz sentido consultar a sessao atual.
       if (!shouldProbeCurrentSession()) {
         applyProfileTheme(null);
@@ -62,9 +87,19 @@ export function useAuthBootstrap({
       }
 
       // Restaura sessao e bootstrap principal em uma unica ida ao backend.
-      const bootstrap = await fetchAuthBootstrap();
-      const user = bootstrap?.user ?? null;
-      if (!bootstrap || !user) {
+      const bootstrapResult = await fetchAuthBootstrap();
+      if (bootstrapResult.state === "unauthorized") {
+        localStorage.removeItem(AUTHENTICATED_HINT_KEY);
+        applyProfileTheme(null);
+        setUser(null);
+        return;
+      }
+
+      if (bootstrapResult.state !== "ok") {
+        if (restoredFromCache) {
+          return;
+        }
+
         const fallbackUser = await fetchCurrentUser();
         if (!fallbackUser) {
           localStorage.removeItem(AUTHENTICATED_HINT_KEY);
@@ -79,6 +114,9 @@ export function useAuthBootstrap({
         void notifyAppOpen().catch(() => undefined);
         return;
       }
+
+      const bootstrap = bootstrapResult.payload;
+      const user = bootstrap.user;
 
       localStorage.setItem(AUTHENTICATED_HINT_KEY, "1");
       setUser(user);
@@ -110,6 +148,9 @@ export function useAuthBootstrap({
         });
       }
     } catch {
+      if (restoredFromCache) {
+        return;
+      }
       localStorage.removeItem(AUTHENTICATED_HINT_KEY);
       applyProfileTheme(null);
       setUser(null);

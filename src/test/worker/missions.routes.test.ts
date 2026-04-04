@@ -268,7 +268,7 @@ describe("mission routes", () => {
             title: "Passos da semana",
             metric_type: "steps",
             metric_value: 12000,
-            progress_value: 0,
+            progress_value: null,
             is_completed: 0,
           },
           {
@@ -278,7 +278,7 @@ describe("mission routes", () => {
             title: "Passos do mes",
             metric_type: "steps",
             metric_value: 60000,
-            progress_value: 0,
+            progress_value: null,
             is_completed: 0,
           },
         ],
@@ -317,6 +317,66 @@ describe("mission routes", () => {
     expect(deps.resolvePeriodicMissionProgressValue).toHaveBeenCalledTimes(2);
   });
 
+  it("reuses stored periodic progress during mission list reads when available", async () => {
+    const { db } = createMockD1Database([
+      {
+        match: "PRAGMA table_info('missions')",
+        all: [
+          { name: "id" },
+          { name: "user_id" },
+          { name: "status" },
+          { name: "skill_id" },
+        ],
+      },
+      {
+        match: "PRAGMA table_info('skills')",
+        all: [],
+      },
+      {
+        match: "SELECT m.*, NULL as skill_name FROM missions m",
+        all: [
+          {
+            id: 43,
+            user_id: TEST_USER.id,
+            type: "weekly",
+            title: "Passos persistidos",
+            metric_type: "steps",
+            metric_value: 15000,
+            progress_value: 4321,
+            is_completed: 0,
+          },
+        ],
+      },
+    ]);
+    const env = createTestEnv(db);
+    const deps = createMissionDeps({
+      normalizeMissionRow: vi.fn((row: Record<string, unknown>) => ({
+        ...row,
+        circuit_tasks: [],
+        exercise_instructions_en: [],
+        exercise_instructions_pt: [],
+        instructions: [],
+      })),
+    });
+    const app = new Hono<AppContext>();
+    registerMissionRoutes(app, deps, createAuthMiddleware());
+    const { executionCtx } = createExecutionContext();
+
+    const response = await app.fetch(
+      new Request("http://localhost/api/missions"),
+      env,
+      executionCtx,
+    );
+
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload).toEqual([
+      expect.objectContaining({ id: 43, progress_value: 4321 }),
+    ]);
+    expect(deps.resolvePeriodicMissionProgressValue).not.toHaveBeenCalled();
+  });
+
   it("hydrates mission detail progress for active periodic step missions", async () => {
     const { db } = createMockD1Database([
       {
@@ -328,7 +388,7 @@ describe("mission routes", () => {
           title: "Passos acumulados",
           metric_type: "steps",
           metric_value: 18000,
-          progress_value: 0,
+          progress_value: null,
           is_completed: 0,
         },
       },

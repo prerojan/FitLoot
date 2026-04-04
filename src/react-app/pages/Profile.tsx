@@ -209,59 +209,60 @@ export default function Profile() {
 
     try {
       const shouldFetch = (entry: { stale: boolean } | null): boolean => !entry || entry.stale;
-      const requests: Promise<void>[] = [];
+      const primaryTasks: Array<() => Promise<void>> = [];
+      const secondaryTasks: Array<() => Promise<void>> = [];
 
       if (shouldFetch(cachedProfile)) {
-        requests.push(
+        primaryTasks.push(() =>
           fetchAndCacheJson<UserProfile>("/api/profile").then((payload) => {
             syncProfileThemeState(payload);
           }),
         );
       }
       if (shouldFetch(cachedAttributes)) {
-        requests.push(
+        primaryTasks.push(() =>
           fetchAndCacheJson<UserAttributes>("/api/attributes").then((payload) => {
             setAttributes(payload);
           }),
         );
       }
       if (shouldFetch(cachedProgression)) {
-        requests.push(
+        primaryTasks.push(() =>
           fetchAndCacheJson<UserProgression>("/api/progression").then((payload) => {
             setProgression(payload);
           }),
         );
       }
       if (shouldFetch(cachedSkills)) {
-        requests.push(
+        primaryTasks.push(() =>
           fetchAndCacheJson<SkillWithProgress[]>("/api/skills").then((payload) => {
             setSkills(Array.isArray(payload) ? payload : []);
           }),
         );
       }
       if (shouldFetch(cachedAvailableSkills)) {
-        requests.push(
+        secondaryTasks.push(() =>
           fetchAndCacheJson<Skill[]>("/api/skills/available").then((payload) => {
             setAvailableSkills(Array.isArray(payload) ? payload : []);
           }),
         );
       }
       if (shouldFetch(cachedAchievements)) {
-        requests.push(
+        secondaryTasks.push(() =>
           fetchAndCacheJson<AchievementWithUnlock[]>("/api/achievements").then((payload) => {
             setAchievements(Array.isArray(payload) ? sanitizeAchievementsForDisplay(payload) : []);
           }),
         );
       }
       if (shouldFetch(cachedTitles)) {
-        requests.push(
+        secondaryTasks.push(() =>
           fetchAndCacheJson<TitleWithUnlock[]>("/api/titles").then((payload) => {
             setTitles(Array.isArray(payload) ? payload : []);
           }),
         );
       }
       if (shouldFetch(cachedBenchmarks)) {
-        requests.push(
+        secondaryTasks.push(() =>
           fetchAndCacheJson<BenchmarksResponse>("/api/benchmarks")
             .catch(() => ({ benchmarks: [] } satisfies BenchmarksResponse))
             .then((payload) => {
@@ -270,8 +271,14 @@ export default function Profile() {
         );
       }
 
-      if (requests.length > 0) {
-        await Promise.all(requests);
+      if (primaryTasks.length > 0) {
+        await Promise.all(primaryTasks.map((task) => task()));
+      }
+
+      setLoading(false);
+
+      if (secondaryTasks.length > 0) {
+        void Promise.allSettled(secondaryTasks.map((task) => task()));
       }
     } catch (loadError) {
       if (loadError instanceof ApiRequestError && (loadError.status === 401 || loadError.status === 403)) {
@@ -403,12 +410,6 @@ export default function Profile() {
   return (
     <AppPageShell bottomNavActive="profile" className="fl-theme-page">
       <main className="custom-scrollbar flex flex-1 flex-col gap-5 sm:gap-8 overflow-y-auto p-4 pb-[98px] sm:p-6 lg:flex-row lg:gap-12 lg:p-10 min-w-0">
-        {error ? (
-          <div className="lg:hidden rounded-3xl border px-5 py-4 text-[11px] font-bold uppercase tracking-widest" style={{ borderColor: "color-mix(in srgb, var(--app-primary-color) 24%, transparent)", backgroundColor: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)", color: "var(--app-primary-color)" }}>
-            {error}
-          </div>
-        ) : null}
-        
         {/* Coluna de identidade */}
         <aside className="w-full lg:w-[360px] flex flex-col gap-6 shrink-0">
           

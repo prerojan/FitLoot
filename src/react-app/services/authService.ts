@@ -4,6 +4,7 @@ import type { User } from "@/react-app/auth/types";
 import type { UserProfileTheme } from "@/react-app/types/profile";
 import type { UserProfile, UserProgression } from "@/shared/types";
 import { preloadProtectedRoute } from "@/react-app/routes/lazyPages";
+import { getHostContext } from "@/react-app/services/runtime/hostRuntime";
 
 export type AuthBootstrapPayload = {
   user: User;
@@ -13,21 +14,29 @@ export type AuthBootstrapPayload = {
   app_open_degraded?: boolean | undefined;
 };
 
-export async function fetchAuthBootstrap(): Promise<AuthBootstrapPayload | null> {
+export type AuthBootstrapResult =
+  | { state: "ok"; payload: AuthBootstrapPayload }
+  | { state: "unauthorized" }
+  | { state: "unavailable" };
+
+export async function fetchAuthBootstrap(): Promise<AuthBootstrapResult> {
   // Consolida a carga inicial de autenticacao em uma unica requisicao.
   const response = await api("/api/app/bootstrap");
   if (response.status === 401 || response.status === 403) {
     localStorage.removeItem(AUTHENTICATED_HINT_KEY);
-    return null;
+    return { state: "unauthorized" };
   }
-  if (!response.ok) return null;
+  if (!response.ok) {
+    return { state: "unavailable" };
+  }
 
   const contentType = response.headers.get("content-type") ?? "";
   if (!contentType.includes("application/json") && !contentType.includes("+json")) {
-    return null;
+    return { state: "unavailable" };
   }
 
-  return ((await response.json().catch(() => null)) as AuthBootstrapPayload | null) ?? null;
+  const payload = ((await response.json().catch(() => null)) as AuthBootstrapPayload | null) ?? null;
+  return payload ? { state: "ok", payload } : { state: "unavailable" };
 }
 
 export async function fetchCurrentUser(): Promise<User | null> {
@@ -70,11 +79,8 @@ type IdleWindow = Window & {
 };
 
 const PRIMARY_PROTECTED_PREFETCH_PATHS = [
-  ROUTE_PATHS.home,
   ROUTE_PATHS.profile,
   ROUTE_PATHS.friends,
-  ROUTE_PATHS.ranking,
-  ROUTE_PATHS.minigames,
 ] as const;
 
 const SECONDARY_PROTECTED_PREFETCH_PATHS = [
@@ -91,6 +97,11 @@ function preloadProtectedRoutes(paths: readonly string[]): void {
 }
 
 function shouldPreloadSecondaryRoutes(win: IdleWindow): boolean {
+  const hostContext = getHostContext();
+  if (hostContext.platform === "android") {
+    return false;
+  }
+
   const connection = win.navigator.connection;
   if (!connection) {
     return true;
@@ -125,6 +136,11 @@ function scheduleIdlePreload(
 }
 
 export function prefetchCoreRoutes(): void {
+  const hostContext = getHostContext();
+  if (hostContext.platform === "android") {
+    return;
+  }
+
   // Aquece primeiro apenas as rotas mais provaveis para evitar burst de chunks
   // logo apos o bootstrap, e deixa o restante para um segundo passe em rede boa.
   const idleWindow = window as IdleWindow;

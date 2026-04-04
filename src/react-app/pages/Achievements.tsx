@@ -94,10 +94,11 @@ export default function Achievements() {
 
     try {
       const shouldFetch = (entry: { stale: boolean } | null): boolean => !entry || entry.stale;
-      const requests: Promise<void>[] = [];
+      const primaryTasks: Array<() => Promise<void>> = [];
+      const secondaryTasks: Array<() => Promise<void>> = [];
 
       if (shouldFetch(cachedAchievements)) {
-        requests.push(
+        primaryTasks.push(() =>
           fetchAndCacheJson<AchievementWithUnlock[]>("/api/achievements").then((payload) => {
             setAchievements(Array.isArray(payload) ? sanitizeAchievementsForDisplay(payload) : []);
           }),
@@ -105,7 +106,7 @@ export default function Achievements() {
       }
 
       if (shouldFetch(cachedProfile)) {
-        requests.push(
+        secondaryTasks.push(() =>
           fetchAndCacheJson<UserProfile>("/api/profile").then((payload) => {
             setProfile(payload);
           }),
@@ -113,15 +114,21 @@ export default function Achievements() {
       }
 
       if (shouldFetch(cachedProgression)) {
-        requests.push(
+        secondaryTasks.push(() =>
           fetchAndCacheJson<UserProgression>("/api/progression").then((payload) => {
             setProgression(payload);
           }),
         );
       }
 
-      if (requests.length > 0) {
-        await Promise.all(requests);
+      if (primaryTasks.length > 0) {
+        await Promise.all(primaryTasks.map((task) => task()));
+      }
+
+      setLoading(false);
+
+      if (secondaryTasks.length > 0) {
+        void Promise.allSettled(secondaryTasks.map((task) => task()));
       }
     } catch (loadError) {
       console.error("Error loading achievements:", loadError);

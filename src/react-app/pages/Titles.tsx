@@ -136,10 +136,11 @@ export default function Titles() {
 
     try {
       const shouldFetch = (entry: { stale: boolean } | null): boolean => !entry || entry.stale;
-      const requests: Promise<void>[] = [];
+      const primaryTasks: Array<() => Promise<void>> = [];
+      const secondaryTasks: Array<() => Promise<void>> = [];
 
       if (shouldFetch(cachedTitles)) {
-        requests.push(
+        primaryTasks.push(() =>
           fetchAndCacheJson<TitleWithUnlock[]>("/api/titles").then((payload) => {
             setTitles(Array.isArray(payload) ? sanitizeTitlesForDisplay(payload) : []);
           }),
@@ -147,7 +148,7 @@ export default function Titles() {
       }
 
       if (shouldFetch(cachedProfile)) {
-        requests.push(
+        secondaryTasks.push(() =>
           fetchAndCacheJson<UserProfile>("/api/profile").then((payload) => {
             setProfile(payload);
           }),
@@ -155,15 +156,21 @@ export default function Titles() {
       }
 
       if (shouldFetch(cachedProgression)) {
-        requests.push(
+        secondaryTasks.push(() =>
           fetchAndCacheJson<UserProgression>("/api/progression").then((payload) => {
             setProgression(payload);
           }),
         );
       }
 
-      if (requests.length > 0) {
-        await Promise.all(requests);
+      if (primaryTasks.length > 0) {
+        await Promise.all(primaryTasks.map((task) => task()));
+      }
+
+      setLoading(false);
+
+      if (secondaryTasks.length > 0) {
+        void Promise.allSettled(secondaryTasks.map((task) => task()));
       }
     } catch (loadError) {
       if (loadError instanceof ApiRequestError && (loadError.status === 401 || loadError.status === 403)) {
