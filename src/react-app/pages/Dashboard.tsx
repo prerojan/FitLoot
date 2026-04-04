@@ -41,6 +41,8 @@ import {
   PRIMARY_GLOW_STYLE,
   STEPS_TARGET,
   SUBTLE_PANEL_STYLE,
+  buildStepMissionProgressSignature,
+  createStepMissionSnapshot,
   buildCenteredDates,
   capitalizeLabel,
   clamp,
@@ -48,7 +50,9 @@ import {
   formatDateKey,
   formatNumber,
   isMissionCompleted,
+  isStepProgressMission,
   sortMissions,
+  type StepMissionSnapshot,
 } from "@/react-app/pages/dashboardUtils";
 import { navigateProtectedRoute } from "@/react-app/services/appNavigation";
 
@@ -103,12 +107,6 @@ function resolveMissionsApiPath(forceRefresh: boolean, cachedMissions: Mission[]
   return forceRefresh ? "/api/missions?refresh=1" : "/api/missions";
 }
 
-function isStepProgressMission(mission: Mission): boolean {
-  const hasCircuitTasks = Array.isArray(mission.circuit_tasks) && mission.circuit_tasks.length > 0;
-  const goalText = typeof mission.goal === "string" ? mission.goal.toLowerCase() : "";
-  return !hasCircuitTasks && (mission.metric_type === "steps" || goalText.includes("passos"));
-}
-
 export default function Dashboard() {
   const { user } = useAuth();
   const { pushRewardNotifications } = useRewardNotifications();
@@ -133,10 +131,7 @@ export default function Dashboard() {
   const quickActionsRef = useRef<HTMLDivElement | null>(null);
   const missionsRef = useRef<Mission[]>([]);
   const latestStepsValueRef = useRef(0);
-  const [stepMissionSnapshot, setStepMissionSnapshot] = useState<{
-    stepsAtSnapshot: number;
-    progressByMissionId: Record<number, number>;
-  } | null>(null);
+  const [stepMissionSnapshot, setStepMissionSnapshot] = useState<StepMissionSnapshot | null>(null);
   const { metrics: consolidatedMetrics, loading: metricsLoading, refreshMetrics } = useDailyMetrics({ syncRemote: true });
 
   const setSectionLoading = useCallback((section: keyof DashboardLoadingState, value: boolean) => {
@@ -424,11 +419,7 @@ export default function Dashboard() {
   const caloriesValue = consolidatedMetrics?.caloriesBurned ?? 0;
   const stepsProgress = clamp((stepsValue / STEPS_TARGET) * 100, 0, 100);
   const stepMissionProgressSignature = useMemo(
-    () =>
-      missions
-        .filter((mission) => isStepProgressMission(mission) && mission.is_completed !== 1)
-        .map((mission) => `${mission.id}:${Number(mission.progress_value ?? 0)}`)
-        .join("|"),
+    () => buildStepMissionProgressSignature(missions),
     [missions],
   );
 
@@ -441,18 +432,16 @@ export default function Dashboard() {
       return;
     }
 
-    const progressByMissionId = missions.reduce<Record<number, number>>((accumulator, mission) => {
-      if (!isStepProgressMission(mission) || mission.is_completed === 1) {
-        return accumulator;
+    setStepMissionSnapshot((current) => {
+      if (current?.signature === stepMissionProgressSignature) {
+        return current;
       }
 
-      accumulator[Number(mission.id)] = Math.max(0, Number(mission.progress_value ?? 0));
-      return accumulator;
-    }, {});
-
-    setStepMissionSnapshot({
-      stepsAtSnapshot: latestStepsValueRef.current,
-      progressByMissionId,
+      return createStepMissionSnapshot(
+        missions,
+        latestStepsValueRef.current,
+        stepMissionProgressSignature,
+      );
     });
   }, [metricsLoading, missions, stepMissionProgressSignature]);
 
@@ -915,10 +904,10 @@ export default function Dashboard() {
       {/* Atalhos flutuantes para fluxos secundarios. */}
       <div
         ref={quickActionsRef}
-        className="fl-z-fab fixed bottom-24 right-4 flex flex-col items-end gap-3 md:bottom-8 md:right-8"
+        className="fl-z-fab pointer-events-none fixed bottom-24 right-4 md:bottom-8 md:right-8"
       >
         <div
-          className={`flex flex-col items-end gap-3 transition-all duration-200 ${quickActionsOpen ? "translate-y-0 opacity-100" : "pointer-events-none translate-y-4 opacity-0"}`}
+          className={`absolute bottom-[calc(100%+0.75rem)] right-0 flex flex-col items-end gap-3 transition-all duration-200 ${quickActionsOpen ? "pointer-events-auto translate-y-0 opacity-100" : "pointer-events-none translate-y-4 opacity-0"}`}
         >
           <button
             type="button"
@@ -954,7 +943,7 @@ export default function Dashboard() {
         <button
           type="button"
           onClick={() => setQuickActionsOpen((current) => !current)}
-          className="flex h-14 w-14 items-center justify-center rounded-full transition-transform duration-200"
+          className="pointer-events-auto flex h-14 w-14 items-center justify-center rounded-full transition-transform duration-200"
           style={PRIMARY_GLOW_STYLE}
           aria-label="Abrir acoes rapidas"
           aria-expanded={quickActionsOpen}

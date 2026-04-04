@@ -807,7 +807,7 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
 
       {/* Keeps a lightweight footer context visible while the detail modal is open. */}
       {showDetails && !detailIsAutoProgressMission && (
-        <div className="fl-z-modal fixed bottom-6 left-1/2 z-10 flex max-w-[calc(100vw-2rem)] -translate-x-1/2 flex-wrap items-center justify-center gap-x-3 gap-y-1.5 rounded-full bg-white/88 px-3 py-2 text-[11px] leading-tight text-gray-500 shadow-lg backdrop-blur-sm sm:max-w-[32rem] sm:text-xs">
+        <div className="fl-z-modal fixed bottom-4 left-1/2 z-10 flex max-w-[calc(100vw-2rem)] -translate-x-1/2 flex-wrap items-center justify-center gap-x-3 gap-y-1.5 rounded-full bg-white/88 px-3 py-2 text-[11px] leading-tight text-gray-500 shadow-lg backdrop-blur-sm sm:bottom-5 sm:max-w-[32rem] sm:text-xs">
           {detailFocusLabels[0] ? (
             <span className="flex min-w-0 max-w-full items-center gap-1 whitespace-nowrap">
               <MapPinned className="h-3 w-3 shrink-0" />

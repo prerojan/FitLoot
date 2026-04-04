@@ -34,6 +34,12 @@ export const PRIMARY_GLOW_STYLE = {
   boxShadow: "0 24px 52px color-mix(in srgb, var(--app-primary-color) 28%, transparent)",
 };
 
+export type StepMissionSnapshot = {
+  signature: string;
+  stepsAtSnapshot: number;
+  progressByMissionId: Record<number, number>;
+};
+
 export function ensureMaterialSymbolsLoaded() {
   if (typeof document === "undefined") return;
   if (document.getElementById(MATERIAL_SYMBOLS_LINK_ID)) return;
@@ -129,6 +135,40 @@ export function missionSummary(mission: Mission): string {
 
 export function primaryMissionLabel(mission: Mission): string {
   return mission.muscle_groups?.[0] ?? bodyAreaLabel(mission.body_area);
+}
+
+export function isStepProgressMission(mission: Mission): boolean {
+  const hasCircuitTasks = Array.isArray(mission.circuit_tasks) && mission.circuit_tasks.length > 0;
+  const goalText = typeof mission.goal === "string" ? mission.goal.toLowerCase() : "";
+  return !hasCircuitTasks && (mission.metric_type === "steps" || goalText.includes("passos"));
+}
+
+export function buildStepMissionProgressSignature(missions: Mission[]): string {
+  return missions
+    .filter((mission) => isStepProgressMission(mission) && mission.is_completed !== 1)
+    .map((mission) => `${mission.id}:${Number(mission.progress_value ?? 0)}`)
+    .join("|");
+}
+
+export function createStepMissionSnapshot(
+  missions: Mission[],
+  stepsAtSnapshot: number,
+  signature: string = buildStepMissionProgressSignature(missions),
+): StepMissionSnapshot {
+  const progressByMissionId = missions.reduce<Record<number, number>>((accumulator, mission) => {
+    if (!isStepProgressMission(mission) || mission.is_completed === 1) {
+      return accumulator;
+    }
+
+    accumulator[Number(mission.id)] = Math.max(0, Number(mission.progress_value ?? 0));
+    return accumulator;
+  }, {});
+
+  return {
+    signature,
+    stepsAtSnapshot: Math.max(0, Math.round(stepsAtSnapshot)),
+    progressByMissionId,
+  };
 }
 
 export function isMissionCompleted(mission: Mission): boolean {

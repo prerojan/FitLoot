@@ -381,6 +381,25 @@ const CANONICAL_EXERCISE_TARGET_PRIORITY = new Map<string, number>([
   ["legs", 40],
 ]);
 
+const UPPER_BODY_TARGET_KEYS = new Set([
+  "upper",
+  "chest",
+  "back",
+  "shoulders",
+  "triceps",
+  "biceps",
+]);
+
+const LOWER_BODY_TARGET_KEYS = new Set([
+  "lower",
+  "legs",
+  "glutes",
+  "quads",
+  "hamstrings",
+  "calves",
+  "hips",
+]);
+
 function normalizeExerciseMuscleKey(value: string): string {
   return normalizeExerciseSeedLookup(value);
 }
@@ -421,6 +440,16 @@ function resolveCanonicalExerciseTargetMuscleLabels(
   entry: SupplementalExerciseCatalogEntry | null,
 ): string[] {
   if (!entry) return [];
+
+  const normalizedKeys = entry.muscles.map((muscle) => normalizeExerciseMuscleKey(muscle));
+  const hasFullBody = normalizedKeys.includes("full body");
+  const hasCardio = normalizedKeys.includes("cardio");
+  const hasUpperBodyWork = normalizedKeys.some((key) => UPPER_BODY_TARGET_KEYS.has(key));
+  const hasLowerBodyWork = normalizedKeys.some((key) => LOWER_BODY_TARGET_KEYS.has(key));
+
+  if (hasFullBody && hasCardio && hasUpperBodyWork && hasLowerBodyWork) {
+    return ["Corpo inteiro"];
+  }
 
   const localized = entry.muscles
     .map((muscle, index) => ({

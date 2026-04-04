@@ -147,4 +147,17 @@ describe("missionCard helpers - resolveMissionFocusLabels", () => {
 
     expect(resolveMissionFocusLabels(mission)).toEqual(["Peitoral"]);
   });
+
+  it("keeps full-body cardio drills labeled as corpo inteiro when the catalog marks them that way", () => {
+    const mission = buildMission({
+      exercise_db_id: "dK9394r",
+      exercise_name: "Burpee",
+      exercise_target: "Quadriceps",
+      muscle_groups: ["Quadriceps", "Parte inferior"],
+      exercise_secondary_muscles: ["Shoulders"],
+      exercise_body_part: "Cardiovascular System",
+    });
+
+    expect(resolveMissionFocusLabels(mission)).toEqual(["Corpo inteiro"]);
+  });
 });

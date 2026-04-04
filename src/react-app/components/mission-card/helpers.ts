@@ -312,6 +312,100 @@ function uniqueLiteralLabels(values: ReadonlyArray<string | null | undefined>): 
   return labels;
 }
 
+function localizeLiteralMuscleLabel(value: string | null | undefined): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return null;
+
+  const normalized = trimmed
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+
+  switch (normalized) {
+    case "pectorals":
+    case "pectoral":
+    case "chest":
+      return "Peitoral";
+    case "back":
+    case "lats":
+      return "Costas";
+    case "shoulders":
+    case "shoulder":
+    case "delts":
+    case "deltoids":
+      return "Ombros";
+    case "triceps":
+    case "tricep":
+      return "Tr\u00edceps";
+    case "biceps":
+    case "bicep":
+      return "B\u00edceps";
+    case "forearms":
+    case "forearm":
+      return "Antebra\u00e7os";
+    case "glutes":
+    case "glute":
+      return "Gl\u00fateos";
+    case "quadriceps":
+    case "quadriceps femoris":
+    case "quads":
+      return "Quadr\u00edceps";
+    case "hamstrings":
+    case "hamstring":
+      return "Posteriores";
+    case "calves":
+    case "calf":
+      return "Panturrilhas";
+    case "abs":
+    case "abdominals":
+    case "abdominal":
+    case "waist":
+      return "Abd\u00f4men";
+    case "hips":
+    case "hip":
+      return "Quadril";
+    case "upper arms":
+    case "lower arms":
+    case "arms":
+      return "Bra\u00e7os";
+    case "upper legs":
+    case "lower legs":
+    case "legs":
+    case "leg":
+      return "Pernas";
+    case "full body":
+    case "corpo inteiro":
+      return "Corpo inteiro";
+    case "upper":
+    case "parte superior":
+      return "Parte superior";
+    case "lower":
+    case "parte inferior":
+      return "Parte inferior";
+    case "core":
+      return "Core";
+    case "cardiovascular system":
+      return "Sistema cardiovascular";
+    default:
+      return trimmed;
+  }
+}
+
+function uniqueMuscleLabels(values: ReadonlyArray<string | null | undefined>): string[] {
+  const seen = new Set<string>();
+  const labels: string[] = [];
+  for (const value of values) {
+    const localized = localizeLiteralMuscleLabel(value);
+    if (!localized) continue;
+    const key = localized.toLocaleLowerCase("pt-BR");
+    if (seen.has(key)) continue;
+    seen.add(key);
+    labels.push(localized);
+  }
+  return labels;
+}
+
 function isGenericMissionFocusLabel(value: string): boolean {
   const normalized = (localizeMissionText(value) ?? value)
     .trim()
@@ -321,8 +415,28 @@ function isGenericMissionFocusLabel(value: string): boolean {
   return normalized === "full body"
     || normalized === "corpo inteiro"
     || normalized === "superior"
+    || normalized === "parte superior"
     || normalized === "inferior"
-    || normalized === "core";
+    || normalized === "parte inferior"
+    || normalized === "core"
+    || normalized === "push"
+    || normalized === "pull"
+    || normalized === "cardio"
+    || normalized === "mobilidade"
+    || normalized === "mobility"
+    || normalized === "flexibility"
+    || normalized === "flexibilidade";
+}
+
+function isTechnicalMissionFocusLabel(value: string): boolean {
+  const normalized = (localizeMissionText(value) ?? value)
+    .trim()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  return normalized === "cardiovascular system"
+    || normalized === "sistema cardiovascular"
+    || normalized === "cardio training";
 }
 
 export function resolveMissionFocusLabels(mission: Mission): string[] {
@@ -334,23 +448,43 @@ export function resolveMissionFocusLabels(mission: Mission): string[] {
         : resolveExerciseTargetMuscleLabels(mission.exercise_name)
     ),
   ]);
+  if (catalogPrimaryLabels.includes("Corpo inteiro")) {
+    return ["Corpo inteiro"];
+  }
+
+  const exerciseDbPrimaryLabels = uniqueMuscleLabels([mission.exercise_target]).filter(
+    (label) => !isGenericMissionFocusLabel(label) && !isTechnicalMissionFocusLabel(label),
+  );
+  const exerciseDbSecondaryLabels = uniqueMuscleLabels(
+    Array.isArray(mission.exercise_secondary_muscles)
+      ? mission.exercise_secondary_muscles.slice(0, 2)
+      : [],
+  ).filter(
+    (label) => !isGenericMissionFocusLabel(label) && !isTechnicalMissionFocusLabel(label),
+  );
+  if (exerciseDbPrimaryLabels.length > 0) {
+    return uniqueMuscleLabels([
+      ...exerciseDbPrimaryLabels,
+      ...exerciseDbSecondaryLabels,
+    ]).slice(0, 6);
+  }
+
   if (catalogPrimaryLabels.length > 0) {
     return catalogPrimaryLabels.slice(0, 6);
   }
 
-  const primaryLabels = uniqueMissionLabels([
-    mission.exercise_target,
+  if (exerciseDbSecondaryLabels.length > 0) {
+    return exerciseDbSecondaryLabels.slice(0, 6);
+  }
+
+  const primaryLabels = uniqueMuscleLabels([
     ...(Array.isArray(mission.muscle_groups) ? mission.muscle_groups : []),
   ]);
-  const secondaryLabels = uniqueMissionLabels(
-    Array.isArray(mission.exercise_secondary_muscles)
-      ? mission.exercise_secondary_muscles.slice(0, 2)
-      : [],
-  );
-  const bodyPartLabels = uniqueMissionLabels([mission.exercise_body_part]).filter(
+  const secondaryLabels = exerciseDbSecondaryLabels;
+  const bodyPartLabels = uniqueMuscleLabels([mission.exercise_body_part]).filter(
     (label) => !isGenericMissionFocusLabel(label) || primaryLabels.length === 0,
   );
-  const labels = uniqueMissionLabels([
+  const labels = uniqueMuscleLabels([
     ...primaryLabels,
     ...secondaryLabels,
     ...bodyPartLabels,
