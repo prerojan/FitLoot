@@ -40,6 +40,27 @@ export type StepMissionSnapshot = {
   progressByMissionId: Record<number, number>;
 };
 
+export type PersistentStepMissionProgressEntry = {
+  metricsDate: string;
+  lastDailySteps: number;
+  progressValue: number;
+};
+
+export type PersistentStepMissionProgressState = Record<
+  number,
+  PersistentStepMissionProgressEntry
+>;
+
+type ReconcilePersistentStepMissionProgressParams = {
+  missions: Mission[];
+  metricsDate: string;
+  stepsValue: number;
+  state: PersistentStepMissionProgressState;
+};
+
+const STEP_MISSION_PROGRESS_STORAGE_PREFIX =
+  "fitloot.dashboard.step-mission-progress.v1";
+
 export function ensureMaterialSymbolsLoaded() {
   if (typeof document === "undefined") return;
   if (document.getElementById(MATERIAL_SYMBOLS_LINK_ID)) return;
@@ -53,6 +74,19 @@ export function ensureMaterialSymbolsLoaded() {
 
 export function formatNumber(value: number): string {
   return value.toLocaleString("pt-BR");
+}
+
+function canUseStorage(): boolean {
+  return typeof window !== "undefined" && typeof window.localStorage !== "undefined";
+}
+
+function persistentStepMissionProgressStorageKey(
+  userId: string | null | undefined,
+): string | null {
+  if (typeof userId !== "string" || userId.trim().length === 0) {
+    return null;
+  }
+  return `${STEP_MISSION_PROGRESS_STORAGE_PREFIX}:${userId.trim()}`;
 }
 
 export function clamp(value: number, min: number, max: number): number {
@@ -169,6 +203,161 @@ export function createStepMissionSnapshot(
     stepsAtSnapshot: Math.max(0, Math.round(stepsAtSnapshot)),
     progressByMissionId,
   };
+}
+
+export function readPersistentStepMissionProgressState(
+  userId: string | null | undefined,
+): PersistentStepMissionProgressState {
+  const storageKey = persistentStepMissionProgressStorageKey(userId);
+  if (!storageKey || !canUseStorage()) {
+    return {};
+  }
+
+  try {
+    const rawValue = window.localStorage.getItem(storageKey);
+    if (!rawValue) return {};
+    const parsed = JSON.parse(rawValue) as unknown;
+    if (!parsed || typeof parsed !== "object") {
+      return {};
+    }
+
+    return Object.entries(parsed as Record<string, unknown>).reduce<PersistentStepMissionProgressState>(
+      (accumulator, [rawMissionId, rawEntry]) => {
+        const missionId = Number(rawMissionId);
+        if (!Number.isInteger(missionId) || missionId <= 0) {
+          return accumulator;
+        }
+
+        if (!rawEntry || typeof rawEntry !== "object") {
+          return accumulator;
+        }
+
+        const candidate = rawEntry as Record<string, unknown>;
+        const metricsDate =
+          typeof candidate.metricsDate === "string" && candidate.metricsDate.trim().length > 0
+            ? candidate.metricsDate.trim()
+            : null;
+        const lastDailySteps = Math.max(0, Math.round(Number(candidate.lastDailySteps ?? 0) || 0));
+        const progressValue = Math.max(0, Math.round(Number(candidate.progressValue ?? 0) || 0));
+
+        if (!metricsDate) {
+          return accumulator;
+        }
+
+        accumulator[missionId] = {
+          metricsDate,
+          lastDailySteps,
+          progressValue,
+        };
+        return accumulator;
+      },
+      {},
+    );
+  } catch {
+    return {};
+  }
+}
+
+export function writePersistentStepMissionProgressState(
+  userId: string | null | undefined,
+  state: PersistentStepMissionProgressState,
+): void {
+  const storageKey = persistentStepMissionProgressStorageKey(userId);
+  if (!storageKey || !canUseStorage()) {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(storageKey, JSON.stringify(state));
+  } catch {
+    // Best-effort persistence only.
+  }
+}
+
+export function arePersistentStepMissionProgressStatesEqual(
+  left: PersistentStepMissionProgressState,
+  right: PersistentStepMissionProgressState,
+): boolean {
+  const leftEntries = Object.entries(left);
+  const rightEntries = Object.entries(right);
+  if (leftEntries.length !== rightEntries.length) {
+    return false;
+  }
+
+  return leftEntries.every(([rawMissionId, leftEntry]) => {
+    const missionId = Number(rawMissionId);
+    const rightEntry = right[missionId];
+    if (!rightEntry) {
+      return false;
+    }
+
+    return (
+      leftEntry.metricsDate === rightEntry.metricsDate &&
+      leftEntry.lastDailySteps === rightEntry.lastDailySteps &&
+      leftEntry.progressValue === rightEntry.progressValue
+    );
+  });
+}
+
+function missionUpdatedOnMetricsDate(
+  mission: Mission,
+  metricsDate: string,
+): boolean {
+  return extractDateKey(mission.updated_at) === metricsDate;
+}
+
+export function reconcilePersistentStepMissionProgress({
+  missions,
+  metricsDate,
+  stepsValue,
+  state,
+}: ReconcilePersistentStepMissionProgressParams): PersistentStepMissionProgressState {
+  const safeStepsValue = Math.max(0, Math.round(stepsValue));
+  const nextState: PersistentStepMissionProgressState = {};
+
+  for (const mission of missions) {
+    if (!isStepProgressMission(mission) || mission.is_completed === 1) {
+      continue;
+    }
+
+    const missionId = Number(mission.id);
+    if (!Number.isInteger(missionId) || missionId <= 0) {
+      continue;
+    }
+
+    const target = missionTotalGoal(mission, normalizeMetricType(mission));
+    const serverProgress = Math.max(0, Math.round(Number(mission.progress_value ?? 0) || 0));
+    const previousEntry = state[missionId];
+
+    if (!previousEntry) {
+      const seededProgress = missionUpdatedOnMetricsDate(mission, metricsDate)
+        ? serverProgress
+        : Math.min(target, serverProgress + safeStepsValue);
+
+      nextState[missionId] = {
+        metricsDate,
+        lastDailySteps: safeStepsValue,
+        progressValue: seededProgress,
+      };
+      continue;
+    }
+
+    const sameMetricsDate = previousEntry.metricsDate === metricsDate;
+    const lastDailySteps = sameMetricsDate ? previousEntry.lastDailySteps : 0;
+    const deltaSteps = Math.max(0, safeStepsValue - lastDailySteps);
+    const progressValue = Math.min(
+      target,
+      Math.max(serverProgress, previousEntry.progressValue) + deltaSteps,
+    );
+
+    nextState[missionId] = {
+      metricsDate,
+      lastDailySteps: Math.max(lastDailySteps, safeStepsValue),
+      progressValue,
+    };
+  }
+
+  return nextState;
 }
 
 export function isMissionCompleted(mission: Mission): boolean {
