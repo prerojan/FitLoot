@@ -6,6 +6,10 @@ import {
 } from "@/shared/types";
 import { api } from "@/react-app/utils/api";
 import {
+  OFFLINE_METRICS_CURSOR_STORAGE_KEY,
+  OFFLINE_QUEUE_STORAGE_KEY,
+} from "@/react-app/constants/storage";
+import {
   getHostContext,
   subscribeToLifecycleState,
   subscribeToNetworkStatus,
@@ -82,8 +86,6 @@ type MetricsCursor = {
   calories: number;
 };
 
-const OFFLINE_QUEUE_STORAGE_KEY = "fitloot.offline-sync.queue.v1";
-const METRICS_CURSOR_STORAGE_KEY = "fitloot.offline-sync.metrics-cursor.v1";
 const FLUSH_EVENT_NAME = "fitloot:offline-sync-flushed";
 const MISSION_SYNCED_EVENT_NAME = "fitloot:offline-missions-synced";
 const DEFAULT_BATCH_SIZE = 40;
@@ -637,7 +639,7 @@ class OfflineSyncService {
   }
 
   private readMetricsCursor(): MetricsCursor {
-    return readStorageValue<MetricsCursor>(METRICS_CURSOR_STORAGE_KEY, {
+    return readStorageValue<MetricsCursor>(OFFLINE_METRICS_CURSOR_STORAGE_KEY, {
       date: "",
       steps: 0,
       calories: 0,
@@ -645,7 +647,18 @@ class OfflineSyncService {
   }
 
   private writeMetricsCursor(cursor: MetricsCursor): void {
-    writeStorageValue(METRICS_CURSOR_STORAGE_KEY, cursor);
+    writeStorageValue(OFFLINE_METRICS_CURSOR_STORAGE_KEY, cursor);
+  }
+
+  clearPersistedState(): void {
+    const nextState = buildDefaultState();
+    this.replaceQueue(nextState.operations);
+    this.writeMetricsCursor({
+      date: "",
+      steps: 0,
+      calories: 0,
+    });
+    this.setState(nextState);
   }
 
   private dispatchFlushEvent(): void {

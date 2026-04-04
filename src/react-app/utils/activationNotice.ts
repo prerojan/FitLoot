@@ -1,3 +1,5 @@
+import { ACTIVATION_NOTICE_STORAGE_KEY } from "@/react-app/constants/storage";
+
 export type ActivationNotice = {
   title: string;
   message: string;
@@ -8,8 +10,6 @@ export type ActivationNotice = {
   downloadHref?: string | undefined;
   downloadFileName?: string | undefined;
 };
-
-const ACTIVATION_NOTICE_KEY = "fitloot_activation_notice";
 
 function isActivationNotice(value: unknown): value is ActivationNotice {
   if (!value || typeof value !== "object") return false;
@@ -29,21 +29,21 @@ function isActivationNotice(value: unknown): value is ActivationNotice {
 
 export function queueActivationNotice(notice: ActivationNotice): void {
   if (typeof window === "undefined") return;
-  sessionStorage.setItem(ACTIVATION_NOTICE_KEY, JSON.stringify(notice));
+  sessionStorage.setItem(ACTIVATION_NOTICE_STORAGE_KEY, JSON.stringify(notice));
 }
 
 export function clearActivationNotice(): void {
   if (typeof window === "undefined") return;
-  sessionStorage.removeItem(ACTIVATION_NOTICE_KEY);
+  sessionStorage.removeItem(ACTIVATION_NOTICE_STORAGE_KEY);
 }
 
 export function consumeActivationNotice(): ActivationNotice | null {
   if (typeof window === "undefined") return null;
 
-  const rawValue = sessionStorage.getItem(ACTIVATION_NOTICE_KEY);
+  const rawValue = sessionStorage.getItem(ACTIVATION_NOTICE_STORAGE_KEY);
   if (!rawValue) return null;
 
-  sessionStorage.removeItem(ACTIVATION_NOTICE_KEY);
+  sessionStorage.removeItem(ACTIVATION_NOTICE_STORAGE_KEY);
 
   try {
     const parsed = JSON.parse(rawValue) as unknown;

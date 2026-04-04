@@ -5,13 +5,17 @@ import {
   hasCoreSchema,
 } from "./database";
 import {
+  deleteRuntimeSession,
   readRuntimeSession,
   upsertRuntimeSession,
 } from "./runtimeSessionStore";
 import {
+  deleteRuntimeUserAuth,
   readRuntimeUserAuth,
   upsertRuntimeUserAuth,
 } from "./runtimeUserAuthStore";
+import { deleteRuntimeHttpCacheBySession } from "./runtimeHttpCacheStore";
+import { deleteRuntimeUserProjections } from "./runtimeUserProjectionStore";
 import type {
   AppContext,
   UserAuthRecord,
@@ -90,6 +94,29 @@ function resolveRuntimeFallbackDb(
   if (!runtimeDb) return null;
   if (runtimeDb === db) return null;
   return runtimeDb;
+}
+
+async function clearRuntimeAuthArtifacts(params: {
+  runtimeDb: D1Database | null;
+  sessionId?: string | null;
+  userId?: string | null;
+}): Promise<void> {
+  const { runtimeDb, sessionId, userId } = params;
+  if (!runtimeDb) return;
+
+  const cleanupTasks: Promise<unknown>[] = [];
+  if (typeof sessionId === "string" && sessionId.trim().length > 0) {
+    cleanupTasks.push(deleteRuntimeSession(runtimeDb, sessionId));
+    cleanupTasks.push(deleteRuntimeHttpCacheBySession(runtimeDb, sessionId));
+  }
+
+  if (typeof userId === "string" && userId.trim().length > 0) {
+    cleanupTasks.push(deleteRuntimeUserAuth(runtimeDb, userId));
+    cleanupTasks.push(deleteRuntimeUserProjections(runtimeDb, userId));
+  }
+
+  if (cleanupTasks.length === 0) return;
+  await Promise.allSettled(cleanupTasks);
 }
 
 export function parseCookieHeader(cookieHeader: string | undefined) {
@@ -392,63 +419,63 @@ export function createAuthMiddleware({
         c.env.fitloot_runtime_db,
       );
       if (!session) {
-        // Prefer edge-local session reads to keep auth resilient under Supabase burst pressure.
-        if (runtimeFallbackDb) {
-          try {
-            session = await readRuntimeSession(runtimeFallbackDb, sessionId);
-          } catch {
-            // Runtime fallback is best-effort; authoritative fallback remains Supabase.
+        try {
+          const sessionRecord = await loadWithDedupe(
+            inflightSessionLoads,
+            sessionId,
+            () =>
+              c.env.fitloot_db
+                .prepare(
+                  "SELECT id, user_id, expires_at FROM sessions WHERE id = ? AND expires_at > CURRENT_TIMESTAMP",
+                )
+                .bind(sessionId)
+                .first<SessionCookieRecord>(),
+          );
+
+          if (sessionRecord) {
+            session = {
+              id: sessionRecord.id,
+              user_id: sessionRecord.user_id,
+            };
+            if (runtimeFallbackDb && sessionRecord.expires_at) {
+              c.executionCtx.waitUntil(
+                upsertRuntimeSession(runtimeFallbackDb, {
+                  id: sessionRecord.id,
+                  user_id: sessionRecord.user_id,
+                  expires_at: sessionRecord.expires_at,
+                }).catch(() => undefined),
+              );
+            }
           }
-        }
+        } catch (sessionError) {
+          if (!isTransientAuthDatabaseError(sessionError)) {
+            throw sessionError;
+          }
 
-        if (!session) {
-          try {
-            const sessionRecord = await loadWithDedupe(
-              inflightSessionLoads,
-              sessionId,
-              () =>
-                c.env.fitloot_db
-                  .prepare(
-                    "SELECT id, user_id, expires_at FROM sessions WHERE id = ? AND expires_at > CURRENT_TIMESTAMP",
-                  )
-                  .bind(sessionId)
-                  .first<SessionCookieRecord>(),
-            );
+          if (runtimeFallbackDb) {
+            try {
+              session = await readRuntimeSession(runtimeFallbackDb, sessionId);
+            } catch {
+              // Runtime fallback is best-effort during transient Supabase failures.
+            }
+          }
 
-            if (sessionRecord) {
-              session = {
-                id: sessionRecord.id,
-                user_id: sessionRecord.user_id,
-              };
-              if (runtimeFallbackDb && sessionRecord.expires_at) {
-                c.executionCtx.waitUntil(
-                  upsertRuntimeSession(runtimeFallbackDb, {
-                    id: sessionRecord.id,
-                    user_id: sessionRecord.user_id,
-                    expires_at: sessionRecord.expires_at,
-                  })
-                    .catch(() => undefined),
-                );
-              }
-            }
-          } catch (sessionError) {
-            if (!isTransientAuthDatabaseError(sessionError)) {
-              throw sessionError;
-            }
+          if (!session && staleSession) {
+            session = staleSession;
+          }
 
-            if (!session && staleSession) {
-              session = staleSession;
-            }
-
-            if (!session) {
-              throw sessionError;
-            }
+          if (!session) {
+            throw sessionError;
           }
         }
       }
 
       if (!session) {
         sessionCache.delete(sessionId);
+        await clearRuntimeAuthArtifacts({
+          runtimeDb: runtimeFallbackDb,
+          sessionId,
+        });
         return c.json({ error: "Unauthorized", code: "SESSION_INVALID" }, 401);
       }
       writeCache(sessionCache, sessionId, session, sessionCacheTtlMs, now);
@@ -458,35 +485,33 @@ export function createAuthMiddleware({
       let runtimeUserRecord: UserAuthRecord | null = null;
       let shouldSyncRuntimeUserRecord = false;
 
-      if (!userRecord && runtimeFallbackDb) {
-        try {
-          runtimeUserRecord = await readRuntimeUserAuth(
-            runtimeFallbackDb,
-            session.user_id,
-            { maxAgeMs: 180_000 },
-          );
-          if (runtimeUserRecord) {
-            userRecord = runtimeUserRecord;
-          }
-        } catch {
-          // Runtime fallback is best-effort for transient Supabase pressure.
-        }
-      }
-
       if (!userRecord) {
         try {
           userRecord = await loadWithDedupe(
             inflightUserLoads,
             session.user_id,
-            () => getUserAuthRecordById(
-              c.env.fitloot_db,
-              session.user_id,
-            ),
+            () =>
+              getUserAuthRecordById(
+                c.env.fitloot_db,
+                session.user_id,
+              ),
           );
           shouldSyncRuntimeUserRecord = Boolean(userRecord);
         } catch (userRecordError) {
           if (!isTransientAuthDatabaseError(userRecordError)) {
             throw userRecordError;
+          }
+
+          if (runtimeFallbackDb) {
+            try {
+              runtimeUserRecord = await readRuntimeUserAuth(
+                runtimeFallbackDb,
+                session.user_id,
+                { maxAgeMs: 180_000 },
+              );
+            } catch {
+              // Runtime fallback is best-effort during transient Supabase failures.
+            }
           }
 
           userRecord = staleUserRecord ?? runtimeUserRecord;
@@ -499,6 +524,11 @@ export function createAuthMiddleware({
       if (!userRecord) {
         userRecordCache.delete(session.user_id);
         sessionCache.delete(sessionId);
+        await clearRuntimeAuthArtifacts({
+          runtimeDb: runtimeFallbackDb,
+          sessionId,
+          userId: session.user_id,
+        });
         return c.json(
           { error: "Usuário não encontrado", code: "USER_NOT_FOUND" },
           404,

@@ -2,7 +2,7 @@ import { BrowserRouter, HashRouter } from "react-router";
 import { useState, useEffect, Suspense, useCallback } from "react";
 import { Analytics } from "@vercel/analytics/react";
 import { SpeedInsights } from "@vercel/speed-insights/react";
-import { AUTHENTICATED_HINT_KEY } from "@/react-app/auth/constants";
+import { clearPersistedAuthenticatedUserState } from "@/react-app/auth/clientStateCleanup";
 import { AuthContext } from "@/react-app/auth/context";
 import { AppChromeContext } from "@/react-app/contexts/appChrome";
 import { ThemeContext } from "@/react-app/contexts/theme";
@@ -13,8 +13,6 @@ import {
   persistAppThemeMode,
   type AppThemeMode,
 } from "@/react-app/theme/appTheme";
-import { applyProfileTheme } from "@/react-app/theme/profileTheme";
-import { clearJsonCache } from "@/react-app/utils/api";
 import type { User } from "@/react-app/auth/types";
 import { startPresenceHeartbeat } from "@/react-app/services/presenceService";
 import { getHostContext } from "@/react-app/services/runtime/hostRuntime";
@@ -47,9 +45,7 @@ export default function App({ initialThemeMode = DEFAULT_APP_THEME_MODE }: AppPr
   }, []);
 
   const logout = useCallback(() => {
-    localStorage.removeItem(AUTHENTICATED_HINT_KEY);
-    clearJsonCache();
-    applyProfileTheme(null);
+    clearPersistedAuthenticatedUserState();
     setUser(null);
   }, []);
 

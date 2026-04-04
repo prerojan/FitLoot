@@ -20,6 +20,7 @@ import {
   consumeActivationNotice,
   type ActivationNotice,
 } from "@/react-app/utils/activationNotice";
+import { ONBOARDING_EMAIL_STORAGE_KEY } from "@/react-app/constants/storage";
 
 type LoginForm = {
   email: string;
@@ -54,7 +55,7 @@ const Home: FC = () => {
   }, []);
 
   const goToOnboarding = () => {
-    if (form.email) sessionStorage.setItem("onboarding_email", form.email);
+      if (form.email) sessionStorage.setItem(ONBOARDING_EMAIL_STORAGE_KEY, form.email);
     navigate("/onboarding");
   };
 

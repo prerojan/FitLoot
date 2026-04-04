@@ -1,5 +1,6 @@
 import { api } from "@/react-app/utils/api";
-import { AUTHENTICATED_HINT_KEY, ROUTE_PATHS } from "@/react-app/auth/constants";
+import { ROUTE_PATHS } from "@/react-app/auth/constants";
+import { clearPersistedAuthenticatedUserState } from "@/react-app/auth/clientStateCleanup";
 import type { User } from "@/react-app/auth/types";
 import type { UserProfileTheme } from "@/react-app/types/profile";
 import type { UserProfile, UserProgression } from "@/shared/types";
@@ -19,11 +20,31 @@ export type AuthBootstrapResult =
   | { state: "unauthorized" }
   | { state: "unavailable" };
 
+async function isMissingUserResponse(response: Response): Promise<boolean> {
+  if (response.status !== 404) {
+    return false;
+  }
+
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!contentType.includes("application/json") && !contentType.includes("+json")) {
+    return false;
+  }
+
+  const payload = (await response.clone().json().catch(() => null)) as
+    | { code?: string | undefined }
+    | null;
+  return payload?.code === "USER_NOT_FOUND";
+}
+
 export async function fetchAuthBootstrap(): Promise<AuthBootstrapResult> {
   // Consolida a carga inicial de autenticacao em uma unica requisicao.
   const response = await api("/api/app/bootstrap");
-  if (response.status === 401 || response.status === 403) {
-    localStorage.removeItem(AUTHENTICATED_HINT_KEY);
+  if (
+    response.status === 401 ||
+    response.status === 403 ||
+    (await isMissingUserResponse(response))
+  ) {
+    clearPersistedAuthenticatedUserState();
     return { state: "unauthorized" };
   }
   if (!response.ok) {
@@ -42,8 +63,12 @@ export async function fetchAuthBootstrap(): Promise<AuthBootstrapResult> {
 export async function fetchCurrentUser(): Promise<User | null> {
   // Resolve a sessao atual sem propagar excecoes para os consumidores.
   const response = await api("/api/users/me");
-  if (response.status === 401 || response.status === 403) {
-    localStorage.removeItem(AUTHENTICATED_HINT_KEY);
+  if (
+    response.status === 401 ||
+    response.status === 403 ||
+    (await isMissingUserResponse(response))
+  ) {
+    clearPersistedAuthenticatedUserState();
     return null;
   }
   if (!response.ok) return null;

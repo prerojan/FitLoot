@@ -5,6 +5,7 @@ import {
   PENDING_404_ACHIEVEMENT_KEY,
   ROUTE_PATHS,
 } from "../constants";
+import { clearPersistedAuthenticatedUserState } from "../clientStateCleanup";
 import type { User } from "../types";
 import { triggerRouteNotFoundAchievement } from "../../services/achievementService";
 import {
@@ -89,8 +90,7 @@ export function useAuthBootstrap({
       // Restaura sessao e bootstrap principal em uma unica ida ao backend.
       const bootstrapResult = await fetchAuthBootstrap();
       if (bootstrapResult.state === "unauthorized") {
-        localStorage.removeItem(AUTHENTICATED_HINT_KEY);
-        applyProfileTheme(null);
+        clearPersistedAuthenticatedUserState();
         setUser(null);
         return;
       }
@@ -102,8 +102,7 @@ export function useAuthBootstrap({
 
         const fallbackUser = await fetchCurrentUser();
         if (!fallbackUser) {
-          localStorage.removeItem(AUTHENTICATED_HINT_KEY);
-          applyProfileTheme(null);
+          clearPersistedAuthenticatedUserState();
           setUser(null);
           return;
         }
@@ -151,8 +150,7 @@ export function useAuthBootstrap({
       if (restoredFromCache) {
         return;
       }
-      localStorage.removeItem(AUTHENTICATED_HINT_KEY);
-      applyProfileTheme(null);
+      clearPersistedAuthenticatedUserState();
       setUser(null);
     } finally {
       setLoading(false);

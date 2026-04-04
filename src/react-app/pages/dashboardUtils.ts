@@ -1,4 +1,5 @@
 import { formatMissionGoal } from "@/constants/missionMetrics";
+import { STEP_MISSION_PROGRESS_STORAGE_PREFIX } from "@/react-app/constants/storage";
 import type { Mission, MissionMetricType } from "@/shared/types";
 
 export const MATERIAL_SYMBOLS_LINK_ID = "fitloot-material-symbols";
@@ -57,9 +58,6 @@ type ReconcilePersistentStepMissionProgressParams = {
   stepsValue: number;
   state: PersistentStepMissionProgressState;
 };
-
-const STEP_MISSION_PROGRESS_STORAGE_PREFIX =
-  "fitloot.dashboard.step-mission-progress.v1";
 
 export function ensureMaterialSymbolsLoaded() {
   if (typeof document === "undefined") return;

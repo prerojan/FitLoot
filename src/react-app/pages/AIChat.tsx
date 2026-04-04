@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import AppPageShell from "@/react-app/components/AppPageShell";
 import { useAuth } from "@/react-app/auth/context";
+import { AI_CHAT_STORAGE_PREFIX } from "@/react-app/constants/storage";
 import { api } from "@/react-app/utils/api";
 
 type Message = {
@@ -74,7 +75,7 @@ function parseAIResponse(text: string): string {
 }
 
 function getStorageKey(userId: string | undefined) {
-  return `fitloot_ai_chat_${userId ?? "guest"}`;
+  return `${AI_CHAT_STORAGE_PREFIX}${userId ?? "guest"}`;
 }
 
 function createGreetingMessage(): Message {

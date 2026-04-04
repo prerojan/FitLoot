@@ -900,7 +900,7 @@ export default function Dashboard() {
             style={PANEL_STYLE}
           >
             <span
-              className="flex h-10 w-10 items-center justify-center rounded-full"
+              className="flex h-10 w-10 shrink-0 aspect-square items-center justify-center rounded-full"
               style={{ background: "color-mix(in srgb, var(--app-primary-color) 18%, transparent)", color: "var(--app-primary-color)" }}
             >
               <Bot className="h-5 w-5" />
@@ -915,7 +915,7 @@ export default function Dashboard() {
             style={PANEL_STYLE}
           >
             <span
-              className="flex h-10 w-10 items-center justify-center rounded-full"
+              className="flex h-10 w-10 shrink-0 aspect-square items-center justify-center rounded-full"
               style={{ background: "color-mix(in srgb, var(--app-primary-color) 18%, transparent)", color: "var(--app-primary-color)" }}
             >
               <Camera className="h-5 w-5" />

@@ -15,6 +15,7 @@ import { AuthThemeHeader } from "@/react-app/theme/AuthThemeHeader";
 import { ROUTE_PATHS } from "@/react-app/auth/constants";
 import { useAuth } from "@/react-app/auth/context";
 import { useTheme } from "@/react-app/contexts/theme";
+import { ONBOARDING_EMAIL_STORAGE_KEY } from "@/react-app/constants/storage";
 import { resolveAuthenticatedStartRoute } from "@/react-app/services/authService";
 import { api } from "@/react-app/utils/api";
 import { saveOnboardingDraft, type OnboardingDraft } from "@/react-app/utils/onboardingDraft";
@@ -541,10 +542,10 @@ export default function Onboarding() {
 
   // Reaproveita o e-mail retornado do checkout quando o usuario volta ao onboarding.
   useEffect(() => {
-    const email = sessionStorage.getItem("onboarding_email");
+    const email = sessionStorage.getItem(ONBOARDING_EMAIL_STORAGE_KEY);
     if (email) {
       setCredentials((currentCredentials) => ({ ...currentCredentials, email }));
-      sessionStorage.removeItem("onboarding_email");
+      sessionStorage.removeItem(ONBOARDING_EMAIL_STORAGE_KEY);
     }
   }, []);
 

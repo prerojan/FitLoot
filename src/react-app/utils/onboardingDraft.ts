@@ -1,4 +1,5 @@
-const ONBOARDING_DRAFT_STORAGE_KEY = "fitloot_onboarding_draft";
+import { ONBOARDING_DRAFT_STORAGE_KEY } from "@/react-app/constants/storage";
+
 const ONBOARDING_DRAFT_TTL_MS = 12 * 60 * 60 * 1000;
 
 export type OnboardingDraft = {
