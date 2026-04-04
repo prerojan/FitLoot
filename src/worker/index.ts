@@ -2792,7 +2792,11 @@ registerShopRoutes(app, {
   withTransaction,
 });
 
-registerMetricsRoutes(app, { authMiddleware });
+registerMetricsRoutes(app, {
+  authMiddleware,
+  invalidateMissionListCache,
+  schedulePeriodicProgressRecomputeWithGuard,
+});
 
 type RankingRow = {
   user_id: string;

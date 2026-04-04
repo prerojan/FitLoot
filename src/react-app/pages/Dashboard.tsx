@@ -126,6 +126,7 @@ export default function Dashboard() {
   const [quickActionsOpen, setQuickActionsOpen] = useState(false);
   const quickActionsRef = useRef<HTMLDivElement | null>(null);
   const missionsRef = useRef<Mission[]>([]);
+  const periodicStepProgressRef = useRef<number | null>(null);
   const { metrics: consolidatedMetrics, loading: metricsLoading, refreshMetrics } = useDailyMetrics({ syncRemote: true });
 
   const setSectionLoading = useCallback((section: keyof DashboardLoadingState, value: boolean) => {
@@ -511,6 +512,33 @@ export default function Dashboard() {
   const stepsValue = consolidatedMetrics?.steps ?? 0;
   const caloriesValue = consolidatedMetrics?.caloriesBurned ?? 0;
   const stepsProgress = clamp((stepsValue / STEPS_TARGET) * 100, 0, 100);
+
+  useEffect(() => {
+    if (!hasPeriodicStepMissions) {
+      periodicStepProgressRef.current = null;
+      return;
+    }
+
+    if (metricsLoading) {
+      return;
+    }
+
+    const previousSteps = periodicStepProgressRef.current;
+    periodicStepProgressRef.current = stepsValue;
+
+    if (previousSteps === null || previousSteps === stepsValue) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      void refreshMissionProgress();
+    }, 750);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [hasPeriodicStepMissions, metricsLoading, refreshMissionProgress, stepsValue]);
+
   const todayKey = useMemo(() => formatDateKey(new Date()), []);
   const calendarDates = useMemo(() => buildCenteredDates(new Date(), 2), []);
   const currentDateLabel = useMemo(() => {
