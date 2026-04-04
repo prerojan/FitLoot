@@ -2,6 +2,45 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Mission } from "../../shared/types";
 
+type MockRuntimeLocation = {
+  latitude: number;
+  longitude: number;
+  accuracyMeters: number;
+  precision: "precise" | "approximate";
+  timestamp: string;
+  source: "android-native" | "browser";
+};
+
+type MockRuntimeState = {
+  location: MockRuntimeLocation | null;
+  permission: {
+    permission: "granted" | "denied" | "prompt";
+    precision: "precise" | "approximate" | "unavailable";
+    granted: boolean;
+  };
+  tracking: boolean;
+  error: string | null;
+};
+
+const {
+  runtimeListeners,
+  startForegroundLocationTracking,
+  stopForegroundLocationTracking,
+  getCurrentLocation,
+} = vi.hoisted(() => ({
+  runtimeListeners: new Set<(state: MockRuntimeState) => void>(),
+  startForegroundLocationTracking: vi.fn(async () => undefined),
+  stopForegroundLocationTracking: vi.fn(() => undefined),
+  getCurrentLocation: vi.fn(async () => ({
+    latitude: -23.5505,
+    longitude: -46.6333,
+    accuracyMeters: 8,
+    precision: "precise" as const,
+    timestamp: "2026-03-30T12:00:00.000Z",
+    source: "android-native" as const,
+  })),
+}));
+
 let mockHealthHookReturn = {
   healthData: {
     steps: 0,
@@ -16,32 +55,53 @@ let mockHealthHookReturn = {
   isAuthenticated: true,
 };
 
-const addMarker = vi.fn();
-const clearMarkers = vi.fn();
-const getCurrentLocation = vi.fn(async () => [-46.6333, -23.5505] as [number, number]);
-const getDirections = vi.fn(async () => ({
-  distance: 3500,
-  duration: 2100,
-  coordinates: [[-46.6333, -23.5505], [-46.65, -23.58]] as [number, number][],
-}));
+let runtimeState: MockRuntimeState = {
+  location: {
+    latitude: -23.5505,
+    longitude: -46.6333,
+    accuracyMeters: 8,
+    precision: "precise",
+    timestamp: "2026-03-30T12:00:00.000Z",
+    source: "android-native",
+  },
+  permission: {
+    permission: "granted",
+    precision: "precise",
+    granted: true,
+  },
+  tracking: false,
+  error: null,
+};
+
+function emitRuntimeLocation(location: MockRuntimeLocation) {
+  runtimeState = {
+    ...runtimeState,
+    location,
+  };
+  runtimeListeners.forEach((listener) => listener(runtimeState));
+}
 
 vi.mock("../../react-app/hooks/useHealthData", () => ({
   useHealthData: () => mockHealthHookReturn,
 }));
 
-vi.mock("../../react-app/hooks/useMapService", () => ({
-  useMapService: () => ({
+vi.mock("../../react-app/services/runtime/locationRuntimeService", () => ({
+  locationRuntimeService: {
+    getState: () => runtimeState,
+    subscribe: (listener: (state: MockRuntimeState) => void) => {
+      runtimeListeners.add(listener);
+      listener(runtimeState);
+      return () => runtimeListeners.delete(listener);
+    },
     getCurrentLocation,
-    getDirections,
-    addMarker,
-    clearMarkers,
-    userLocation: [-46.6333, -23.5505] as [number, number],
-  }),
+    startForegroundLocationTracking,
+    stopForegroundLocationTracking,
+  },
 }));
 
 import useWalkingMission from "../../react-app/hooks/useWalkingMission";
 
-const mission: Mission = {
+const stepMission: Mission = {
   id: 7,
   user_id: "user-1",
   type: "daily",
@@ -93,9 +153,37 @@ const mission: Mission = {
   updated_at: "2026-03-30T12:00:00.000Z",
 };
 
+const distanceMission: Mission = {
+  ...stepMission,
+  id: 11,
+  title: "Corrida curta",
+  metric_type: "distance_meters",
+  metric_value: 600,
+  metric_unit: "m",
+  goal: "Percorra 600 m",
+};
+
 describe("useWalkingMission", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    runtimeListeners.clear();
+    runtimeState = {
+      location: {
+        latitude: -23.5505,
+        longitude: -46.6333,
+        accuracyMeters: 8,
+        precision: "precise",
+        timestamp: "2026-03-30T12:00:00.000Z",
+        source: "android-native",
+      },
+      permission: {
+        permission: "granted",
+        precision: "precise",
+        granted: true,
+      },
+      tracking: false,
+      error: null,
+    };
     mockHealthHookReturn = {
       healthData: {
         steps: 0,
@@ -111,13 +199,13 @@ describe("useWalkingMission", () => {
     };
   });
 
-  it("starts the walking mission, creates markers, and completes when the target is reached", async () => {
+  it("starts the step mission and completes when the target is reached", async () => {
     const onComplete = vi.fn(async () => undefined);
     const { result, rerender } = renderHook(
       (props: { mission: Mission; onComplete: typeof onComplete }) =>
         useWalkingMission({ ...props, autoRefresh: false }),
       {
-        initialProps: { mission, onComplete },
+        initialProps: { mission: stepMission, onComplete },
       },
     );
 
@@ -126,25 +214,107 @@ describe("useWalkingMission", () => {
     });
 
     expect(result.current.state.isRunning).toBe(true);
-    expect(addMarker).toHaveBeenCalledTimes(2);
-    expect(getDirections).toHaveBeenCalledTimes(1);
+    expect(startForegroundLocationTracking).toHaveBeenCalledTimes(1);
 
     mockHealthHookReturn = {
       ...mockHealthHookReturn,
       healthData: {
         ...mockHealthHookReturn.healthData,
         steps: 5200,
+        calories: 140,
         distance: 3.7,
         lastUpdated: "2026-03-30T12:05:00.000Z",
       },
     };
 
-    rerender({ mission, onComplete });
+    rerender({ mission: stepMission, onComplete });
 
     await waitFor(() => {
       expect(onComplete).toHaveBeenCalledWith(7, 5200, true);
     });
 
-    expect(result.current.state.isCompleted).toBe(true);
+    expect(stopForegroundLocationTracking).toHaveBeenCalled();
+  });
+
+  it("tracks only the distance accumulated after the session starts", async () => {
+    const onComplete = vi.fn(async () => undefined);
+    mockHealthHookReturn = {
+      ...mockHealthHookReturn,
+      healthData: {
+        ...mockHealthHookReturn.healthData,
+        steps: 2000,
+        calories: 180,
+        distance: 1.4,
+      },
+    };
+
+    const { result, rerender } = renderHook(
+      (props: { mission: Mission; onComplete: typeof onComplete }) =>
+        useWalkingMission({ ...props, autoRefresh: false }),
+      {
+        initialProps: { mission: distanceMission, onComplete },
+      },
+    );
+
+    await act(async () => {
+      await result.current.startExecution();
+    });
+
+    expect(result.current.state.currentDistance).toBe(0);
+    expect(result.current.state.currentSteps).toBe(0);
+    expect(result.current.state.currentCalories).toBe(0);
+
+    mockHealthHookReturn = {
+      ...mockHealthHookReturn,
+      healthData: {
+        ...mockHealthHookReturn.healthData,
+        steps: 2450,
+        calories: 225,
+        distance: 2.2,
+      },
+    };
+
+    rerender({ mission: distanceMission, onComplete });
+
+    await waitFor(() => {
+      expect(result.current.state.currentSteps).toBe(450);
+      expect(result.current.state.currentCalories).toBe(45);
+      expect(result.current.state.currentDistance).toBe(0);
+    });
+
+    act(() => {
+      emitRuntimeLocation({
+        latitude: -23.5486,
+        longitude: -46.6333,
+        accuracyMeters: 8,
+        precision: "precise",
+        timestamp: "2026-03-30T12:01:00.000Z",
+        source: "android-native",
+      });
+      emitRuntimeLocation({
+        latitude: -23.5467,
+        longitude: -46.6333,
+        accuracyMeters: 8,
+        precision: "precise",
+        timestamp: "2026-03-30T12:02:00.000Z",
+        source: "android-native",
+      });
+      emitRuntimeLocation({
+        latitude: -23.5448,
+        longitude: -46.6333,
+        accuracyMeters: 8,
+        precision: "precise",
+        timestamp: "2026-03-30T12:03:00.000Z",
+        source: "android-native",
+      });
+    });
+
+    await waitFor(() => {
+      expect(onComplete).toHaveBeenCalledTimes(1);
+    });
+
+    const completionValue = onComplete.mock.calls[0]?.[1];
+    expect(completionValue).toBeGreaterThanOrEqual(600);
+    expect(completionValue).toBeLessThan(900);
   });
 });

@@ -2837,8 +2837,6 @@ registerShopRoutes(app, {
 
 registerMetricsRoutes(app, {
   authMiddleware,
-  invalidateMissionListCache,
-  schedulePeriodicProgressRecomputeWithGuard,
 });
 
 type RankingRow = {

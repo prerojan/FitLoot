@@ -60,6 +60,7 @@ const OPENROUTESERVICE_CONFIG = {
 class OpenStreetMapService {
   private config: OSMConfig;
   private isInitialized: boolean = false;
+  private initializationPromise: Promise<void> | null = null;
 
   constructor() {
     this.config = {
@@ -74,18 +75,38 @@ class OpenStreetMapService {
 
   // Valida a disponibilidade mínima dos provedores antes do uso.
   async initialize(): Promise<void> {
-    try {
-      const response = await fetch('https://nominatim.openstreetmap.org/search?q=sao+paulo&format=json&limit=1');
-      
-      if (!response.ok) {
-        throw new Error('OpenStreetMap services are not available');
-      }
+    if (this.isInitialized) {
+      return;
+    }
 
-      this.isInitialized = true;
-      console.log('OpenStreetMap service initialized successfully');
-    } catch (error) {
-      console.error('Failed to initialize OpenStreetMap service:', error);
-      throw new Error('Failed to initialize OpenStreetMap service');
+    if (this.initializationPromise) {
+      return this.initializationPromise;
+    }
+
+    this.initializationPromise = (async () => {
+      try {
+        const response = await fetch('https://nominatim.openstreetmap.org/search?q=sao+paulo&format=json&limit=1');
+        
+        if (!response.ok) {
+          throw new Error('OpenStreetMap services are not available');
+        }
+
+        this.isInitialized = true;
+        console.log('OpenStreetMap service initialized successfully');
+      } catch (error) {
+        console.error('Failed to initialize OpenStreetMap service:', error);
+        throw new Error('Failed to initialize OpenStreetMap service');
+      } finally {
+        this.initializationPromise = null;
+      }
+    })();
+
+    try {
+      await this.initializationPromise;
+    } finally {
+      if (!this.isInitialized) {
+        this.initializationPromise = null;
+      }
     }
   }
 

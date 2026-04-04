@@ -164,8 +164,8 @@ describe("mission routes", () => {
     expect(response.status).toBe(200);
     expect(payload).toEqual([]);
     expect(deps.invalidateMissionListCache).toHaveBeenCalledWith(TEST_USER.id);
-    expect(deps.schedulePeriodicMissionsRefreshWithGuard).toHaveBeenCalledTimes(1);
-    expect(deps.scheduleLegacyDailyMetadataRepairWithGuard).toHaveBeenCalledTimes(1);
+    expect(deps.schedulePeriodicMissionsRefreshWithGuard).not.toHaveBeenCalled();
+    expect(deps.scheduleLegacyDailyMetadataRepairWithGuard).not.toHaveBeenCalled();
   });
 
   it("serves a cached mission detail payload without querying the mission detail path", async () => {
@@ -204,7 +204,7 @@ describe("mission routes", () => {
     expect(deps.writeMissionDetailCache).not.toHaveBeenCalled();
   });
 
-  it("runs heavier maintenance hooks only when refresh is explicitly requested", async () => {
+  it("keeps refresh reads free from maintenance hooks", async () => {
     const { db } = createMockD1Database([
       {
         match: "PRAGMA table_info('missions')",
@@ -238,9 +238,9 @@ describe("mission routes", () => {
 
     expect(response.status).toBe(200);
     expect(deps.invalidateMissionListCache).toHaveBeenCalledWith(TEST_USER.id);
-    expect(deps.schedulePeriodicMissionsRefreshWithGuard).toHaveBeenCalledTimes(1);
-    expect(deps.scheduleLegacyDailyMetadataRepairWithGuard).toHaveBeenCalledTimes(1);
-    expect(deps.schedulePeriodicProgressRecomputeWithGuard).toHaveBeenCalledTimes(1);
+    expect(deps.schedulePeriodicMissionsRefreshWithGuard).not.toHaveBeenCalled();
+    expect(deps.scheduleLegacyDailyMetadataRepairWithGuard).not.toHaveBeenCalled();
+    expect(deps.schedulePeriodicProgressRecomputeWithGuard).not.toHaveBeenCalled();
   });
 
   it("hydrates weekly and monthly step progress from the periodic progress resolver", async () => {

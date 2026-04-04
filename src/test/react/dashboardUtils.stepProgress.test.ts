@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import type { Mission } from "../../shared/types";
 import {
+  arePersistentStepMissionProgressStatesEqual,
   buildStepMissionProgressSignature,
   createStepMissionSnapshot,
+  reconcilePersistentStepMissionProgress,
 } from "../../react-app/pages/dashboardUtils";
 
 function buildMission(overrides?: Partial<Mission>): Mission {
@@ -91,5 +93,50 @@ describe("dashboardUtils step mission helpers", () => {
         12: 8000,
       },
     });
+  });
+
+  it("seeds persistent step mission progress by adding the current daily steps when the server has not updated today", () => {
+    const nextState = reconcilePersistentStepMissionProgress({
+      missions: [buildMission({ progress_value: 24000, updated_at: "2026-04-03T22:00:00.000Z" })],
+      metricsDate: "2026-04-04",
+      stepsValue: 7342,
+      state: {},
+    });
+
+    expect(nextState).toEqual({
+      1: {
+        metricsDate: "2026-04-04",
+        lastDailySteps: 7342,
+        progressValue: 31342,
+      },
+    });
+  });
+
+  it("keeps accumulated mission progress across the daily metrics rollover and only adds the new day's steps", () => {
+    const previousState = {
+      1: {
+        metricsDate: "2026-04-04",
+        lastDailySteps: 7342,
+        progressValue: 31342,
+      },
+    };
+
+    const nextState = reconcilePersistentStepMissionProgress({
+      missions: [buildMission({ progress_value: 24000, updated_at: "2026-04-03T22:00:00.000Z" })],
+      metricsDate: "2026-04-05",
+      stepsValue: 512,
+      state: previousState,
+    });
+
+    expect(nextState).toEqual({
+      1: {
+        metricsDate: "2026-04-05",
+        lastDailySteps: 512,
+        progressValue: 31854,
+      },
+    });
+    expect(
+      arePersistentStepMissionProgressStatesEqual(previousState, nextState),
+    ).toBe(false);
   });
 });

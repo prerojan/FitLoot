@@ -8,13 +8,11 @@ import { createAuthMiddleware, createExecutionContext, createJsonRequest, create
 function createMetricsDeps() {
   return {
     authMiddleware: createAuthMiddleware(),
-    invalidateMissionListCache: vi.fn(() => undefined),
-    schedulePeriodicProgressRecomputeWithGuard: vi.fn(() => undefined),
   } satisfies Parameters<typeof registerMetricsRoutes>[1];
 }
 
 describe("metrics routes", () => {
-  it("invalidates mission caches and schedules periodic recompute after offline step sync", async () => {
+  it("processes offline step sync without touching mission cache state", async () => {
     const { db } = createMockD1Database([
       {
         match: "SELECT response_payload",
@@ -69,15 +67,9 @@ describe("metrics routes", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(deps.invalidateMissionListCache).toHaveBeenCalledWith(TEST_USER.id);
-    expect(deps.schedulePeriodicProgressRecomputeWithGuard).toHaveBeenCalledWith(
-      TEST_USER.id,
-      db,
-      executionCtx,
-    );
   });
 
-  it("invalidates mission caches and schedules periodic recompute after direct metrics update", async () => {
+  it("persists direct metrics updates without triggering mission refresh side effects", async () => {
     const { db } = createMockD1Database([
       {
         match: "INSERT INTO daily_metrics",
@@ -103,11 +95,5 @@ describe("metrics routes", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(deps.invalidateMissionListCache).toHaveBeenCalledWith(TEST_USER.id);
-    expect(deps.schedulePeriodicProgressRecomputeWithGuard).toHaveBeenCalledWith(
-      TEST_USER.id,
-      db,
-      executionCtx,
-    );
   });
 });

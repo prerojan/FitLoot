@@ -24,6 +24,12 @@ vi.mock("../../react-app/components/WalkingMissionExecution", () => ({
   default: () => <div>Walking mission modal</div>,
 }));
 
+vi.mock("../../react-app/components/mission-card/DistanceMissionRoutePreview", () => ({
+  default: ({ mission }: { mission: Mission }) => (
+    <div data-testid="distance-route-preview">Rota {mission.id}</div>
+  ),
+}));
+
 import MissionCard from "../../react-app/components/MissionCard";
 
 const mission: Mission = {
@@ -111,5 +117,25 @@ describe("MissionCard", () => {
 
     expect(apiMock).toHaveBeenCalledWith("/api/missions/10");
     expect(chromeState.setMissionDetailsOpen).toHaveBeenCalledWith(true);
+  });
+
+  it("renders the distance route preview instead of regular media for distance missions", () => {
+    render(
+      <MissionCard
+        mission={{
+          ...mission,
+          id: 22,
+          title: "Corrida leve",
+          metric_type: "distance_meters",
+          metric_value: 3200,
+          metric_unit: "m",
+          goal: "Percorra 3,2 km",
+          exercise_category: "cardio",
+        }}
+        onComplete={vi.fn(async () => undefined)}
+      />,
+    );
+
+    expect(screen.getByTestId("distance-route-preview")).toHaveTextContent("Rota 22");
   });
 });

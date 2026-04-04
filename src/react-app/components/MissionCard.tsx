@@ -19,7 +19,12 @@ import type { Mission } from "@/shared/types";
 import { localizeMissionText, localizeMissionTextArray } from "@/shared/missionLocalization";
 import { api } from "@/react-app/utils/api";
 import { useAppChrome } from "@/react-app/contexts/appChrome";
+import {
+  isDistanceRouteMission,
+  resolveDistanceMissionActivityLabel,
+} from "@/react-app/services/distanceMissionRoute";
 import WalkingMissionExecution from "./WalkingMissionExecution";
+import DistanceMissionRoutePreview from "./mission-card/DistanceMissionRoutePreview";
 import { MissionExecutionModal } from "./mission-card/MissionExecutionModal";
 import {
   formatDifficultyLabel,
@@ -83,6 +88,10 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
   const isAIMission = Number(mission.is_ai_special ?? 0) === 1 || mission.mission_origin === "ai";
   const isWalkingMission = metricType === "steps" || metricType === "distance_meters";
   const isTrackableWalkingMission = isWalkingMission && mission.type === "daily";
+  const isDistanceRouteDailyMission = isDistanceRouteMission(mission);
+  const walkingActionLabel = isDistanceRouteDailyMission
+    ? `Iniciar ${resolveDistanceMissionActivityLabel(mission).toLowerCase()}`
+    : "Iniciar caminhada";
   const circuitTasks = useMemo(() => resolveCircuitTasks(mission), [mission]);
   const focusLabels = useMemo(() => resolveMissionFocusLabels(mission), [mission]);
   const hasTaskProgressMission = circuitTasks.length > 0;
@@ -223,6 +232,10 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
   const missionMediaStyle = resolveMissionMediaStyle(missionMediaUrl);
   const detailMissionMediaStyle = resolveMissionMediaStyle(detailMissionMediaUrl);
   const detailIsTrackableWalkingMission = (detailMetricType === "steps" || detailMetricType === "distance_meters") && missionDetails.type === "daily";
+  const detailIsDistanceRouteDailyMission = isDistanceRouteMission(missionDetails);
+  const detailWalkingActionLabel = detailIsDistanceRouteDailyMission
+    ? `INICIAR ${resolveDistanceMissionActivityLabel(missionDetails).toUpperCase()}`
+    : "INICIAR CAMINHADA";
   const detailIsCircuitMission = detailMetricType === "circuit_tasks";
   const missionCycleDateLabel = useMemo(
     () => formatMissionCycleDate(missionDetails.cycle_date),
@@ -254,7 +267,13 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
         : isCircuitMission
           ? [compactDurationLabel, `${circuitTasks.length || monthlyTarget} tarefas`].filter(Boolean).join(" | ")
           : [compactDurationLabel, formatGoal(mission, metricType)].filter(Boolean).join(" | ");
-  const compactActionLabel = isAutoProgressMission ? "Ver progresso" : isTrackableWalkingMission ? "Iniciar caminhada" : isCircuitMission ? "Ver detalhes" : "Iniciar treino";
+  const compactActionLabel = isAutoProgressMission
+    ? "Ver progresso"
+    : isTrackableWalkingMission
+      ? walkingActionLabel
+      : isCircuitMission
+        ? "Ver detalhes"
+        : "Iniciar treino";
 
   // Switches between the compact row layout and the richer card layout.
   const triggerContent = layout === "compact" ? (
@@ -347,34 +366,41 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
         </Badge>
       </div>
 
-      {!isAutoProgressMission && (missionMediaUrl || missionVideoUrl) ? (
-        <div
-          className="hidden sm:block relative w-full mb-3 aspect-video overflow-hidden rounded-2xl border"
-          style={{ background: "#ffffff", borderColor: "var(--fl-border-soft)" }}
-        >
-          {missionVideoUrl ? (
-            <video
-              src={missionVideoUrl}
-              poster={missionMediaUrl ?? undefined}
-              className="absolute inset-0 h-full w-full object-contain"
-              style={missionMediaStyle}
-              autoPlay
-              loop
-              muted
-              playsInline
-            />
-          ) : missionMediaUrl ? (
-              <img
-                src={missionMediaUrl}
-                alt={cardTitle}
-              loading="lazy"
-              decoding="async"
-              className="absolute inset-0 h-full w-full object-contain"
-              style={missionMediaStyle}
-            />
-          ) : null}
-        </div>
-      ) : null}
+      {!isAutoProgressMission && isDistanceRouteDailyMission ? (
+        <DistanceMissionRoutePreview
+          mission={mission}
+          variant="card"
+          loadStrategy="passive"
+          className="mb-3 hidden sm:block"
+        />
+      ) : !isAutoProgressMission && (missionMediaUrl || missionVideoUrl) ? (
+          <div
+            className="hidden sm:block relative w-full mb-3 aspect-video overflow-hidden rounded-2xl border"
+            style={{ background: "#ffffff", borderColor: "var(--fl-border-soft)" }}
+          >
+            {missionVideoUrl ? (
+              <video
+                src={missionVideoUrl}
+                poster={missionMediaUrl ?? undefined}
+                className="absolute inset-0 h-full w-full object-contain"
+                style={missionMediaStyle}
+                autoPlay
+                loop
+                muted
+                playsInline
+              />
+            ) : missionMediaUrl ? (
+                <img
+                  src={missionMediaUrl}
+                  alt={cardTitle}
+                  loading="lazy"
+                  decoding="async"
+                  className="absolute inset-0 h-full w-full object-contain"
+                  style={missionMediaStyle}
+                />
+            ) : null}
+          </div>
+        ) : null}
 
       <h3 className="font-semibold text-gray-900 mb-1">{cardTitle}</h3>
       <p className="text-sm text-gray-500 mb-2">{primaryLabel}</p>
@@ -466,7 +492,7 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
           className="w-full py-3 rounded-xl shadow-md hover:shadow-lg" 
           disabled={completing}
         >
-          {completing ? "Finalizando..." : isTrackableWalkingMission ? "Iniciar caminhada" : "Ver detalhes"}
+          {completing ? "Finalizando..." : isTrackableWalkingMission ? walkingActionLabel : "Ver detalhes"}
         </Button>
       )}
     </Card>
@@ -499,40 +525,54 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
             <div className="overflow-y-auto pb-32 min-h-[50vh] max-h-[75vh]">
               <div className="px-6 py-4">
                 {!detailIsAutoProgressMission ? (
-                  <div
-                    className="relative w-full aspect-video rounded-xl overflow-hidden group border"
-                    style={{ background: "#ffffff", borderColor: "var(--fl-border-soft)" }}
-                  >
-                    {detailMissionVideoUrl ? (
-                      <video
-                        src={detailMissionVideoUrl}
-                        poster={detailMissionMediaUrl ?? undefined}
-                        className="absolute inset-0 h-full w-full object-contain transition-transform duration-500 group-hover:scale-105"
-                        style={detailMissionMediaStyle}
-                        autoPlay
-                        loop
-                        muted
-                        playsInline
-                      />
-                    ) : detailMissionMediaUrl ? (
-                      <img
-                        src={detailMissionMediaUrl}
-                        alt={detailTitle}
-                        className="absolute inset-0 h-full w-full object-contain transition-transform duration-500 group-hover:scale-105"
-                        style={detailMissionMediaStyle}
-                      />
-                    ) : (
-                      <div className="absolute inset-0 flex items-center justify-center">
-                        <Dumbbell className="w-16 h-16 opacity-50" style={{ color: "var(--app-primary-color)" }} />
+                  detailIsDistanceRouteDailyMission ? (
+                    <DistanceMissionRoutePreview
+                      mission={missionDetails}
+                      variant="details"
+                      loadStrategy="eager"
+                    >
+                      <div className="absolute bottom-4 left-4">
+                        <span className="rounded-full px-2 py-1 text-[11px] font-bold uppercase tracking-[0.18em] text-black" style={{ background: "var(--app-primary-color)" }}>
+                          {stateLabel}
+                        </span>
                       </div>
-                    )}
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/70 to-transparent" />
-                    <div className="absolute bottom-4 left-4">
-                      <span className="rounded-full px-2 py-1 text-[11px] font-bold uppercase tracking-[0.18em] text-black" style={{ background: "var(--app-primary-color)" }}>
-                        {stateLabel}
-                      </span>
+                    </DistanceMissionRoutePreview>
+                  ) : (
+                    <div
+                      className="relative w-full aspect-video rounded-xl overflow-hidden group border"
+                      style={{ background: "#ffffff", borderColor: "var(--fl-border-soft)" }}
+                    >
+                      {detailMissionVideoUrl ? (
+                        <video
+                          src={detailMissionVideoUrl}
+                          poster={detailMissionMediaUrl ?? undefined}
+                          className="absolute inset-0 h-full w-full object-contain transition-transform duration-500 group-hover:scale-105"
+                          style={detailMissionMediaStyle}
+                          autoPlay
+                          loop
+                          muted
+                          playsInline
+                        />
+                      ) : detailMissionMediaUrl ? (
+                        <img
+                          src={detailMissionMediaUrl}
+                          alt={detailTitle}
+                          className="absolute inset-0 h-full w-full object-contain transition-transform duration-500 group-hover:scale-105"
+                          style={detailMissionMediaStyle}
+                        />
+                      ) : (
+                        <div className="absolute inset-0 flex items-center justify-center">
+                          <Dumbbell className="w-16 h-16 opacity-50" style={{ color: "var(--app-primary-color)" }} />
+                        </div>
+                      )}
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/70 to-transparent" />
+                      <div className="absolute bottom-4 left-4">
+                        <span className="rounded-full px-2 py-1 text-[11px] font-bold uppercase tracking-[0.18em] text-black" style={{ background: "var(--app-primary-color)" }}>
+                          {stateLabel}
+                        </span>
+                      </div>
                     </div>
-                  </div>
+                  )
                 ) : null}
               </div>
 
@@ -774,7 +814,7 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
                       : isInProgress
                         ? "CONTINUAR"
                         : detailIsTrackableWalkingMission
-                          ? "INICIAR CAMINHADA"
+                          ? detailWalkingActionLabel
                           : "INICIAR MISSÃO"}
               </button>
             </div>

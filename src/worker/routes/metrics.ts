@@ -18,12 +18,6 @@ import {
 
 type MetricsRouteDeps = {
   authMiddleware: MiddlewareHandler<AppContext>;
-  invalidateMissionListCache: (userId: string) => void;
-  schedulePeriodicProgressRecomputeWithGuard: (
-    userId: string,
-    db: D1Database,
-    executionCtx: ExecutionContext,
-  ) => void;
 };
 
 type StoredOfflineOperationRow = {
@@ -246,28 +240,10 @@ async function processOfflineSyncOperation(
   return resultPayload;
 }
 
-function shouldRefreshStepMissionProgress(operation: OfflineSyncOperation): boolean {
-  return operation.type === "step_delta_recorded";
-}
-
-function refreshStepMissionProgress(
-  userId: string,
-  db: D1Database,
-  executionCtx: ExecutionContext,
-  deps: Pick<MetricsRouteDeps, "invalidateMissionListCache" | "schedulePeriodicProgressRecomputeWithGuard">,
-): void {
-  deps.invalidateMissionListCache(userId);
-  deps.schedulePeriodicProgressRecomputeWithGuard(userId, db, executionCtx);
-}
-
 // Route registration for daily metrics and food diary persistence.
 export function registerMetricsRoutes(
   app: Hono<AppContext>,
-  {
-    authMiddleware,
-    invalidateMissionListCache,
-    schedulePeriodicProgressRecomputeWithGuard,
-  }: MetricsRouteDeps,
+  { authMiddleware }: MetricsRouteDeps,
 ): void {
   app.get("/api/metrics/today", authMiddleware, async (c) => {
     const user = c.get("user");
@@ -341,16 +317,6 @@ export function registerMetricsRoutes(
           )
           .run();
 
-        refreshStepMissionProgress(
-          user.id,
-          c.env.fitloot_db,
-          c.executionCtx,
-          {
-            invalidateMissionListCache,
-            schedulePeriodicProgressRecomputeWithGuard,
-          },
-        );
-
         return c.json({ success: true });
       } catch (error) {
         console.error("[/api/metrics/update]", {
@@ -378,30 +344,13 @@ export function registerMetricsRoutes(
       try {
         const data = c.req.valid("json");
         const results: Record<string, unknown>[] = [];
-        let shouldRefreshMissionProgress = false;
-
         for (const operation of data.operations) {
-          if (shouldRefreshStepMissionProgress(operation)) {
-            shouldRefreshMissionProgress = true;
-          }
           results.push(
             await processOfflineSyncOperation(
               c.env.fitloot_db,
               user.id,
               operation,
             ),
-          );
-        }
-
-        if (shouldRefreshMissionProgress) {
-          refreshStepMissionProgress(
-            user.id,
-            c.env.fitloot_db,
-            c.executionCtx,
-            {
-              invalidateMissionListCache,
-              schedulePeriodicProgressRecomputeWithGuard,
-            },
           );
         }
 

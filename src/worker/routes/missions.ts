@@ -493,9 +493,6 @@ export function registerMissionRoutes(
     normalizeMissionRow,
     readMissionDetailCache,
     readMissionListCache,
-    scheduleLegacyDailyMetadataRepairWithGuard,
-    schedulePeriodicMissionsRefreshWithGuard,
-    schedulePeriodicProgressRecomputeWithGuard,
     streamJsonArrayResponse,
     writeMissionDetailCache,
     writeMissionListCache,
@@ -624,27 +621,6 @@ export function registerMissionRoutes(
       }
 
       // Mantém o endpoint de leitura leve e relega manutenção periódica ao fluxo com debounce.
-      schedulePeriodicMissionsRefreshWithGuard(
-        c.env,
-        c.env.fitloot_db,
-        user.id,
-        c.executionCtx,
-        "safe",
-      );
-      const shouldScheduleLegacyRepair = forceRefresh || cachedNeedsRepair;
-      if (shouldScheduleLegacyRepair) {
-        scheduleLegacyDailyMetadataRepairWithGuard(
-          c.env,
-          c.env.fitloot_db,
-          user.id,
-          c.executionCtx,
-        );
-        schedulePeriodicProgressRecomputeWithGuard(
-          user.id,
-          c.env.fitloot_db,
-          c.executionCtx,
-        );
-      }
 
       // Busca missões ativas e histórico recente, com fallback para esquemas antigos sem coluna status.
       const { hasMissionStatus, includeSkillJoin } =
@@ -748,14 +724,6 @@ export function registerMissionRoutes(
         summaries,
         deps.extractExerciseName,
       );
-      if (listNeedsRepair && !shouldScheduleLegacyRepair) {
-        scheduleLegacyDailyMetadataRepairWithGuard(
-          c.env,
-          c.env.fitloot_db,
-          user.id,
-          c.executionCtx,
-        );
-      }
       if (!listNeedsRepair) {
         writeMissionListCache(user.id, summaries);
       }

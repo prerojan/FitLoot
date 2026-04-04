@@ -27,7 +27,6 @@ import {
 } from "@/react-app/utils/api";
 import {
   offlineSyncService,
-  OFFLINE_SYNC_FLUSH_EVENT,
   OFFLINE_MISSION_SYNCED_EVENT,
   type OfflineMissionSyncedDetail,
 } from "@/react-app/services/runtime/offlineSyncService";
@@ -41,8 +40,7 @@ import {
   PRIMARY_GLOW_STYLE,
   STEPS_TARGET,
   SUBTLE_PANEL_STYLE,
-  buildStepMissionProgressSignature,
-  createStepMissionSnapshot,
+  arePersistentStepMissionProgressStatesEqual,
   buildCenteredDates,
   capitalizeLabel,
   clamp,
@@ -51,8 +49,11 @@ import {
   formatNumber,
   isMissionCompleted,
   isStepProgressMission,
+  readPersistentStepMissionProgressState,
+  reconcilePersistentStepMissionProgress,
   sortMissions,
-  type StepMissionSnapshot,
+  type PersistentStepMissionProgressState,
+  writePersistentStepMissionProgressState,
 } from "@/react-app/pages/dashboardUtils";
 import { navigateProtectedRoute } from "@/react-app/services/appNavigation";
 
@@ -130,8 +131,8 @@ export default function Dashboard() {
   const [quickActionsOpen, setQuickActionsOpen] = useState(false);
   const quickActionsRef = useRef<HTMLDivElement | null>(null);
   const missionsRef = useRef<Mission[]>([]);
-  const latestStepsValueRef = useRef(0);
-  const [stepMissionSnapshot, setStepMissionSnapshot] = useState<StepMissionSnapshot | null>(null);
+  const [persistentStepMissionProgress, setPersistentStepMissionProgress] =
+    useState<PersistentStepMissionProgressState>({});
   const { metrics: consolidatedMetrics, loading: metricsLoading, refreshMetrics } = useDailyMetrics({ syncRemote: true });
 
   const setSectionLoading = useCallback((section: keyof DashboardLoadingState, value: boolean) => {
@@ -269,6 +270,12 @@ export default function Dashboard() {
   }, [missions]);
 
   useEffect(() => {
+    setPersistentStepMissionProgress(
+      readPersistentStepMissionProgressState(user?.id),
+    );
+  }, [user?.id]);
+
+  useEffect(() => {
     // Fecha o menu rapido ao clicar fora da area flutuante.
     if (!quickActionsOpen) return;
 
@@ -316,22 +323,6 @@ export default function Dashboard() {
       refreshMetrics({ forceApi: true, syncRemote: true }),
     ]);
   }, [loadData, refreshMetrics]);
-
-  const refreshMissionProgress = useCallback(async () => {
-    clearJsonCache("/api/missions");
-    setSectionLoading("missions", true);
-    try {
-      const payload = await fetchAndCacheJson<Mission[]>(resolveMissionsApiPath(true, missionsRef.current));
-      const nextMissions = Array.isArray(payload) ? payload : [];
-      missionsRef.current = nextMissions;
-      setMissions(nextMissions);
-      writeCachedJson("/api/missions", nextMissions);
-    } catch {
-      // Silent by design: mission progress retries on the next sync pulse.
-    } finally {
-      setSectionLoading("missions", false);
-    }
-  }, [setSectionLoading]);
 
   useEffect(() => {
     const handleMissionSynced = (event: Event) => {
@@ -418,45 +409,38 @@ export default function Dashboard() {
   const stepsValue = consolidatedMetrics?.steps ?? 0;
   const caloriesValue = consolidatedMetrics?.caloriesBurned ?? 0;
   const stepsProgress = clamp((stepsValue / STEPS_TARGET) * 100, 0, 100);
-  const stepMissionProgressSignature = useMemo(
-    () => buildStepMissionProgressSignature(missions),
-    [missions],
-  );
-
-  useEffect(() => {
-    latestStepsValueRef.current = stepsValue;
-  }, [stepsValue]);
 
   useEffect(() => {
     if (metricsLoading) {
       return;
     }
 
-    setStepMissionSnapshot((current) => {
-      if (current?.signature === stepMissionProgressSignature) {
+    const metricsDate = consolidatedMetrics?.dailyMetrics.date ?? formatDateKey(new Date());
+    setPersistentStepMissionProgress((current) => {
+      const nextState = reconcilePersistentStepMissionProgress({
+        missions,
+        metricsDate,
+        stepsValue,
+        state: current,
+      });
+
+      if (arePersistentStepMissionProgressStatesEqual(current, nextState)) {
         return current;
       }
 
-      return createStepMissionSnapshot(
-        missions,
-        latestStepsValueRef.current,
-        stepMissionProgressSignature,
-      );
+      writePersistentStepMissionProgressState(user?.id, nextState);
+      return nextState;
     });
-  }, [metricsLoading, missions, stepMissionProgressSignature]);
+  }, [consolidatedMetrics?.dailyMetrics.date, metricsLoading, missions, stepsValue, user?.id]);
 
   const missionsWithLiveStepProgress = useMemo(() => {
-    if (!stepMissionSnapshot) {
-      return missions;
-    }
-
-    const stepDelta = Math.max(0, stepsValue - stepMissionSnapshot.stepsAtSnapshot);
-    if (stepDelta <= 0) {
-      return missions;
-    }
-
     return missions.map((mission) => {
       if (!isStepProgressMission(mission) || mission.is_completed === 1) {
+        return mission;
+      }
+
+      const liveProgressEntry = persistentStepMissionProgress[Number(mission.id)];
+      if (!liveProgressEntry) {
         return mission;
       }
 
@@ -469,16 +453,19 @@ export default function Dashboard() {
           ?? 1,
         ),
       );
-      const baseProgress =
-        stepMissionSnapshot.progressByMissionId[Number(mission.id)]
-        ?? Math.max(0, Number(mission.progress_value ?? 0));
 
       return {
         ...mission,
-        progress_value: Math.min(missionTarget, baseProgress + stepDelta),
+        progress_value: Math.min(
+          missionTarget,
+          Math.max(
+            Math.max(0, Number(mission.progress_value ?? 0)),
+            liveProgressEntry.progressValue,
+          ),
+        ),
       };
     });
-  }, [missions, stepMissionSnapshot, stepsValue]);
+  }, [missions, persistentStepMissionProgress]);
 
   const allDailyMissions = useMemo(
     () => sortMissions(
@@ -512,34 +499,6 @@ export default function Dashboard() {
     () => sortMissions(missionsWithLiveStepProgress.filter((mission) => mission.type === "monthly" && mission.is_completed !== 1 && !isExpiredMission(mission) && !isAiSpecialMission(mission))),
     [isAiSpecialMission, isExpiredMission, missionsWithLiveStepProgress],
   );
-  const hasPeriodicStepMissions = useMemo(
-    () =>
-      [...weeklyMissions, ...monthlyMissions].some((mission) => isStepProgressMission(mission)),
-    [monthlyMissions, weeklyMissions],
-  );
-  useEffect(() => {
-    if (!hasPeriodicStepMissions) {
-      return;
-    }
-
-    let timeoutId: number | null = null;
-    const handleOfflineSyncFlushed = () => {
-      if (timeoutId !== null) {
-        window.clearTimeout(timeoutId);
-      }
-      timeoutId = window.setTimeout(() => {
-        void refreshMissionProgress();
-      }, 400);
-    };
-
-    window.addEventListener(OFFLINE_SYNC_FLUSH_EVENT, handleOfflineSyncFlushed as EventListener);
-    return () => {
-      if (timeoutId !== null) {
-        window.clearTimeout(timeoutId);
-      }
-      window.removeEventListener(OFFLINE_SYNC_FLUSH_EVENT, handleOfflineSyncFlushed as EventListener);
-    };
-  }, [hasPeriodicStepMissions, refreshMissionProgress]);
   const expiredMissions = useMemo(
     () => sortMissions(missionsWithLiveStepProgress.filter((mission) => isExpiredMission(mission) && mission.is_completed !== 1 && !isAiSpecialMission(mission))),
     [isAiSpecialMission, isExpiredMission, missionsWithLiveStepProgress],
