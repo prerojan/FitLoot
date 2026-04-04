@@ -36,6 +36,18 @@ function createProfileDeps(overrides: Record<string, unknown> = {}) {
     normalizeTrainingFrequencyInput: vi.fn(() => 3),
     onGoalChanged: vi.fn(async () => undefined),
     onProfileCustomization: vi.fn(async () => undefined),
+    repairActivatedProfileState: vi.fn(async () => ({
+      user_id: TEST_USER.id,
+      username: "teste",
+      full_name: TEST_USER.name,
+      initial_conditioning: "iniciante",
+      injuries: "",
+      equipment: "",
+      main_goal: "saude_geral",
+      age: null,
+      gender: null,
+      goals_json: "[\"saude_geral\"]",
+    })),
     unlockAchievementIfNeeded: vi.fn(async () => undefined),
     upsertTrainingPlan: vi.fn(async () => undefined),
     ...overrides,
@@ -48,53 +60,6 @@ describe("profile routes", () => {
       {
         match: "FROM user_profiles up",
         first: null,
-      },
-      {
-        match: "SELECT * FROM user_profiles WHERE user_id = ?",
-        first: {
-          user_id: TEST_USER.id,
-          username: "teste",
-          full_name: TEST_USER.name,
-          initial_conditioning: "iniciante",
-          injuries: "",
-          equipment: "",
-          main_goal: "saude_geral",
-          age: null,
-          gender: null,
-          goals_json: "[\"saude_geral\"]",
-        },
-      },
-      {
-        match: "SELECT user_id FROM user_attributes WHERE user_id = ?",
-        first: null,
-      },
-      {
-        match: "SELECT user_id FROM user_progression WHERE user_id = ?",
-        first: null,
-      },
-      {
-        match: "SELECT user_id FROM user_training_plans WHERE user_id = ?",
-        first: null,
-      },
-      {
-        match: "SELECT main_goal, conditioning, training_frequency, equipment, injuries",
-        first: null,
-      },
-      {
-        match: "SELECT user_id FROM user_profiles WHERE username = ? LIMIT 1",
-        first: null,
-      },
-      {
-        match: "INSERT OR IGNORE INTO user_profiles",
-        run: { success: true, meta: {} },
-      },
-      {
-        match: "INSERT INTO user_attributes",
-        run: { success: true, meta: {} },
-      },
-      {
-        match: "INSERT INTO user_progression",
-        run: { success: true, meta: {} },
       },
     ]);
 
@@ -118,8 +83,10 @@ describe("profile routes", () => {
       full_name: TEST_USER.name,
       main_goal: "saude_geral",
     });
-    expect(deps.buildInitialTrainingPlan).toHaveBeenCalled();
-    expect(deps.upsertTrainingPlan).toHaveBeenCalled();
-    expect(deps.ensureGoalStatsRow).toHaveBeenCalledWith(db, TEST_USER.id, "saude_geral");
+    expect(deps.repairActivatedProfileState).toHaveBeenCalledWith({
+      db,
+      env,
+      user: expect.objectContaining({ id: TEST_USER.id }),
+    });
   });
 });

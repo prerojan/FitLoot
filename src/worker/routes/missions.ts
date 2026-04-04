@@ -19,7 +19,7 @@ import {
   isMissingSchemaError,
   schemaMismatchResponse,
 } from "../core/errors";
-import type { AppContext } from "../core/types";
+import type { AppContext, AuthUser } from "../core/types";
 import type { WithTransaction } from "./contracts";
 import { ensurePortugueseExerciseLabel } from "../services/instructionLocalization";
 import {
@@ -131,6 +131,11 @@ type MissionRouteDeps = {
       monthlyTarget: number;
     },
   ) => Promise<StructuredMissionPlanResult>;
+  repairActivatedProfileState: (params: {
+    db: D1Database;
+    env: AppContext["Bindings"];
+    user: AuthUser;
+  }) => Promise<Record<string, unknown> | null>;
   getMonthlyCounters: (
     db: D1Database,
     userId: string,
@@ -514,6 +519,47 @@ export function registerMissionRoutes(
         message: getErrorMessage(error),
       });
       return false;
+    }
+  };
+
+  const generateMissionPlanWithRecovery = async (
+    env: AppContext["Bindings"],
+    db: D1Database,
+    user: AuthUser,
+    options: {
+      isAiSpecial: boolean;
+      dailyTarget: number;
+      weeklyTarget: number;
+      monthlyTarget: number;
+    },
+  ): Promise<StructuredMissionPlanResult> => {
+    try {
+      return await generateStructuredMissionPlanForUser(
+        env,
+        db,
+        user.id,
+        options,
+      );
+    } catch (error) {
+      if (getErrorMessage(error) !== "MISSION_GENERATION_PROFILE_INCOMPLETE") {
+        throw error;
+      }
+
+      const recoveredProfile = await deps.repairActivatedProfileState({
+        db,
+        env,
+        user,
+      });
+      if (!recoveredProfile) {
+        throw error;
+      }
+
+      return generateStructuredMissionPlanForUser(
+        env,
+        db,
+        user.id,
+        options,
+      );
     }
   };
 
@@ -919,10 +965,10 @@ export function registerMissionRoutes(
     if (!user) return c.json({ error: "Unauthorized" }, 401);
 
     try {
-      const result = await generateStructuredMissionPlanForUser(
+      const result = await generateMissionPlanWithRecovery(
         c.env,
         c.env.fitloot_db,
-        user.id,
+        user,
         {
           isAiSpecial: false,
           dailyTarget: MISSION_LIMITS.daily,
@@ -943,6 +989,15 @@ export function registerMissionRoutes(
         missions: result.missions,
       });
     } catch (error) {
+      if (getErrorMessage(error) === "MISSION_GENERATION_PROFILE_INCOMPLETE") {
+        return c.json(
+          {
+            error: "Perfil incompleto para gerar missões.",
+            code: "MISSION_GENERATION_PROFILE_INCOMPLETE",
+          },
+          409,
+        );
+      }
       console.error("[/api/missions/generate]", {
         message: getErrorMessage(error),
         userId: user.id,
@@ -957,10 +1012,10 @@ export function registerMissionRoutes(
     if (!user) return c.json({ error: "Unauthorized" }, 401);
 
     try {
-      const result = await generateStructuredMissionPlanForUser(
+      const result = await generateMissionPlanWithRecovery(
         c.env,
         c.env.fitloot_db,
-        user.id,
+        user,
         {
           isAiSpecial: true,
           dailyTarget: 1,
@@ -981,6 +1036,15 @@ export function registerMissionRoutes(
         missions: result.missions,
       });
     } catch (error) {
+      if (getErrorMessage(error) === "MISSION_GENERATION_PROFILE_INCOMPLETE") {
+        return c.json(
+          {
+            error: "Perfil incompleto para gerar missões.",
+            code: "MISSION_GENERATION_PROFILE_INCOMPLETE",
+          },
+          409,
+        );
+      }
       console.error("[/api/missions/generate/ai-special]", {
         message: getErrorMessage(error),
         userId: user.id,

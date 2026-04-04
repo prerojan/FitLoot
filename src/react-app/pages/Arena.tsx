@@ -4,49 +4,11 @@ import AppPageShell from "@/react-app/components/AppPageShell";
 export default function Arena() {
   return (
     <AppPageShell bottomNavActive="arena">
-      <main className="mx-auto max-w-[48rem] px-4 pb-[98px] pt-4 sm:px-5 md:px-8 md:pt-8 min-w-0">
-        {/* Hero simples da arena enquanto a experiencia competitiva continua em construcao. */}
-        <section className="fl-app-container py-2 sm:py-4 md:py-6 min-w-0">
+      <main className="mx-auto flex w-full max-w-[48rem] flex-1 items-center justify-center px-4 pb-[98px] pt-4 sm:px-5 md:px-8 md:py-8 min-w-0">
+        {/* Placeholder centralizado enquanto a experiencia competitiva continua em construcao. */}
+        <section className="w-full py-2 sm:py-4 md:py-6 min-w-0">
           <div
-            className="relative overflow-hidden rounded-[1.5rem] sm:rounded-[2rem] px-4 py-5 shadow-xl sm:px-6 sm:py-6 min-w-0"
-            style={{
-              background:
-                "linear-gradient(135deg, color-mix(in srgb, var(--app-primary-color) 90%, #042f2e) 0%, color-mix(in srgb, var(--app-primary-color) 58%, var(--fl-surface-strong)) 100%)",
-              color: "var(--fl-nav-item-active-text)",
-              boxShadow: "0 24px 56px color-mix(in srgb, var(--app-primary-color) 20%, transparent)",
-            }}
-          >
-            <div
-              className="pointer-events-none absolute -right-10 -top-14 h-36 w-36 rounded-full"
-              style={{
-                background: "radial-gradient(circle, color-mix(in srgb, white 18%, transparent) 0%, transparent 72%)",
-              }}
-            />
-            <div
-              className="pointer-events-none absolute -bottom-16 left-8 h-32 w-32 rounded-full"
-              style={{
-                background: "radial-gradient(circle, color-mix(in srgb, var(--app-primary-color) 24%, transparent) 0%, transparent 76%)",
-              }}
-            />
-            <div className="flex items-center gap-3 min-w-0">
-              <Swords className="h-6 w-6 sm:h-8 sm:w-8 shrink-0" />
-              <div className="min-w-0">
-                <h1 className="text-xl sm:text-2xl md:text-3xl font-bold truncate">Arena</h1>
-                <p
-                  className="text-xs sm:text-base truncate"
-                  style={{ color: "color-mix(in srgb, var(--fl-nav-item-active-text) 72%, transparent)" }}
-                >
-                  Desafie seus limites
-                </p>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {/* Placeholder funcional com os modulos competitivos que serao liberados depois. */}
-        <section className="py-2 sm:py-4 md:py-6 min-w-0">
-          <div
-            className="space-y-4 sm:space-y-6 rounded-[1.5rem] border p-4 sm:p-8 text-center min-w-0"
+            className="mx-auto max-w-[36rem] space-y-4 sm:space-y-6 rounded-[1.5rem] border p-4 sm:p-8 text-center min-w-0"
             style={{
               background:
                 "linear-gradient(180deg, color-mix(in srgb, var(--fl-surface-strong) 96%, transparent), color-mix(in srgb, var(--fl-surface-muted) 72%, transparent))",

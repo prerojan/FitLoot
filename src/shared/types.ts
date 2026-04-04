@@ -298,11 +298,14 @@ export type TitleWithUnlock = Title & {
 };
 
 export type RankingPlayer = {
+  user_id?: string;
   username: string;
   full_name: string;
   level: number;
   xp: number;
   current_streak: number;
+  training_rank?: TrainingRank;
+  training_rank_score?: number;
 };
 
 export const RewardNotificationTypeSchema = z.enum([

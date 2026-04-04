@@ -50,6 +50,7 @@ function createMissionDeps(overrides: Partial<Parameters<typeof registerMissionR
     onGoalProgress: vi.fn(async () => undefined),
     onMissionComplete: vi.fn(async () => undefined),
     onStreakContinued: vi.fn(async () => undefined),
+    repairActivatedProfileState: vi.fn(async () => ({ user_id: TEST_USER.id })),
     readMissionDetailCache: vi.fn(() => null),
     readMissionListCache: vi.fn(() => null),
     runMissionLifecycleHookSafely: vi.fn(async (_userId: string, _label: string, action: () => Promise<void>) => {
@@ -658,5 +659,46 @@ describe("mission routes", () => {
     await flush();
     expect(deps.translateExerciseInstructionsToPt).toHaveBeenCalledTimes(1);
     expect(deps.clearMissionDetailCache).toHaveBeenCalledWith(TEST_USER.id, 21);
+  });
+
+  it("recovers the activated profile state and retries mission generation when the mission snapshot is incomplete", async () => {
+    const { db } = createMockD1Database([]);
+    const env = createTestEnv(db);
+    const deps = createMissionDeps({
+      generateStructuredMissionPlanForUser: vi
+        .fn()
+        .mockRejectedValueOnce(new Error("MISSION_GENERATION_PROFILE_INCOMPLETE"))
+        .mockResolvedValueOnce({
+          already_active: false,
+          used_ai: false,
+          invalid_ratio: 0,
+          missions: [{ id: 91, title: "Missao Diaria: Burpee", type: "daily" }],
+        }),
+    });
+    const app = new Hono<AppContext>();
+    registerMissionRoutes(app, deps, createAuthMiddleware());
+    const { executionCtx } = createExecutionContext();
+
+    const response = await app.fetch(
+      new Request("http://localhost/api/missions/generate", {
+        method: "POST",
+      }),
+      env,
+      executionCtx,
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload).toMatchObject({
+      success: true,
+      generated: true,
+      missions: [{ id: 91, title: "Missao Diaria: Burpee", type: "daily" }],
+    });
+    expect(deps.repairActivatedProfileState).toHaveBeenCalledWith({
+      db,
+      env,
+      user: expect.objectContaining({ id: TEST_USER.id }),
+    });
+    expect(deps.generateStructuredMissionPlanForUser).toHaveBeenCalledTimes(2);
   });
 });

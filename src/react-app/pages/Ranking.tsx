@@ -6,18 +6,9 @@ import LoadingBall from "@/react-app/components/LoadingBall";
 import { Avatar } from "@/react-app/components/ui/avatar";
 import { useAuth } from "@/react-app/auth/context";
 import { ApiRequestError, fetchAndCacheJson, readCachedJson } from "@/react-app/utils/api";
-import type { RankingPlayer, UserProfile, UserProgression } from "@/shared/types";
+import type { RankingPlayer, TrainingRank, UserProfile } from "@/shared/types";
 
 type RankingMode = "global" | "friends";
-
-type FriendRankingRow = {
-  friend_user_id: string;
-  friend_username: string;
-  friend_full_name: string;
-  friend_level: number;
-  friend_xp: number;
-  friend_streak: number;
-};
 
 type RankingEntry = {
   userId?: string | undefined;
@@ -26,32 +17,28 @@ type RankingEntry = {
   level: number;
   xp: number;
   current_streak: number;
+  training_rank: TrainingRank;
+  training_rank_score: number;
 };
 
-function normalizeRankingEntry(player: RankingPlayer | FriendRankingRow): RankingEntry {
-  // Unifica o formato do ranking global e do ranking entre amigos.
-  if ("friend_username" in player) {
-    return {
-      userId: player.friend_user_id,
-      username: player.friend_username,
-      full_name: player.friend_full_name,
-      level: player.friend_level,
-      xp: player.friend_xp,
-      current_streak: player.friend_streak,
-    };
-  }
-
+function normalizeRankingEntry(player: RankingPlayer): RankingEntry {
   return {
+    userId: player.user_id,
     username: player.username,
     full_name: player.full_name,
     level: player.level,
     xp: player.xp,
     current_streak: player.current_streak,
+    training_rank: player.training_rank ?? "iniciante",
+    training_rank_score: Number(player.training_rank_score ?? 0),
   };
 }
 
 function sortRankingEntries(entries: RankingEntry[]): RankingEntry[] {
   return [...entries].sort((left, right) => {
+    if (right.training_rank_score !== left.training_rank_score) {
+      return right.training_rank_score - left.training_rank_score;
+    }
     if (right.level !== left.level) {
       return right.level - left.level;
     }
@@ -64,34 +51,15 @@ function sortRankingEntries(entries: RankingEntry[]): RankingEntry[] {
   });
 }
 
-function mergeCurrentUserIntoFriendsRanking(
-  rankingEntries: RankingEntry[],
-  profile: UserProfile | null,
-  progression: UserProgression | null,
-  currentUserId: string | null,
-): RankingEntry[] {
-  if (!profile || !progression) {
-    return rankingEntries;
+function formatTrainingRankLabel(rank: TrainingRank): string {
+  switch (rank) {
+    case "avancado":
+      return "Avancado";
+    case "intermediario":
+      return "Intermediario";
+    default:
+      return "Iniciante";
   }
-
-  const selfEntry: RankingEntry = {
-    userId: currentUserId ?? profile.user_id,
-    username: profile.username,
-    full_name: profile.full_name,
-    level: progression.level,
-    xp: progression.xp,
-    current_streak: progression.current_streak,
-  };
-
-  const merged = rankingEntries.filter((entry) => {
-    if (selfEntry.userId && entry.userId) {
-      return entry.userId !== selfEntry.userId;
-    }
-    return entry.username !== selfEntry.username;
-  });
-
-  merged.push(selfEntry);
-  return sortRankingEntries(merged);
 }
 
 export default function Ranking() {
@@ -99,7 +67,6 @@ export default function Ranking() {
   const navigate = useNavigate();
   const [ranking, setRanking] = useState<RankingEntry[]>([]);
   const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [progression, setProgression] = useState<UserProgression | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<RankingMode>("global");
@@ -108,56 +75,33 @@ export default function Ranking() {
   const loadRanking = useCallback(async (currentMode: RankingMode) => {
     setError(null);
 
-    const rankingPath = currentMode === "global" ? "/api/ranking/global" : "/api/friends";
-    const cachedRanking = readCachedJson<Array<RankingPlayer | FriendRankingRow>>(rankingPath);
+    const rankingPath = currentMode === "global" ? "/api/ranking/global" : "/api/ranking/friends";
+    const cachedRanking = readCachedJson<RankingPlayer[]>(rankingPath);
     const cachedProfile = readCachedJson<UserProfile>("/api/profile");
-    const cachedProgression = readCachedJson<UserProgression>("/api/progression");
 
     if (cachedRanking) {
       const normalizedCachedList = Array.isArray(cachedRanking.data)
-        ? cachedRanking.data.map(normalizeRankingEntry)
+        ? sortRankingEntries(cachedRanking.data.map(normalizeRankingEntry))
         : [];
-      const cachedList = currentMode === "friends"
-        ? mergeCurrentUserIntoFriendsRanking(
-          normalizedCachedList,
-          cachedProfile?.data ?? null,
-          cachedProgression?.data ?? null,
-          user?.id ?? null,
-        )
-        : normalizedCachedList;
-      setRanking(cachedList);
+      setRanking(normalizedCachedList);
       setLoading(false);
     }
 
     if (cachedProfile) {
       setProfile(cachedProfile.data);
     }
-    if (cachedProgression) {
-      setProgression(cachedProgression.data);
-    }
 
     try {
-      const [nextRanking, nextProfile, nextProgression] = await Promise.all([
-        fetchAndCacheJson<Array<RankingPlayer | FriendRankingRow>>(rankingPath),
+      const [nextRanking, nextProfile] = await Promise.all([
+        fetchAndCacheJson<RankingPlayer[]>(rankingPath),
         fetchAndCacheJson<UserProfile>("/api/profile"),
-        fetchAndCacheJson<UserProgression>("/api/progression"),
       ]);
 
       const normalizedRanking = Array.isArray(nextRanking)
-        ? nextRanking.map(normalizeRankingEntry)
+        ? sortRankingEntries(nextRanking.map(normalizeRankingEntry))
         : [];
-      setRanking(
-        currentMode === "friends"
-          ? mergeCurrentUserIntoFriendsRanking(
-            normalizedRanking,
-            nextProfile,
-            nextProgression,
-            user?.id ?? null,
-          )
-          : normalizedRanking,
-      );
+      setRanking(normalizedRanking);
       setProfile(nextProfile);
-      setProgression(nextProgression);
     } catch (loadError) {
       if (loadError instanceof ApiRequestError && (loadError.status === 401 || loadError.status === 403)) {
         navigate("/app");
@@ -166,13 +110,13 @@ export default function Ranking() {
 
       console.error("Error loading ranking:", loadError);
       if (!cachedRanking) {
-        setError("Não foi possível carregar o ranking agora.");
+        setError("Nao foi possivel carregar o ranking agora.");
         setRanking([]);
       }
     } finally {
       setLoading(false);
     }
-  }, [navigate, user?.id]);
+  }, [navigate]);
 
   // Recarrega o ranking sempre que o modo ou a sessao mudam.
   useEffect(() => {
@@ -210,15 +154,15 @@ export default function Ranking() {
 
   return (
     <AppPageShell bottomNavActive="ranking" className="fl-theme-page">
-      <div className="flex flex-1 flex-col overflow-y-auto p-4 pb-[98px] sm:p-6 lg:p-8 min-w-0">
+      <div className="flex flex-1 min-w-0 flex-col overflow-y-auto p-4 pb-[98px] sm:p-6 lg:p-8">
         {/* Cabecalho contextual do ranking atual. */}
-        <header className="mb-4 sm:mb-8 flex flex-wrap items-center justify-between gap-3 min-w-0">
+        <header className="mb-4 flex min-w-0 flex-wrap items-center justify-between gap-3 sm:mb-8">
           <div className="min-w-0">
-            <h1 className="mb-1 text-xl sm:text-2xl font-bold uppercase tracking-[0.15em] sm:tracking-[0.2em] truncate">
+            <h1 className="mb-1 truncate text-xl font-bold uppercase tracking-[0.15em] sm:text-2xl sm:tracking-[0.2em]">
               {mode === "global" ? "Ranking Global" : "Ranking de Amigos"}
             </h1>
-            <p className="fl-theme-text-muted text-[9px] sm:text-[10px] font-bold uppercase tracking-widest truncate">
-              Os guerreiros mais consistentes do FitLoot.
+            <p className="fl-theme-text-muted truncate text-[9px] font-bold uppercase tracking-widest sm:text-[10px]">
+              Posicoes definidas pelo rank de treinamento.
             </p>
           </div>
         </header>
@@ -238,12 +182,15 @@ export default function Ranking() {
 
         {/* Alterna entre o ranking global e a visao apenas de amigos. */}
         <div className="mb-6 sm:mb-10">
-          <div className="fl-theme-surface-soft mx-auto flex max-w-[320px] rounded-2xl p-1.5 min-w-0">
+          <div className="fl-theme-surface-soft mx-auto flex min-w-0 max-w-[320px] rounded-2xl p-1.5">
             <button
               type="button"
               onClick={() => setMode("global")}
               className="flex-1 rounded-xl py-3 text-[10px] font-bold uppercase tracking-widest transition-all"
-              style={{ backgroundColor: mode === "global" ? "var(--app-primary-color)" : undefined, color: mode === "global" ? "var(--fl-nav-item-active-text)" : "var(--fl-color-text-muted)" }}
+              style={{
+                backgroundColor: mode === "global" ? "var(--app-primary-color)" : undefined,
+                color: mode === "global" ? "var(--fl-nav-item-active-text)" : "var(--fl-color-text-muted)",
+              }}
             >
               Global
             </button>
@@ -251,7 +198,10 @@ export default function Ranking() {
               type="button"
               onClick={() => setMode("friends")}
               className="flex-1 rounded-xl py-3 text-[10px] font-bold uppercase tracking-widest transition-all"
-              style={{ backgroundColor: mode === "friends" ? "var(--app-primary-color)" : undefined, color: mode === "friends" ? "var(--fl-nav-item-active-text)" : "var(--fl-color-text-muted)" }}
+              style={{
+                backgroundColor: mode === "friends" ? "var(--app-primary-color)" : undefined,
+                color: mode === "friends" ? "var(--fl-nav-item-active-text)" : "var(--fl-color-text-muted)",
+              }}
             >
               Amigos
             </button>
@@ -260,10 +210,12 @@ export default function Ranking() {
 
         {/* Resume a posicao atual do usuario para orientar a leitura da tabela. */}
         {currentUserEntry ? (
-          <section className="fl-theme-surface mb-6 sm:mb-10 rounded-[1.5rem] sm:rounded-[2rem] p-4 sm:p-6 min-w-0">
-            <div className="mb-4 sm:mb-5 flex items-center gap-3">
-              <Trophy className="h-4 w-4 sm:h-5 sm:w-5 shrink-0" style={{ color: "var(--app-primary-color)" }} />
-              <h2 className="text-[9px] sm:text-[10px] font-bold uppercase tracking-[0.2em] sm:tracking-[0.3em] truncate">Sua posição atual</h2>
+          <section className="fl-theme-surface mb-6 min-w-0 rounded-[1.5rem] p-4 sm:mb-10 sm:rounded-[2rem] sm:p-6">
+            <div className="mb-4 flex items-center gap-3 sm:mb-5">
+              <Trophy className="h-4 w-4 shrink-0 sm:h-5 sm:w-5" style={{ color: "var(--app-primary-color)" }} />
+              <h2 className="truncate text-[9px] font-bold uppercase tracking-[0.2em] sm:text-[10px] sm:tracking-[0.3em]">
+                Sua posicao atual
+              </h2>
             </div>
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div className="flex min-w-0 items-center gap-4">
@@ -275,7 +227,7 @@ export default function Ranking() {
                 </div>
                 <div className="min-w-0">
                   <p className="truncate text-lg font-bold tracking-tight">
-                    Você ({currentUserEntry.username})
+                    Voce ({currentUserEntry.username})
                   </p>
                   <p className="fl-theme-text-muted text-[10px] font-bold uppercase tracking-[0.2em]">
                     {currentUserEntry.current_streak} dias de streak
@@ -287,7 +239,7 @@ export default function Ranking() {
                   #{currentUserPosition}
                 </p>
                 <p className="fl-theme-text-muted text-[10px] font-bold uppercase tracking-[0.2em]">
-                  {`LVL ${currentUserEntry.level} • ${(currentUserEntry.xp / 1000).toFixed(1)}K XP`}
+                  {`${formatTrainingRankLabel(currentUserEntry.training_rank)} - Score ${currentUserEntry.training_rank_score}`}
                 </p>
               </div>
             </div>
@@ -295,7 +247,7 @@ export default function Ranking() {
         ) : null}
 
         {/* Destaque do podium com os tres melhores colocados. */}
-        <div className="mx-auto mb-16 sm:mb-24 flex w-full max-w-[720px] items-end justify-center gap-1.5 sm:gap-6 px-1 sm:px-4 pt-10 sm:pt-14 min-w-0">
+        <div className="mx-auto mb-16 flex w-full max-w-[720px] min-w-0 items-end justify-center gap-1.5 px-1 pt-10 sm:mb-24 sm:gap-6 sm:px-4 sm:pt-14">
           <PodiumCard entry={top3[1]} position={2} highlightColor="#64748b" />
           <PodiumCard entry={top3[0]} position={1} highlightColor="var(--app-primary-color)" featured />
           <PodiumCard entry={top3[2]} position={3} highlightColor="#92400e" />
@@ -303,10 +255,10 @@ export default function Ranking() {
 
         {/* Lista completa dos demais competidores e fallback vazio. */}
         <div className="mx-auto mb-8 flex w-full max-w-[800px] flex-col gap-4">
-          <div className="flex items-center px-4 py-2 text-[10px] font-bold uppercase tracking-[0.3em] fl-theme-text-muted sm:px-6">
+          <div className="fl-theme-text-muted flex items-center px-4 py-2 text-[10px] font-bold uppercase tracking-[0.3em] sm:px-6">
             <span className="w-8 sm:w-10">POS</span>
-            <span className="flex-1 px-4">USUÁRIO</span>
-            <span className="text-right">EXPERIÊNCIA</span>
+            <span className="flex-1 px-4">USUARIO</span>
+            <span className="text-right">RANK</span>
           </div>
 
           {others.map((player, index) => {
@@ -316,7 +268,7 @@ export default function Ranking() {
             return (
               <div
                 key={`${player.username}-${position}`}
-                className={`relative flex items-center rounded-2xl border p-3 sm:p-4 transition-all duration-300 min-w-0 ${isCurrentUser ? "overflow-hidden" : ""}`}
+                className={`relative flex min-w-0 items-center rounded-2xl border p-3 transition-all duration-300 sm:p-4 ${isCurrentUser ? "overflow-hidden" : ""}`}
                 style={{
                   borderColor: isCurrentUser
                     ? "color-mix(in srgb, var(--app-primary-color) 30%, transparent)"
@@ -330,29 +282,34 @@ export default function Ranking() {
                   <div className="absolute inset-y-0 left-0 w-1.5" style={{ backgroundColor: "var(--app-primary-color)" }} />
                 ) : null}
                 <span
-                  className="w-6 sm:w-10 text-[10px] sm:text-sm font-bold shrink-0"
+                  className="w-6 shrink-0 text-[10px] font-bold sm:w-10 sm:text-sm"
                   style={{ color: isCurrentUser ? "var(--app-primary-color)" : "var(--fl-color-text-muted)" }}
                 >
                   {position}
                 </span>
                 <div
-                  className="mx-2 sm:mx-4 size-10 sm:size-12 shrink-0 overflow-hidden rounded-full border"
+                  className="mx-2 size-10 shrink-0 overflow-hidden rounded-full border sm:mx-4 sm:size-12"
                   style={{ borderColor: isCurrentUser ? "var(--app-primary-color)" : "var(--fl-border-soft)" }}
                 >
                   <Avatar name={player.username} className="h-full w-full" />
                 </div>
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-base font-bold tracking-tight">
-                    {isCurrentUser ? `Você (${player.username})` : player.username}
+                    {isCurrentUser ? `Voce (${player.username})` : player.username}
                   </p>
                   <p className="fl-theme-text-muted mt-0.5 text-[10px] font-bold uppercase tracking-[0.15em]">
                     {player.current_streak} dias de streak
                   </p>
                 </div>
-                <div className="shrink-0 text-right min-w-0">
-                  <p className="text-xs sm:text-base font-bold truncate">LVL {player.level}</p>
-                  <p className="text-[8px] sm:text-[10px] font-bold uppercase tracking-[0.1em] sm:tracking-[0.15em] truncate" style={{ color: "var(--app-primary-color)" }}>
-                    {(player.xp / 1000).toFixed(1)}K XP
+                <div className="min-w-0 shrink-0 text-right">
+                  <p className="truncate text-xs font-bold sm:text-base">
+                    {formatTrainingRankLabel(player.training_rank).toUpperCase()}
+                  </p>
+                  <p
+                    className="truncate text-[8px] font-bold uppercase tracking-[0.1em] sm:text-[10px] sm:tracking-[0.15em]"
+                    style={{ color: "var(--app-primary-color)" }}
+                  >
+                    {`Score ${player.training_rank_score} - LVL ${player.level}`}
                   </p>
                 </div>
               </div>
@@ -361,7 +318,7 @@ export default function Ranking() {
 
           {ranking.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-24 text-center">
-              <Trophy className="mb-6 h-16 w-16 fl-theme-text-soft" />
+              <Trophy className="fl-theme-text-soft mb-6 h-16 w-16" />
               <p className="fl-theme-text-muted text-[11px] font-bold uppercase tracking-[0.2em]">
                 Nenhum competidor encontrado.
               </p>
@@ -388,7 +345,7 @@ function PodiumCard({
   if (!entry) return <div className="flex-1" />;
 
   return (
-    <div className={`flex flex-1 flex-col items-center ${featured ? "-mt-10 sm:-mt-12 max-w-[140px] sm:max-w-[180px]" : "max-w-[100px] sm:max-w-[140px]"}`}>
+    <div className={`flex flex-1 flex-col items-center ${featured ? "-mt-10 max-w-[140px] sm:-mt-12 sm:max-w-[180px]" : "max-w-[100px] sm:max-w-[140px]"}`}>
       <div className="relative mb-5">
         {featured ? (
           <Crown className="absolute -top-10 left-1/2 h-12 w-12 -translate-x-1/2" style={{ color: highlightColor }} />
@@ -397,14 +354,14 @@ function PodiumCard({
           <Avatar name={entry.username} className="h-full w-full" />
         </div>
         <div
-          className="absolute -bottom-2 left-1/2 -translate-x-1/2 rounded-full px-2 py-0.5 sm:px-4 sm:py-1 text-[8px] sm:text-[9px] font-bold uppercase tracking-[0.1em] sm:tracking-[0.2em] truncate"
+          className="absolute -bottom-2 left-1/2 -translate-x-1/2 truncate rounded-full px-2 py-0.5 text-[8px] font-bold uppercase tracking-[0.1em] sm:px-4 sm:py-1 sm:text-[9px] sm:tracking-[0.2em]"
           style={{ backgroundColor: highlightColor, color: "var(--fl-nav-item-active-text)" }}
         >
-          {position === 1 ? "Campeão" : `${position}º`}
+          {position === 1 ? "Campeao" : `${position}o`}
         </div>
       </div>
       <div
-        className={`w-full rounded-t-[1.5rem] sm:rounded-t-[2rem] border-x border-t p-2 sm:p-4 text-center ${featured ? "h-20 sm:h-36" : "h-14 sm:h-24"}`}
+        className={`w-full rounded-t-[1.5rem] border-x border-t p-2 text-center sm:rounded-t-[2rem] sm:p-4 ${featured ? "h-20 sm:h-36" : "h-14 sm:h-24"}`}
         style={{
           borderColor: "var(--fl-border-soft)",
           backgroundColor: featured
@@ -414,7 +371,7 @@ function PodiumCard({
       >
         <p className="truncate text-sm font-bold sm:text-base">{entry.username}</p>
         <p className="mt-1 text-[10px] font-bold uppercase tracking-widest" style={{ color: "var(--app-primary-color)" }}>
-          LVL {entry.level}
+          {formatTrainingRankLabel(entry.training_rank)}
         </p>
       </div>
     </div>

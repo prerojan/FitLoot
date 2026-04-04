@@ -18,6 +18,14 @@ import {
   localizeMissionTextArray,
 } from "../shared/missionLocalization";
 import {
+  calculateRankBenchmarkScore,
+  calculateRankConsistencyScore,
+  calculateSkillMasteryScore,
+  calculateVolumeScore,
+  clamp as clampTrainingRankScore,
+  scoreToTrainingRank,
+} from "../shared/trainingLevels";
+import {
   classifyMission,
   getMissionMetricType,
   metricUnitByType,
@@ -163,6 +171,7 @@ import {
 import { createMissionPlanPersistenceService } from "./services/missionPlanPersistence";
 import { createMissionPlanValidationService } from "./services/missionPlanValidation";
 import { createLegacyMissionRepairService } from "./services/legacyMissionRepair";
+import { createActivatedProfileRecoveryService } from "./services/activatedProfileRecovery";
 import {
   createMissionRuntimeStateService,
   type MissionRefreshMode,
@@ -886,6 +895,14 @@ const {
   generateStructuredMissionPlanForUser,
   getErrorMessage,
   invalidateMissionListCache,
+});
+
+const activatedProfileRecoveryService = createActivatedProfileRecoveryService({
+  buildInitialTrainingPlan: buildInitialTrainingPlanService,
+  ensureGoalStatsRow: ensureGoalStatsRowService,
+  normalizeConditioning,
+  normalizeTrainingFrequencyInput: normalizeTrainingFrequencyInputService,
+  upsertTrainingPlan: upsertTrainingPlanService,
 });
 
 // Centraliza cache, locks e refresh periódico das missões fora do entrypoint.
@@ -1754,6 +1771,8 @@ registerProfileRoutes(app, {
   normalizeTrainingFrequencyInput: normalizeTrainingFrequencyInputService,
   onGoalChanged: onGoalChangedService,
   onProfileCustomization: onProfileCustomizationService,
+  repairActivatedProfileState: ({ db, env, user }) =>
+    activatedProfileRecoveryService.repairActivatedProfileState({ db, env, user }),
   unlockAchievementIfNeeded: unlockAchievementIfNeededService,
   upsertTrainingPlan: upsertTrainingPlanService,
 });
@@ -2782,6 +2801,8 @@ registerMissionRoutes(
     onGoalProgress,
     onMissionComplete,
     onStreakContinued,
+    repairActivatedProfileState: ({ db, env, user }) =>
+      activatedProfileRecoveryService.repairActivatedProfileState({ db, env, user }),
     readMissionDetailCache,
     readMissionListCache,
     runMissionLifecycleHookSafely,
@@ -2841,6 +2862,22 @@ type RankingRow = {
   xp: number;
   current_streak: number;
   points: number;
+  training_rank: "iniciante" | "intermediario" | "avancado";
+  training_rank_score: number;
+};
+
+type TrainingRankingSourceRow = {
+  user_id: string;
+  username: string;
+  full_name: string;
+  level: number | string | null;
+  xp: number | string | null;
+  current_streak: number | string | null;
+  best_streak: number | string | null;
+  points: number | string | null;
+  unlocked_skills: number | string | null;
+  unlocked_skill_stages: number | string | null;
+  skill_stage_score: number | string | null;
 };
 
 const RANKING_CACHE_TTL_MS = 15_000;
@@ -2867,20 +2904,135 @@ function invalidateRankingCache(): void {
   rankingCacheEntry = null;
 }
 
+function normalizeNonNegativeNumber(value: unknown, fallback = 0): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+  return Math.max(0, parsed);
+}
+
+function estimateTrainingBenchmarks(level: number, skillStageScore: number) {
+  return {
+    pushUpMaxReps: Math.min(Math.max(Math.floor(level * 2.5), 5), 50),
+    squatMaxReps: Math.min(Math.max(Math.floor(level * 4), 8), 80),
+    plankMaxSeconds: Math.min(Math.max(Math.floor(level * 15), 20), 180),
+    sitUpMaxReps: Math.min(Math.max(Math.floor(level * 3), 6), 60),
+    skillStageScore,
+  };
+}
+
+function normalizeTrainingRankingRow(row: TrainingRankingSourceRow): RankingRow {
+  const level = Math.max(1, normalizeNonNegativeNumber(row.level, 1));
+  const xp = normalizeNonNegativeNumber(row.xp);
+  const currentStreak = normalizeNonNegativeNumber(row.current_streak);
+  const bestStreak = Math.max(
+    currentStreak,
+    normalizeNonNegativeNumber(row.best_streak, currentStreak),
+  );
+  const unlockedSkills = normalizeNonNegativeNumber(row.unlocked_skills);
+  const unlockedSkillStages = normalizeNonNegativeNumber(row.unlocked_skill_stages);
+  const skillStageScore = normalizeNonNegativeNumber(row.skill_stage_score);
+  const totalSessions = Math.max(0, Math.floor(xp / 50));
+  const activeWeeks = Math.min(Math.floor(totalSessions / 3), 52);
+
+  const volumeScore = calculateVolumeScore(totalSessions);
+  const consistencyScore = calculateRankConsistencyScore(activeWeeks, bestStreak);
+  const skillMasteryScore = calculateSkillMasteryScore({
+    unlockedSkills,
+    unlockedSkillStages,
+  });
+  const benchmarkScore = calculateRankBenchmarkScore(
+    estimateTrainingBenchmarks(level, skillStageScore),
+  );
+  const trainingRankScore = clampTrainingRankScore(
+    volumeScore + consistencyScore + benchmarkScore + skillMasteryScore,
+    0,
+    100,
+  );
+
+  return {
+    user_id: row.user_id,
+    username: row.username,
+    full_name: row.full_name,
+    level,
+    xp,
+    current_streak: currentStreak,
+    points: normalizeNonNegativeNumber(row.points),
+    training_rank: scoreToTrainingRank(trainingRankScore),
+    training_rank_score: trainingRankScore,
+  };
+}
+
+function sortTrainingRankingRows(rows: RankingRow[]): RankingRow[] {
+  return [...rows].sort((left, right) => {
+    if (right.training_rank_score !== left.training_rank_score) {
+      return right.training_rank_score - left.training_rank_score;
+    }
+    if (right.level !== left.level) {
+      return right.level - left.level;
+    }
+    if (right.xp !== left.xp) {
+      return right.xp - left.xp;
+    }
+    return left.username.localeCompare(right.username, "pt-BR", {
+      sensitivity: "base",
+    });
+  });
+}
+
+async function loadTrainingRankingRows(
+  db: D1Database,
+  whereClause?: string,
+  bindings: unknown[] = [],
+): Promise<RankingRow[]> {
+  const ranking = await db.prepare(
+    `SELECT
+      up.user_id,
+      up.username,
+      up.full_name,
+      pr.level,
+      pr.xp,
+      pr.current_streak,
+      pr.best_streak,
+      pr.points,
+      COALESCE(skill_stats.unlocked_skills, 0) as unlocked_skills,
+      COALESCE(skill_stats.unlocked_skill_stages, 0) as unlocked_skill_stages,
+      COALESCE(skill_stats.skill_stage_score, 0) as skill_stage_score
+    FROM user_profiles up
+    INNER JOIN user_progression pr
+      ON up.user_id = pr.user_id
+    LEFT JOIN (
+      SELECT
+        user_id,
+        COUNT(*) as unlocked_skills,
+        SUM(CASE WHEN total_reps >= 100 THEN 1 ELSE 0 END) as unlocked_skill_stages,
+        SUM(
+          CASE
+            WHEN total_reps >= 100 THEN 2.0
+            WHEN total_reps >= 50 THEN 1.0
+            WHEN total_reps >= 10 THEN 0.5
+            ELSE 0
+          END
+        ) as skill_stage_score
+      FROM user_skills
+      GROUP BY user_id
+    ) skill_stats
+      ON skill_stats.user_id = up.user_id
+    ${whereClause ? `WHERE ${whereClause}` : ""}`,
+  ).bind(...bindings).all<TrainingRankingSourceRow>();
+
+  const sourceRows = Array.isArray(ranking.results) ? ranking.results : [];
+  return sortTrainingRankingRows(sourceRows.map(normalizeTrainingRankingRow));
+}
+
 app.get("/api/ranking/global", authMiddleware, async (c) => {
   const user = c.get("user");
   if (!user) return c.json({ error: "Unauthorized" }, 401);
 
   let rankingRows = readRankingCache();
   if (!rankingRows) {
-    const ranking = await c.env.fitloot_db.prepare(
-      `SELECT up.user_id, up.username, up.full_name, pr.level, pr.xp, pr.current_streak, pr.points
-      FROM user_profiles up
-      INNER JOIN user_progression pr ON up.user_id = pr.user_id
-      ORDER BY pr.level DESC, pr.xp DESC
-      LIMIT 100`
-    ).all<RankingRow>();
-    rankingRows = Array.isArray(ranking.results) ? ranking.results : [];
+    rankingRows = (await loadTrainingRankingRows(c.env.fitloot_db)).slice(0, 100);
     writeRankingCache(rankingRows);
   }
 
@@ -2899,6 +3051,25 @@ app.get("/api/ranking/global", authMiddleware, async (c) => {
     return sanitized;
   });
   return streamJsonArrayResponse(sanitized);
+});
+
+app.get("/api/ranking/friends", authMiddleware, async (c) => {
+  const user = c.get("user");
+  if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+  c.header("Cache-Control", "no-store");
+
+  const rankingRows = await loadTrainingRankingRows(
+    c.env.fitloot_db,
+    `up.user_id = ? OR up.user_id IN (
+      SELECT COALESCE(friend_id, friend_user_id)
+      FROM friendships
+      WHERE user_id = ?
+    )`,
+    [user.id, user.id],
+  );
+
+  return streamJsonArrayResponse(rankingRows);
 });
 
 registerFriendsRoutes(app, {
