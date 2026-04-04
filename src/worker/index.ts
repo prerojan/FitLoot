@@ -1918,6 +1918,62 @@ function monthStartIso(reference = new Date()): string {
   return new Date(Date.UTC(year, month, 1, 0, 0, 0, 0)).toISOString();
 }
 
+function isoDateOnly(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (trimmed.length < 10) return null;
+  return trimmed.slice(0, 10);
+}
+
+function maxIsoDate(values: string[]): string {
+  return values.reduce((currentMax, candidate) => (candidate > currentMax ? candidate : currentMax));
+}
+
+function minIsoDate(values: string[]): string {
+  return values.reduce((currentMin, candidate) => (candidate < currentMin ? candidate : currentMin));
+}
+
+function resolvePeriodicMissionDateWindow(
+  mission: Record<string, unknown>,
+  reference = new Date(),
+): { startDate: string; endDate: string } {
+  const today = reference.toISOString().slice(0, 10);
+  const createdAtDate = isoDateOnly(mission.created_at);
+  const deadlineDate = isoDateOnly(mission.deadline);
+  const missionType = String(mission.type ?? "");
+  const defaultStartDate = missionType === "monthly"
+    ? monthStartIso(reference).slice(0, 10)
+    : createdAtDate ?? today;
+  const startDate = maxIsoDate(
+    [defaultStartDate, createdAtDate].filter((value): value is string => typeof value === "string" && value.length > 0),
+  );
+  const endDate = minIsoDate(
+    [today, deadlineDate].filter((value): value is string => typeof value === "string" && value.length > 0),
+  );
+
+  return {
+    startDate,
+    endDate: endDate < startDate ? startDate : endDate,
+  };
+}
+
+async function readPeriodicMissionStepProgress(
+  db: D1Database,
+  userId: string,
+  mission: Record<string, unknown>,
+): Promise<number> {
+  const { startDate, endDate } = resolvePeriodicMissionDateWindow(mission);
+  const aggregate = await db.prepare(
+    `SELECT COALESCE(SUM(steps), 0) as steps
+       FROM daily_metrics
+      WHERE user_id = ?
+        AND date >= date(?)
+        AND date <= date(?)`,
+  ).bind(userId, startDate, endDate).first<{ steps: number }>();
+
+  return Math.max(0, Number(aggregate?.steps ?? 0));
+}
+
 function monthlyCounterValueByMission(mission: Record<string, unknown>, counters: MonthlyCounterSnapshot): number {
   const title = normalizeMatchText(String(mission.title ?? ""));
   const goal = normalizeMatchText(String(mission.goal ?? ""));
@@ -1937,6 +1993,25 @@ function monthlyMissionProgressValue(mission: Record<string, unknown>, counters:
   const target = Math.max(1, Number(mission.metric_value ?? mission.target_reps ?? 1));
   const value = Math.max(0, monthlyCounterValueByMission(mission, counters));
   return Math.min(target, value);
+}
+
+async function resolvePeriodicMissionProgressValue(
+  userId: string,
+  mission: Record<string, unknown>,
+  db: D1Database,
+  options?: { monthlyCounters?: MonthlyCounterSnapshot | undefined },
+): Promise<number> {
+  const metricType = normalizeMissionMetricType(mission.metric_type, mission.target_time);
+  if (metricType === "steps") {
+    return readPeriodicMissionStepProgress(db, userId, mission);
+  }
+
+  if (String(mission.type ?? "") === "monthly") {
+    const monthlyCounters = options?.monthlyCounters ?? await getMonthlyCounters(db, userId);
+    return monthlyMissionProgressValue(mission, monthlyCounters);
+  }
+
+  return Math.max(0, Number(mission.progress_value ?? 0));
 }
 
 async function recomputeMonthlyCounters(db: D1Database, userId: string, reference = new Date()): Promise<MonthlyCounterSnapshot> {
@@ -2044,7 +2119,9 @@ async function updateMonthlyMissionProgress(userId: string, db: D1Database): Pro
   ).bind(userId).all<Record<string, unknown>>();
 
   for (const mission of monthlyMissions.results) {
-    const progress = monthlyMissionProgressValue(mission, counters);
+    const progress = await resolvePeriodicMissionProgressValue(userId, mission, db, {
+      monthlyCounters: counters,
+    });
     const target = Math.max(1, Number(mission.metric_value ?? mission.target_reps ?? 1));
     if (hasProgressValueColumn) {
       await db.prepare(
@@ -2301,7 +2378,50 @@ async function recomputeActivePeriodicMissionProgress(userId: string, db: D1Data
       continue;
     }
 
-    if (normalizeMissionMetricType(missionRow.metric_type, missionRow.target_time) !== "circuit_tasks") {
+    const missionMetricType = normalizeMissionMetricType(missionRow.metric_type, missionRow.target_time);
+    if (missionMetricType === "steps") {
+      const progress = await resolvePeriodicMissionProgressValue(userId, missionRow, db);
+      const target = Math.max(1, Number(missionRow.metric_value ?? missionRow.target_reps ?? 1));
+      const nextProgressValue = Math.min(target, progress);
+
+      if (hasProgressValueColumn && Number(missionRow.progress_value ?? 0) !== nextProgressValue) {
+        await db.prepare(
+          `UPDATE missions
+              SET progress_value = ?,
+                  updated_at = datetime('now')
+            WHERE id = ?`,
+        ).bind(nextProgressValue, missionId).run();
+      }
+
+      if (progress < target) {
+        continue;
+      }
+
+      if (missionsHaveStatus) {
+        await db.prepare(
+          `UPDATE missions
+              SET is_completed = 1,
+                  status = 'completed',
+                  completed_at = datetime('now'),
+                  updated_at = datetime('now')
+            WHERE id = ? AND is_completed = 0`,
+        ).bind(missionId).run();
+      } else {
+        await db.prepare(
+          `UPDATE missions
+              SET is_completed = 1,
+                  completed_at = datetime('now'),
+                  updated_at = datetime('now')
+            WHERE id = ? AND is_completed = 0`,
+        ).bind(missionId).run();
+      }
+
+      await grantCircuitRewards(db, userId, missionRow);
+      await onMissionComplete(db, userId, missionId);
+      continue;
+    }
+
+    if (missionMetricType !== "circuit_tasks") {
       continue;
     }
 
@@ -2612,6 +2732,14 @@ registerMissionRoutes(
       missionSummaryFromNormalized(mission as NormalizedMissionRow),
     monthlyMissionProgressValue: (mission, monthlyCounters) =>
       monthlyMissionProgressValue(mission, monthlyCounters as MonthlyCounterSnapshot),
+    resolvePeriodicMissionProgressValue: (
+      userId,
+      mission,
+      db,
+      monthlyCounters,
+    ) => resolvePeriodicMissionProgressValue(userId, mission, db, {
+      monthlyCounters: monthlyCounters as MonthlyCounterSnapshot | undefined,
+    }),
     normalizeInstructionList,
     normalizeMatchText,
     normalizeMissionMetricType,

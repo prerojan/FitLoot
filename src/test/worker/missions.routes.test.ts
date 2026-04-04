@@ -42,6 +42,7 @@ function createMissionDeps(overrides: Partial<Parameters<typeof registerMissionR
     logUserEvent: vi.fn(async () => undefined),
     missionSummaryFromNormalized: vi.fn((mission: Record<string, unknown>) => mission),
     monthlyMissionProgressValue: vi.fn(() => 0),
+    resolvePeriodicMissionProgressValue: vi.fn(async () => 0),
     normalizeInstructionList: vi.fn((value: unknown) => Array.isArray(value) ? value : []),
     normalizeMatchText: vi.fn((value: string) => value.trim().toLowerCase()),
     normalizeMissionMetricType: vi.fn(() => "repetitions"),
@@ -239,6 +240,126 @@ describe("mission routes", () => {
     expect(deps.schedulePeriodicMissionsRefreshWithGuard).toHaveBeenCalledTimes(1);
     expect(deps.scheduleLegacyDailyMetadataRepairWithGuard).toHaveBeenCalledTimes(1);
     expect(deps.schedulePeriodicProgressRecomputeWithGuard).toHaveBeenCalledTimes(1);
+  });
+
+  it("hydrates weekly and monthly step progress from the periodic progress resolver", async () => {
+    const { db } = createMockD1Database([
+      {
+        match: "PRAGMA table_info('missions')",
+        all: [
+          { name: "id" },
+          { name: "user_id" },
+          { name: "status" },
+          { name: "skill_id" },
+        ],
+      },
+      {
+        match: "PRAGMA table_info('skills')",
+        all: [],
+      },
+      {
+        match: "SELECT m.*, NULL as skill_name FROM missions m",
+        all: [
+          {
+            id: 41,
+            user_id: TEST_USER.id,
+            type: "weekly",
+            title: "Passos da semana",
+            metric_type: "steps",
+            metric_value: 12000,
+            progress_value: 0,
+            is_completed: 0,
+          },
+          {
+            id: 42,
+            user_id: TEST_USER.id,
+            type: "monthly",
+            title: "Passos do mes",
+            metric_type: "steps",
+            metric_value: 60000,
+            progress_value: 0,
+            is_completed: 0,
+          },
+        ],
+      },
+    ]);
+    const env = createTestEnv(db);
+    const deps = createMissionDeps({
+      normalizeMissionRow: vi.fn((row: Record<string, unknown>) => ({
+        ...row,
+        circuit_tasks: [],
+        exercise_instructions_en: [],
+        exercise_instructions_pt: [],
+        instructions: [],
+      })),
+      resolvePeriodicMissionProgressValue: vi.fn(async (_userId: string, mission: Record<string, unknown>) =>
+        Number(mission.id) === 41 ? 3456 : 7890,
+      ),
+    });
+    const app = new Hono<AppContext>();
+    registerMissionRoutes(app, deps, createAuthMiddleware());
+    const { executionCtx } = createExecutionContext();
+
+    const response = await app.fetch(
+      new Request("http://localhost/api/missions"),
+      env,
+      executionCtx,
+    );
+
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload).toEqual([
+      expect.objectContaining({ id: 41, progress_value: 3456 }),
+      expect.objectContaining({ id: 42, progress_value: 7890 }),
+    ]);
+    expect(deps.resolvePeriodicMissionProgressValue).toHaveBeenCalledTimes(2);
+  });
+
+  it("hydrates mission detail progress for active periodic step missions", async () => {
+    const { db } = createMockD1Database([
+      {
+        match: "SELECT m.*, NULL as skill_name",
+        first: {
+          id: 51,
+          user_id: TEST_USER.id,
+          type: "weekly",
+          title: "Passos acumulados",
+          metric_type: "steps",
+          metric_value: 18000,
+          progress_value: 0,
+          is_completed: 0,
+        },
+      },
+    ]);
+    const env = createTestEnv(db);
+    const deps = createMissionDeps({
+      normalizeMissionRow: vi.fn((row: Record<string, unknown>) => ({
+        ...row,
+        circuit_tasks: [],
+        exercise_instructions_en: [],
+        exercise_instructions_pt: [],
+        instructions: [],
+      })),
+      resolvePeriodicMissionProgressValue: vi.fn(async () => 5432),
+    });
+    const app = new Hono<AppContext>();
+    registerMissionRoutes(app, deps, createAuthMiddleware());
+    const { executionCtx } = createExecutionContext();
+
+    const response = await app.fetch(
+      new Request("http://localhost/api/missions/51"),
+      env,
+      executionCtx,
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload).toMatchObject({
+      id: 51,
+      progress_value: 5432,
+    });
+    expect(deps.resolvePeriodicMissionProgressValue).toHaveBeenCalledTimes(1);
   });
 
   it("invalidates mission caches after generating the regular mission plan", async () => {

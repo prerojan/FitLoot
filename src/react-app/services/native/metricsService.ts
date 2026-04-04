@@ -77,7 +77,22 @@ function cloneDailyMetrics(metrics: DailyMetrics | null | undefined): DailyMetri
   };
 }
 
-function buildConsolidatedMetrics(
+function resolveDisplayedSteps(
+  baseMetrics: DailyMetrics,
+  stepSnapshot: StepSnapshot,
+): number {
+  const sensorSteps = Math.max(0, Math.round(stepSnapshot.steps));
+  const isSessionBasedAndroidSensor =
+    stepSnapshot.source === "android-sensor" && stepSnapshot.confidence !== "official";
+
+  if (!isSessionBasedAndroidSensor) {
+    return sensorSteps;
+  }
+
+  return Math.max(baseMetrics.steps, sensorSteps);
+}
+
+export function buildConsolidatedMetrics(
   apiMetrics: DailyMetrics | null,
   stepSnapshot: StepSnapshot | null,
 ): ConsolidatedMetrics {
@@ -99,7 +114,7 @@ function buildConsolidatedMetrics(
     };
   }
 
-  const nextSteps = Math.max(0, Math.round(stepSnapshot.steps));
+  const nextSteps = resolveDisplayedSteps(baseMetrics, stepSnapshot);
   const hasOfficialCalories = stepSnapshot.caloriesSource === "official";
   const nextCalories = hasOfficialCalories
     ? Math.max(0, Math.round(stepSnapshot.calories))

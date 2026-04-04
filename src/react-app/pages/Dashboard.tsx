@@ -27,6 +27,7 @@ import {
 } from "@/react-app/utils/api";
 import {
   offlineSyncService,
+  OFFLINE_SYNC_FLUSH_EVENT,
   OFFLINE_MISSION_SYNCED_EVENT,
   type OfflineMissionSyncedDetail,
 } from "@/react-app/services/runtime/offlineSyncService";
@@ -98,9 +99,8 @@ function resolveExpiredMissionRefreshDelay(missions: Mission[]): number | null {
 }
 
 function resolveMissionsApiPath(forceRefresh: boolean, cachedMissions: Mission[] | null): string {
-  void forceRefresh;
   void cachedMissions;
-  return "/api/missions";
+  return forceRefresh ? "/api/missions?refresh=1" : "/api/missions";
 }
 
 export default function Dashboard() {
@@ -311,6 +311,22 @@ export default function Dashboard() {
     ]);
   }, [loadData, refreshMetrics]);
 
+  const refreshMissionProgress = useCallback(async () => {
+    clearJsonCache("/api/missions");
+    setSectionLoading("missions", true);
+    try {
+      const payload = await fetchAndCacheJson<Mission[]>(resolveMissionsApiPath(true, missionsRef.current));
+      const nextMissions = Array.isArray(payload) ? payload : [];
+      missionsRef.current = nextMissions;
+      setMissions(nextMissions);
+      writeCachedJson("/api/missions", nextMissions);
+    } catch {
+      // Silent by design: mission progress retries on the next sync pulse.
+    } finally {
+      setSectionLoading("missions", false);
+    }
+  }, [setSectionLoading]);
+
   useEffect(() => {
     const handleMissionSynced = (event: Event) => {
       const detail = (event as CustomEvent<OfflineMissionSyncedDetail | undefined>).detail;
@@ -425,6 +441,38 @@ export default function Dashboard() {
     () => sortMissions(missions.filter((mission) => mission.type === "monthly" && mission.is_completed !== 1 && !isExpiredMission(mission) && !isAiSpecialMission(mission))),
     [isAiSpecialMission, isExpiredMission, missions],
   );
+  const hasPeriodicStepMissions = useMemo(
+    () =>
+      [...weeklyMissions, ...monthlyMissions].some((mission) => {
+        const hasCircuitTasks = Array.isArray(mission.circuit_tasks) && mission.circuit_tasks.length > 0;
+        const goalText = typeof mission.goal === "string" ? mission.goal.toLowerCase() : "";
+        return !hasCircuitTasks && (mission.metric_type === "steps" || goalText.includes("passos"));
+      }),
+    [monthlyMissions, weeklyMissions],
+  );
+  useEffect(() => {
+    if (!hasPeriodicStepMissions) {
+      return;
+    }
+
+    let timeoutId: number | null = null;
+    const handleOfflineSyncFlushed = () => {
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+      }
+      timeoutId = window.setTimeout(() => {
+        void refreshMissionProgress();
+      }, 400);
+    };
+
+    window.addEventListener(OFFLINE_SYNC_FLUSH_EVENT, handleOfflineSyncFlushed as EventListener);
+    return () => {
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+      }
+      window.removeEventListener(OFFLINE_SYNC_FLUSH_EVENT, handleOfflineSyncFlushed as EventListener);
+    };
+  }, [hasPeriodicStepMissions, refreshMissionProgress]);
   const expiredMissions = useMemo(
     () => sortMissions(missions.filter((mission) => isExpiredMission(mission) && mission.is_completed !== 1 && !isAiSpecialMission(mission))),
     [isAiSpecialMission, isExpiredMission, missions],

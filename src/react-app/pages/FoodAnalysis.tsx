@@ -673,6 +673,7 @@ export default function FoodAnalysis() {
   const scannerCaptureButtonSurfaceClass = reduceInlineCameraEffects
     ? "bg-black/70"
     : "bg-white/10";
+  const useAndroidPreviewOverlay = androidNativeAvailable;
 
   return (
     <AppPageShell bottomNavActive="missions" className="fl-theme-page overflow-hidden w-full flex flex-col font-display antialiased">
@@ -898,21 +899,36 @@ export default function FoodAnalysis() {
         </div>
       ) : preview ? (
         <div className="custom-scrollbar flex flex-1 flex-col overflow-y-auto p-3 pb-4 sm:p-4 sm:pb-5 lg:p-6 animate-in fade-in slide-in-from-bottom-5 duration-500 min-w-0" style={{ backgroundColor: "var(--app-bg-color)" }}>
-          <div className="flex items-center justify-between mb-8">
-            <button
-              onClick={resetCaptureState}
-              className="fl-theme-surface-soft flex h-10 w-10 items-center justify-center rounded-full transition-opacity hover:opacity-85"
-              aria-label="Voltar"
-            >
-              <ArrowLeft className="h-5 w-5" style={{ color: "var(--fl-color-text-muted)" }} />
-            </button>
-            <h2 className="text-[0.68rem] font-bold uppercase tracking-[0.2em] sm:text-xs" style={{ color: "var(--fl-color-text-muted)" }}>
-              {previewSource === "gallery" ? "Imagem Importada" : "Captura Pronta"}
-            </h2>
-            <div className="w-10 h-10" />
-          </div>
+          {useAndroidPreviewOverlay ? null : (
+            <div className="flex items-center justify-between mb-8">
+              <button
+                onClick={resetCaptureState}
+                className="fl-theme-surface-soft flex h-10 w-10 items-center justify-center rounded-full transition-opacity hover:opacity-85"
+                aria-label="Voltar"
+              >
+                <ArrowLeft className="h-5 w-5" style={{ color: "var(--fl-color-text-muted)" }} />
+              </button>
+              <h2 className="text-[0.68rem] font-bold uppercase tracking-[0.2em] sm:text-xs" style={{ color: "var(--fl-color-text-muted)" }}>
+                {previewSource === "gallery" ? "Imagem Importada" : "Captura Pronta"}
+              </h2>
+              <div className="w-10 h-10" />
+            </div>
+          )}
 
-          <div className="fl-theme-surface overflow-hidden rounded-[2rem] border mb-6" style={{ borderColor: "var(--fl-border-soft)" }}>
+          <div className="fl-theme-surface relative overflow-hidden rounded-[2rem] border mb-6" style={{ borderColor: "var(--fl-border-soft)" }}>
+            {useAndroidPreviewOverlay ? (
+              <button
+                onClick={resetCaptureState}
+                className="fl-theme-surface-soft absolute left-4 z-10 flex h-10 w-10 items-center justify-center rounded-full border transition-opacity hover:opacity-85"
+                style={{
+                  top: "calc(env(safe-area-inset-top, 0px) + 1rem)",
+                  borderColor: "var(--fl-border-soft)",
+                }}
+                aria-label="Voltar"
+              >
+                <ArrowLeft className="h-5 w-5" style={{ color: "var(--fl-color-text-muted)" }} />
+              </button>
+            ) : null}
             <img src={preview} alt="Previa do alimento" className="aspect-[4/5] w-full object-cover" />
           </div>
 
