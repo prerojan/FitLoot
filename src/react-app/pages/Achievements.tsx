@@ -17,7 +17,12 @@ import {
 } from "lucide-react";
 import AppPageShell from "@/react-app/components/AppPageShell";
 import PageLoader from "@/react-app/components/PageLoader";
-import { api, clearJsonCache, fetchAndCacheJson, readCachedJson } from "@/react-app/utils/api";
+import { ApiRequestError, api, clearJsonCache } from "@/react-app/utils/api";
+import {
+  hydrateCachedResource,
+  refreshCachedResource,
+  shouldRefreshCachedResource,
+} from "@/react-app/utils/cachedResourceLoader";
 import type { AchievementWithUnlock, UserProfile, UserProgression } from "@/shared/types";
 import { getAchievementShowcaseStyle, resolveShowcasedAchievement, sanitizeAchievementsForDisplay } from "@/react-app/utils/achievementShowcase";
 
@@ -74,69 +79,83 @@ export default function Achievements() {
   const [honorStatus, setHonorStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
   const loadData = useCallback(async () => {
-    const cachedAchievements = readCachedJson<AchievementWithUnlock[]>("/api/achievements");
-    const cachedProfile = readCachedJson<UserProfile>("/api/profile", SECONDARY_PROFILE_CACHE_TTL_MS);
-    const cachedProgression = readCachedJson<UserProgression>("/api/progression", SECONDARY_PROFILE_CACHE_TTL_MS);
+    const cachedAchievements = hydrateCachedResource<AchievementWithUnlock[]>(
+      "/api/achievements",
+      (payload) => {
+        setAchievements(Array.isArray(payload) ? sanitizeAchievementsForDisplay(payload) : []);
+      },
+    );
+    const cachedProfile = hydrateCachedResource<UserProfile>(
+      "/api/profile",
+      (payload) => {
+        setProfile(payload);
+      },
+      SECONDARY_PROFILE_CACHE_TTL_MS,
+    );
+    const cachedProgression = hydrateCachedResource<UserProgression>(
+      "/api/progression",
+      (payload) => {
+        setProgression(payload);
+      },
+      SECONDARY_PROFILE_CACHE_TTL_MS,
+    );
 
-    if (cachedAchievements) {
-      setAchievements(Array.isArray(cachedAchievements.data) ? sanitizeAchievementsForDisplay(cachedAchievements.data) : []);
-    }
-    if (cachedProfile) {
-      setProfile(cachedProfile.data);
-    }
-    if (cachedProgression) {
-      setProgression(cachedProgression.data);
-    }
-
-    const hasCache = Boolean(cachedAchievements && cachedProfile && cachedProgression);
+    const hasCache = Boolean(
+      cachedAchievements.hasCached &&
+      cachedProfile.hasCached &&
+      cachedProgression.hasCached,
+    );
     if (hasCache) {
       setLoading(false);
     }
 
     try {
-      const shouldFetch = (entry: { stale: boolean } | null): boolean => !entry || entry.stale;
-      const primaryTasks: Array<() => Promise<void>> = [];
-      const secondaryTasks: Array<() => Promise<void>> = [];
+      const primaryTasks: Array<Promise<unknown>> = [];
+      const secondaryTasks: Array<Promise<unknown>> = [];
 
-      if (shouldFetch(cachedAchievements)) {
-        primaryTasks.push(() =>
-          fetchAndCacheJson<AchievementWithUnlock[]>("/api/achievements").then((payload) => {
+      if (shouldRefreshCachedResource(cachedAchievements)) {
+        primaryTasks.push(
+          refreshCachedResource<AchievementWithUnlock[]>("/api/achievements", (payload) => {
             setAchievements(Array.isArray(payload) ? sanitizeAchievementsForDisplay(payload) : []);
           }),
         );
       }
 
-      if (!cachedProfile) {
-        secondaryTasks.push(() =>
-          fetchAndCacheJson<UserProfile>("/api/profile").then((payload) => {
+      if (shouldRefreshCachedResource(cachedProfile)) {
+        secondaryTasks.push(
+          refreshCachedResource<UserProfile>("/api/profile", (payload) => {
             setProfile(payload);
           }),
         );
       }
 
-      if (!cachedProgression) {
-        secondaryTasks.push(() =>
-          fetchAndCacheJson<UserProgression>("/api/progression").then((payload) => {
+      if (shouldRefreshCachedResource(cachedProgression)) {
+        secondaryTasks.push(
+          refreshCachedResource<UserProgression>("/api/progression", (payload) => {
             setProgression(payload);
           }),
         );
       }
 
       if (primaryTasks.length > 0) {
-        await Promise.all(primaryTasks.map((task) => task()));
+        await Promise.all(primaryTasks);
       }
 
       setLoading(false);
 
       if (secondaryTasks.length > 0) {
-        void Promise.allSettled(secondaryTasks.map((task) => task()));
+        void Promise.allSettled(secondaryTasks);
       }
     } catch (loadError) {
+      if (loadError instanceof ApiRequestError && (loadError.status === 401 || loadError.status === 403)) {
+        navigate("/app");
+        return;
+      }
       console.error("Error loading achievements:", loadError);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [navigate]);
 
   useEffect(() => {
     if (!user) {

@@ -201,6 +201,7 @@ export interface Env {
   REQUEST_DEDUPE_WINDOW_MS?: string | undefined;
   HOT_GET_CACHE_TTL_MS?: string | undefined;
   HOT_GET_STALE_TTL_MS?: string | undefined;
+  HOT_GET_LOG_SAMPLE_RATE?: string | undefined;
   HF_TOKEN?: string | undefined;
   HF_CHAT_MODEL?: string | undefined;
   HUGGING_FACE_API_KEY?: string | undefined;

@@ -17,7 +17,13 @@ import { useAuth } from "@/react-app/auth/context";
 import { useTheme } from "@/react-app/contexts/theme";
 import { ONBOARDING_EMAIL_STORAGE_KEY } from "@/react-app/constants/storage";
 import { resolveAuthenticatedStartRoute } from "@/react-app/services/authService";
-import { api } from "@/react-app/utils/api";
+import {
+  api,
+  fetchJson,
+  isApiTimeoutError,
+  isExpectedApiCancellation,
+  type ApiRequestClass,
+} from "@/react-app/utils/api";
 import { saveOnboardingDraft, type OnboardingDraft } from "@/react-app/utils/onboardingDraft";
 import { Input } from "@/react-app/components/ui/input";
 import {
@@ -516,6 +522,8 @@ type StableAvailabilityCacheEntry = {
   status: "checking" | "available" | "unavailable";
 };
 
+type AvailabilityValidationIntent = "typing" | "commit";
+
 const AVAILABILITY_CACHE_TTL_MS = 15_000;
 
 export default function Onboarding() {
@@ -540,9 +548,6 @@ export default function Onboarding() {
   const accountBootstrapRedirectRef = useRef(false);
   const availabilityCacheRef = useRef<
     Map<string, { expiresAt: number; payload: AvailabilityPayload }>
-  >(new Map());
-  const availabilityInflightRef = useRef<
-    Map<string, Promise<AvailabilityPayload | null>>
   >(new Map());
   const usernameValidationCacheRef = useRef<StableAvailabilityCacheEntry | null>(null);
   const emailValidationCacheRef = useRef<StableAvailabilityCacheEntry | null>(null);
@@ -599,7 +604,10 @@ export default function Onboarding() {
     };
 
   const requestAvailability = useCallback(
-    async (params: { email?: string; username?: string }): Promise<AvailabilityPayload | null> => {
+    async (
+      params: { email?: string; username?: string },
+      options?: { requestClass?: ApiRequestClass | undefined },
+    ): Promise<AvailabilityPayload | null> => {
       const normalizedEmail = (params.email ?? "").trim().toLowerCase();
       const normalizedUsername = (params.username ?? "").trim();
       if (!normalizedEmail && !normalizedUsername) {
@@ -620,65 +628,51 @@ export default function Onboarding() {
         availabilityCacheRef.current.delete(cacheKey);
       }
 
-      const inflight = availabilityInflightRef.current.get(cacheKey);
-      if (inflight) {
-        return inflight;
+      const payload = await fetchJson<AvailabilityPayload>(
+        `/api/auth/check-availability?${query.toString()}`,
+        {
+          timeoutMs: 8_000,
+          orchestrationKey: `onboarding:availability:${cacheKey}`,
+          orchestrationPolicy: "join",
+          requestClass: options?.requestClass ?? "background",
+        },
+      );
+
+      if (normalizedEmail && typeof payload.emailAvailable !== "boolean") return null;
+      if (normalizedUsername && typeof payload.usernameAvailable !== "boolean") return null;
+
+      const safePayload: AvailabilityPayload = {
+        emailAvailable:
+          typeof payload.emailAvailable === "boolean" ? payload.emailAvailable : null,
+        usernameAvailable:
+          typeof payload.usernameAvailable === "boolean" ? payload.usernameAvailable : null,
+      };
+      availabilityCacheRef.current.set(cacheKey, {
+        payload: safePayload,
+        expiresAt: Date.now() + AVAILABILITY_CACHE_TTL_MS,
+      });
+      return safePayload;
+    },
+    [],
+  );
+
+  const resolveAvailabilityFailureMessage = useCallback(
+    (intent: AvailabilityValidationIntent): string | null => {
+      if (intent === "typing") {
+        return null;
       }
 
-      const started = (async () => {
-        try {
-          const response = await api(`/api/auth/check-availability?${query.toString()}`, {
-            timeoutMs: 8_000,
-          });
-          if (!response.ok) {
-            console.warn("[onboarding][check-availability]", {
-              status: response.status,
-              hasEmail: Boolean(normalizedEmail),
-              hasUsername: Boolean(normalizedUsername),
-            });
-            return null;
-          }
-
-          const payload = (await response.json().catch(() => null)) as AvailabilityPayload | null;
-          if (!payload) return null;
-
-          if (normalizedEmail && typeof payload.emailAvailable !== "boolean") return null;
-          if (normalizedUsername && typeof payload.usernameAvailable !== "boolean") return null;
-
-          const safePayload: AvailabilityPayload = {
-            emailAvailable:
-              typeof payload.emailAvailable === "boolean" ? payload.emailAvailable : null,
-            usernameAvailable:
-              typeof payload.usernameAvailable === "boolean" ? payload.usernameAvailable : null,
-          };
-          availabilityCacheRef.current.set(cacheKey, {
-            payload: safePayload,
-            expiresAt: Date.now() + AVAILABILITY_CACHE_TTL_MS,
-          });
-          return safePayload;
-        } catch (error) {
-          console.warn("[onboarding][check-availability]", {
-            hasEmail: Boolean(normalizedEmail),
-            hasUsername: Boolean(normalizedUsername),
-            message: error instanceof Error ? error.message : String(error),
-          });
-          return null;
-        } finally {
-          availabilityInflightRef.current.delete(cacheKey);
-        }
-      })();
-
-      availabilityInflightRef.current.set(cacheKey, started);
-      return started;
+      return "Nao foi possivel validar agora.";
     },
     [],
   );
 
   const validateUsername = useCallback(async (
     rawUsername: string,
-    options?: { force?: boolean },
+    options?: { force?: boolean; intent?: AvailabilityValidationIntent },
   ) => {
     const force = options?.force === true;
+    const intent = options?.intent ?? "typing";
     const username = rawUsername.trim();
     if (!username) {
       usernameValidationCacheRef.current = null;
@@ -710,12 +704,20 @@ export default function Onboarding() {
     setUsernameAvailability({ status: "checking" });
 
     try {
-      const payload = await requestAvailability({ username });
+      const payload = await requestAvailability(
+        { username },
+        { requestClass: intent === "commit" ? "foreground" : "background" },
+      );
 
       if (requestId !== usernameReqRef.current) return false;
       if (!payload || typeof payload.usernameAvailable !== "boolean") {
         usernameValidationCacheRef.current = null;
-        setUsernameAvailability({ status: "invalid", message: "Nao foi possivel validar agora." });
+        const failureMessage = resolveAvailabilityFailureMessage(intent);
+        setUsernameAvailability(
+          failureMessage
+            ? { status: "invalid", message: failureMessage }
+            : { status: "idle" },
+        );
         return false;
       }
       if (!payload.usernameAvailable) {
@@ -727,20 +729,33 @@ export default function Onboarding() {
       usernameValidationCacheRef.current = { value: username, status: "available" };
       setUsernameAvailability({ status: "available" });
       return true;
-    } catch {
+    } catch (error) {
+      if (isExpectedApiCancellation(error) || requestId !== usernameReqRef.current) {
+        return false;
+      }
+
       if (requestId === usernameReqRef.current) {
         usernameValidationCacheRef.current = null;
-        setUsernameAvailability({ status: "invalid", message: "Erro de conexao ao validar." });
+        const failureMessage = resolveAvailabilityFailureMessage(intent);
+        if (failureMessage) {
+          setUsernameAvailability({
+            status: "invalid",
+            message: isApiTimeoutError(error) ? "A validacao demorou mais do que o esperado." : failureMessage,
+          });
+        } else {
+          setUsernameAvailability({ status: "idle" });
+        }
       }
       return false;
     }
-  }, [requestAvailability]);
+  }, [requestAvailability, resolveAvailabilityFailureMessage]);
 
   const validateEmail = useCallback(async (
     rawEmail: string,
-    options?: { force?: boolean },
+    options?: { force?: boolean; intent?: AvailabilityValidationIntent },
   ) => {
     const force = options?.force === true;
+    const intent = options?.intent ?? "typing";
     const email = rawEmail.trim().toLowerCase();
     if (!email) {
       emailValidationCacheRef.current = null;
@@ -773,12 +788,20 @@ export default function Onboarding() {
     setEmailAvailability({ status: "checking" });
 
     try {
-      const payload = await requestAvailability({ email });
+      const payload = await requestAvailability(
+        { email },
+        { requestClass: intent === "commit" ? "foreground" : "background" },
+      );
 
       if (requestId !== emailReqRef.current) return false;
       if (!payload || typeof payload.emailAvailable !== "boolean") {
         emailValidationCacheRef.current = null;
-        setEmailAvailability({ status: "invalid", message: "Nao foi possivel validar agora." });
+        const failureMessage = resolveAvailabilityFailureMessage(intent);
+        setEmailAvailability(
+          failureMessage
+            ? { status: "invalid", message: failureMessage }
+            : { status: "idle" },
+        );
         return false;
       }
       if (!payload.emailAvailable) {
@@ -790,14 +813,26 @@ export default function Onboarding() {
       emailValidationCacheRef.current = { value: email, status: "available" };
       setEmailAvailability({ status: "available" });
       return true;
-    } catch {
+    } catch (error) {
+      if (isExpectedApiCancellation(error) || requestId !== emailReqRef.current) {
+        return false;
+      }
+
       if (requestId === emailReqRef.current) {
         emailValidationCacheRef.current = null;
-        setEmailAvailability({ status: "invalid", message: "Erro de conexao ao validar." });
+        const failureMessage = resolveAvailabilityFailureMessage(intent);
+        if (failureMessage) {
+          setEmailAvailability({
+            status: "invalid",
+            message: isApiTimeoutError(error) ? "A validacao demorou mais do que o esperado." : failureMessage,
+          });
+        } else {
+          setEmailAvailability({ status: "idle" });
+        }
       }
       return false;
     }
-  }, [requestAvailability]);
+  }, [requestAvailability, resolveAvailabilityFailureMessage]);
 
   // Faz o debounce da disponibilidade do username durante a digitacao.
   useEffect(() => {
@@ -807,7 +842,7 @@ export default function Onboarding() {
       return;
     }
     const timer = setTimeout(() => {
-      void validateUsername(username);
+      void validateUsername(username, { intent: "typing" });
     }, 600);
     return () => clearTimeout(timer);
   }, [profile.username, validateUsername]);
@@ -820,7 +855,7 @@ export default function Onboarding() {
       return;
     }
     const timer = setTimeout(() => {
-      void validateEmail(email);
+      void validateEmail(email, { intent: "typing" });
     }, 600);
     return () => clearTimeout(timer);
   }, [credentials.email, validateEmail]);
@@ -960,10 +995,13 @@ export default function Onboarding() {
       setEmailAvailability({ status: "checking" });
       setUsernameAvailability({ status: "checking" });
 
-      const availabilityPayload = await requestAvailability({
-        email: normalizedEmail,
-        username: trimmedUsername,
-      });
+      const availabilityPayload = await requestAvailability(
+        {
+          email: normalizedEmail,
+          username: trimmedUsername,
+        },
+        { requestClass: "foreground" },
+      );
 
       if (
         !availabilityPayload ||
@@ -1122,7 +1160,11 @@ export default function Onboarding() {
       }
 
       navigate(ROUTE_PATHS.checkout, { replace: true });
-    } catch {
+    } catch (error) {
+      if (isExpectedApiCancellation(error)) {
+        setStepError("A validacao foi interrompida. Tente novamente.");
+        return;
+      }
       setStepError(
         accountBootstrapRedirectRef.current
           ? "Conta criada e sessao iniciada, mas nao foi possivel preparar seu onboarding para o checkout. Tente novamente em instantes."
@@ -1848,7 +1890,7 @@ export default function Onboarding() {
                 value={profile.username}
                 onChange={setProfileField("username")}
                 onBlur={() => {
-                  void validateUsername(profile.username);
+                  void validateUsername(profile.username, { force: true, intent: "commit" });
                 }}
                 placeholder="nome_de_usuario"
                 minLength={3}
@@ -1867,7 +1909,7 @@ export default function Onboarding() {
                 value={credentials.email}
                 onChange={setCredential("email")}
                 onBlur={() => {
-                  void validateEmail(credentials.email);
+                  void validateEmail(credentials.email, { force: true, intent: "commit" });
                 }}
                 placeholder="seu@email.com"
                 className={FIELD_INPUT}

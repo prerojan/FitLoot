@@ -149,6 +149,47 @@ describe("authService routing", () => {
     });
   });
 
+  it("joins concurrent bootstrap reads into a single fetch", async () => {
+    let resolveFetch: ((response: Response) => void) | null = null;
+    global.fetch = vi.fn(
+      () =>
+        new Promise<Response>((resolve) => {
+          resolveFetch = resolve;
+        }),
+    ) as typeof fetch;
+
+    const first = fetchAuthBootstrap();
+    const second = fetchAuthBootstrap();
+
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+
+    resolveFetch?.(
+      new Response(
+        JSON.stringify({
+          user: {
+            id: "u6",
+            email: "u6@example.com",
+            name: "U6",
+            onboarding_completed: 1,
+            plan_id: "vip",
+            plan_status: "active",
+            payment_method: "card",
+          },
+          profile: null,
+          profile_theme: null,
+          progression: null,
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        },
+      ),
+    );
+
+    const [firstResult, secondResult] = await Promise.all([first, second]);
+    expect(firstResult).toEqual(secondResult);
+  });
+
   it("clears local state when current user is gone", async () => {
     localStorage.setItem("fitloot_authenticated_hint", "1");
     localStorage.setItem("fitloot_ai_chat_u7", JSON.stringify([{ role: "assistant" }]));

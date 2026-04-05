@@ -5,7 +5,12 @@ import AppPageShell from "@/react-app/components/AppPageShell";
 import LoadingBall from "@/react-app/components/LoadingBall";
 import { Avatar } from "@/react-app/components/ui/avatar";
 import { useAuth } from "@/react-app/auth/context";
-import { ApiRequestError, fetchAndCacheJson, readCachedJson } from "@/react-app/utils/api";
+import { ApiRequestError } from "@/react-app/utils/api";
+import {
+  hydrateCachedResource,
+  refreshCachedResource,
+  shouldRefreshCachedResource,
+} from "@/react-app/utils/cachedResourceLoader";
 import type { RankingPlayer, TrainingRank, UserProfile } from "@/shared/types";
 
 type RankingMode = "global" | "friends";
@@ -77,29 +82,31 @@ export default function Ranking() {
     setError(null);
 
     const rankingPath = currentMode === "global" ? "/api/ranking/global" : "/api/ranking/friends";
-    const cachedRanking = readCachedJson<RankingPlayer[]>(rankingPath);
-    const cachedProfile = readCachedJson<UserProfile>("/api/profile", SECONDARY_PROFILE_CACHE_TTL_MS);
-
-    if (cachedRanking) {
-      const normalizedCachedList = Array.isArray(cachedRanking.data)
-        ? sortRankingEntries(cachedRanking.data.map(normalizeRankingEntry))
-        : [];
-      setRanking(normalizedCachedList);
-      setLoading(false);
-    }
-
-    if (cachedProfile) {
-      setProfile(cachedProfile.data);
-    }
+    const cachedRanking = hydrateCachedResource<RankingPlayer[]>(
+      rankingPath,
+      (payload) => {
+        const normalizedCachedList = Array.isArray(payload)
+          ? sortRankingEntries(payload.map(normalizeRankingEntry))
+          : [];
+        setRanking(normalizedCachedList);
+        setLoading(false);
+      },
+    );
+    const cachedProfile = hydrateCachedResource<UserProfile>(
+      "/api/profile",
+      (payload) => {
+        setProfile(payload);
+      },
+      SECONDARY_PROFILE_CACHE_TTL_MS,
+    );
 
     try {
-      const shouldFetch = (entry: { stale: boolean } | null): boolean => !entry || entry.stale;
-      const primaryTasks: Array<() => Promise<void>> = [];
-      const secondaryTasks: Array<() => Promise<void>> = [];
+      const primaryTasks: Array<Promise<unknown>> = [];
+      const secondaryTasks: Array<Promise<unknown>> = [];
 
-      if (shouldFetch(cachedRanking)) {
-        primaryTasks.push(() =>
-          fetchAndCacheJson<RankingPlayer[]>(rankingPath).then((payload) => {
+      if (shouldRefreshCachedResource(cachedRanking)) {
+        primaryTasks.push(
+          refreshCachedResource<RankingPlayer[]>(rankingPath, (payload) => {
             const normalizedRanking = Array.isArray(payload)
               ? sortRankingEntries(payload.map(normalizeRankingEntry))
               : [];
@@ -108,22 +115,22 @@ export default function Ranking() {
         );
       }
 
-      if (!cachedProfile) {
-        secondaryTasks.push(() =>
-          fetchAndCacheJson<UserProfile>("/api/profile").then((payload) => {
+      if (shouldRefreshCachedResource(cachedProfile)) {
+        secondaryTasks.push(
+          refreshCachedResource<UserProfile>("/api/profile", (payload) => {
             setProfile(payload);
           }),
         );
       }
 
       if (primaryTasks.length > 0) {
-        await Promise.all(primaryTasks.map((task) => task()));
+        await Promise.all(primaryTasks);
       }
 
       setLoading(false);
 
       if (secondaryTasks.length > 0) {
-        void Promise.allSettled(secondaryTasks.map((task) => task()));
+        void Promise.allSettled(secondaryTasks);
       }
     } catch (loadError) {
       if (loadError instanceof ApiRequestError && (loadError.status === 401 || loadError.status === 403)) {
@@ -132,7 +139,7 @@ export default function Ranking() {
       }
 
       console.error("Error loading ranking:", loadError);
-      if (!cachedRanking) {
+      if (!cachedRanking.hasCached) {
         setError("Nao foi possivel carregar o ranking agora.");
         setRanking([]);
       }

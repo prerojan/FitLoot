@@ -3,8 +3,6 @@ import { api, resolveApiRequestUrl } from "@/react-app/utils/api";
 const DEFAULT_PRESENCE_INTERVAL_MS = 15_000;
 const OFFLINE_DEDUPE_WINDOW_MS = 3_000;
 
-let inflightHeartbeat: Promise<void> | null = null;
-let inflightOffline: Promise<void> | null = null;
 let lastOfflineSentAt = 0;
 
 function canUseSameOriginBeaconTransport(requestUrl: string): boolean {
@@ -50,19 +48,15 @@ async function sendPresenceHeartbeat(): Promise<void> {
     return;
   }
 
-  if (inflightHeartbeat) return inflightHeartbeat;
-
-  inflightHeartbeat = api("/api/presence/heartbeat", {
+  await api("/api/presence/heartbeat", {
     method: "POST",
     body: JSON.stringify({ visibility: "friends" }),
     keepalive: true,
+    orchestrationKey: "presence:heartbeat",
+    orchestrationPolicy: "join",
+    requestClass: "background",
   })
-    .then(() => undefined)
-    .finally(() => {
-      inflightHeartbeat = null;
-    });
-
-  return inflightHeartbeat;
+    .then(() => undefined);
 }
 
 async function sendPresenceOffline(): Promise<void> {
@@ -71,23 +65,19 @@ async function sendPresenceOffline(): Promise<void> {
     return;
   }
 
-  if (inflightOffline) return inflightOffline;
-
   lastOfflineSentAt = now;
   if (trySendPresenceBeacon("/api/presence/offline")) {
     return;
   }
 
-  inflightOffline = api("/api/presence/offline", {
+  await api("/api/presence/offline", {
     method: "POST",
     keepalive: true,
+    orchestrationKey: "presence:offline",
+    orchestrationPolicy: "join",
+    requestClass: "background",
   })
-    .then(() => undefined)
-    .finally(() => {
-      inflightOffline = null;
-    });
-
-  return inflightOffline;
+    .then(() => undefined);
 }
 
 // Starts a lightweight visibility-aware heartbeat loop for friends online presence.

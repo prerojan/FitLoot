@@ -476,6 +476,7 @@ class OfflineSyncService {
         operation_id: operation.operationId,
         occurred_at: operation.occurredAt,
       }),
+      requestClass: "background",
     });
 
     const payload = (await response.json().catch(() => null)) as
@@ -533,6 +534,7 @@ class OfflineSyncService {
     const response = await api("/api/offline/sync", {
       method: "POST",
       body: JSON.stringify(requestBody),
+      requestClass: "background",
     });
 
     const payload = (await response.json().catch(() => null)) as

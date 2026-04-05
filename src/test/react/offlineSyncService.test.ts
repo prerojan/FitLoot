@@ -131,7 +131,7 @@ describe("offlineSyncService", () => {
 
     expect(apiMock).toHaveBeenCalledWith(
       "/api/offline/sync",
-      expect.objectContaining({ method: "POST" }),
+      expect.objectContaining({ method: "POST", requestClass: "background" }),
     );
 
     resolveFlush?.(createResponse({ success: true }));

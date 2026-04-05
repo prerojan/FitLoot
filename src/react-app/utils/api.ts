@@ -15,8 +15,15 @@ type CacheEntry = {
   inflight: Promise<unknown> | null;
 };
 
+export type ApiRequestClass = "foreground" | "background";
+export type ApiRequestOrchestrationPolicy = "parallel" | "join" | "replace";
+export type ApiAbortReason = "timeout" | "superseded" | "external";
+
 export type ApiRequestOptions = RequestInit & {
   timeoutMs?: number | undefined;
+  orchestrationKey?: string | undefined;
+  orchestrationPolicy?: ApiRequestOrchestrationPolicy | undefined;
+  requestClass?: ApiRequestClass | undefined;
 };
 
 export class ApiRequestError extends Error {
@@ -28,8 +35,40 @@ export class ApiRequestError extends Error {
   }
 }
 
+export class ApiAbortError extends Error {
+  readonly reason: ApiAbortReason;
+  readonly requestClass: ApiRequestClass;
+  readonly expected: boolean;
+
+  constructor(reason: ApiAbortReason, requestClass: ApiRequestClass, message?: string) {
+    super(
+      message ??
+        (reason === "timeout"
+          ? "A requisição excedeu o tempo limite."
+          : "A requisição foi cancelada."),
+    );
+    this.reason = reason;
+    this.requestClass = requestClass;
+    this.expected = reason !== "timeout";
+  }
+}
+
+export class ApiTimeoutError extends ApiAbortError {
+  constructor(requestClass: ApiRequestClass) {
+    super("timeout", requestClass, "A requisição excedeu o tempo limite.");
+  }
+}
+
 const requestCache = new Map<string, CacheEntry>();
 const inflightGetRequests = new Map<string, Promise<Response>>();
+const orchestratedRequests = new Map<
+  string,
+  {
+    promise: Promise<Response>;
+    abort: (reason: ApiAbortReason) => void;
+    requestClass: ApiRequestClass;
+  }
+>();
 
 type PlanAccessRequiredPayload = {
   redirect_to?: string | undefined;
@@ -52,6 +91,28 @@ function buildCacheKey(path: string): string {
 
 function buildInflightGetKey(url: string): string {
   return `GET:${url}`;
+}
+
+function buildOrchestratedRequestKey(method: string, key: string): string {
+  return `${method}:${key.trim()}`;
+}
+
+function isFetchAbortError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const name = "name" in error ? String(error.name ?? "") : "";
+  return name === "AbortError";
+}
+
+export function isApiAbortError(error: unknown): error is ApiAbortError {
+  return error instanceof ApiAbortError;
+}
+
+export function isApiTimeoutError(error: unknown): error is ApiTimeoutError {
+  return error instanceof ApiTimeoutError;
+}
+
+export function isExpectedApiCancellation(error: unknown): boolean {
+  return isApiAbortError(error) && error.expected;
 }
 
 function resolveClientTimeZone(): string | null {
@@ -127,11 +188,23 @@ export async function api(path: string, options: ApiRequestOptions = {}) {
   // Wrapper padrao de fetch com cookies, timeout e suporte a cancelamento externo.
   const requestPath = normalizePath(path);
   const url = resolveApiRequestUrl(requestPath);
-  const { timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS, headers, signal, ...restOptions } = options;
+  const {
+    timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
+    headers,
+    signal,
+    orchestrationKey,
+    orchestrationPolicy = "parallel",
+    requestClass = "foreground",
+    ...restOptions
+  } = options;
   const method = String(restOptions.method ?? "GET").toUpperCase();
   const requestHeaders = new Headers(headers ?? {});
   const hasBody = typeof restOptions.body !== "undefined" && restOptions.body !== null;
   const shouldSendJsonContentType = hasBody && method !== "GET" && method !== "HEAD";
+  const normalizedOrchestrationKey =
+    typeof orchestrationKey === "string" && orchestrationKey.trim().length > 0 && !signal
+      ? buildOrchestratedRequestKey(method, orchestrationKey)
+      : null;
 
   if (shouldSendJsonContentType && !requestHeaders.has("Content-Type")) {
     requestHeaders.set("Content-Type", "application/json");
@@ -144,37 +217,91 @@ export async function api(path: string, options: ApiRequestOptions = {}) {
   }
 
   const controller = new AbortController();
+  let abortReason: ApiAbortReason | null = null;
   const abortListener = () => controller.abort();
+  const onExternalAbort = () => {
+    abortReason = "external";
+    abortListener();
+  };
 
   if (signal) {
     if (signal.aborted) {
+      abortReason = "external";
       controller.abort();
     } else {
-      signal.addEventListener("abort", abortListener, { once: true });
+      signal.addEventListener("abort", onExternalAbort, { once: true });
     }
   }
 
   const hasTimeout = Number.isFinite(timeoutMs) && Number(timeoutMs) > 0;
   const timeoutId = hasTimeout
     ? globalThis.setTimeout(() => {
+        abortReason = "timeout";
         controller.abort();
       }, Number(timeoutMs))
     : null;
 
   const executeRequest = async (): Promise<Response> => {
-    const response = await fetch(url, {
-      ...restOptions,
-      method,
-      credentials: "include",
-      signal: controller.signal,
-      headers: requestHeaders,
-    });
+    try {
+      const response = await fetch(url, {
+        ...restOptions,
+        method,
+        credentials: "include",
+        signal: controller.signal,
+        headers: requestHeaders,
+      });
 
-    await handlePlanAccessRequired(response);
-    return response;
+      await handlePlanAccessRequired(response);
+      return response;
+    } catch (error) {
+      if (abortReason === "timeout") {
+        throw new ApiTimeoutError(requestClass);
+      }
+
+      if (abortReason || controller.signal.aborted || isFetchAbortError(error)) {
+        throw new ApiAbortError(abortReason ?? "external", requestClass);
+      }
+
+      throw error;
+    }
   };
 
   try {
+    if (normalizedOrchestrationKey) {
+      const existing = orchestratedRequests.get(normalizedOrchestrationKey);
+      if (existing) {
+        if (orchestrationPolicy === "join") {
+          const response = await existing.promise;
+          return response.clone();
+        }
+
+        if (orchestrationPolicy === "replace") {
+          existing.abort("superseded");
+          orchestratedRequests.delete(normalizedOrchestrationKey);
+        }
+      }
+
+      const started = executeRequest();
+      orchestratedRequests.set(normalizedOrchestrationKey, {
+        promise: started,
+        abort: (reason) => {
+          abortReason = reason;
+          controller.abort();
+        },
+        requestClass,
+      });
+
+      try {
+        const response = await started;
+        return response.clone();
+      } finally {
+        const current = orchestratedRequests.get(normalizedOrchestrationKey);
+        if (current?.promise === started) {
+          orchestratedRequests.delete(normalizedOrchestrationKey);
+        }
+      }
+    }
+
     const canDedupeGet = method === "GET" && !hasBody && !signal;
     if (!canDedupeGet) {
       return await executeRequest();
@@ -201,7 +328,7 @@ export async function api(path: string, options: ApiRequestOptions = {}) {
     }
 
     if (signal) {
-      signal.removeEventListener("abort", abortListener);
+      signal.removeEventListener("abort", onExternalAbort);
     }
   }
 }

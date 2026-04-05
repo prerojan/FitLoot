@@ -37,7 +37,12 @@ import type {
   UserProfile,
   UserProgression,
 } from "@/shared/types";
-import { ApiRequestError, api, clearJsonCache, fetchAndCacheJson, readCachedJson } from "@/react-app/utils/api";
+import { ApiRequestError, api, clearJsonCache } from "@/react-app/utils/api";
+import {
+  hydrateCachedResource,
+  refreshCachedResource,
+  shouldRefreshCachedResource,
+} from "@/react-app/utils/cachedResourceLoader";
 import { getAchievementShowcaseStyle, resolveShowcasedAchievement, sanitizeAchievementsForDisplay } from "@/react-app/utils/achievementShowcase";
 import { applyProfileTheme } from "@/react-app/theme/profileTheme";
 
@@ -180,107 +185,123 @@ export default function Profile() {
 
   const loadData = useCallback(async () => {
     setError(null);
-    const cachedProfile = readCachedJson<UserProfile>("/api/profile");
-    const cachedAttributes = readCachedJson<UserAttributes>("/api/attributes");
-    const cachedProgression = readCachedJson<UserProgression>("/api/progression");
-    const cachedSkills = readCachedJson<SkillWithProgress[]>("/api/skills");
-    const cachedAvailableSkills = readCachedJson<Skill[]>("/api/skills/available", PROFILE_SECONDARY_CACHE_TTL_MS);
-    const cachedAchievements = readCachedJson<AchievementWithUnlock[]>("/api/achievements", PROFILE_SECONDARY_CACHE_TTL_MS);
-    const cachedTitles = readCachedJson<TitleWithUnlock[]>("/api/titles", PROFILE_SECONDARY_CACHE_TTL_MS);
-    const cachedBenchmarks = readCachedJson<BenchmarksResponse>("/api/benchmarks", PROFILE_BENCHMARKS_CACHE_TTL_MS);
+    const cachedProfile = hydrateCachedResource<UserProfile>("/api/profile", syncProfileThemeState);
+    const cachedAttributes = hydrateCachedResource<UserAttributes>("/api/attributes", setAttributes);
+    const cachedProgression = hydrateCachedResource<UserProgression>("/api/progression", setProgression);
+    const cachedSkills = hydrateCachedResource<SkillWithProgress[]>("/api/skills", (payload) => {
+      setSkills(Array.isArray(payload) ? payload : []);
+    });
+    const cachedAvailableSkills = hydrateCachedResource<Skill[]>(
+      "/api/skills/available",
+      (payload) => {
+        setAvailableSkills(Array.isArray(payload) ? payload : []);
+      },
+      PROFILE_SECONDARY_CACHE_TTL_MS,
+    );
+    const cachedAchievements = hydrateCachedResource<AchievementWithUnlock[]>(
+      "/api/achievements",
+      (payload) => {
+        setAchievements(
+          Array.isArray(payload)
+            ? sanitizeAchievementsForDisplay(payload)
+            : [],
+        );
+      },
+      PROFILE_SECONDARY_CACHE_TTL_MS,
+    );
+    const cachedTitles = hydrateCachedResource<TitleWithUnlock[]>(
+      "/api/titles",
+      (payload) => {
+        setTitles(Array.isArray(payload) ? payload : []);
+      },
+      PROFILE_SECONDARY_CACHE_TTL_MS,
+    );
+    const cachedBenchmarks = hydrateCachedResource<BenchmarksResponse>(
+      "/api/benchmarks",
+      (payload) => {
+        setBenchmarks(Array.isArray(payload.benchmarks) ? payload.benchmarks : []);
+      },
+      PROFILE_BENCHMARKS_CACHE_TTL_MS,
+    );
 
-    if (cachedProfile) syncProfileThemeState(cachedProfile.data);
-    if (cachedAttributes) setAttributes(cachedAttributes.data);
-    if (cachedProgression) setProgression(cachedProgression.data);
-    if (cachedSkills) setSkills(Array.isArray(cachedSkills.data) ? cachedSkills.data : []);
-    if (cachedAvailableSkills) setAvailableSkills(Array.isArray(cachedAvailableSkills.data) ? cachedAvailableSkills.data : []);
-    if (cachedAchievements) {
-      setAchievements(
-        Array.isArray(cachedAchievements.data)
-          ? sanitizeAchievementsForDisplay(cachedAchievements.data)
-          : [],
-      );
-    }
-    if (cachedTitles) setTitles(Array.isArray(cachedTitles.data) ? cachedTitles.data : []);
-    if (cachedBenchmarks) {
-      setBenchmarks(Array.isArray(cachedBenchmarks.data.benchmarks) ? cachedBenchmarks.data.benchmarks : []);
-    }
-
-    const hasCache = Boolean(cachedProfile && cachedAttributes && cachedProgression);
+    const hasCache = Boolean(
+      cachedProfile.hasCached &&
+      cachedAttributes.hasCached &&
+      cachedProgression.hasCached,
+    );
     if (hasCache) setLoading(false);
 
     try {
-      const shouldFetch = (entry: { stale: boolean } | null): boolean => !entry || entry.stale;
-      const primaryTasks: Array<() => Promise<void>> = [];
-      const secondaryTasks: Array<() => Promise<void>> = [];
+      const primaryTasks: Array<Promise<unknown>> = [];
+      const secondaryTasks: Array<Promise<unknown>> = [];
 
-      if (shouldFetch(cachedProfile)) {
-        primaryTasks.push(() =>
-          fetchAndCacheJson<UserProfile>("/api/profile").then((payload) => {
+      if (shouldRefreshCachedResource(cachedProfile)) {
+        primaryTasks.push(
+          refreshCachedResource<UserProfile>("/api/profile", (payload) => {
             syncProfileThemeState(payload);
           }),
         );
       }
-      if (shouldFetch(cachedAttributes)) {
-        primaryTasks.push(() =>
-          fetchAndCacheJson<UserAttributes>("/api/attributes").then((payload) => {
+      if (shouldRefreshCachedResource(cachedAttributes)) {
+        primaryTasks.push(
+          refreshCachedResource<UserAttributes>("/api/attributes", (payload) => {
             setAttributes(payload);
           }),
         );
       }
-      if (shouldFetch(cachedProgression)) {
-        primaryTasks.push(() =>
-          fetchAndCacheJson<UserProgression>("/api/progression").then((payload) => {
+      if (shouldRefreshCachedResource(cachedProgression)) {
+        primaryTasks.push(
+          refreshCachedResource<UserProgression>("/api/progression", (payload) => {
             setProgression(payload);
           }),
         );
       }
-      if (shouldFetch(cachedSkills)) {
-        primaryTasks.push(() =>
-          fetchAndCacheJson<SkillWithProgress[]>("/api/skills").then((payload) => {
+      if (shouldRefreshCachedResource(cachedSkills)) {
+        primaryTasks.push(
+          refreshCachedResource<SkillWithProgress[]>("/api/skills", (payload) => {
             setSkills(Array.isArray(payload) ? payload : []);
           }),
         );
       }
-      if (!cachedAvailableSkills) {
-        secondaryTasks.push(() =>
-          fetchAndCacheJson<Skill[]>("/api/skills/available").then((payload) => {
+      if (shouldRefreshCachedResource(cachedAvailableSkills)) {
+        secondaryTasks.push(
+          refreshCachedResource<Skill[]>("/api/skills/available", (payload) => {
             setAvailableSkills(Array.isArray(payload) ? payload : []);
           }),
         );
       }
-      if (!cachedAchievements) {
-        secondaryTasks.push(() =>
-          fetchAndCacheJson<AchievementWithUnlock[]>("/api/achievements").then((payload) => {
+      if (shouldRefreshCachedResource(cachedAchievements)) {
+        secondaryTasks.push(
+          refreshCachedResource<AchievementWithUnlock[]>("/api/achievements", (payload) => {
             setAchievements(Array.isArray(payload) ? sanitizeAchievementsForDisplay(payload) : []);
           }),
         );
       }
-      if (!cachedTitles) {
-        secondaryTasks.push(() =>
-          fetchAndCacheJson<TitleWithUnlock[]>("/api/titles").then((payload) => {
+      if (shouldRefreshCachedResource(cachedTitles)) {
+        secondaryTasks.push(
+          refreshCachedResource<TitleWithUnlock[]>("/api/titles", (payload) => {
             setTitles(Array.isArray(payload) ? payload : []);
           }),
         );
       }
-      if (!cachedBenchmarks) {
-        secondaryTasks.push(() =>
-          fetchAndCacheJson<BenchmarksResponse>("/api/benchmarks")
-            .catch(() => ({ benchmarks: [] } satisfies BenchmarksResponse))
-            .then((payload) => {
-              setBenchmarks(Array.isArray(payload.benchmarks) ? payload.benchmarks : []);
-            }),
+      if (shouldRefreshCachedResource(cachedBenchmarks)) {
+        secondaryTasks.push(
+          refreshCachedResource<BenchmarksResponse>("/api/benchmarks", (payload) => {
+            setBenchmarks(Array.isArray(payload.benchmarks) ? payload.benchmarks : []);
+          }).catch(() => {
+            setBenchmarks([]);
+          }),
         );
       }
 
       if (primaryTasks.length > 0) {
-        await Promise.all(primaryTasks.map((task) => task()));
+        await Promise.all(primaryTasks);
       }
 
       setLoading(false);
 
       if (secondaryTasks.length > 0) {
-        void Promise.allSettled(secondaryTasks.map((task) => task()));
+        void Promise.allSettled(secondaryTasks);
       }
     } catch (loadError) {
       if (loadError instanceof ApiRequestError && (loadError.status === 401 || loadError.status === 403)) {

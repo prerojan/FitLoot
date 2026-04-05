@@ -89,6 +89,7 @@ import {
   readRuntimeHttpCache,
   upsertRuntimeHttpCache,
 } from "./core/runtimeHttpCacheStore";
+import { resolveHotCacheRequestIdentity } from "./core/hotCacheIdentity";
 import {
   deleteRuntimeUserProjectionScopes,
   deleteRuntimeUserProjections,
@@ -1307,10 +1308,6 @@ const HOT_GET_CACHEABLE_PATHS = new Set<string>([
   "/api/metrics/today",
 ]);
 
-const PUBLIC_HOT_CACHEABLE_PATHS = new Set<string>([
-  "/api/auth/check-availability",
-]);
-
 type CachedResponseSnapshot = {
   status: number;
   headers: Array<[string, string]>;
@@ -1342,31 +1339,6 @@ function readEnvInt(
 
 function isHotCacheableGetPath(path: string): boolean {
   return HOT_GET_CACHEABLE_PATHS.has(path);
-}
-
-function resolveSessionScopedRequestKey(c: {
-  req: {
-    path: string;
-    url: string;
-    header: (name: string) => string | undefined;
-  };
-}): string | null {
-  const sessionId = getSessionIdFromCookieHeader(c.req.header("Cookie"));
-  const url = new URL(c.req.url);
-  if (sessionId) {
-    return `${sessionId}:${c.req.path}:${url.search}`;
-  }
-
-  if (!PUBLIC_HOT_CACHEABLE_PATHS.has(c.req.path)) {
-    return null;
-  }
-
-  const ip =
-    c.req.header("CF-Connecting-IP")?.trim() ||
-    c.req.header("X-Forwarded-For")?.split(",")[0]?.trim() ||
-    "unknown";
-  const userAgent = (c.req.header("User-Agent") ?? "").trim();
-  return `anon:${ip}:${userAgent}:${c.req.path}:${url.search}`;
 }
 
 function resolveRuntimeHotCacheDb(c: {
@@ -1404,6 +1376,41 @@ function cloneResponseSnapshot(
   return new Response(snapshot.body, {
     status: snapshot.status,
     headers,
+  });
+}
+
+function emitHotGetTelemetry(
+  c: Pick<import("hono").Context<AppContext>, "env" | "req">,
+  payload: {
+    cacheStatus:
+      | "memory-hit"
+      | "runtime-hit"
+      | "shared-hit"
+      | "fresh"
+      | "stale-fallback"
+      | "uncached";
+    requestClass: "authenticated" | "public";
+    runtimeCacheHit: boolean;
+    startedAt: number;
+  },
+): void {
+  const durationMs = Date.now() - payload.startedAt;
+  const sampleRate = Number(c.env.HOT_GET_LOG_SAMPLE_RATE ?? "0.03");
+  const shouldLog =
+    durationMs >= 700 ||
+    (Number.isFinite(sampleRate) && sampleRate > 0 && Math.random() < sampleRate);
+
+  if (!shouldLog) {
+    return;
+  }
+
+  console.info("[hot-get]", {
+    path: c.req.path,
+    cache_status: payload.cacheStatus,
+    request_class: payload.requestClass,
+    runtime_cache_hit: payload.runtimeCacheHit,
+    db_backend: resolveDatabaseBackend(c.env),
+    duration_ms: durationMs,
   });
 }
 
@@ -1544,11 +1551,24 @@ app.use("/api/*", async (c, next) => {
     Boolean(sessionId && requestKey.startsWith(`${sessionId}:`));
 
   if (method === "GET" && isHotCacheableGetPath(c.req.path)) {
-    const requestKey = resolveSessionScopedRequestKey(c);
-    if (!requestKey) {
+    const requestIdentity = await resolveHotCacheRequestIdentity({
+      path: c.req.path,
+      url: c.req.url,
+      cookieHeader: c.req.header("Cookie"),
+      ipAddress:
+        c.req.header("CF-Connecting-IP")?.trim() ||
+        c.req.header("X-Forwarded-For")?.split(",")[0]?.trim() ||
+        "unknown",
+      userAgent: c.req.header("User-Agent") ?? "",
+    });
+    if (!requestIdentity) {
       await next();
       return;
     }
+    const requestKey = requestIdentity.requestKey;
+    const runtimeCacheKey = requestIdentity.runtimeCacheKey;
+    const runtimeScopeKey = requestIdentity.runtimeScopeKey;
+    const telemetryStartedAt = Date.now();
 
     const dedupeWindowMs = readEnvInt(
       c.env.REQUEST_DEDUPE_WINDOW_MS,
@@ -1572,6 +1592,12 @@ app.use("/api/*", async (c, next) => {
     const cached = hotGetResponseCache.get(requestKey);
     let staleSnapshot: CachedResponseSnapshot | null = null;
     if (cached && cached.expiresAt > now) {
+      emitHotGetTelemetry(c, {
+        cacheStatus: "memory-hit",
+        requestClass: requestIdentity.requestClass,
+        runtimeCacheHit: false,
+        startedAt: telemetryStartedAt,
+      });
       return cloneResponseSnapshot(cached.snapshot);
     }
     if (cached) {
@@ -1583,10 +1609,12 @@ app.use("/api/*", async (c, next) => {
     }
 
     const shouldUseRuntimeEdgeCache =
-      Boolean(runtimeHotCacheDb) && isSessionScopedRequestKey(requestKey);
+      Boolean(runtimeHotCacheDb) &&
+      (Boolean(runtimeScopeKey) || isSessionScopedRequestKey(requestKey));
     if (!cached && shouldUseRuntimeEdgeCache && runtimeHotCacheDb) {
       try {
-        const runtimeCached = await readRuntimeHttpCache(runtimeHotCacheDb, requestKey);
+        const runtimeLookupKey = requestIdentity.requestClass === "public" ? runtimeCacheKey : requestKey;
+        const runtimeCached = await readRuntimeHttpCache(runtimeHotCacheDb, runtimeLookupKey);
         if (runtimeCached) {
           hotGetResponseCache.set(requestKey, {
             snapshot: runtimeCached.snapshot,
@@ -1595,6 +1623,12 @@ app.use("/api/*", async (c, next) => {
           });
 
           if (runtimeCached.expiresAt > now) {
+            emitHotGetTelemetry(c, {
+              cacheStatus: "runtime-hit",
+              requestClass: requestIdentity.requestClass,
+              runtimeCacheHit: true,
+              startedAt: telemetryStartedAt,
+            });
             return cloneResponseSnapshot(runtimeCached.snapshot);
           }
 
@@ -1614,12 +1648,30 @@ app.use("/api/*", async (c, next) => {
     if (inflight && now - inflight.startedAt <= dedupeWindowMs) {
       const sharedSnapshot = await inflight.promise;
       if (sharedSnapshot) {
+        emitHotGetTelemetry(c, {
+          cacheStatus: "shared-hit",
+          requestClass: requestIdentity.requestClass,
+          runtimeCacheHit: false,
+          startedAt: telemetryStartedAt,
+        });
         return cloneResponseSnapshot(sharedSnapshot);
       }
       if (staleSnapshot) {
+        emitHotGetTelemetry(c, {
+          cacheStatus: "stale-fallback",
+          requestClass: requestIdentity.requestClass,
+          runtimeCacheHit: false,
+          startedAt: telemetryStartedAt,
+        });
         return cloneResponseSnapshot(staleSnapshot, { staleFallback: true });
       }
       await next();
+      emitHotGetTelemetry(c, {
+        cacheStatus: "uncached",
+        requestClass: requestIdentity.requestClass,
+        runtimeCacheHit: false,
+        startedAt: telemetryStartedAt,
+      });
       return;
     }
 
@@ -1644,11 +1696,11 @@ app.use("/api/*", async (c, next) => {
           staleUntil,
         });
 
-        if (shouldUseRuntimeEdgeCache && runtimeHotCacheDb && sessionId) {
+        if (shouldUseRuntimeEdgeCache && runtimeHotCacheDb && (runtimeScopeKey ?? sessionId)) {
           c.executionCtx.waitUntil(
             upsertRuntimeHttpCache(runtimeHotCacheDb, {
-              cacheKey: requestKey,
-              sessionId,
+              cacheKey: requestIdentity.requestClass === "public" ? runtimeCacheKey : requestKey,
+              sessionId: runtimeScopeKey ?? sessionId ?? "anonymous",
               path: c.req.path,
               expiresAt,
               staleUntil,
@@ -1661,13 +1713,31 @@ app.use("/api/*", async (c, next) => {
             }),
           );
         }
+        emitHotGetTelemetry(c, {
+          cacheStatus: "fresh",
+          requestClass: requestIdentity.requestClass,
+          runtimeCacheHit: false,
+          startedAt: telemetryStartedAt,
+        });
       } else if (staleSnapshot && c.res.status >= 500) {
+        emitHotGetTelemetry(c, {
+          cacheStatus: "stale-fallback",
+          requestClass: requestIdentity.requestClass,
+          runtimeCacheHit: false,
+          startedAt: telemetryStartedAt,
+        });
         return cloneResponseSnapshot(staleSnapshot, { staleFallback: true });
       }
     } finally {
       hotGetInflightRequests.delete(requestKey);
     }
 
+    emitHotGetTelemetry(c, {
+      cacheStatus: "uncached",
+      requestClass: requestIdentity.requestClass,
+      runtimeCacheHit: false,
+      startedAt: telemetryStartedAt,
+    });
     return;
   }
 

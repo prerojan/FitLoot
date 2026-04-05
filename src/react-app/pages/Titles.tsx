@@ -16,9 +16,12 @@ import {
   ApiRequestError,
   api,
   clearJsonCache,
-  fetchAndCacheJson,
-  readCachedJson,
 } from "@/react-app/utils/api";
+import {
+  hydrateCachedResource,
+  refreshCachedResource,
+  shouldRefreshCachedResource,
+} from "@/react-app/utils/cachedResourceLoader";
 import { getAchievementShowcaseStyle } from "@/react-app/utils/achievementShowcase";
 import type { TitleWithUnlock, UserProfile, UserProgression } from "@/shared/types";
 import { repairKnownMojibakeString } from "@/shared/textEncoding";
@@ -122,56 +125,68 @@ export default function Titles() {
   const loadData = useCallback(async () => {
     setStatus(null);
 
-    const cachedTitles = readCachedJson<TitleWithUnlock[]>("/api/titles");
-    const cachedProfile = readCachedJson<UserProfile>("/api/profile", SECONDARY_PROFILE_CACHE_TTL_MS);
-    const cachedProgression = readCachedJson<UserProgression>("/api/progression", SECONDARY_PROFILE_CACHE_TTL_MS);
+    const cachedTitles = hydrateCachedResource<TitleWithUnlock[]>(
+      "/api/titles",
+      (payload) => {
+        setTitles(Array.isArray(payload) ? sanitizeTitlesForDisplay(payload) : []);
+      },
+    );
+    const cachedProfile = hydrateCachedResource<UserProfile>(
+      "/api/profile",
+      (payload) => {
+        setProfile(payload);
+      },
+      SECONDARY_PROFILE_CACHE_TTL_MS,
+    );
+    const cachedProgression = hydrateCachedResource<UserProgression>(
+      "/api/progression",
+      (payload) => {
+        setProgression(payload);
+      },
+      SECONDARY_PROFILE_CACHE_TTL_MS,
+    );
 
-    if (cachedTitles) {
-      setTitles(Array.isArray(cachedTitles.data) ? sanitizeTitlesForDisplay(cachedTitles.data) : []);
-    }
-    if (cachedProfile) setProfile(cachedProfile.data);
-    if (cachedProgression) setProgression(cachedProgression.data);
-
-    const hasCache = Boolean(cachedTitles && cachedProfile && cachedProgression);
+    const hasCache = Boolean(
+      cachedTitles.hasCached && cachedProfile.hasCached && cachedProgression.hasCached,
+    );
     if (hasCache) setLoading(false);
 
     try {
-      const shouldFetch = (entry: { stale: boolean } | null): boolean => !entry || entry.stale;
-      const primaryTasks: Array<() => Promise<void>> = [];
-      const secondaryTasks: Array<() => Promise<void>> = [];
+      const primaryTasks: Array<Promise<unknown>> = [];
+      const secondaryTasks: Array<Promise<unknown>> = [];
 
-      if (shouldFetch(cachedTitles)) {
-        primaryTasks.push(() =>
-          fetchAndCacheJson<TitleWithUnlock[]>("/api/titles").then((payload) => {
+      if (shouldRefreshCachedResource(cachedTitles)) {
+        primaryTasks.push(
+          refreshCachedResource<TitleWithUnlock[]>("/api/titles", (payload) => {
             setTitles(Array.isArray(payload) ? sanitizeTitlesForDisplay(payload) : []);
           }),
         );
       }
 
-      if (!cachedProfile) {
-        secondaryTasks.push(() =>
-          fetchAndCacheJson<UserProfile>("/api/profile").then((payload) => {
+      if (shouldRefreshCachedResource(cachedProfile)) {
+        secondaryTasks.push(
+          refreshCachedResource<UserProfile>("/api/profile", (payload) => {
             setProfile(payload);
           }),
         );
       }
 
-      if (!cachedProgression) {
-        secondaryTasks.push(() =>
-          fetchAndCacheJson<UserProgression>("/api/progression").then((payload) => {
+      if (shouldRefreshCachedResource(cachedProgression)) {
+        secondaryTasks.push(
+          refreshCachedResource<UserProgression>("/api/progression", (payload) => {
             setProgression(payload);
           }),
         );
       }
 
       if (primaryTasks.length > 0) {
-        await Promise.all(primaryTasks.map((task) => task()));
+        await Promise.all(primaryTasks);
       }
 
       setLoading(false);
 
       if (secondaryTasks.length > 0) {
-        void Promise.allSettled(secondaryTasks.map((task) => task()));
+        void Promise.allSettled(secondaryTasks);
       }
     } catch (loadError) {
       if (loadError instanceof ApiRequestError && (loadError.status === 401 || loadError.status === 403)) {
@@ -249,8 +264,9 @@ export default function Titles() {
       }
 
       clearJsonCache("/api/titles");
-      const refreshedTitles = await fetchAndCacheJson<TitleWithUnlock[]>("/api/titles");
-      setTitles(Array.isArray(refreshedTitles) ? sanitizeTitlesForDisplay(refreshedTitles) : []);
+      await refreshCachedResource<TitleWithUnlock[]>("/api/titles", (payload) => {
+        setTitles(Array.isArray(payload) ? sanitizeTitlesForDisplay(payload) : []);
+      });
       setStatus({ type: "success", message: "Título equipado com sucesso." });
     } catch (error) {
       setStatus({

@@ -28,6 +28,9 @@ vi.mock("../../react-app/services/authService", () => ({
 
 vi.mock("../../react-app/utils/api", () => ({
   api: vi.fn(),
+  fetchJson: vi.fn(),
+  isApiTimeoutError: vi.fn(() => false),
+  isExpectedApiCancellation: vi.fn(() => false),
 }));
 
 vi.mock("../../react-app/utils/onboardingDraft", () => ({

@@ -22,7 +22,6 @@ export type AuthBootstrapResult =
 
 const APP_OPEN_MIN_INTERVAL_MS = 45_000;
 let lastAppOpenSentAt = 0;
-let inflightAppOpenRequest: Promise<void> | null = null;
 
 function canUseSameOriginBeaconTransport(requestUrl: string): boolean {
   if (typeof window === "undefined" || typeof navigator === "undefined") {
@@ -59,7 +58,11 @@ async function isMissingUserResponse(response: Response): Promise<boolean> {
 
 export async function fetchAuthBootstrap(): Promise<AuthBootstrapResult> {
   // Consolida a carga inicial de autenticacao em uma unica requisicao.
-  const response = await api("/api/app/bootstrap");
+  const response = await api("/api/app/bootstrap", {
+    orchestrationKey: "auth:bootstrap",
+    orchestrationPolicy: "join",
+    requestClass: "foreground",
+  });
   if (
     response.status === 401 ||
     response.status === 403 ||
@@ -83,7 +86,11 @@ export async function fetchAuthBootstrap(): Promise<AuthBootstrapResult> {
 
 export async function fetchCurrentUser(): Promise<User | null> {
   // Resolve a sessao atual sem propagar excecoes para os consumidores.
-  const response = await api("/api/users/me");
+  const response = await api("/api/users/me", {
+    orchestrationKey: "auth:current-user",
+    orchestrationPolicy: "join",
+    requestClass: "foreground",
+  });
   if (
     response.status === 401 ||
     response.status === 403 ||
@@ -107,10 +114,6 @@ export async function notifyAppOpen(): Promise<void> {
     return;
   }
 
-  if (inflightAppOpenRequest) {
-    return inflightAppOpenRequest;
-  }
-
   const requestUrl = resolveApiRequestUrl("/api/app/open");
   lastAppOpenSentAt = now;
 
@@ -124,22 +127,20 @@ export async function notifyAppOpen(): Promise<void> {
     }
   }
 
-  inflightAppOpenRequest = api("/api/app/open", {
+  return api("/api/app/open", {
     method: "POST",
     keepalive: true,
     body: "{}",
     timeoutMs: 10_000,
+    orchestrationKey: "auth:app-open",
+    orchestrationPolicy: "join",
+    requestClass: "background",
   })
     .then(() => undefined)
     .catch((error) => {
       lastAppOpenSentAt = 0;
       throw error;
-    })
-    .finally(() => {
-      inflightAppOpenRequest = null;
     });
-
-  return inflightAppOpenRequest;
 }
 
 type IdleDeadlineLike = {

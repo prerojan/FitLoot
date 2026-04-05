@@ -25,6 +25,7 @@ vi.mock("../../react-app/auth/context", () => ({
 vi.mock("../../react-app/utils/api", () => ({
   api: (...args: Parameters<typeof apiMock>) => apiMock(...args),
   clearJsonCache: (...args: Parameters<typeof clearJsonCacheMock>) => clearJsonCacheMock(...args),
+  isExpectedApiCancellation: () => false,
 }));
 
 vi.mock("../../react-app/components/LevelUpModal", () => ({
@@ -42,12 +43,25 @@ function renderProvider() {
 }
 
 describe("RewardNotificationsProvider", () => {
+  const originalRequestIdleCallback = window.requestIdleCallback;
+  const originalCancelIdleCallback = window.cancelIdleCallback;
+
   beforeEach(() => {
     vi.clearAllMocks();
+    window.requestIdleCallback = ((callback: IdleRequestCallback) => {
+      callback({
+        didTimeout: false,
+        timeRemaining: () => 50,
+      } as IdleDeadline);
+      return 1;
+    }) as typeof window.requestIdleCallback;
+    window.cancelIdleCallback = vi.fn();
   });
 
   afterEach(() => {
     mockedUser = null;
+    window.requestIdleCallback = originalRequestIdleCallback;
+    window.cancelIdleCallback = originalCancelIdleCallback;
   });
 
   it("loads pending notifications once on app entry and refreshes only on explicit event", async () => {
@@ -72,7 +86,14 @@ describe("RewardNotificationsProvider", () => {
 
     await waitFor(() => {
       expect(apiMock).toHaveBeenCalledTimes(1);
-      expect(apiMock).toHaveBeenCalledWith("/api/reward-notifications/pending");
+      expect(apiMock).toHaveBeenCalledWith(
+        "/api/reward-notifications/pending",
+        expect.objectContaining({
+          orchestrationKey: "reward-notifications:pending",
+          orchestrationPolicy: "join",
+          requestClass: "background",
+        }),
+      );
     });
 
     await new Promise((resolve) => window.setTimeout(resolve, 20));

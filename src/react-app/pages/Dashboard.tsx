@@ -21,10 +21,12 @@ import type {
 } from "@/shared/types";
 import {
   ApiRequestError,
-  fetchAndCacheJson,
-  readCachedJson,
   writeCachedJson,
 } from "@/react-app/utils/api";
+import {
+  hydrateCachedResource,
+  refreshCachedResource,
+} from "@/react-app/utils/cachedResourceLoader";
 import {
   offlineSyncService,
   OFFLINE_MISSION_SYNCED_EVENT,
@@ -153,32 +155,38 @@ export default function Dashboard() {
     const forceRefresh = options?.forceRefresh === true;
     setError(null);
 
-    const cacheProfile = readCachedJson<UserProfile>("/api/profile");
-    const cacheProgression = readCachedJson<UserProgression>("/api/progression");
-    const cacheMissions = readCachedJson<Mission[]>("/api/missions");
-    const cacheAchievements = readCachedJson<AchievementWithUnlock[]>("/api/achievements", DASHBOARD_SECONDARY_CACHE_TTL_MS);
-    const cacheTitles = readCachedJson<Array<Title & { is_active?: number | undefined }>>("/api/titles", DASHBOARD_SECONDARY_CACHE_TTL_MS);
-    const cachedMissionList = Array.isArray(cacheMissions?.data) ? cacheMissions.data : null;
+    const cacheProfile = hydrateCachedResource<UserProfile>("/api/profile", setProfile);
+    const cacheProgression = hydrateCachedResource<UserProgression>("/api/progression", setProgression);
+    const cacheMissions = hydrateCachedResource<Mission[]>("/api/missions", (payload) => {
+      setMissions(Array.isArray(payload) ? payload : []);
+    });
+    const cacheAchievements = hydrateCachedResource<AchievementWithUnlock[]>(
+      "/api/achievements",
+      (payload) => {
+        setAchievements(Array.isArray(payload) ? payload : []);
+      },
+      DASHBOARD_SECONDARY_CACHE_TTL_MS,
+    );
+    const cacheTitles = hydrateCachedResource<Array<Title & { is_active?: number | undefined }>>(
+      "/api/titles",
+      (payload) => {
+        setActiveTitle((Array.isArray(payload) ? payload : []).find((title) => title.is_active === 1) ?? null);
+      },
+      DASHBOARD_SECONDARY_CACHE_TTL_MS,
+    );
+    const cachedMissionList = Array.isArray(cacheMissions.cached?.data) ? cacheMissions.cached.data : null;
     const missionsApiPath = resolveMissionsApiPath(forceRefresh, cachedMissionList);
     const shouldForceMissionRefresh = missionsApiPath !== "/api/missions";
-    const cachedProgressionPayload = cacheProgression?.data ?? null;
+    const cachedProgressionPayload = cacheProgression.cached?.data ?? null;
     const progressionNeedsReconcile =
       cachedProgressionPayload !== null && progressionHasXpOverflow(cachedProgressionPayload);
 
-    if (cacheProfile) setProfile(cacheProfile.data);
-    if (cacheProgression) setProgression(cacheProgression.data);
-    if (cacheMissions) setMissions(Array.isArray(cacheMissions.data) ? cacheMissions.data : []);
-    if (cacheAchievements) setAchievements(Array.isArray(cacheAchievements.data) ? cacheAchievements.data : []);
-    if (cacheTitles) {
-      setActiveTitle(cacheTitles.data.find((title) => title.is_active === 1) ?? null);
-    }
-
     setLoadingState({
-      profile: forceRefresh || !cacheProfile,
-      progression: forceRefresh || !cacheProgression || progressionNeedsReconcile,
-      missions: shouldForceMissionRefresh || !cacheMissions,
+      profile: forceRefresh || !cacheProfile.hasCached,
+      progression: forceRefresh || !cacheProgression.hasCached || progressionNeedsReconcile,
+      missions: shouldForceMissionRefresh || !cacheMissions.hasCached,
       metrics: false,
-      titles: forceRefresh || !cacheTitles,
+      titles: forceRefresh || !cacheTitles.hasCached,
     });
 
     let shouldRedirectToApp = false;
@@ -199,7 +207,7 @@ export default function Dashboard() {
       }
 
       try {
-        onSuccess(await fetchAndCacheJson<T>(path));
+        await refreshCachedResource<T>(path, onSuccess);
       } catch (requestError) {
         if (requestError instanceof ApiRequestError) {
           if (requestError.status === 401 || requestError.status === 403) {
@@ -222,7 +230,7 @@ export default function Dashboard() {
     };
 
     const primaryTasks: Array<Promise<void>> = [
-      runRequest<UserProfile>("profile", "/api/profile", Boolean(cacheProfile), Boolean(cacheProfile?.stale), setProfile, () => {
+      runRequest<UserProfile>("profile", "/api/profile", cacheProfile.hasCached, cacheProfile.stale, setProfile, () => {
         if (Number(user?.onboarding_completed ?? 0) !== 1) {
           shouldRedirectToOnboarding = true;
           return;
@@ -234,8 +242,8 @@ export default function Dashboard() {
       runRequest<UserProgression>(
         "progression",
         "/api/progression",
-        Boolean(cacheProgression),
-        Boolean(cacheProgression?.stale) || progressionNeedsReconcile,
+        cacheProgression.hasCached,
+        cacheProgression.stale || progressionNeedsReconcile,
         (payload) => {
           const { celebrate_level: celebrateLevel, ...clean } = payload;
           setProgression(clean);
@@ -247,8 +255,8 @@ export default function Dashboard() {
       runRequest<Mission[]>(
         "missions",
         missionsApiPath,
-        Boolean(cacheMissions),
-        shouldForceMissionRefresh || Boolean(cacheMissions?.stale),
+        cacheMissions.hasCached,
+        shouldForceMissionRefresh || cacheMissions.stale,
         (payload) => {
           setMissions(Array.isArray(payload) ? payload : []);
         },
@@ -258,12 +266,13 @@ export default function Dashboard() {
     await Promise.all(primaryTasks);
 
     const secondaryTasks: Array<Promise<void>> = [];
-    if (forceRefresh || !cacheAchievements) {
+    if (forceRefresh || !cacheAchievements.hasCached) {
       secondaryTasks.push(
         (async () => {
           try {
-            const payload = await fetchAndCacheJson<AchievementWithUnlock[]>("/api/achievements");
-            setAchievements(Array.isArray(payload) ? payload : []);
+            await refreshCachedResource<AchievementWithUnlock[]>("/api/achievements", (payload) => {
+              setAchievements(Array.isArray(payload) ? payload : []);
+            });
           } catch (requestError) {
             if (requestError instanceof ApiRequestError && (requestError.status === 401 || requestError.status === 403)) {
               shouldRedirectToApp = true;
@@ -278,8 +287,8 @@ export default function Dashboard() {
         runRequest<Array<Title & { is_active?: number | undefined }>>(
           "titles",
           "/api/titles",
-          Boolean(cacheTitles),
-          Boolean(cacheTitles?.stale),
+          cacheTitles.hasCached,
+          cacheTitles.stale,
           (payload) => {
             setActiveTitle((Array.isArray(payload) ? payload : []).find((title) => title.is_active === 1) ?? null);
           },

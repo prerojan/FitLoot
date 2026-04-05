@@ -12,14 +12,20 @@ import { Award, Crown, Sparkles, X, Zap } from "lucide-react";
 import { useAuth } from "@/react-app/auth/context";
 import { hasPlanAccess } from "@/react-app/services/authService";
 import LevelUpModal from "@/react-app/components/LevelUpModal";
-import { api, clearJsonCache } from "@/react-app/utils/api";
+import {
+  api,
+  clearJsonCache,
+  isExpectedApiCancellation,
+} from "@/react-app/utils/api";
 import type { RewardNotification } from "@/shared/types";
 
 type RewardNotificationsContextValue = {
   pushRewardNotifications: (
     notifications: RewardNotification[] | null | undefined,
   ) => void;
-  refreshRewardNotifications: () => Promise<void>;
+  refreshRewardNotifications: (options?: {
+    force?: boolean;
+  }) => Promise<void>;
 };
 
 const RewardNotificationsContext =
@@ -91,8 +97,12 @@ export function RewardNotificationsProvider({
       await api("/api/reward-notifications/consume", {
         method: "POST",
         body: JSON.stringify({ ids }),
+        requestClass: "background",
       });
     } catch (error) {
+      if (isExpectedApiCancellation(error)) {
+        return;
+      }
       console.error("Error acknowledging reward notifications:", error);
     }
   }, []);
@@ -127,20 +137,25 @@ export function RewardNotificationsProvider({
     [acknowledgeNotifications],
   );
 
-  const refreshRewardNotifications = useCallback(async () => {
+  const refreshRewardNotifications = useCallback(async (options?: { force?: boolean }) => {
     if (!user || !hasUnlockedAccess) return;
     if (refreshInFlightRef.current) {
       return refreshInFlightRef.current;
     }
 
     const now = Date.now();
-    if (now - lastRefreshAtRef.current < MIN_REFRESH_INTERVAL_MS) {
+    const forceRefresh = options?.force === true;
+    if (!forceRefresh && now - lastRefreshAtRef.current < MIN_REFRESH_INTERVAL_MS) {
       return;
     }
 
     const refreshTask = (async () => {
       try {
-        const response = await api("/api/reward-notifications/pending");
+        const response = await api("/api/reward-notifications/pending", {
+          orchestrationKey: "reward-notifications:pending",
+          orchestrationPolicy: "join",
+          requestClass: "background",
+        });
 
         if (response.status === 401 || response.status === 403 || response.status === 402) {
           return;
@@ -154,6 +169,9 @@ export function RewardNotificationsProvider({
         lastRefreshAtRef.current = Date.now();
         pushRewardNotifications(payload);
       } catch (error) {
+        if (isExpectedApiCancellation(error)) {
+          return;
+        }
         console.error("Error loading reward notifications:", error);
       } finally {
         refreshInFlightRef.current = null;
@@ -194,7 +212,7 @@ export function RewardNotificationsProvider({
     }
 
     const handleRefreshRequest = () => {
-      void refreshRewardNotifications();
+      void refreshRewardNotifications({ force: true });
     };
 
     window.addEventListener("fitloot:refresh-rewards", handleRefreshRequest);
