@@ -2,10 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import type { Mission } from "../../shared/types";
 import {
-  arePersistentStepMissionProgressStatesEqual,
-  buildStepMissionProgressSignature,
-  createStepMissionSnapshot,
-  reconcilePersistentStepMissionProgress,
+  arePersistentCounterMissionProgressStatesEqual,
+  buildCounterMissionProgressSignature,
+  createCounterMissionSnapshot,
+  reconcilePersistentCounterMissionProgress,
 } from "../../react-app/pages/dashboardUtils";
 
 function buildMission(overrides?: Partial<Mission>): Mission {
@@ -64,17 +64,17 @@ function buildMission(overrides?: Partial<Mission>): Mission {
   };
 }
 
-describe("dashboardUtils step mission helpers", () => {
-  it("keeps the step-progress signature stable when the mission payload identity changes but progress does not", () => {
+describe("dashboardUtils counter mission helpers", () => {
+  it("keeps the counter-progress signature stable when the mission payload identity changes but progress does not", () => {
     const first = [buildMission()];
     const second = [buildMission({ title: "Passos do mes atualizado" })];
 
-    expect(buildStepMissionProgressSignature(first)).toBe(
-      buildStepMissionProgressSignature(second),
+    expect(buildCounterMissionProgressSignature(first)).toBe(
+      buildCounterMissionProgressSignature(second),
     );
   });
 
-  it("captures only unfinished step missions in the live progress snapshot", () => {
+  it("captures only unfinished periodic counter missions in the live progress snapshot", () => {
     const missions = [
       buildMission({ id: 11, progress_value: 22000 }),
       buildMission({ id: 12, type: "weekly", progress_value: 8000 }),
@@ -82,12 +82,19 @@ describe("dashboardUtils step mission helpers", () => {
       buildMission({ id: 14, is_completed: 1, progress_value: 99000 }),
     ];
 
-    const signature = buildStepMissionProgressSignature(missions);
-    const snapshot = createStepMissionSnapshot(missions, 7342, signature);
+    const signature = buildCounterMissionProgressSignature(missions);
+    const snapshot = createCounterMissionSnapshot(
+      missions,
+      { steps: 7342, distance_meters: 0 },
+      signature,
+    );
 
     expect(snapshot).toEqual({
       signature,
-      stepsAtSnapshot: 7342,
+      metricsAtSnapshot: {
+        steps: 7342,
+        distance_meters: 0,
+      },
       progressByMissionId: {
         11: 22000,
         12: 8000,
@@ -96,17 +103,19 @@ describe("dashboardUtils step mission helpers", () => {
   });
 
   it("seeds persistent step mission progress by adding the current daily steps when the server has not updated today", () => {
-    const nextState = reconcilePersistentStepMissionProgress({
+    const nextState = reconcilePersistentCounterMissionProgress({
       missions: [buildMission({ progress_value: 24000, updated_at: "2026-04-03T22:00:00.000Z" })],
       metricsDate: "2026-04-04",
       stepsValue: 7342,
+      distanceMetersValue: 0,
       state: {},
     });
 
     expect(nextState).toEqual({
       1: {
         metricsDate: "2026-04-04",
-        lastDailySteps: 7342,
+        metricType: "steps",
+        lastMetricValue: 7342,
         progressValue: 31342,
       },
     });
@@ -116,27 +125,60 @@ describe("dashboardUtils step mission helpers", () => {
     const previousState = {
       1: {
         metricsDate: "2026-04-04",
-        lastDailySteps: 7342,
+        metricType: "steps" as const,
+        lastMetricValue: 7342,
         progressValue: 31342,
       },
     };
 
-    const nextState = reconcilePersistentStepMissionProgress({
+    const nextState = reconcilePersistentCounterMissionProgress({
       missions: [buildMission({ progress_value: 24000, updated_at: "2026-04-03T22:00:00.000Z" })],
       metricsDate: "2026-04-05",
       stepsValue: 512,
+      distanceMetersValue: 0,
       state: previousState,
     });
 
     expect(nextState).toEqual({
       1: {
         metricsDate: "2026-04-05",
-        lastDailySteps: 512,
+        metricType: "steps",
+        lastMetricValue: 512,
         progressValue: 31854,
       },
     });
     expect(
-      arePersistentStepMissionProgressStatesEqual(previousState, nextState),
+      arePersistentCounterMissionProgressStatesEqual(previousState, nextState),
     ).toBe(false);
+  });
+
+  it("tracks distance missions with the same accumulated-progress contract", () => {
+    const nextState = reconcilePersistentCounterMissionProgress({
+      missions: [
+        buildMission({
+          id: 9,
+          title: "Distancia do mes",
+          metric_type: "distance_meters",
+          metric_value: 12000,
+          metric_unit: "m",
+          goal: "Acumule distancia no mes",
+          progress_value: 4000,
+          updated_at: "2026-04-03T22:00:00.000Z",
+        }),
+      ],
+      metricsDate: "2026-04-04",
+      stepsValue: 0,
+      distanceMetersValue: 1800,
+      state: {},
+    });
+
+    expect(nextState).toEqual({
+      9: {
+        metricsDate: "2026-04-04",
+        metricType: "distance_meters",
+        lastMetricValue: 1800,
+        progressValue: 5800,
+      },
+    });
   });
 });

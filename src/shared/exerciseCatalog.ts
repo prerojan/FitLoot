@@ -494,6 +494,88 @@ function resolveCanonicalExerciseTargetMuscleLabels(
   return labels;
 }
 
+function resolveCanonicalExerciseTargetKey(
+  entry: SupplementalExerciseCatalogEntry | null,
+): string | null {
+  if (!entry) return null;
+
+  const normalizedKeys = entry.muscles.map((muscle) => normalizeExerciseMuscleKey(muscle));
+  const hasFullBody = normalizedKeys.includes("full body");
+  const hasCardio = normalizedKeys.includes("cardio");
+  const hasUpperBodyWork = normalizedKeys.some((key) => UPPER_BODY_TARGET_KEYS.has(key));
+  const hasLowerBodyWork = normalizedKeys.some((key) => LOWER_BODY_TARGET_KEYS.has(key));
+
+  if (hasFullBody && hasCardio && hasUpperBodyWork && hasLowerBodyWork) {
+    return "full body";
+  }
+
+  const prioritizedKeys = normalizedKeys
+    .filter((key) => !GENERIC_EXERCISE_TARGET_KEYS.has(key) && mapExerciseMuscleKeyToPt(key) !== null)
+    .sort((left, right) => {
+      const leftPriority = CANONICAL_EXERCISE_TARGET_PRIORITY.get(left) ?? 999;
+      const rightPriority = CANONICAL_EXERCISE_TARGET_PRIORITY.get(right) ?? 999;
+      return leftPriority - rightPriority;
+    });
+
+  if (prioritizedKeys.length > 0) {
+    return prioritizedKeys[0] ?? null;
+  }
+
+  if (normalizedKeys.includes("waist") || normalizedKeys.includes("abs")) {
+    return "waist";
+  }
+  if (hasLowerBodyWork) {
+    return "legs";
+  }
+  if (hasUpperBodyWork) {
+    return "upper body";
+  }
+  if (hasFullBody) {
+    return "full body";
+  }
+
+  return null;
+}
+
+function resolveCanonicalExerciseBodyPart(
+  entry: SupplementalExerciseCatalogEntry | null,
+): string | null {
+  if (!entry) return null;
+
+  const normalizedKeys = entry.muscles.map((muscle) => normalizeExerciseMuscleKey(muscle));
+  const hasFullBody = normalizedKeys.includes("full body");
+  const hasUpperBodyWork = normalizedKeys.some((key) => UPPER_BODY_TARGET_KEYS.has(key));
+  const hasLowerBodyWork = normalizedKeys.some((key) => LOWER_BODY_TARGET_KEYS.has(key));
+  const hasCoreWork = normalizedKeys.includes("waist") || normalizedKeys.includes("abs") || normalizedKeys.includes("core");
+
+  if (hasFullBody && hasUpperBodyWork && hasLowerBodyWork) {
+    return "full body";
+  }
+  if (hasCoreWork && !hasUpperBodyWork && !hasLowerBodyWork) {
+    return "waist";
+  }
+  if (hasLowerBodyWork && !hasUpperBodyWork) {
+    return "lower body";
+  }
+  if (hasUpperBodyWork && !hasLowerBodyWork) {
+    return "upper body";
+  }
+  if (hasFullBody) {
+    return "full body";
+  }
+
+  return null;
+}
+
+function resolveRouteMissionActivityKindFromEntry(
+  entry: SupplementalExerciseCatalogEntry | null,
+): "walking" | "running" | null {
+  if (!entry) return null;
+  if (entry.slug === "walking-active") return "walking";
+  if (entry.slug === "running-light") return "running";
+  return null;
+}
+
 function isStrictSupportedMissionExerciseEntry(
   entry: SupplementalExerciseCatalogEntry | null,
 ): entry is StrictSupportedMissionExerciseEntry {
@@ -675,6 +757,48 @@ export function resolveExerciseTargetMuscleLabels(
     resolveStrictSupportedMissionExerciseEntry(value)
     ?? resolveSupportedRouteMissionExerciseEntry(value);
   return resolveCanonicalExerciseTargetMuscleLabels(supportedEntry);
+}
+
+export function resolveExerciseCatalogTargetById(
+  exerciseDbId: string | null | undefined,
+): string | null {
+  const catalogEntry = resolveCatalogEntryByExerciseDbId(exerciseDbId);
+  const supportedEntry = resolveReplacementEntry(catalogEntry);
+  return resolveCanonicalExerciseTargetKey(supportedEntry ?? catalogEntry);
+}
+
+export function resolveExerciseCatalogTarget(
+  value: string | null | undefined,
+): string | null {
+  const supportedEntry =
+    resolveStrictSupportedMissionExerciseEntry(value)
+    ?? resolveSupportedRouteMissionExerciseEntry(value);
+  return resolveCanonicalExerciseTargetKey(supportedEntry);
+}
+
+export function resolveExerciseCatalogBodyPartById(
+  exerciseDbId: string | null | undefined,
+): string | null {
+  const catalogEntry = resolveCatalogEntryByExerciseDbId(exerciseDbId);
+  const supportedEntry = resolveReplacementEntry(catalogEntry);
+  return resolveCanonicalExerciseBodyPart(supportedEntry ?? catalogEntry);
+}
+
+export function resolveExerciseCatalogBodyPart(
+  value: string | null | undefined,
+): string | null {
+  const supportedEntry =
+    resolveStrictSupportedMissionExerciseEntry(value)
+    ?? resolveSupportedRouteMissionExerciseEntry(value);
+  return resolveCanonicalExerciseBodyPart(supportedEntry);
+}
+
+export function resolveSupportedRouteMissionActivityKind(
+  value: string | null | undefined,
+): "walking" | "running" | null {
+  return resolveRouteMissionActivityKindFromEntry(
+    resolveSupportedRouteMissionExerciseEntry(value),
+  );
 }
 
 export function resolveExerciseMediaFallbackUrlById(exerciseDbId: string | null | undefined): string | null {

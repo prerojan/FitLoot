@@ -23,7 +23,6 @@ import {
   isDistanceRouteMission,
   resolveDistanceMissionActivityLabel,
 } from "@/react-app/services/distanceMissionRoute";
-import WalkingMissionExecution from "./WalkingMissionExecution";
 import DistanceMissionRoutePreview from "./mission-card/DistanceMissionRoutePreview";
 import { MissionExecutionModal } from "./mission-card/MissionExecutionModal";
 import {
@@ -70,7 +69,6 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
   const { setMissionDetailsOpen, setMissionExecutionOpen } = useAppChrome();
   const [showDetails, setShowDetails] = useState(false);
   const [showExecution, setShowExecution] = useState(false);
-  const [showWalkingExecution, setShowWalkingExecution] = useState(false);
   const [completing, setCompleting] = useState(false);
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [detailsError, setDetailsError] = useState<string | null>(null);
@@ -159,12 +157,12 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
     }
   }, [detailedMission, detailsLoading, hasInlineDetails, mission.id]);
 
-  const completeMission = async (value: number) => {
+  const completeMission = async (value: number, verified = true) => {
     setCompleting(true);
     try {
-      await onComplete(mission.id, value, true);
+      await onComplete(mission.id, value, verified);
       setShowDetails(false);
-      setShowWalkingExecution(false);
+      setShowExecution(false);
     } finally {
       setCompleting(false);
     }
@@ -305,7 +303,7 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
           type="button"
           onClick={() => { 
             if (isTrackableWalkingMission) {
-              setShowWalkingExecution(true);
+              setShowExecution(true);
             } else {
               void openDetails();
             }
@@ -482,7 +480,7 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
         <Button 
           onClick={() => { 
             if (isTrackableWalkingMission) {
-              setShowWalkingExecution(true);
+              setShowExecution(true);
             } else {
               void openDetails();
             }
@@ -790,11 +788,7 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
                     setShowDetails(false);
                   } else {
                     setShowDetails(false);
-                    if (detailIsTrackableWalkingMission) {
-                      setShowWalkingExecution(true);
-                    } else {
-                      setShowExecution(true);
-                    }
+                    setShowExecution(true);
                   }
                 }}
                 className="w-full text-black font-black text-lg py-4 rounded-xl transition-all active:scale-95 flex items-center justify-center gap-3 relative z-10"
@@ -832,15 +826,13 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
         />
       )}
 
-      {/* Routes walking missions to the dedicated tracking experience. */}
-      {showWalkingExecution && detailIsTrackableWalkingMission && (
-        <WalkingMissionExecution
+      {detailIsTrackableWalkingMission && !detailIsAutoProgressMission && (
+        <MissionExecutionModal
           mission={missionDetails}
-          onComplete={async (id, value, verified) => {
-            await onComplete(id, value, verified);
-            setShowWalkingExecution(false);
-          }}
-          onClose={() => setShowWalkingExecution(false)}
+          metricType={detailMetricType}
+          open={showExecution}
+          onClose={() => setShowExecution(false)}
+          onFinish={completeMission}
         />
       )}
 

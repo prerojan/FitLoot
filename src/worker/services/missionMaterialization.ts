@@ -5,8 +5,12 @@ import type {
 } from "../../shared/types";
 import { repairKnownMojibakeString } from "../../shared/textEncoding";
 import {
+  resolveExerciseCatalogBodyPartById,
+  resolveExerciseCatalogTargetById,
   resolveExerciseMediaFallbackUrlById,
+  resolveExerciseTargetMuscleLabelsById,
   isSupportedRouteMissionExercise,
+  resolveSupportedRouteMissionActivityKind,
   resolveStrictSupportedMissionExerciseDbId,
 } from "../../shared/exerciseCatalog";
 import {
@@ -343,14 +347,15 @@ export function createMissionMaterializationService(deps: MissionMaterialization
 
     const metricValue = deps.metricValueByPeriod(metricType, params.period);
     const metricUnit = deps.metricUnitByType(metricType);
+    const routeActivityKind =
+      params.period === "daily"
+        ? resolveSupportedRouteMissionActivityKind(params.exerciseName)
+        : null;
     const isRouteTrackingMission =
       params.period === "daily"
       && metricType === "distance_meters"
-      && (category === "walk" || category === "run");
-    const activityKind =
-      isRouteTrackingMission
-        ? (category === "run" ? "running" : "walking")
-        : null;
+      && routeActivityKind !== null;
+    const activityKind = isRouteTrackingMission ? routeActivityKind : null;
     const sets = metricType === "circuit_tasks" ? null : deps.inferSets(metricType, params.period);
     const restSeconds = metricType === "circuit_tasks" ? null : deps.inferRestSeconds(metricType);
     const bodyArea = deps.inferBodyArea(params.muscle);
@@ -661,15 +666,42 @@ export function createMissionMaterializationService(deps: MissionMaterialization
       withMetric.difficulty_level = blueprint.difficultyLevel;
       withMetric.exercise_name = resolvedExerciseDisplayName;
       withMetric.exercise_db_id = enriched?.id ?? strictExerciseDbId ?? withMetric.exercise_db_id;
+      const canonicalExerciseDbId = withMetric.exercise_db_id;
+      const catalogTarget = resolveExerciseCatalogTargetById(canonicalExerciseDbId);
+      const catalogBodyPart = resolveExerciseCatalogBodyPartById(canonicalExerciseDbId);
+      const catalogTargetLabels = resolveExerciseTargetMuscleLabelsById(canonicalExerciseDbId);
       withMetric.exercise_equipment = enriched?.equipment ?? null;
-      withMetric.exercise_body_part = enriched?.bodyPart ?? null;
-      withMetric.exercise_target = enriched?.target ?? null;
+      withMetric.exercise_body_part =
+        enriched?.bodyPart
+        ?? catalogBodyPart
+        ?? withMetric.exercise_body_part
+        ?? null;
+      withMetric.exercise_target =
+        enriched?.target
+        ?? catalogTarget
+        ?? blueprint.muscle
+        ?? withMetric.exercise_target
+        ?? null;
       withMetric.exercise_secondary_muscles = deps.mergeUniqueStrings(Array.isArray(enriched?.secondaryMuscles) ? enriched.secondaryMuscles : [], 8);
-      withMetric.muscle_groups = deps.resolveExerciseApiMuscleGroups(enriched);
-      withMetric.body_area = deps.resolveExerciseApiBodyArea(enriched, blueprint.muscle);
+      withMetric.muscle_groups = (() => {
+        const resolvedGroups = deps.resolveExerciseApiMuscleGroups(enriched);
+        if (resolvedGroups.length > 0) return resolvedGroups;
+        if (catalogTargetLabels.length > 0) return catalogTargetLabels;
+        return [blueprint.muscle].filter((value) => value.trim().length > 0);
+      })();
+      withMetric.body_area = deps.resolveExerciseApiBodyArea(
+        enriched,
+        withMetric.exercise_target ?? blueprint.muscle,
+      );
       withMetric.exercise_db_gif_url = enriched?.exerciseDbGifUrl ?? strictExerciseGifUrl ?? withMetric.exercise_db_gif_url;
       withMetric.exercise_db_image_url = enriched?.exerciseDbImageUrl ?? strictExerciseGifUrl ?? withMetric.exercise_db_image_url;
       withMetric.image_url = enriched?.imageUrl ?? strictExerciseGifUrl ?? withMetric.image_url;
+      const routeActivityKind = resolveSupportedRouteMissionActivityKind(supportedExerciseName);
+      const isRouteTrackingMission =
+        withMetric.metric_type === "distance_meters"
+        && routeActivityKind !== null;
+      withMetric.execution_mode = isRouteTrackingMission ? "route_tracking" : "standard";
+      withMetric.activity_kind = isRouteTrackingMission ? routeActivityKind : null;
       return withMetric;
     }
 

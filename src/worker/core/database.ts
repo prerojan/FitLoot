@@ -25,7 +25,11 @@ const BETA_BASELINE_TABLE_COLUMNS = new Map<string, Set<string>>([
   ],
   [
     "missions",
-    new Set(["id", "user_id", "type", "title", "description", "skill_id", "metric_type", "metric_value", "progress_value", "goal", "status", "is_ai_special", "exercise_db_id", "cycle_date", "target_reps", "target_time", "is_completed", "deadline", "created_at", "updated_at"]),
+    new Set(["id", "user_id", "type", "title", "description", "skill_id", "metric_type", "metric_value", "progress_value", "goal", "status", "is_ai_special", "exercise_db_id", "cycle_date", "execution_mode", "activity_kind", "target_reps", "target_time", "is_completed", "deadline", "created_at", "updated_at"]),
+  ],
+  [
+    "daily_metrics",
+    new Set(["id", "user_id", "date", "steps", "calories_burned", "distance_meters", "created_at", "updated_at"]),
   ],
   [
     "skills",

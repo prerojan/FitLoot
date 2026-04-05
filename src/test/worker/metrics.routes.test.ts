@@ -88,6 +88,7 @@ describe("metrics routes", () => {
         body: {
           steps: 5400,
           calories_burned: 320,
+          distance_meters: 1250,
         },
       }),
       env,

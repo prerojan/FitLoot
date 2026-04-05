@@ -1,16 +1,29 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import {
+  Activity,
   CheckCircle2,
+  Clock3,
   Dumbbell,
   FastForward,
+  Flame,
+  Footprints,
   Info,
+  MapPinned,
   Pause,
   Play,
+  Route,
   Square,
   X,
 } from "lucide-react";
 import LoadingBall from "@/react-app/components/LoadingBall";
 import type { Mission, MissionMetricType } from "@/shared/types";
+import useWalkingMission from "@/react-app/hooks/useWalkingMission";
+import DistanceMissionRoutePreview from "@/react-app/components/mission-card/DistanceMissionRoutePreview";
+import {
+  formatDistanceMissionAmount,
+  resolveDistanceMissionActivityLabel,
+} from "@/react-app/services/distanceMissionRoute";
+import { formatStepsSourceLabel } from "@/react-app/services/native/stepsService";
 import {
   isUnilateralExecutionMission,
   missionTotalGoal,
@@ -49,8 +62,352 @@ type MissionExecutionModalProps = {
   metricType: MissionMetricType;
   open: boolean;
   onClose: () => void;
-  onFinish: (value: number) => Promise<void>;
+  onFinish: (value: number, verified?: boolean) => Promise<void>;
 };
+
+type RouteMissionExecutionModalProps = Pick<
+  MissionExecutionModalProps,
+  "mission" | "open" | "onClose" | "onFinish"
+>;
+
+function renderRouteMetricCard(
+  icon: ReactNode,
+  label: string,
+  value: string,
+  helper: string,
+) {
+  return (
+    <div
+      className="rounded-2xl border p-4"
+      style={{
+        backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 82%, transparent)",
+        borderColor: "var(--fl-border-soft)",
+      }}
+    >
+      <div className="mb-3 flex items-center gap-2">
+        <div
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full"
+          style={{ backgroundColor: "color-mix(in srgb, var(--app-primary-color) 14%, transparent)" }}
+        >
+          {icon}
+        </div>
+        <div className="min-w-0">
+          <p className="text-[10px] font-bold uppercase tracking-[0.24em]" style={{ color: "var(--app-primary-color)" }}>
+            {label}
+          </p>
+          <p className="truncate text-lg font-bold" style={{ color: "var(--fl-color-text)" }}>
+            {value}
+          </p>
+        </div>
+      </div>
+      <p className="text-xs leading-relaxed" style={{ color: "var(--fl-color-text-muted)" }}>
+        {helper}
+      </p>
+    </div>
+  );
+}
+
+function RouteMissionExecutionModal({
+  mission,
+  open,
+  onClose,
+  onFinish,
+}: RouteMissionExecutionModalProps) {
+  const {
+    state,
+    progress,
+    formattedTime,
+    startExecution,
+    togglePause,
+    completeMission,
+    cancelExecution,
+    isDistanceMission,
+    healthData,
+    canStart,
+    canPause,
+    canResume,
+    canComplete,
+  } = useWalkingMission({
+    mission,
+    onComplete: async (_id, value, verified) => {
+      await onFinish(value, verified);
+      onClose();
+    },
+  });
+
+  if (!open) return null;
+
+  const executionTitle = resolveMissionDisplayTitle(mission.title);
+  const activityLabel = resolveDistanceMissionActivityLabel(mission);
+  const distanceLabel = formatDistanceMissionAmount(state.currentDistance);
+  const targetDistanceLabel = formatDistanceMissionAmount(state.targetDistance);
+  const sourceLabel = formatStepsSourceLabel(healthData?.source);
+  const locationLabel =
+    state.locationPrecision === "approximate"
+      ? "Localização aproximada"
+      : state.locationPrecision === "precise"
+        ? "Localização precisa"
+        : "Localização indisponível";
+  const sessionXp = Math.max(0, Math.round((mission.xp_reward * Math.min(100, progress)) / 100));
+  const statusLabel = state.isCompleted
+    ? "Concluída"
+    : state.isPaused
+      ? "Pausada"
+      : state.isRunning
+        ? "Em andamento"
+        : "Pronta";
+
+  const handleClose = () => {
+    cancelExecution();
+    onClose();
+  };
+
+  const handlePrimaryComplete = () => {
+    void completeMission(isDistanceMission ? state.currentDistance : state.currentSteps);
+  };
+
+  return (
+    <div className="fl-z-mission-screen fixed inset-0 flex flex-col overflow-x-hidden font-display antialiased min-w-0" style={{ backgroundColor: "var(--app-bg-color)", color: "var(--fl-color-text)" }}>
+      <div className="layout-container flex h-full grow flex-col min-w-0">
+        <header className="flex items-center justify-between border-b px-3 py-2 sm:px-4 sm:py-3 md:px-6 md:py-4" style={{ borderColor: "var(--fl-border-soft)" }}>
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+            <div className="flex size-7 sm:size-8 items-center justify-center rounded shrink-0" style={{ backgroundColor: "var(--app-primary-color)", color: "var(--fl-nav-item-active-text)" }}>
+              <Dumbbell className="w-4 h-4 sm:w-5 sm:h-5" strokeWidth={2.5} />
+            </div>
+            <h2 className="text-lg sm:text-xl font-bold tracking-tight truncate">FitLoot</h2>
+          </div>
+          <button type="button" className="flex size-8 sm:size-10 items-center justify-center rounded-full border transition-opacity hover:opacity-80" onClick={handleClose} style={{ backgroundColor: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)", color: "var(--app-primary-color)", borderColor: "color-mix(in srgb, var(--app-primary-color) 20%, transparent)" }}>
+            <X className="w-4 h-4 sm:w-5 sm:h-5" />
+          </button>
+        </header>
+
+        <main className="flex-1 max-w-5xl mx-auto w-full px-3 py-4 sm:px-6 sm:py-8 flex flex-col min-w-0">
+          <div className="mb-6 sm:mb-8">
+            <div className="flex justify-between items-end mb-2 sm:mb-3 gap-2">
+              <div className="min-w-0 overflow-hidden">
+                <p className="text-[10px] sm:text-xs md:text-sm font-medium uppercase tracking-widest truncate" style={{ color: "var(--app-primary-color)" }}>Missão Ativa</p>
+                <h1 className="text-lg sm:text-xl md:text-2xl lg:text-3xl font-bold mt-0.5 sm:mt-1 truncate">{executionTitle}</h1>
+                <p className="text-xs sm:text-sm mt-2 truncate" style={{ color: "var(--fl-color-text-muted)" }}>
+                  {activityLabel} com rota sugerida e monitoramento da sessão
+                </p>
+              </div>
+              <p className="text-base sm:text-lg md:text-xl font-bold shrink-0" style={{ color: "var(--app-primary-color)" }}>{Math.round(progress)}%</p>
+            </div>
+            <div className="h-3 w-full overflow-hidden rounded-full" style={{ backgroundColor: "color-mix(in srgb, var(--fl-color-text) 8%, transparent)" }}>
+              <div
+                className="h-full rounded-full transition-all duration-500"
+                style={{
+                  width: `${Math.min(100, progress)}%`,
+                  backgroundColor: "var(--app-primary-color)",
+                  boxShadow: "0 0 15px color-mix(in srgb, var(--app-primary-color) 50%, transparent)",
+                }}
+              />
+            </div>
+          </div>
+
+          {state.error ? (
+            <div
+              className="mb-4 rounded-2xl border px-4 py-3 text-sm font-medium"
+              style={{
+                backgroundColor: "color-mix(in srgb, #ef4444 12%, transparent)",
+                borderColor: "color-mix(in srgb, #ef4444 28%, transparent)",
+                color: "#991b1b",
+              }}
+            >
+              {state.error}
+            </div>
+          ) : null}
+
+          <div className="grid gap-6 lg:grid-cols-[minmax(0,1.45fr)_minmax(18rem,1fr)]">
+            <div className="min-w-0">
+              <DistanceMissionRoutePreview
+                mission={mission}
+                variant="execution"
+                loadStrategy="eager"
+                showStats={false}
+              >
+                <div className="absolute inset-x-4 top-4 flex items-start justify-between gap-3">
+                  <div className="max-w-[70%] rounded-2xl border border-white/14 bg-black/34 px-4 py-3 text-white backdrop-blur-md">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-white/72">{activityLabel}</p>
+                    <p className="mt-1 text-lg font-black leading-tight">{targetDistanceLabel}</p>
+                    <p className="mt-1 text-xs text-white/78">Meta monitorada por rota e progresso oficial.</p>
+                  </div>
+                  <span className="rounded-full border border-white/14 bg-black/40 px-3 py-2 text-xs font-semibold text-white backdrop-blur-md">
+                    {statusLabel}
+                  </span>
+                </div>
+
+                <div className="absolute inset-x-4 bottom-4 rounded-[28px] border border-white/14 bg-black/42 p-4 text-white backdrop-blur-md">
+                  <div className="mb-3 flex items-center justify-between gap-4 text-xs font-semibold text-white/78">
+                    <span>Progresso da missão</span>
+                    <span>{progress.toFixed(1)}%</span>
+                  </div>
+                  <div className="mb-4 h-2.5 overflow-hidden rounded-full bg-white/16">
+                    <div
+                      className="h-full rounded-full transition-all duration-500"
+                      style={{
+                        width: `${Math.min(100, progress)}%`,
+                        background: "linear-gradient(90deg, var(--app-primary-color), color-mix(in srgb, var(--app-primary-color) 45%, white))",
+                      }}
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                    <div>
+                      <p className="text-[10px] uppercase tracking-[0.2em] text-white/62">Tempo</p>
+                      <p className="mt-1 text-sm font-bold">{formattedTime}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] uppercase tracking-[0.2em] text-white/62">Distância</p>
+                      <p className="mt-1 text-sm font-bold">{distanceLabel}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] uppercase tracking-[0.2em] text-white/62">Passos</p>
+                      <p className="mt-1 text-sm font-bold">{state.currentSteps.toLocaleString("pt-BR")}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] uppercase tracking-[0.2em] text-white/62">Calorias</p>
+                      <p className="mt-1 text-sm font-bold">{state.currentCalories.toLocaleString("pt-BR")}</p>
+                    </div>
+                  </div>
+                </div>
+              </DistanceMissionRoutePreview>
+            </div>
+
+            <div className="space-y-4">
+              {renderRouteMetricCard(
+                <Clock3 className="h-5 w-5" style={{ color: "var(--app-primary-color)" }} />,
+                "Tempo",
+                formattedTime,
+                "Cronômetro da sessão atual, pausando junto com o rastreamento.",
+              )}
+              {renderRouteMetricCard(
+                <Route className="h-5 w-5" style={{ color: "var(--app-primary-color)" }} />,
+                "Distância",
+                `${distanceLabel} / ${targetDistanceLabel}`,
+                "A distância desta missão é acumulada somente pela sessão ativa.",
+              )}
+              {renderRouteMetricCard(
+                <Footprints className="h-5 w-5" style={{ color: "var(--app-primary-color)" }} />,
+                "Passos",
+                state.currentSteps.toLocaleString("pt-BR"),
+                "Passos consolidados do dispositivo durante a execução.",
+              )}
+              {renderRouteMetricCard(
+                <Flame className="h-5 w-5" style={{ color: "var(--app-primary-color)" }} />,
+                "Calorias",
+                state.currentCalories.toLocaleString("pt-BR"),
+                "Estimativa energética acompanhando a mesma sessão monitorada.",
+              )}
+            </div>
+          </div>
+
+          <div className="mt-6 grid gap-4 lg:grid-cols-2">
+            <div
+              className="rounded-2xl border p-4"
+              style={{
+                backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 82%, transparent)",
+                borderColor: "var(--fl-border-soft)",
+              }}
+            >
+              <div className="mb-3 flex items-center gap-2">
+                <MapPinned className="h-5 w-5" style={{ color: "var(--app-primary-color)" }} />
+                <h3 className="text-sm font-bold uppercase tracking-[0.2em]" style={{ color: "var(--app-primary-color)" }}>
+                  Sessão
+                </h3>
+              </div>
+              <div className="grid gap-3 text-sm sm:grid-cols-3">
+                <div>
+                  <p style={{ color: "var(--fl-color-text-muted)" }}>Status</p>
+                  <p className="mt-1 font-semibold" style={{ color: "var(--fl-color-text)" }}>{statusLabel}</p>
+                </div>
+                <div>
+                  <p style={{ color: "var(--fl-color-text-muted)" }}>Fonte</p>
+                  <p className="mt-1 font-semibold" style={{ color: "var(--fl-color-text)" }}>{sourceLabel}</p>
+                </div>
+                <div>
+                  <p style={{ color: "var(--fl-color-text-muted)" }}>Precisão</p>
+                  <p className="mt-1 font-semibold" style={{ color: "var(--fl-color-text)" }}>{locationLabel}</p>
+                </div>
+              </div>
+              {healthData?.lastUpdated ? (
+                <p className="mt-4 text-xs" style={{ color: "var(--fl-color-text-muted)" }}>
+                  Última atualização das métricas: {new Date(healthData.lastUpdated).toLocaleTimeString("pt-BR")}
+                </p>
+              ) : null}
+            </div>
+
+            <div
+              className="rounded-2xl border p-4"
+              style={{
+                backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 82%, transparent)",
+                borderColor: "var(--fl-border-soft)",
+              }}
+            >
+              <div className="mb-3 flex items-center gap-2">
+                <Activity className="h-5 w-5" style={{ color: "var(--app-primary-color)" }} />
+                <h3 className="text-sm font-bold uppercase tracking-[0.2em]" style={{ color: "var(--app-primary-color)" }}>
+                  Meta da missão
+                </h3>
+              </div>
+              <p className="text-2xl font-black leading-tight" style={{ color: "var(--fl-color-text)" }}>
+                {isDistanceMission ? targetDistanceLabel : `${state.targetSteps.toLocaleString("pt-BR")} passos`}
+              </p>
+              <p className="mt-2 text-sm leading-relaxed" style={{ color: "var(--fl-color-text-muted)" }}>
+                O mapa é a mídia principal da missão, mantendo o mesmo fluxo visual e validando a execução pela sessão real.
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2 sm:gap-4 mt-auto pt-6 sm:pt-8 min-w-0">
+            <button
+              type="button"
+              className="col-span-2 h-12 sm:h-16 rounded-xl sm:rounded-2xl font-bold text-base sm:text-xl flex items-center justify-center gap-2 shadow-lg active:scale-[0.98] transition-all disabled:opacity-50 disabled:grayscale"
+              style={{ backgroundColor: "var(--app-primary-color)", color: "var(--fl-nav-item-active-text)", boxShadow: "0 10px 15px -3px color-mix(in srgb, var(--app-primary-color) 20%, transparent)" }}
+              onClick={canStart ? () => { void startExecution(); } : handlePrimaryComplete}
+              disabled={!canStart && !canComplete}
+            >
+              {canStart ? (
+                <Play className="w-5 h-5 sm:w-6 sm:h-6 fill-current" strokeWidth={1} />
+              ) : (
+                <CheckCircle2 className="w-5 h-5 sm:w-6 sm:h-6" />
+              )}
+              {canStart
+                ? `INICIAR ${activityLabel.toUpperCase()}`
+                : state.isCompleted
+                  ? "MISSÃO CONCLUÍDA"
+                  : "REGISTRAR CONCLUSÃO"}
+            </button>
+
+            <button
+              type="button"
+              className="h-10 sm:h-14 rounded-xl sm:rounded-2xl font-bold text-xs sm:text-sm md:text-base flex items-center justify-center gap-1 sm:gap-2 border transition-colors active:scale-95 hover:bg-white/10 truncate disabled:opacity-50"
+              style={{ backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 82%, transparent)", borderColor: "var(--fl-border-soft)", color: "var(--fl-color-text-muted)" }}
+              onClick={togglePause}
+              disabled={(!canPause && !canResume) || state.isCompleted}
+            >
+              {canResume ? <Play className="w-4 h-4 sm:w-5 sm:h-5 fill-current shrink-0" strokeWidth={1} /> : <Pause className="w-4 h-4 sm:w-5 sm:h-5 fill-current shrink-0" strokeWidth={1} />}
+              <span className="truncate">{canResume ? "RETOMAR" : "PAUSAR"}</span>
+            </button>
+
+            <button
+              type="button"
+              className="h-10 sm:h-14 rounded-xl sm:rounded-2xl font-bold text-xs sm:text-sm md:text-base flex items-center justify-center gap-1 sm:gap-2 border transition-colors active:scale-95 truncate"
+              style={{ backgroundColor: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)", borderColor: "color-mix(in srgb, var(--app-primary-color) 22%, transparent)", color: "var(--app-primary-color)" }}
+              onClick={handleClose}
+            >
+              <X className="w-4 h-4 shrink-0" />
+              <span className="truncate">FECHAR</span>
+            </button>
+          </div>
+        </main>
+
+        <footer className="mt-auto py-3 sm:py-6 flex justify-center uppercase tracking-[0.2em] sm:tracking-[0.3em] font-medium" style={{ color: "var(--fl-color-text-muted)", fontSize: 0 }}>
+          <span className="text-[9px] sm:text-[10px]">Loot desta sessão: {sessionXp} / {mission.xp_reward} XP</span>
+        </footer>
+      </div>
+    </div>
+  );
+}
 
 export function MissionExecutionModal({
   mission,
@@ -59,6 +416,20 @@ export function MissionExecutionModal({
   onClose,
   onFinish,
 }: MissionExecutionModalProps) {
+  const isRouteTrackingMission =
+    mission.execution_mode === "route_tracking"
+    && (mission.activity_kind === "walking" || mission.activity_kind === "running");
+  if (isRouteTrackingMission) {
+    return (
+      <RouteMissionExecutionModal
+        mission={mission}
+        open={open}
+        onClose={onClose}
+        onFinish={onFinish}
+      />
+    );
+  }
+
   const [state, setState] = useState<MissionExecutionState>(DEFAULT_EXECUTION_STATE);
   const [videoVisibleControls, setVideoVisibleControls] = useState(false);
   const [finishing, setFinishing] = useState(false);

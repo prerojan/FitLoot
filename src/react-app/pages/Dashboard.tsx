@@ -42,7 +42,7 @@ import {
   PRIMARY_GLOW_STYLE,
   STEPS_TARGET,
   SUBTLE_PANEL_STYLE,
-  arePersistentStepMissionProgressStatesEqual,
+  arePersistentCounterMissionProgressStatesEqual,
   buildCenteredDates,
   capitalizeLabel,
   clamp,
@@ -50,12 +50,12 @@ import {
   formatDateKey,
   formatNumber,
   isMissionCompleted,
-  isStepProgressMission,
-  readPersistentStepMissionProgressState,
-  reconcilePersistentStepMissionProgress,
+  isCounterProgressMission,
+  readPersistentCounterMissionProgressState,
+  reconcilePersistentCounterMissionProgress,
   sortMissions,
-  type PersistentStepMissionProgressState,
-  writePersistentStepMissionProgressState,
+  type PersistentCounterMissionProgressState,
+  writePersistentCounterMissionProgressState,
 } from "@/react-app/pages/dashboardUtils";
 import { navigateProtectedRoute } from "@/react-app/services/appNavigation";
 import { consumeActivationNotice, type ActivationNotice } from "@/react-app/utils/activationNotice";
@@ -137,8 +137,8 @@ export default function Dashboard() {
   const quickActionsRef = useRef<HTMLDivElement | null>(null);
   const missionsRef = useRef<Mission[]>([]);
   const [activationNotice, setActivationNotice] = useState<ActivationNotice | null>(null);
-  const [persistentStepMissionProgress, setPersistentStepMissionProgress] =
-    useState<PersistentStepMissionProgressState>({});
+  const [persistentCounterMissionProgress, setPersistentCounterMissionProgress] =
+    useState<PersistentCounterMissionProgressState>({});
   const { metrics: consolidatedMetrics, loading: metricsLoading, refreshMetrics } = useDailyMetrics({ syncRemote: true });
 
   useEffect(() => {
@@ -321,8 +321,8 @@ export default function Dashboard() {
   }, [missions]);
 
   useEffect(() => {
-    setPersistentStepMissionProgress(
-      readPersistentStepMissionProgressState(user?.id),
+    setPersistentCounterMissionProgress(
+      readPersistentCounterMissionProgressState(user?.id),
     );
   }, [user?.id]);
 
@@ -462,6 +462,7 @@ export default function Dashboard() {
   }, [pushRewardNotifications, refreshData, user?.id]);
 
   const stepsValue = consolidatedMetrics?.steps ?? 0;
+  const distanceMetersValue = Math.max(0, Math.round(consolidatedMetrics?.distanceMeters ?? 0));
   const caloriesValue = consolidatedMetrics?.caloriesBurned ?? 0;
   const stepsProgress = clamp((stepsValue / STEPS_TARGET) * 100, 0, 100);
 
@@ -471,30 +472,31 @@ export default function Dashboard() {
     }
 
     const metricsDate = consolidatedMetrics?.dailyMetrics.date ?? formatDateKey(new Date());
-    setPersistentStepMissionProgress((current) => {
-      const nextState = reconcilePersistentStepMissionProgress({
+    setPersistentCounterMissionProgress((current) => {
+      const nextState = reconcilePersistentCounterMissionProgress({
         missions,
         metricsDate,
         stepsValue,
+        distanceMetersValue,
         state: current,
       });
 
-      if (arePersistentStepMissionProgressStatesEqual(current, nextState)) {
+      if (arePersistentCounterMissionProgressStatesEqual(current, nextState)) {
         return current;
       }
 
-      writePersistentStepMissionProgressState(user?.id, nextState);
+      writePersistentCounterMissionProgressState(user?.id, nextState);
       return nextState;
     });
-  }, [consolidatedMetrics?.dailyMetrics.date, metricsLoading, missions, stepsValue, user?.id]);
+  }, [consolidatedMetrics?.dailyMetrics.date, distanceMetersValue, metricsLoading, missions, stepsValue, user?.id]);
 
-  const missionsWithLiveStepProgress = useMemo(() => {
+  const missionsWithLiveCounterProgress = useMemo(() => {
     return missions.map((mission) => {
-      if (!isStepProgressMission(mission) || mission.is_completed === 1) {
+      if (!isCounterProgressMission(mission) || mission.is_completed === 1) {
         return mission;
       }
 
-      const liveProgressEntry = persistentStepMissionProgress[Number(mission.id)];
+      const liveProgressEntry = persistentCounterMissionProgress[Number(mission.id)];
       if (!liveProgressEntry) {
         return mission;
       }
@@ -520,43 +522,43 @@ export default function Dashboard() {
         ),
       };
     });
-  }, [missions, persistentStepMissionProgress]);
+  }, [missions, persistentCounterMissionProgress]);
 
   const allDailyMissions = useMemo(
     () => sortMissions(
-      missionsWithLiveStepProgress.filter(
+      missionsWithLiveCounterProgress.filter(
         (mission) =>
           mission.type === "daily" &&
           !isAiSpecialMission(mission) &&
           !isExpiredMission(mission),
       ),
     ),
-    [isAiSpecialMission, isExpiredMission, missionsWithLiveStepProgress],
+    [isAiSpecialMission, isExpiredMission, missionsWithLiveCounterProgress],
   );
   const visibleDailyMissions = useMemo(() => allDailyMissions.slice(0, 3), [allDailyMissions]);
   const aiSpecialMissions = useMemo(
     () =>
       sortMissions(
-        missionsWithLiveStepProgress.filter(
+        missionsWithLiveCounterProgress.filter(
           (mission) =>
             isAiSpecialMission(mission) &&
             mission.is_completed !== 1 &&
             !isExpiredMission(mission),
         ),
       ),
-    [isAiSpecialMission, isExpiredMission, missionsWithLiveStepProgress],
+    [isAiSpecialMission, isExpiredMission, missionsWithLiveCounterProgress],
   );
   const weeklyMissions = useMemo(
-    () => sortMissions(missionsWithLiveStepProgress.filter((mission) => mission.type === "weekly" && mission.is_completed !== 1 && !isExpiredMission(mission) && !isAiSpecialMission(mission))),
-    [isAiSpecialMission, isExpiredMission, missionsWithLiveStepProgress],
+    () => sortMissions(missionsWithLiveCounterProgress.filter((mission) => mission.type === "weekly" && mission.is_completed !== 1 && !isExpiredMission(mission) && !isAiSpecialMission(mission))),
+    [isAiSpecialMission, isExpiredMission, missionsWithLiveCounterProgress],
   );
   const monthlyMissions = useMemo(
-    () => sortMissions(missionsWithLiveStepProgress.filter((mission) => mission.type === "monthly" && mission.is_completed !== 1 && !isExpiredMission(mission) && !isAiSpecialMission(mission))),
-    [isAiSpecialMission, isExpiredMission, missionsWithLiveStepProgress],
+    () => sortMissions(missionsWithLiveCounterProgress.filter((mission) => mission.type === "monthly" && mission.is_completed !== 1 && !isExpiredMission(mission) && !isAiSpecialMission(mission))),
+    [isAiSpecialMission, isExpiredMission, missionsWithLiveCounterProgress],
   );
   const expiredMissions = useMemo(
-    () => sortMissions(missionsWithLiveStepProgress.filter((mission) => isExpiredMission(mission) && mission.is_completed !== 1 && !isAiSpecialMission(mission))),
-    [isAiSpecialMission, isExpiredMission, missionsWithLiveStepProgress],
+    () => sortMissions(missionsWithLiveCounterProgress.filter((mission) => isExpiredMission(mission) && mission.is_completed !== 1 && !isAiSpecialMission(mission))),
+    [isAiSpecialMission, isExpiredMission, missionsWithLiveCounterProgress],
   );
   const expiredMissionRefreshDelay = useMemo(
     () => resolveExpiredMissionRefreshDelay(expiredMissions),

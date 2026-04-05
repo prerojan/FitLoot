@@ -44,6 +44,8 @@ export type MissionPayload = {
   points_reward: number;
   duration_estimate_minutes: number | null;
   exercise_category: MissionExerciseCategory;
+  execution_mode?: "standard" | "route_tracking";
+  activity_kind?: "walking" | "running" | null;
   mission_origin: "regular" | "ai";
   is_ai_special?: number;
   circuit_tasks: CircuitTask[];

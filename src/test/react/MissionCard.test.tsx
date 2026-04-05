@@ -12,16 +12,16 @@ const { apiMock, chromeState } = vi.hoisted(() => ({
   },
 }));
 
-vi.mock("../../react-app/utils/api", () => ({
-  api: apiMock,
-}));
+vi.mock("../../react-app/utils/api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../react-app/utils/api")>();
+  return {
+    ...actual,
+    api: apiMock,
+  };
+});
 
 vi.mock("../../react-app/contexts/appChrome", () => ({
   useAppChrome: () => chromeState,
-}));
-
-vi.mock("../../react-app/components/WalkingMissionExecution", () => ({
-  default: () => <div>Walking mission modal</div>,
 }));
 
 vi.mock("../../react-app/components/mission-card/DistanceMissionRoutePreview", () => ({

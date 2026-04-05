@@ -141,7 +141,7 @@ describe("mission routes", () => {
         all: [],
       },
       {
-        match: "SELECT m.*, NULL as skill_name FROM missions m",
+        match: "SELECT m.*, s.name as skill_name FROM missions m",
         all: [],
       },
     ]);
@@ -220,7 +220,7 @@ describe("mission routes", () => {
         all: [],
       },
       {
-        match: "SELECT m.*, NULL as skill_name FROM missions m",
+        match: "SELECT m.*, s.name as skill_name FROM missions m",
         all: [],
       },
     ]);
@@ -259,7 +259,7 @@ describe("mission routes", () => {
         all: [],
       },
       {
-        match: "SELECT m.*, NULL as skill_name FROM missions m",
+        match: "SELECT m.*, s.name as skill_name FROM missions m",
         all: [
           {
             id: 41,
@@ -333,7 +333,7 @@ describe("mission routes", () => {
         all: [],
       },
       {
-        match: "SELECT m.*, NULL as skill_name FROM missions m",
+        match: "SELECT m.*, s.name as skill_name FROM missions m",
         all: [
           {
             id: 43,

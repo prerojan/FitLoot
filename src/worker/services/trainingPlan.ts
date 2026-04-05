@@ -124,9 +124,9 @@ function buildStaticWeeklyPlan(mainGoal: string | null | undefined): TrainingPla
     },
     domingo: {
       focus: "rest",
-      muscles: ["walk", "stretching"],
+      muscles: ["full body", "mobility"],
       intensity: "leve",
-      exercises: ["Walking", "Stretching"],
+      exercises: ["Walking", "Mobility Flow", "Stretching"],
       rest_day: true,
     },
   };
@@ -421,7 +421,7 @@ function resolveMusclesForFocus(focus: string): string[] {
     case "active_recovery":
       return ["full body", "mobility"];
     case "rest":
-      return ["walk", "stretching"];
+      return ["full body", "mobility"];
     case "conditioning":
     case "skill":
     case "optional":
@@ -511,10 +511,10 @@ async function buildRapidInitialTrainingPlan(
     if (exerciseNames.length === 0) {
       weekly[weekday] = {
         focus: "rest",
-        muscles: ["walk", "stretching"],
+        muscles: ["full body", "mobility"],
         intensity: "leve",
         exercises: sanitizeMissionExerciseNames({
-          requestedNames: ["Walking", "Stretching"],
+          requestedNames: ["Walking", "Mobility Flow", "Stretching"],
           focus: "rest",
           limit: 3,
           fallbackOrder: ["focus", "catalog"],

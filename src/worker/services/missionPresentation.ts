@@ -39,6 +39,8 @@ export type NormalizedMissionComputedFields = {
   exercise_db_image_url: string | null;
   duration_estimate_minutes: number | undefined;
   exercise_category: string;
+  execution_mode: "standard" | "route_tracking" | undefined;
+  activity_kind: "walking" | "running" | null | undefined;
   difficulty_level: string | undefined;
   video_url: string | null;
   thumbnail_url: string | null;
@@ -470,6 +472,16 @@ export function createMissionPresentationService({
         typeof rawMission.exercise_category === "string"
           ? rawMission.exercise_category
           : "default",
+      execution_mode:
+        rawMission.execution_mode === "route_tracking"
+          ? "route_tracking"
+          : rawMission.execution_mode === "standard"
+            ? "standard"
+            : undefined,
+      activity_kind:
+        rawMission.activity_kind === "walking" || rawMission.activity_kind === "running"
+          ? rawMission.activity_kind
+          : null,
       difficulty_level: localizeDifficultyLabel(
         typeof rawMission.difficulty_level === "string"
           ? rawMission.difficulty_level
@@ -535,6 +547,8 @@ export function createMissionPresentationService({
       body_area: mission.body_area,
       duration_estimate_minutes: mission.duration_estimate_minutes,
       exercise_category: mission.exercise_category,
+      execution_mode: mission.execution_mode,
+      activity_kind: mission.activity_kind,
       mission_origin: mission.mission_origin,
       goal: mission.goal,
       is_ai_special: mission.is_ai_special,

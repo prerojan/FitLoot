@@ -2092,6 +2092,7 @@ async function hydrateMissionRowsWithSubtasks(
 type MonthlyCounterSnapshot = {
   month_key: string;
   missions_completed: number;
+  steps: number;
   distance_meters: number;
   streak_days: number;
   weekly_circuits_completed: number;
@@ -2142,22 +2143,24 @@ function resolvePeriodicMissionDateWindow(
   };
 }
 
-async function readPeriodicMissionStepProgress(
+async function readPeriodicMissionAccumulatedProgress(
   db: D1Database,
   userId: string,
   mission: Record<string, unknown>,
+  metricType: "steps" | "distance_meters",
 ): Promise<number> {
   const timeZone = await readUserMissionTimeZone(db, userId);
   const { startDate, endDate } = resolvePeriodicMissionDateWindow(mission, timeZone);
+  const metricColumn = metricType === "distance_meters" ? "distance_meters" : "steps";
   const aggregate = await db.prepare(
-    `SELECT COALESCE(SUM(steps), 0) as steps
+    `SELECT COALESCE(SUM(${metricColumn}), 0) as value
        FROM daily_metrics
       WHERE user_id = ?
         AND date >= date(?)
         AND date <= date(?)`,
-  ).bind(userId, startDate, endDate).first<{ steps: number }>();
+  ).bind(userId, startDate, endDate).first<{ value: number }>();
 
-  return Math.max(0, Number(aggregate?.steps ?? 0));
+  return Math.max(0, Number(aggregate?.value ?? 0));
 }
 
 function monthlyCounterValueByMission(mission: Record<string, unknown>, counters: MonthlyCounterSnapshot): number {
@@ -2170,7 +2173,7 @@ function monthlyCounterValueByMission(mission: Record<string, unknown>, counters
     return Math.max(0, Math.round(counters.distance_meters));
   }
   if (metricType === "steps" || title.includes("passos") || goal.includes("passos acumulados")) {
-    return Math.max(0, Math.round(counters.distance_meters / 0.75));
+    return Math.max(0, Math.round(counters.steps));
   }
   return counters.missions_completed;
 }
@@ -2189,7 +2192,10 @@ async function resolvePeriodicMissionProgressValue(
 ): Promise<number> {
   const metricType = normalizeMissionMetricType(mission.metric_type, mission.target_time);
   if (metricType === "steps") {
-    return readPeriodicMissionStepProgress(db, userId, mission);
+    return readPeriodicMissionAccumulatedProgress(db, userId, mission, "steps");
+  }
+  if (metricType === "distance_meters") {
+    return readPeriodicMissionAccumulatedProgress(db, userId, mission, "distance_meters");
   }
 
   if (String(mission.type ?? "") === "monthly") {
@@ -2206,49 +2212,49 @@ async function recomputeMonthlyCounters(db: D1Database, userId: string, referenc
   const monthKey = currentMonthKey(reference, timeZone);
   const monthStartDate = missionCycleDateKey("monthly", timeZone, reference);
   const monthEndDate = missionCycleEndDateKey("monthly", monthStartDate);
-  const [hasMetricTypeColumn, hasMetricValueColumn] = await Promise.all([
-    hasTableColumn(db, "missions", "metric_type"),
-    hasTableColumn(db, "missions", "metric_value"),
-  ]);
-  const metricTypeSql = hasMetricTypeColumn ? "metric_type" : "NULL";
-  const metricValueSql = hasMetricValueColumn ? "metric_value" : "NULL";
-  const aggregate = await db.prepare(
+  const missionAggregate = await db.prepare(
     `SELECT
        COALESCE(SUM(CASE WHEN is_completed = 1 AND type = 'daily' THEN 1 ELSE 0 END), 0) as missions_completed,
-       COALESCE(SUM(
-         CASE
-           WHEN is_completed = 1 AND type = 'daily' AND ${metricTypeSql} = 'distance_meters' THEN COALESCE(${metricValueSql}, target_reps, target_time, 0)
-           WHEN is_completed = 1 AND type = 'daily' AND ${metricTypeSql} = 'steps' THEN CAST(COALESCE(${metricValueSql}, target_reps, 0) * 0.75 AS INTEGER)
-           ELSE 0
-         END
-       ), 0) as distance_meters,
        COALESCE(COUNT(DISTINCT CASE WHEN is_completed = 1 AND type = 'daily' THEN ${missionCycleDateSql()} END), 0) as streak_days,
-       COALESCE(SUM(CASE WHEN is_completed = 1 AND type = 'weekly' AND ${metricTypeSql} = 'circuit_tasks' THEN 1 ELSE 0 END), 0) as weekly_circuits_completed
+       COALESCE(SUM(CASE WHEN is_completed = 1 AND type = 'weekly' AND metric_type = 'circuit_tasks' THEN 1 ELSE 0 END), 0) as weekly_circuits_completed
      FROM missions
      WHERE user_id = ?
        AND ${missionCycleDateSql()} >= ?
        AND ${missionCycleDateSql()} <= ?`
   ).bind(userId, monthStartDate, monthEndDate).first<{
     missions_completed: number;
-    distance_meters: number;
     streak_days: number;
     weekly_circuits_completed: number;
+  }>();
+  const metricAggregate = await db.prepare(
+    `SELECT
+        COALESCE(SUM(steps), 0) as steps,
+        COALESCE(SUM(distance_meters), 0) as distance_meters
+      FROM daily_metrics
+      WHERE user_id = ?
+        AND date >= date(?)
+        AND date <= date(?)`,
+  ).bind(userId, monthStartDate, monthEndDate).first<{
+    steps: number;
+    distance_meters: number;
   }>();
 
   const snapshot: MonthlyCounterSnapshot = {
     month_key: monthKey,
-    missions_completed: Number(aggregate?.missions_completed ?? 0),
-    distance_meters: Number(aggregate?.distance_meters ?? 0),
-    streak_days: Number(aggregate?.streak_days ?? 0),
-    weekly_circuits_completed: Number(aggregate?.weekly_circuits_completed ?? 0),
+    missions_completed: Number(missionAggregate?.missions_completed ?? 0),
+    steps: Number(metricAggregate?.steps ?? 0),
+    distance_meters: Number(metricAggregate?.distance_meters ?? 0),
+    streak_days: Number(missionAggregate?.streak_days ?? 0),
+    weekly_circuits_completed: Number(missionAggregate?.weekly_circuits_completed ?? 0),
   };
 
   await db.prepare(
     `INSERT INTO user_monthly_counters (
-       user_id, month_key, missions_completed, distance_meters, streak_days, weekly_circuits_completed, updated_at
-     ) VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+       user_id, month_key, missions_completed, steps, distance_meters, streak_days, weekly_circuits_completed, updated_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
      ON CONFLICT(user_id, month_key) DO UPDATE SET
        missions_completed = excluded.missions_completed,
+       steps = excluded.steps,
        distance_meters = excluded.distance_meters,
        streak_days = excluded.streak_days,
        weekly_circuits_completed = excluded.weekly_circuits_completed,
@@ -2257,6 +2263,7 @@ async function recomputeMonthlyCounters(db: D1Database, userId: string, referenc
     userId,
     snapshot.month_key,
     snapshot.missions_completed,
+    snapshot.steps,
     snapshot.distance_meters,
     snapshot.streak_days,
     snapshot.weekly_circuits_completed,
@@ -2270,12 +2277,13 @@ async function getMonthlyCounters(db: D1Database, userId: string): Promise<Month
   const timeZone = await readUserMissionTimeZone(db, userId);
   const monthKey = currentMonthKey(new Date(), timeZone);
   const row = await db.prepare(
-    `SELECT month_key, missions_completed, distance_meters, streak_days, weekly_circuits_completed
+    `SELECT month_key, missions_completed, steps, distance_meters, streak_days, weekly_circuits_completed
      FROM user_monthly_counters
      WHERE user_id = ? AND month_key = ?`
   ).bind(userId, monthKey).first<{
     month_key: string;
     missions_completed: number;
+    steps: number;
     distance_meters: number;
     streak_days: number;
     weekly_circuits_completed: number;
@@ -2284,6 +2292,7 @@ async function getMonthlyCounters(db: D1Database, userId: string): Promise<Month
     return {
       month_key: row.month_key,
       missions_completed: Number(row.missions_completed ?? 0),
+      steps: Number(row.steps ?? 0),
       distance_meters: Number(row.distance_meters ?? 0),
       streak_days: Number(row.streak_days ?? 0),
       weekly_circuits_completed: Number(row.weekly_circuits_completed ?? 0),
@@ -2639,7 +2648,7 @@ async function recomputeActivePeriodicMissionProgress(userId: string, db: D1Data
     }
 
     const missionMetricType = normalizeMissionMetricType(missionRow.metric_type, missionRow.target_time);
-    if (missionMetricType === "steps") {
+    if (missionMetricType === "steps" || missionMetricType === "distance_meters") {
       const progress = await resolvePeriodicMissionProgressValue(userId, missionRow, db);
       const target = Math.max(1, Number(missionRow.metric_value ?? missionRow.target_reps ?? 1));
       const nextProgressValue = Math.min(target, progress);
@@ -3499,7 +3508,7 @@ const MISSION_METRIC_RULES_PROMPT = [
   "- Flexao, agachamento, abdominal, burpee, barra => sets_reps ('3 series de 12 repeticoes')",
   "- Prancha, hollow body, wall sit, dead hang, l-sit => duration_seconds ('3 series de 30 segundos')",
   "- Corrida, ciclismo => distance_meters ('2 km')",
-  "- Caminhada => steps ('8.000 passos')",
+  "- Caminhada => distance_meters ('2 km')",
   "- Yoga, alongamento, mobilidade => duration_minutes ('15 minutos')",
   "- Circuito completo ou sessao longa => circuit_tasks e SEMPRE semanal (nunca diaria)",
 ].join("\n");
@@ -3513,11 +3522,20 @@ async function insertMission(
   mission: MissionPayload,
   skillId: number | null,
 ): Promise<number | null> {
-  const [hasGoalColumn, hasAiSpecialColumn, hasExerciseDbIdColumn, hasCycleDateColumn] = await Promise.all([
+  const [
+    hasGoalColumn,
+    hasAiSpecialColumn,
+    hasExerciseDbIdColumn,
+    hasCycleDateColumn,
+    hasExecutionModeColumn,
+    hasActivityKindColumn,
+  ] = await Promise.all([
     hasTableColumn(db, "missions", "goal"),
     hasTableColumn(db, "missions", "is_ai_special"),
     hasTableColumn(db, "missions", "exercise_db_id"),
     hasTableColumn(db, "missions", "cycle_date"),
+    hasTableColumn(db, "missions", "execution_mode"),
+    hasTableColumn(db, "missions", "activity_kind"),
   ]);
   const userTimeZone = hasCycleDateColumn
     ? await readUserMissionTimeZone(db, userId)
@@ -3598,6 +3616,8 @@ async function insertMission(
     "attributes_benefited_json",
     "duration_estimate_minutes",
     "exercise_category",
+    "execution_mode",
+    "activity_kind",
     "mission_origin",
     "circuit_tasks_json",
     "safety_tips_json",
@@ -3645,6 +3665,8 @@ async function insertMission(
     JSON.stringify(mission.attributes_benefited),
     normalizedDurationEstimateMinutes,
     mission.exercise_category,
+    mission.execution_mode ?? "standard",
+    mission.activity_kind ?? null,
     mission.mission_origin,
     JSON.stringify(mission.circuit_tasks),
     JSON.stringify(mission.safety_tips),
@@ -3675,6 +3697,24 @@ async function insertMission(
     }
   }
 
+  if (!hasExecutionModeColumn) {
+    const executionModeIndex = columns.indexOf("execution_mode");
+    if (executionModeIndex >= 0) {
+      columns.splice(executionModeIndex, 1);
+      placeholders.splice(executionModeIndex, 1);
+      values.splice(executionModeIndex, 1);
+    }
+  }
+
+  if (!hasActivityKindColumn) {
+    const activityKindIndex = columns.indexOf("activity_kind");
+    if (activityKindIndex >= 0) {
+      columns.splice(activityKindIndex, 1);
+      placeholders.splice(activityKindIndex, 1);
+      values.splice(activityKindIndex, 1);
+    }
+  }
+
   if (hasCycleDateColumn) {
     columns.splice(columns.length - 1, 0, "cycle_date");
     placeholders.splice(placeholders.length - 1, 0, "?");
@@ -3683,9 +3723,9 @@ async function insertMission(
 
   placeholders[placeholders.length - 1] = "datetime('now')";
 
-  const sql = `INSERT INTO missions (${columns.join(", ")}) VALUES (${placeholders.join(", ")})`;
-  const result = await db.prepare(sql).bind(...values).run();
-  const insertedId = Number(result.meta.last_row_id ?? 0);
+  const sql = `INSERT INTO missions (${columns.join(", ")}) VALUES (${placeholders.join(", ")}) RETURNING id`;
+  const insertedRow = await db.prepare(sql).bind(...values).first<{ id: number }>();
+  const insertedId = Number(insertedRow?.id ?? 0);
   return insertedId > 0 ? insertedId : null;
 }
 
@@ -4008,15 +4048,13 @@ function isCircuitLikeText(value: string): boolean {
 function structuredMetricTypeToMissionMetric(
   rawMetricType: unknown,
   exerciseName: string,
-  exerciseType: string,
-  muscleGroup: string,
+  _exerciseType: string,
+  _muscleGroup: string,
   period: MissionPeriod,
 ): MissionMetricType {
   const normalizedRaw =
     typeof rawMetricType === "string" ? normalizeMatchText(rawMetricType) : "";
-  const expected = getMissionMetricType(
-    `${exerciseName} ${exerciseType} ${muscleGroup}`,
-  );
+  const expected = getMissionMetricType(exerciseName);
 
   let resolved: MissionMetricType;
   if (normalizedRaw === "seconds" || normalizedRaw === "segundos") {

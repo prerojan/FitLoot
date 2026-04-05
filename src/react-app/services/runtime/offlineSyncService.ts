@@ -48,7 +48,7 @@ type MissionQueuedOperation = {
 
 type MetricsQueuedOperation = {
   operationId: string;
-  type: "step_delta_recorded" | "calorie_delta_recorded" | "achievement_triggered";
+  type: "step_delta_recorded" | "calorie_delta_recorded" | "distance_delta_recorded" | "achievement_triggered";
   userId?: string | undefined;
   occurredAt: string;
   source: OfflineOperationSource;
@@ -84,6 +84,7 @@ type MetricsCursor = {
   date: string;
   steps: number;
   calories: number;
+  distanceMeters: number;
 };
 
 const FLUSH_EVENT_NAME = "fitloot:offline-sync-flushed";
@@ -206,6 +207,7 @@ class OfflineSyncService {
     date: string;
     steps: number;
     calories: number;
+    distanceMeters: number;
   }): void {
     const current = this.readMetricsCursor();
     if (current.date !== baseline.date) {
@@ -213,6 +215,7 @@ class OfflineSyncService {
         date: baseline.date,
         steps: Math.max(0, Math.round(baseline.steps)),
         calories: Math.max(0, Math.round(baseline.calories)),
+        distanceMeters: Math.max(0, Math.round(baseline.distanceMeters)),
       });
       return;
     }
@@ -221,6 +224,10 @@ class OfflineSyncService {
       date: baseline.date,
       steps: Math.max(current.steps, Math.max(0, Math.round(baseline.steps))),
       calories: Math.max(current.calories, Math.max(0, Math.round(baseline.calories))),
+      distanceMeters: Math.max(
+        current.distanceMeters,
+        Math.max(0, Math.round(baseline.distanceMeters)),
+      ),
     });
   }
 
@@ -297,12 +304,14 @@ class OfflineSyncService {
     date: string;
     steps: number;
     calories: number;
+    distanceMeters: number;
     confidence: OfflineOperationConfidence;
   }): Promise<void> {
     this.start();
 
     const nextSteps = Math.max(0, Math.round(params.steps));
     const nextCalories = Math.max(0, Math.round(params.calories));
+    const nextDistanceMeters = Math.max(0, Math.round(params.distanceMeters));
     const cursor = this.readMetricsCursor();
 
     if (!cursor.date || cursor.date !== params.date) {
@@ -310,13 +319,15 @@ class OfflineSyncService {
         date: params.date,
         steps: nextSteps,
         calories: nextCalories,
+        distanceMeters: nextDistanceMeters,
       });
       return;
     }
 
     const stepDelta = Math.max(0, nextSteps - cursor.steps);
     const calorieDelta = Math.max(0, nextCalories - cursor.calories);
-    if (stepDelta <= 0 && calorieDelta <= 0) {
+    const distanceDelta = Math.max(0, nextDistanceMeters - cursor.distanceMeters);
+    if (stepDelta <= 0 && calorieDelta <= 0 && distanceDelta <= 0) {
       return;
     }
 
@@ -352,10 +363,27 @@ class OfflineSyncService {
       });
     }
 
+    if (distanceDelta > 0) {
+      this.enqueueOperation({
+        operationId: createOperationId("distance_delta_recorded"),
+        type: "distance_delta_recorded",
+        occurredAt: new Date().toISOString(),
+        source: resolveOfflineSource(),
+        confidence: params.confidence,
+        syncStatus: "pending",
+        payload: {
+          delta: distanceDelta,
+          total_after_delta: nextDistanceMeters,
+          date: params.date,
+        },
+      });
+    }
+
     this.writeMetricsCursor({
       date: params.date,
       steps: nextSteps,
       calories: nextCalories,
+      distanceMeters: nextDistanceMeters,
     });
 
     if (this.networkOnline) {
@@ -519,6 +547,18 @@ class OfflineSyncService {
           };
         }
 
+        if (operation.type === "distance_delta_recorded") {
+          return {
+            operation_id: operation.operationId,
+            type: operation.type,
+            user_id: operation.userId,
+            occurred_at: operation.occurredAt,
+            source: operation.source,
+            confidence: operation.confidence,
+            payload: operation.payload as MetricDeltaPayload,
+          };
+        }
+
         return {
           operation_id: operation.operationId,
           type: operation.type,
@@ -641,11 +681,19 @@ class OfflineSyncService {
   }
 
   private readMetricsCursor(): MetricsCursor {
-    return readStorageValue<MetricsCursor>(OFFLINE_METRICS_CURSOR_STORAGE_KEY, {
+    const cursor = readStorageValue<Partial<MetricsCursor>>(OFFLINE_METRICS_CURSOR_STORAGE_KEY, {
       date: "",
       steps: 0,
       calories: 0,
+      distanceMeters: 0,
     });
+
+    return {
+      date: typeof cursor.date === "string" ? cursor.date : "",
+      steps: Math.max(0, Math.round(Number(cursor.steps ?? 0) || 0)),
+      calories: Math.max(0, Math.round(Number(cursor.calories ?? 0) || 0)),
+      distanceMeters: Math.max(0, Math.round(Number(cursor.distanceMeters ?? 0) || 0)),
+    };
   }
 
   private writeMetricsCursor(cursor: MetricsCursor): void {
@@ -659,6 +707,7 @@ class OfflineSyncService {
       date: "",
       steps: 0,
       calories: 0,
+      distanceMeters: 0,
     });
     this.setState(nextState);
   }

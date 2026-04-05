@@ -1,5 +1,6 @@
 import type { MissionMetricType } from "../../shared/types";
 import {
+  isSupportedRouteMissionExercise,
   resolveExerciseDisplayNamePt,
 } from "../../shared/exerciseCatalog";
 import {
@@ -8,7 +9,10 @@ import {
 } from "../../shared/missionLocalization";
 import { getMissionMetricType } from "../../constants/missionMetrics";
 import type { StructuredGenerationOptions } from "./missionGeneration";
-import { resolveMissionExerciseForGeneration } from "./missionExerciseSelection";
+import {
+  resolveMissionExerciseForGeneration,
+  sanitizeMissionExerciseNames,
+} from "./missionExerciseSelection";
 
 type MissionPeriod = "daily" | "weekly" | "monthly";
 
@@ -196,7 +200,82 @@ function normalizePlannedMuscle(
   if (matchingMuscle) {
     return matchingMuscle;
   }
-  return plannedDay.muscles[0] ?? requestedMuscle;
+  if (requestedMuscle.trim().length > 0) {
+    return requestedMuscle;
+  }
+  return plannedDay.muscles[0] ?? "full body";
+}
+
+function focusAllowsRouteTracking(focus: string): boolean {
+  const normalizedFocus = focus
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLowerCase()
+    .trim();
+  return (
+    normalizedFocus.includes("condition") ||
+    normalizedFocus.includes("cardio") ||
+    normalizedFocus.includes("recover") ||
+    normalizedFocus.includes("rest")
+  );
+}
+
+function scoreExercisePoolCandidate(
+  candidate: string,
+  requestedName: string,
+  normalizeMatchText: (value: string) => string,
+): number {
+  const normalizedCandidate = normalizeMatchText(candidate);
+  const normalizedRequested = normalizeMatchText(requestedName);
+
+  if (!normalizedCandidate || !normalizedRequested) {
+    return 0;
+  }
+  if (normalizedCandidate === normalizedRequested) {
+    return 100;
+  }
+  if (normalizedCandidate.includes(normalizedRequested)) {
+    return 80;
+  }
+  if (normalizedRequested.includes(normalizedCandidate)) {
+    return 72;
+  }
+
+  const requestedTokens = normalizedRequested
+    .split(/\s+/)
+    .filter((token) => token.length >= 3);
+  const candidateTokens = new Set(
+    normalizedCandidate.split(/\s+/).filter((token) => token.length >= 3),
+  );
+  const overlap = requestedTokens.filter((token) => candidateTokens.has(token)).length;
+  return overlap > 0 ? overlap * 10 : 0;
+}
+
+function resolveAllowedDailyExercisePool(
+  plannedDay: WeeklyPlanDayLike,
+  requestedName: string,
+  requestedMuscle: string,
+  plannedFocus: string,
+): string[] {
+  const plannedExercises = Array.isArray(plannedDay.exercises)
+    ? plannedDay.exercises.filter((value) => value.trim().length > 0)
+    : [];
+  const basePool = sanitizeMissionExerciseNames({
+    requestedNames: [requestedName, ...plannedExercises],
+    muscles: plannedDay.muscles.length > 0 ? plannedDay.muscles : [requestedMuscle],
+    focus: plannedFocus,
+    limit: 12,
+    fallbackOrder: ["muscles", "focus", "catalog"],
+  });
+
+  const routeAllowed =
+    focusAllowsRouteTracking(plannedFocus)
+    || plannedExercises.some((exercise) => isSupportedRouteMissionExercise(exercise));
+  const filteredPool = routeAllowed
+    ? basePool
+    : basePool.filter((candidate) => !isSupportedRouteMissionExercise(candidate));
+
+  return filteredPool.length > 0 ? filteredPool : basePool;
 }
 
 function resolveSupportedDailyExerciseDraft(
@@ -222,29 +301,36 @@ function resolveSupportedDailyExerciseDraft(
     plannedDay,
     deps.normalizeMatchText,
   );
-  const plannedExercises = Array.isArray(plannedDay.exercises)
-    ? plannedDay.exercises.filter((value) => value.trim().length > 0)
-    : [];
+  const allowedPool = resolveAllowedDailyExercisePool(
+    plannedDay,
+    rawName,
+    muscleGroup,
+    plannedFocus,
+  );
 
-  const strictSupported =
+  const resolvedRequestedExercise =
     resolveMissionExerciseForGeneration({
       requestedName: rawName,
       muscles: plannedDay.muscles.length > 0 ? plannedDay.muscles : [muscleGroup],
       focus: plannedFocus,
-    })
-    ?? plannedExercises
-      .map((candidate) =>
-        resolveMissionExerciseForGeneration({
-          requestedName: candidate,
-          muscles: plannedDay.muscles.length > 0 ? plannedDay.muscles : [muscleGroup],
-          focus: plannedFocus,
-        }))
-      .find((candidate): candidate is string => typeof candidate === "string" && candidate.length > 0)
-    ?? resolveMissionExerciseForGeneration({
-      requestedName: rawName,
-      muscles: [muscleGroup],
-      focus: rawExerciseType,
     });
+  const strictSupported =
+    typeof resolvedRequestedExercise === "string" &&
+      allowedPool.some((candidate) =>
+        deps.normalizeMatchText(candidate) === deps.normalizeMatchText(resolvedRequestedExercise),
+      )
+      ? resolvedRequestedExercise
+      : allowedPool
+        .slice()
+        .sort((left, right) =>
+          scoreExercisePoolCandidate(right, rawName, deps.normalizeMatchText)
+          - scoreExercisePoolCandidate(left, rawName, deps.normalizeMatchText),
+        )[0]
+        ?? resolveMissionExerciseForGeneration({
+          requestedName: rawName,
+          muscles: [muscleGroup],
+          focus: rawExerciseType,
+        });
 
   return {
     exerciseName: strictSupported ?? null,
@@ -653,9 +739,7 @@ export function createMissionPlanValidationService(
         draft.description,
         `Complete a meta proposta em ${name}.`,
       );
-      const expectedMetricType = getMissionMetricType(
-        `${supportedExerciseName} ${exerciseType} ${muscleGroup}`,
-      );
+      const expectedMetricType = getMissionMetricType(supportedExerciseName);
 
       if (
         expectedMetricType === "circuit_tasks" ||

@@ -35,28 +35,32 @@ export const PRIMARY_GLOW_STYLE = {
   boxShadow: "0 24px 52px color-mix(in srgb, var(--app-primary-color) 28%, transparent)",
 };
 
-export type StepMissionSnapshot = {
+type CounterMissionMetricType = "steps" | "distance_meters";
+
+export type CounterMissionSnapshot = {
   signature: string;
-  stepsAtSnapshot: number;
+  metricsAtSnapshot: Record<CounterMissionMetricType, number>;
   progressByMissionId: Record<number, number>;
 };
 
-export type PersistentStepMissionProgressEntry = {
+export type PersistentCounterMissionProgressEntry = {
   metricsDate: string;
-  lastDailySteps: number;
+  metricType: CounterMissionMetricType;
+  lastMetricValue: number;
   progressValue: number;
 };
 
-export type PersistentStepMissionProgressState = Record<
+export type PersistentCounterMissionProgressState = Record<
   number,
-  PersistentStepMissionProgressEntry
+  PersistentCounterMissionProgressEntry
 >;
 
-type ReconcilePersistentStepMissionProgressParams = {
+type ReconcilePersistentCounterMissionProgressParams = {
   missions: Mission[];
   metricsDate: string;
   stepsValue: number;
-  state: PersistentStepMissionProgressState;
+  distanceMetersValue: number;
+  state: PersistentCounterMissionProgressState;
 };
 
 export function ensureMaterialSymbolsLoaded() {
@@ -78,7 +82,7 @@ function canUseStorage(): boolean {
   return typeof window !== "undefined" && typeof window.localStorage !== "undefined";
 }
 
-function persistentStepMissionProgressStorageKey(
+function persistentCounterMissionProgressStorageKey(
   userId: string | null | undefined,
 ): string | null {
   if (typeof userId !== "string" || userId.trim().length === 0) {
@@ -169,26 +173,45 @@ export function primaryMissionLabel(mission: Mission): string {
   return mission.muscle_groups?.[0] ?? bodyAreaLabel(mission.body_area);
 }
 
-export function isStepProgressMission(mission: Mission): boolean {
+export function resolveCounterProgressMetricType(
+  mission: Mission,
+): CounterMissionMetricType | null {
   const hasCircuitTasks = Array.isArray(mission.circuit_tasks) && mission.circuit_tasks.length > 0;
   const goalText = typeof mission.goal === "string" ? mission.goal.toLowerCase() : "";
-  return !hasCircuitTasks && (mission.metric_type === "steps" || goalText.includes("passos"));
+  const isPeriodic = mission.type === "weekly" || mission.type === "monthly";
+  if (!isPeriodic || hasCircuitTasks) {
+    return null;
+  }
+  if (mission.metric_type === "distance_meters" || goalText.includes(" km") || goalText.includes("metros")) {
+    return "distance_meters";
+  }
+  if (mission.metric_type === "steps" || goalText.includes("passos")) {
+    return "steps";
+  }
+  return null;
 }
 
-export function buildStepMissionProgressSignature(missions: Mission[]): string {
+export function isCounterProgressMission(mission: Mission): boolean {
+  return resolveCounterProgressMetricType(mission) !== null;
+}
+
+export function buildCounterMissionProgressSignature(missions: Mission[]): string {
   return missions
-    .filter((mission) => isStepProgressMission(mission) && mission.is_completed !== 1)
-    .map((mission) => `${mission.id}:${Number(mission.progress_value ?? 0)}`)
+    .filter((mission) => isCounterProgressMission(mission) && mission.is_completed !== 1)
+    .map((mission) => {
+      const metricType = resolveCounterProgressMetricType(mission) ?? "steps";
+      return `${mission.id}:${metricType}:${Number(mission.progress_value ?? 0)}`;
+    })
     .join("|");
 }
 
-export function createStepMissionSnapshot(
+export function createCounterMissionSnapshot(
   missions: Mission[],
-  stepsAtSnapshot: number,
-  signature: string = buildStepMissionProgressSignature(missions),
-): StepMissionSnapshot {
+  metricsAtSnapshot: Record<CounterMissionMetricType, number>,
+  signature: string = buildCounterMissionProgressSignature(missions),
+): CounterMissionSnapshot {
   const progressByMissionId = missions.reduce<Record<number, number>>((accumulator, mission) => {
-    if (!isStepProgressMission(mission) || mission.is_completed === 1) {
+    if (!isCounterProgressMission(mission) || mission.is_completed === 1) {
       return accumulator;
     }
 
@@ -198,15 +221,18 @@ export function createStepMissionSnapshot(
 
   return {
     signature,
-    stepsAtSnapshot: Math.max(0, Math.round(stepsAtSnapshot)),
+    metricsAtSnapshot: {
+      steps: Math.max(0, Math.round(metricsAtSnapshot.steps ?? 0)),
+      distance_meters: Math.max(0, Math.round(metricsAtSnapshot.distance_meters ?? 0)),
+    },
     progressByMissionId,
   };
 }
 
-export function readPersistentStepMissionProgressState(
+export function readPersistentCounterMissionProgressState(
   userId: string | null | undefined,
-): PersistentStepMissionProgressState {
-  const storageKey = persistentStepMissionProgressStorageKey(userId);
+): PersistentCounterMissionProgressState {
+  const storageKey = persistentCounterMissionProgressStorageKey(userId);
   if (!storageKey || !canUseStorage()) {
     return {};
   }
@@ -219,7 +245,7 @@ export function readPersistentStepMissionProgressState(
       return {};
     }
 
-    return Object.entries(parsed as Record<string, unknown>).reduce<PersistentStepMissionProgressState>(
+    return Object.entries(parsed as Record<string, unknown>).reduce<PersistentCounterMissionProgressState>(
       (accumulator, [rawMissionId, rawEntry]) => {
         const missionId = Number(rawMissionId);
         if (!Number.isInteger(missionId) || missionId <= 0) {
@@ -235,7 +261,9 @@ export function readPersistentStepMissionProgressState(
           typeof candidate.metricsDate === "string" && candidate.metricsDate.trim().length > 0
             ? candidate.metricsDate.trim()
             : null;
-        const lastDailySteps = Math.max(0, Math.round(Number(candidate.lastDailySteps ?? 0) || 0));
+        const metricType =
+          candidate.metricType === "distance_meters" ? "distance_meters" : "steps";
+        const lastMetricValue = Math.max(0, Math.round(Number(candidate.lastMetricValue ?? candidate.lastDailySteps ?? 0) || 0));
         const progressValue = Math.max(0, Math.round(Number(candidate.progressValue ?? 0) || 0));
 
         if (!metricsDate) {
@@ -244,7 +272,8 @@ export function readPersistentStepMissionProgressState(
 
         accumulator[missionId] = {
           metricsDate,
-          lastDailySteps,
+          metricType,
+          lastMetricValue,
           progressValue,
         };
         return accumulator;
@@ -256,11 +285,11 @@ export function readPersistentStepMissionProgressState(
   }
 }
 
-export function writePersistentStepMissionProgressState(
+export function writePersistentCounterMissionProgressState(
   userId: string | null | undefined,
-  state: PersistentStepMissionProgressState,
+  state: PersistentCounterMissionProgressState,
 ): void {
-  const storageKey = persistentStepMissionProgressStorageKey(userId);
+  const storageKey = persistentCounterMissionProgressStorageKey(userId);
   if (!storageKey || !canUseStorage()) {
     return;
   }
@@ -272,9 +301,9 @@ export function writePersistentStepMissionProgressState(
   }
 }
 
-export function arePersistentStepMissionProgressStatesEqual(
-  left: PersistentStepMissionProgressState,
-  right: PersistentStepMissionProgressState,
+export function arePersistentCounterMissionProgressStatesEqual(
+  left: PersistentCounterMissionProgressState,
+  right: PersistentCounterMissionProgressState,
 ): boolean {
   const leftEntries = Object.entries(left);
   const rightEntries = Object.entries(right);
@@ -291,7 +320,8 @@ export function arePersistentStepMissionProgressStatesEqual(
 
     return (
       leftEntry.metricsDate === rightEntry.metricsDate &&
-      leftEntry.lastDailySteps === rightEntry.lastDailySteps &&
+      leftEntry.metricType === rightEntry.metricType &&
+      leftEntry.lastMetricValue === rightEntry.lastMetricValue &&
       leftEntry.progressValue === rightEntry.progressValue
     );
   });
@@ -304,17 +334,20 @@ function missionUpdatedOnMetricsDate(
   return extractDateKey(mission.updated_at) === metricsDate;
 }
 
-export function reconcilePersistentStepMissionProgress({
+export function reconcilePersistentCounterMissionProgress({
   missions,
   metricsDate,
   stepsValue,
+  distanceMetersValue,
   state,
-}: ReconcilePersistentStepMissionProgressParams): PersistentStepMissionProgressState {
+}: ReconcilePersistentCounterMissionProgressParams): PersistentCounterMissionProgressState {
   const safeStepsValue = Math.max(0, Math.round(stepsValue));
-  const nextState: PersistentStepMissionProgressState = {};
+  const safeDistanceMetersValue = Math.max(0, Math.round(distanceMetersValue));
+  const nextState: PersistentCounterMissionProgressState = {};
 
   for (const mission of missions) {
-    if (!isStepProgressMission(mission) || mission.is_completed === 1) {
+    const progressMetricType = resolveCounterProgressMetricType(mission);
+    if (!progressMetricType || mission.is_completed === 1) {
       continue;
     }
 
@@ -326,31 +359,39 @@ export function reconcilePersistentStepMissionProgress({
     const target = missionTotalGoal(mission, normalizeMetricType(mission));
     const serverProgress = Math.max(0, Math.round(Number(mission.progress_value ?? 0) || 0));
     const previousEntry = state[missionId];
+    const currentMetricValue =
+      progressMetricType === "distance_meters"
+        ? safeDistanceMetersValue
+        : safeStepsValue;
 
     if (!previousEntry) {
       const seededProgress = missionUpdatedOnMetricsDate(mission, metricsDate)
         ? serverProgress
-        : Math.min(target, serverProgress + safeStepsValue);
+        : Math.min(target, serverProgress + currentMetricValue);
 
       nextState[missionId] = {
         metricsDate,
-        lastDailySteps: safeStepsValue,
+        metricType: progressMetricType,
+        lastMetricValue: currentMetricValue,
         progressValue: seededProgress,
       };
       continue;
     }
 
-    const sameMetricsDate = previousEntry.metricsDate === metricsDate;
-    const lastDailySteps = sameMetricsDate ? previousEntry.lastDailySteps : 0;
-    const deltaSteps = Math.max(0, safeStepsValue - lastDailySteps);
+    const sameMetricsDate =
+      previousEntry.metricsDate === metricsDate
+      && previousEntry.metricType === progressMetricType;
+    const lastMetricValue = sameMetricsDate ? previousEntry.lastMetricValue : 0;
+    const deltaMetricValue = Math.max(0, currentMetricValue - lastMetricValue);
     const progressValue = Math.min(
       target,
-      Math.max(serverProgress, previousEntry.progressValue) + deltaSteps,
+      Math.max(serverProgress, previousEntry.progressValue) + deltaMetricValue,
     );
 
     nextState[missionId] = {
       metricsDate,
-      lastDailySteps: Math.max(lastDailySteps, safeStepsValue),
+      metricType: progressMetricType,
+      lastMetricValue: Math.max(lastMetricValue, currentMetricValue),
       progressValue,
     };
   }

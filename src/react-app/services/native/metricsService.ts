@@ -60,6 +60,7 @@ function createEmptyDailyMetrics(): DailyMetrics {
     date: now.slice(0, 10),
     steps: 0,
     calories_burned: 0,
+    distance_meters: 0,
     created_at: now,
     updated_at: now,
   };
@@ -74,6 +75,7 @@ function cloneDailyMetrics(metrics: DailyMetrics | null | undefined): DailyMetri
     ...metrics,
     steps: Math.max(0, Math.round(Number(metrics.steps ?? 0))),
     calories_burned: Math.max(0, Math.round(Number(metrics.calories_burned ?? 0))),
+    distance_meters: Math.max(0, Math.round(Number(metrics.distance_meters ?? 0))),
   };
 }
 
@@ -104,7 +106,7 @@ export function buildConsolidatedMetrics(
       dailyMetrics: baseMetrics,
       steps: baseMetrics.steps,
       caloriesBurned: baseMetrics.calories_burned,
-      distanceMeters: null,
+      distanceMeters: baseMetrics.distance_meters,
       activeMinutes: 0,
       lastUpdated,
       source: "api",
@@ -125,6 +127,10 @@ export function buildConsolidatedMetrics(
       ...baseMetrics,
       steps: nextSteps,
       calories_burned: nextCalories,
+      distance_meters:
+        Number.isFinite(stepSnapshot.distance) && stepSnapshot.distance > 0
+          ? Math.round(stepSnapshot.distance * 1000)
+          : baseMetrics.distance_meters,
       updated_at: lastUpdated,
     },
     steps: nextSteps,
@@ -298,11 +304,12 @@ class MetricsService {
       const cached = readCachedJson<DailyMetrics>(METRICS_API_PATH);
       if (cached?.data) {
         this.apiMetrics = cached.data;
-        offlineSyncService.hydrateMetricsBaseline({
-          date: cached.data.date,
-          steps: cached.data.steps,
-          calories: cached.data.calories_burned,
-        });
+      offlineSyncService.hydrateMetricsBaseline({
+        date: cached.data.date,
+        steps: cached.data.steps,
+        calories: cached.data.calories_burned,
+        distanceMeters: cached.data.distance_meters,
+      });
       }
     }
 
@@ -317,6 +324,7 @@ class MetricsService {
         date: metrics.date,
         steps: metrics.steps,
         calories: metrics.calories_burned,
+        distanceMeters: metrics.distance_meters,
       });
       return metrics;
     } catch {
@@ -336,6 +344,7 @@ class MetricsService {
     const nextPayload = {
       steps: consolidatedMetrics.dailyMetrics.steps,
       calories_burned: consolidatedMetrics.dailyMetrics.calories_burned,
+      distance_meters: Math.max(0, Math.round(consolidatedMetrics.distanceMeters ?? 0)),
       date: consolidatedMetrics.dailyMetrics.date,
     };
     const payloadKey = JSON.stringify(nextPayload);
@@ -346,7 +355,8 @@ class MetricsService {
     const hasChanges =
       !this.apiMetrics ||
       this.apiMetrics.steps !== nextPayload.steps ||
-      this.apiMetrics.calories_burned !== nextPayload.calories_burned;
+      this.apiMetrics.calories_burned !== nextPayload.calories_burned ||
+      this.apiMetrics.distance_meters !== nextPayload.distance_meters;
     if (!hasChanges) {
       this.lastSyncedPayloadKey = payloadKey;
       return;
@@ -357,6 +367,7 @@ class MetricsService {
         date: consolidatedMetrics.dailyMetrics.date,
         steps: consolidatedMetrics.dailyMetrics.steps,
         calories: consolidatedMetrics.dailyMetrics.calories_burned,
+        distanceMeters: Math.max(0, Math.round(consolidatedMetrics.distanceMeters ?? 0)),
         confidence: stepSnapshot?.confidence === "official" ? "official" : "derived",
       });
 
@@ -365,6 +376,7 @@ class MetricsService {
         ...(this.apiMetrics ?? createEmptyDailyMetrics()),
         steps: nextPayload.steps,
         calories_burned: nextPayload.calories_burned,
+        distance_meters: nextPayload.distance_meters,
         date: nextPayload.date,
         updated_at: consolidatedMetrics.lastUpdated,
       };

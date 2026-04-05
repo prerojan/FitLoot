@@ -107,63 +107,64 @@ export function normalizeExerciseCategory(
   muscle: string,
 ): MissionExerciseCategory {
   // Category inference is the base routing layer that decides how each exercise should be framed downstream.
-  const text = normalizeMatchText(`${name} ${muscle}`);
+  const normalizedName = normalizeMatchText(name);
+  void muscle;
 
-  if (text.includes("plank") || text.includes("prancha")) return "plank";
+  if (normalizedName.includes("plank") || normalizedName.includes("prancha")) return "plank";
   if (
-    text.includes("hold") ||
-    text.includes("isometric") ||
-    text.includes("isometr")
+    normalizedName.includes("hold") ||
+    normalizedName.includes("isometric") ||
+    normalizedName.includes("isometr")
   ) {
     return "isometric";
   }
   if (
-    text.includes("walking lunge") ||
-    text.includes("lunge") ||
-    text.includes("step-up") ||
-    text.includes("step up") ||
-    text.includes("mountain climber") ||
-    text.includes("burpee") ||
-    text.includes("push") ||
-    text.includes("squat") ||
-    text.includes("pull") ||
-    text.includes("press")
+    normalizedName.includes("walking lunge") ||
+    normalizedName.includes("lunge") ||
+    normalizedName.includes("step-up") ||
+    normalizedName.includes("step up") ||
+    normalizedName.includes("mountain climber") ||
+    normalizedName.includes("burpee") ||
+    normalizedName.includes("push") ||
+    normalizedName.includes("squat") ||
+    normalizedName.includes("pull") ||
+    normalizedName.includes("press")
   ) {
     return "strength";
   }
   if (
-    /\bwalk(?:ing)?\b/.test(text) ||
-    text.includes("caminha")
+    /\bwalk(?:ing)?\b/.test(normalizedName) ||
+    normalizedName.includes("caminha")
   ) {
     return "walk";
   }
   if (
-    /\brun(?:ning)?\b/.test(text) ||
-    text.includes("corrid") ||
-    text.includes("jog") ||
-    text.includes("sprint") ||
-    text.includes("cicl")
+    /\brun(?:ning)?\b/.test(normalizedName) ||
+    normalizedName.includes("corrid") ||
+    normalizedName.includes("jog") ||
+    normalizedName.includes("sprint") ||
+    normalizedName.includes("cicl")
   ) {
     return "run";
   }
-  if (text.includes("yoga") || text.includes("pose")) return "yoga";
-  if (text.includes("stretch") || text.includes("along")) return "stretching";
-  if (text.includes("mobility") || text.includes("mobilidade")) {
+  if (normalizedName.includes("yoga") || normalizedName.includes("pose")) return "yoga";
+  if (normalizedName.includes("stretch") || normalizedName.includes("along")) return "stretching";
+  if (normalizedName.includes("mobility") || normalizedName.includes("mobilidade")) {
     return "mobility";
   }
   if (
-    text.includes("circuit") ||
-    text.includes("circuito") ||
-    text.includes("hiit")
+    normalizedName.includes("circuit") ||
+    normalizedName.includes("circuito") ||
+    normalizedName.includes("hiit")
   ) {
     return "cardio_circuit";
   }
   if (
-    text.includes("abdominal") ||
-    text.includes("crunch") ||
-    text.includes("situp") ||
-    text.includes("sit-up") ||
-    text.includes("sit up")
+    normalizedName.includes("abdominal") ||
+    normalizedName.includes("crunch") ||
+    normalizedName.includes("situp") ||
+    normalizedName.includes("sit-up") ||
+    normalizedName.includes("sit up")
   ) {
     return "abdominal";
   }

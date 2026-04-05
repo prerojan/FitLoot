@@ -122,7 +122,7 @@ async function applyMetricDeltaOperation(
   db: D1Database,
   params: {
     userId: string;
-    field: "steps" | "calories_burned";
+    field: "steps" | "calories_burned" | "distance_meters";
     delta: number;
     date: string;
   },
@@ -130,29 +130,33 @@ async function applyMetricDeltaOperation(
   date: string;
   steps: number;
   calories_burned: number;
+  distance_meters: number;
 }> {
   const { userId, field, date } = params;
   const delta = roundMetricDelta(params.delta);
   const initialSteps = field === "steps" ? delta : 0;
   const initialCalories = field === "calories_burned" ? delta : 0;
+  const initialDistance = field === "distance_meters" ? delta : 0;
   const nextValueSql = field === "steps"
     ? "steps = MAX(0, COALESCE(steps, 0) + excluded.steps)"
-    : "calories_burned = MAX(0, COALESCE(calories_burned, 0) + excluded.calories_burned)";
+    : field === "calories_burned"
+      ? "calories_burned = MAX(0, COALESCE(calories_burned, 0) + excluded.calories_burned)"
+      : "distance_meters = MAX(0, COALESCE(distance_meters, 0) + excluded.distance_meters)";
 
   await db
     .prepare(
-      `INSERT INTO daily_metrics (user_id, date, steps, calories_burned, updated_at)
-       VALUES (?, ?, ?, ?, datetime('now'))
+      `INSERT INTO daily_metrics (user_id, date, steps, calories_burned, distance_meters, updated_at)
+       VALUES (?, ?, ?, ?, ?, datetime('now'))
        ON CONFLICT(user_id, date) DO UPDATE SET
          ${nextValueSql},
          updated_at = datetime('now')`,
     )
-    .bind(userId, date, initialSteps, initialCalories)
+    .bind(userId, date, initialSteps, initialCalories, initialDistance)
     .run();
 
   const metrics = await db
     .prepare(
-      `SELECT date, steps, calories_burned
+      `SELECT date, steps, calories_burned, distance_meters
        FROM daily_metrics
        WHERE user_id = ? AND date = ?`,
     )
@@ -161,12 +165,14 @@ async function applyMetricDeltaOperation(
       date: string;
       steps: number;
       calories_burned: number;
+      distance_meters: number;
     }>();
 
   return {
     date,
     steps: Number(metrics?.steps ?? 0),
     calories_burned: Number(metrics?.calories_burned ?? 0),
+    distance_meters: Number(metrics?.distance_meters ?? 0),
   };
 }
 
@@ -207,6 +213,20 @@ async function processOfflineSyncOperation(
     const metrics = await applyMetricDeltaOperation(db, {
       userId,
       field: "calories_burned",
+      delta: operation.payload.delta,
+      date,
+    });
+    resultPayload = {
+      operation_id: operation.operation_id,
+      type: operation.type,
+      status: "processed",
+      metrics,
+    };
+  } else if (operation.type === "distance_delta_recorded") {
+    const date = resolveMetricsDate(operation.occurred_at, operation.payload.date);
+    const metrics = await applyMetricDeltaOperation(db, {
+      userId,
+      field: "distance_meters",
       delta: operation.payload.delta,
       date,
     });
@@ -266,6 +286,7 @@ export function registerMetricsRoutes(
           date: today,
           steps: 0,
           calories_burned: 0,
+          distance_meters: 0,
           created_at: nowIso,
           updated_at: nowIso,
         };
@@ -302,18 +323,20 @@ export function registerMetricsRoutes(
 
         await c.env.fitloot_db
           .prepare(
-            `INSERT INTO daily_metrics (user_id, date, steps, calories_burned, updated_at)
-            VALUES (?, ?, ?, ?, datetime('now'))
+            `INSERT INTO daily_metrics (user_id, date, steps, calories_burned, distance_meters, updated_at)
+            VALUES (?, ?, ?, ?, ?, datetime('now'))
             ON CONFLICT(user_id, date) DO UPDATE SET
-            steps = ?, calories_burned = ?, updated_at = datetime('now')`,
+            steps = ?, calories_burned = ?, distance_meters = ?, updated_at = datetime('now')`,
           )
           .bind(
             user.id,
             today,
             data.steps,
             data.calories_burned,
+            data.distance_meters,
             data.steps,
             data.calories_burned,
+            data.distance_meters,
           )
           .run();
 

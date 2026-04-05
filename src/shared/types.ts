@@ -274,6 +274,7 @@ export const DailyMetricsSchema = z.object({
   date: z.string(),
   steps: z.number(),
   calories_burned: z.number(),
+  distance_meters: z.number(),
   created_at: z.string(),
   updated_at: z.string(),
 });
@@ -423,6 +424,7 @@ export const OfflineOperationTypeSchema = z.enum([
   "achievement_triggered",
   "step_delta_recorded",
   "calorie_delta_recorded",
+  "distance_delta_recorded",
 ]);
 
 export type OfflineOperationType = z.infer<typeof OfflineOperationTypeSchema>;
@@ -471,6 +473,18 @@ export const CalorieDeltaRecordedOperationSchema = z.object({
 
 export type CalorieDeltaRecordedOperation = z.infer<typeof CalorieDeltaRecordedOperationSchema>;
 
+export const DistanceDeltaRecordedOperationSchema = z.object({
+  operation_id: z.string().trim().min(8).max(128),
+  type: z.literal("distance_delta_recorded"),
+  user_id: z.string().trim().min(1).max(128).optional(),
+  occurred_at: z.string().datetime({ offset: true }),
+  source: OfflineOperationSourceSchema,
+  confidence: OfflineOperationConfidenceSchema,
+  payload: OfflineMetricDeltaPayloadSchema,
+});
+
+export type DistanceDeltaRecordedOperation = z.infer<typeof DistanceDeltaRecordedOperationSchema>;
+
 export const AchievementTriggeredOperationSchema = z.object({
   operation_id: z.string().trim().min(8).max(128),
   type: z.literal("achievement_triggered"),
@@ -490,6 +504,7 @@ export type AchievementTriggeredOperation = z.infer<typeof AchievementTriggeredO
 export const OfflineSyncOperationSchema = z.discriminatedUnion("type", [
   StepDeltaRecordedOperationSchema,
   CalorieDeltaRecordedOperationSchema,
+  DistanceDeltaRecordedOperationSchema,
   AchievementTriggeredOperationSchema,
 ]);
 
@@ -514,6 +529,7 @@ export type FoodScanRequest = z.infer<typeof FoodScanRequestSchema>;
 export const UpdateDailyMetricsRequestSchema = z.object({
   steps: z.number().min(0),
   calories_burned: z.number().min(0),
+  distance_meters: z.number().min(0),
 });
 
 export type UpdateDailyMetricsRequest = z.infer<typeof UpdateDailyMetricsRequestSchema>;
