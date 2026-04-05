@@ -61,6 +61,34 @@
   ],
   "rewrites": [
     {
+      "source": "/android-artifacts.json",
+      "destination": "https://fitloot-worker.suportefitloot.workers.dev/android-artifacts.json"
+    },
+    {
+      "source": "/FitLoot.apk",
+      "destination": "https://fitloot-worker.suportefitloot.workers.dev/FitLoot.apk"
+    },
+    {
+      "source": "/FitLoot-Dev.apk",
+      "destination": "https://fitloot-worker.suportefitloot.workers.dev/FitLoot-Dev.apk"
+    },
+    {
+      "source": "/FitLoot-Internal.apk",
+      "destination": "https://fitloot-worker.suportefitloot.workers.dev/FitLoot-Internal.apk"
+    },
+    {
+      "source": "/app-release.apk",
+      "destination": "https://fitloot-worker.suportefitloot.workers.dev/FitLoot.apk"
+    },
+    {
+      "source": "/app-dev-debug.apk",
+      "destination": "https://fitloot-worker.suportefitloot.workers.dev/FitLoot-Dev.apk"
+    },
+    {
+      "source": "/app-internal-debug.apk",
+      "destination": "https://fitloot-worker.suportefitloot.workers.dev/FitLoot-Internal.apk"
+    },
+    {
       "source": "/api/(.*)",
       "destination": "https://fitloot-worker.suportefitloot.workers.dev/api/$1"
     },

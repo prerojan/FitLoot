@@ -14,6 +14,10 @@ import {
   isMissingSchemaError,
   schemaMismatchResponse,
 } from "../core/errors";
+import {
+  deleteRuntimeUserAuth,
+  upsertRuntimeUserAuth,
+} from "../core/runtimeUserAuthStore";
 import type {
   AppContext,
   CheckoutStartResult,
@@ -101,6 +105,30 @@ function isSupabaseRuntimeDb(db: D1Database): boolean {
   return (db as D1Database & { __backend?: string }).__backend === "supabase";
 }
 
+function resolveRuntimeSessionDb(env: Env): D1Database | null {
+  const runtimeDb = env.fitloot_runtime_db;
+  if (!runtimeDb) return null;
+  if (runtimeDb === env.fitloot_db) return null;
+  return runtimeDb;
+}
+
+async function syncRuntimeUserAuthSnapshot(params: {
+  env: Env;
+  runtimeSessionDb: D1Database | null;
+  userId: string;
+  username: string;
+}): Promise<void> {
+  const { env, runtimeSessionDb, userId, username } = params;
+  if (!runtimeSessionDb) return;
+
+  const authRecord = await getUserAuthRecordById(env.fitloot_db, userId);
+  if (!authRecord) return;
+
+  await upsertRuntimeUserAuth(runtimeSessionDb, authRecord, {
+    username,
+  });
+}
+
 type PersistOnboardingProfileStateParams = {
   env: Env;
   userId: string;
@@ -112,6 +140,7 @@ type PersistOnboardingProfileStateParams = {
   evaluateLevelTitles: OnboardingRouteDeps["evaluateLevelTitles"];
   logUserEvent: OnboardingRouteDeps["logUserEvent"];
   normalizeTrainingFrequencyInput: OnboardingRouteDeps["normalizeTrainingFrequencyInput"];
+  runtimeSessionDb: D1Database | null;
   skillTierOrder: OnboardingRouteDeps["skillTierOrder"];
   upsertTrainingPlan: OnboardingRouteDeps["upsertTrainingPlan"];
 };
@@ -127,6 +156,7 @@ async function persistOnboardingProfileState({
   evaluateLevelTitles,
   logUserEvent,
   normalizeTrainingFrequencyInput,
+  runtimeSessionDb,
   skillTierOrder,
   upsertTrainingPlan,
 }: PersistOnboardingProfileStateParams): Promise<PersistedOnboardingSnapshot> {
@@ -172,6 +202,11 @@ async function persistOnboardingProfileState({
 
     // Reclaim stale identity slugs tied to abandoned onboarding records.
     await purgeUserAccountData(env.fitloot_db, existingUsername.user_id);
+    if (runtimeSessionDb) {
+      await deleteRuntimeUserAuth(runtimeSessionDb, existingUsername.user_id).catch(
+        () => undefined,
+      );
+    }
   }
 
   let initialAttrs = {
@@ -518,6 +553,7 @@ export function registerOnboardingRoutes(
       if (!user) return c.json({ error: "Unauthorized" }, 401);
 
       const data = c.req.valid("json");
+      const runtimeSessionDb = resolveRuntimeSessionDb(c.env);
       if (!isSupabaseRuntimeDb(c.env.fitloot_db)) {
         c.executionCtx.waitUntil(
           ensureGamificationCatalog(c.env.fitloot_db).catch((error) => {
@@ -543,10 +579,17 @@ export function registerOnboardingRoutes(
               evaluateLevelTitles,
               logUserEvent,
               normalizeTrainingFrequencyInput,
+              runtimeSessionDb,
               skillTierOrder,
               upsertTrainingPlan,
             });
           }, c.env);
+        });
+        await syncRuntimeUserAuthSnapshot({
+          env: c.env,
+          runtimeSessionDb,
+          userId: user.id,
+          username: data.username.trim(),
         });
       } catch (error) {
         const handled = respondOnboardingPersistenceError(c, error);
@@ -592,6 +635,7 @@ export function registerOnboardingRoutes(
       if (!user) return c.json({ error: "Unauthorized" }, 401);
 
       const data = c.req.valid("json");
+      const runtimeSessionDb = resolveRuntimeSessionDb(c.env);
       if (!isSupabaseRuntimeDb(c.env.fitloot_db)) {
         c.executionCtx.waitUntil(
           ensureGamificationCatalog(c.env.fitloot_db).catch((error) => {
@@ -620,6 +664,7 @@ export function registerOnboardingRoutes(
               evaluateLevelTitles,
               logUserEvent,
               normalizeTrainingFrequencyInput,
+              runtimeSessionDb,
               skillTierOrder,
               upsertTrainingPlan,
             });
@@ -649,6 +694,12 @@ export function registerOnboardingRoutes(
               amount: checkoutResult.amount,
             });
           }, c.env);
+        });
+        await syncRuntimeUserAuthSnapshot({
+          env: c.env,
+          runtimeSessionDb,
+          userId: user.id,
+          username: data.username.trim(),
         });
       } catch (error) {
         const handled = respondOnboardingPersistenceError(c, error);

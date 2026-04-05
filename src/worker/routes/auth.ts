@@ -12,7 +12,11 @@ import {
   purgeUserAccountData,
 } from "../core/database";
 import { upsertRuntimeSession } from "../core/runtimeSessionStore";
-import { upsertRuntimeUserAuth } from "../core/runtimeUserAuthStore";
+import {
+  deleteRuntimeUserAuth,
+  readRuntimeUserAuthAvailability,
+  upsertRuntimeUserAuth,
+} from "../core/runtimeUserAuthStore";
 import type { AppContext } from "../core/types";
 import {
   getUserAuthRecordById,
@@ -113,6 +117,10 @@ export function registerAuthRoutes(
               }
 
               await purgeUserAccountData(c.env.fitloot_db, existing.id);
+              const runtimeSessionDb = resolveRuntimeSessionDb(c);
+              if (runtimeSessionDb) {
+                await deleteRuntimeUserAuth(runtimeSessionDb, existing.id).catch(() => undefined);
+              }
               userId = crypto.randomUUID();
               await insertUser(userId);
               userInserted = true;
@@ -287,55 +295,85 @@ export function registerAuthRoutes(
     }
 
     try {
-        const reusableByUserId = new Map<string, Promise<boolean>>();
-        const isReusableByUserId = async (userId: string): Promise<boolean> => {
-          const cached = reusableByUserId.get(userId);
-          if (cached) return cached;
+        const runtimeSessionDb = resolveRuntimeSessionDb(c);
+        if (runtimeSessionDb) {
+          try {
+            const runtimeLookup = await readRuntimeUserAuthAvailability(
+              runtimeSessionDb,
+              {
+                emailLower: emailQuery || null,
+                usernameLower: normalizedUsernameQuery || null,
+              },
+            );
 
-          const started = (async () => {
-            const existingUser = await getUserAuthRecordById(c.env.fitloot_db, userId);
-            return isReusableIncompleteAccount(existingUser);
-          })();
-          reusableByUserId.set(userId, started);
-          return started;
-        };
+            return c.json({
+              emailAvailable: emailQuery
+                ? !runtimeLookup.email || isReusableIncompleteAccount(runtimeLookup.email)
+                : null,
+              usernameAvailable: normalizedUsernameQuery
+                ? !runtimeLookup.username ||
+                  isReusableIncompleteAccount(runtimeLookup.username)
+                : null,
+            });
+        } catch (runtimeLookupError) {
+          console.warn("[check-availability][runtime]", {
+            message:
+              runtimeLookupError instanceof Error
+                ? runtimeLookupError.message
+                : String(runtimeLookupError),
+          });
+        }
+      }
 
-        const availabilityLookup =
-          emailQuery || normalizedUsernameQuery
-            ? await c.env.fitloot_db
-                .prepare(
-                  `SELECT
-                    (SELECT id FROM users WHERE lower(email) = ? LIMIT 1) AS email_user_id,
-                    (SELECT user_id FROM user_profiles WHERE lower(username) = ? LIMIT 1) AS username_user_id`,
-                )
-                .bind(emailQuery || null, normalizedUsernameQuery || null)
-                .first<{ email_user_id: string | null; username_user_id: string | null }>()
-            : null;
-        const emailUserId = availabilityLookup?.email_user_id ?? null;
-        const usernameUserId = availabilityLookup?.username_user_id ?? null;
+      const reusableByUserId = new Map<string, Promise<boolean>>();
+      const isReusableByUserId = async (userId: string): Promise<boolean> => {
+        const cached = reusableByUserId.get(userId);
+        if (cached) return cached;
+
+        const started = (async () => {
+          const existingUser = await getUserAuthRecordById(c.env.fitloot_db, userId);
+          return isReusableIncompleteAccount(existingUser);
+        })();
+        reusableByUserId.set(userId, started);
+        return started;
+      };
+
+      const availabilityLookup =
+        emailQuery || normalizedUsernameQuery
+          ? await c.env.fitloot_db
+              .prepare(
+                `SELECT
+                  (SELECT id FROM users WHERE lower(email) = ? LIMIT 1) AS email_user_id,
+                  (SELECT user_id FROM user_profiles WHERE lower(username) = ? LIMIT 1) AS username_user_id`,
+              )
+              .bind(emailQuery || null, normalizedUsernameQuery || null)
+              .first<{ email_user_id: string | null; username_user_id: string | null }>()
+          : null;
+      const emailUserId = availabilityLookup?.email_user_id ?? null;
+      const usernameUserId = availabilityLookup?.username_user_id ?? null;
 
       let emailAvailable: boolean | null = null;
-        if (emailQuery) {
-          if (!emailUserId) {
-            emailAvailable = true;
-          } else {
-            emailAvailable = await isReusableByUserId(emailUserId);
-          }
+      if (emailQuery) {
+        if (!emailUserId) {
+          emailAvailable = true;
+        } else {
+          emailAvailable = await isReusableByUserId(emailUserId);
         }
+      }
 
-        let usernameAvailable: boolean | null = null;
-        if (normalizedUsernameQuery) {
-          if (!usernameUserId) {
-            usernameAvailable = true;
-          } else {
-            usernameAvailable = await isReusableByUserId(usernameUserId);
-          }
+      let usernameAvailable: boolean | null = null;
+      if (normalizedUsernameQuery) {
+        if (!usernameUserId) {
+          usernameAvailable = true;
+        } else {
+          usernameAvailable = await isReusableByUserId(usernameUserId);
         }
+      }
 
-        return c.json({
-          emailAvailable,
-          usernameAvailable,
-        });
+      return c.json({
+        emailAvailable,
+        usernameAvailable,
+      });
     } catch (error) {
       console.error("[check-availability]", error);
       return c.json(
@@ -429,7 +467,18 @@ export function registerAuthRoutes(
                 user_id: userRow.id,
                 expires_at: expiresAt,
               }),
-              upsertRuntimeUserAuth(runtimeSessionDb, authRecord),
+              (async () => {
+                const profileRow = await c.env.fitloot_db
+                  .prepare(
+                    "SELECT username FROM user_profiles WHERE user_id = ? LIMIT 1",
+                  )
+                  .bind(userRow.id)
+                  .first<{ username: string | null }>()
+                  .catch(() => null);
+                await upsertRuntimeUserAuth(runtimeSessionDb, authRecord, {
+                  username: profileRow?.username ?? null,
+                });
+              })(),
             ]);
           } catch (runtimeSyncError) {
             console.warn("[login][runtime-session-sync]", {

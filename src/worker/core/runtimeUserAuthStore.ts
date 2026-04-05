@@ -14,6 +14,7 @@ const runtimeUserAuthSchemaState = new WeakMap<
 type RuntimeUserAuthRow = {
   user_id: string;
   email: string;
+  username: string | null;
   name: string;
   avatar_url: string | null;
   onboarding_completed: number | null;
@@ -21,6 +22,31 @@ type RuntimeUserAuthRow = {
   plan_status: string | null;
   payment_method: string | null;
   updated_at: string | null;
+};
+
+export type RuntimeUserAvailabilityMatch = UserAuthRecord & {
+  username: string | null;
+};
+
+export type RuntimeUserAvailabilityLookup = {
+  email: RuntimeUserAvailabilityMatch | null;
+  username: RuntimeUserAvailabilityMatch | null;
+};
+
+type RuntimeUserAuthUpsertOptions = {
+  username?: string | null | undefined;
+};
+
+type AvailabilityLookupInput = {
+  emailLower?: string | null | undefined;
+  usernameLower?: string | null | undefined;
+};
+
+type AvailabilityLookupQuery = {
+  emailLower: string;
+  usernameLower: string;
+  clauses: string[];
+  params: string[];
 };
 
 function normalizePlanId(value: string | null): PlanId {
@@ -49,6 +75,61 @@ function normalizePaymentMethod(value: string | null): UserPaymentMethod {
   return "none";
 }
 
+function normalizeUsername(value: string | null | undefined): string | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
+}
+
+function buildAvailabilityLookupQuery(
+  lookup: AvailabilityLookupInput,
+  clausesByField: {
+    email: string;
+    username: string;
+  },
+): AvailabilityLookupQuery {
+  const emailLower = String(lookup.emailLower ?? "").trim().toLowerCase();
+  const usernameLower = String(lookup.usernameLower ?? "").trim().toLowerCase();
+  const clauses: string[] = [];
+  const params: string[] = [];
+
+  if (emailLower) {
+    clauses.push(clausesByField.email);
+    params.push(emailLower);
+  }
+  if (usernameLower) {
+    clauses.push(clausesByField.username);
+    params.push(usernameLower);
+  }
+
+  return {
+    emailLower,
+    usernameLower,
+    clauses,
+    params,
+  };
+}
+
+function toUserAuthRecord(row: RuntimeUserAuthRow): UserAuthRecord {
+  return {
+    id: row.user_id,
+    email: row.email,
+    name: row.name,
+    avatar_url: row.avatar_url ?? null,
+    onboarding_completed: Number(row.onboarding_completed) === 1 ? 1 : 0,
+    plan_id: normalizePlanId(row.plan_id),
+    plan_status: normalizePlanStatus(row.plan_status),
+    payment_method: normalizePaymentMethod(row.payment_method),
+  };
+}
+
+function toAvailabilityMatch(row: RuntimeUserAuthRow): RuntimeUserAvailabilityMatch {
+  return {
+    ...toUserAuthRecord(row),
+    username: normalizeUsername(row.username),
+  };
+}
+
 async function ensureRuntimeUserAuthSchema(db: D1Database): Promise<void> {
   const now = Date.now();
   const cached = runtimeUserAuthSchemaState.get(db);
@@ -58,12 +139,36 @@ async function ensureRuntimeUserAuthSchema(db: D1Database): Promise<void> {
 
   await db
     .prepare(
-      "CREATE TABLE IF NOT EXISTS runtime_user_auth_cache (user_id TEXT PRIMARY KEY, email TEXT NOT NULL, name TEXT NOT NULL, avatar_url TEXT, onboarding_completed INTEGER NOT NULL DEFAULT 0, plan_id TEXT NOT NULL DEFAULT 'basic', plan_status TEXT NOT NULL DEFAULT 'failed', payment_method TEXT NOT NULL DEFAULT 'none', updated_at TEXT NOT NULL DEFAULT (datetime('now')))",
+      "CREATE TABLE IF NOT EXISTS runtime_user_auth_cache (user_id TEXT PRIMARY KEY, email TEXT NOT NULL, username TEXT, name TEXT NOT NULL, avatar_url TEXT, onboarding_completed INTEGER NOT NULL DEFAULT 0, plan_id TEXT NOT NULL DEFAULT 'basic', plan_status TEXT NOT NULL DEFAULT 'failed', payment_method TEXT NOT NULL DEFAULT 'none', updated_at TEXT NOT NULL DEFAULT (datetime('now')))",
+    )
+    .run();
+
+  const columns = await db
+    .prepare("PRAGMA table_info('runtime_user_auth_cache')")
+    .all<{ name: string | null }>();
+  const hasUsernameColumn = (columns.results ?? []).some(
+    (column) => String(column.name ?? "").toLowerCase() === "username",
+  );
+  if (!hasUsernameColumn) {
+    await db
+      .prepare("ALTER TABLE runtime_user_auth_cache ADD COLUMN username TEXT")
+      .run()
+      .catch(() => undefined);
+  }
+
+  await db
+    .prepare(
+      "CREATE INDEX IF NOT EXISTS idx_runtime_user_auth_updated_at ON runtime_user_auth_cache(updated_at)",
     )
     .run();
   await db
     .prepare(
-      "CREATE INDEX IF NOT EXISTS idx_runtime_user_auth_updated_at ON runtime_user_auth_cache(updated_at)",
+      "CREATE INDEX IF NOT EXISTS idx_runtime_user_auth_email_lower ON runtime_user_auth_cache(lower(email))",
+    )
+    .run();
+  await db
+    .prepare(
+      "CREATE INDEX IF NOT EXISTS idx_runtime_user_auth_username_lower ON runtime_user_auth_cache(lower(username))",
     )
     .run();
 
@@ -83,6 +188,7 @@ export async function readRuntimeUserAuth(
       `SELECT
         user_id,
         email,
+        username,
         name,
         avatar_url,
         onboarding_completed,
@@ -104,28 +210,33 @@ export async function readRuntimeUserAuth(
     }
   }
 
-  return {
-    id: row.user_id,
-    email: row.email,
-    name: row.name,
-    avatar_url: row.avatar_url ?? null,
-    onboarding_completed: Number(row.onboarding_completed) === 1 ? 1 : 0,
-    plan_id: normalizePlanId(row.plan_id),
-    plan_status: normalizePlanStatus(row.plan_status),
-    payment_method: normalizePaymentMethod(row.payment_method),
-  };
+  return toUserAuthRecord(row);
 }
 
-export async function upsertRuntimeUserAuth(
+export async function readRuntimeUserAuthAvailability(
   db: D1Database,
-  user: UserAuthRecord,
-): Promise<void> {
+  lookup: AvailabilityLookupInput,
+): Promise<RuntimeUserAvailabilityLookup> {
   await ensureRuntimeUserAuthSchema(db);
-  await db
+  const { emailLower, usernameLower, clauses, params } =
+    buildAvailabilityLookupQuery(lookup, {
+      email: "lower(email) = ?",
+      username: "lower(username) = ?",
+    });
+
+  if (clauses.length === 0) {
+    return {
+      email: null,
+      username: null,
+    };
+  }
+
+  const rows = await db
     .prepare(
-      `INSERT INTO runtime_user_auth_cache (
+      `SELECT
         user_id,
         email,
+        username,
         name,
         avatar_url,
         onboarding_completed,
@@ -133,9 +244,57 @@ export async function upsertRuntimeUserAuth(
         plan_status,
         payment_method,
         updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+      FROM runtime_user_auth_cache
+      WHERE ${clauses.join(" OR ")}`,
+    )
+    .bind(...params)
+    .all<RuntimeUserAuthRow>();
+
+  let emailMatch: RuntimeUserAvailabilityMatch | null = null;
+  let usernameMatch: RuntimeUserAvailabilityMatch | null = null;
+
+  for (const row of rows.results ?? []) {
+    if (!emailMatch && emailLower && row.email.trim().toLowerCase() === emailLower) {
+      emailMatch = toAvailabilityMatch(row);
+    }
+    if (
+      !usernameMatch &&
+      usernameLower &&
+      String(row.username ?? "").trim().toLowerCase() === usernameLower
+    ) {
+      usernameMatch = toAvailabilityMatch(row);
+    }
+  }
+
+  return {
+    email: emailMatch,
+    username: usernameMatch,
+  };
+}
+
+export async function upsertRuntimeUserAuth(
+  db: D1Database,
+  user: UserAuthRecord,
+  options: RuntimeUserAuthUpsertOptions = {},
+): Promise<void> {
+  await ensureRuntimeUserAuthSchema(db);
+  await db
+    .prepare(
+      `INSERT INTO runtime_user_auth_cache (
+        user_id,
+        email,
+        username,
+        name,
+        avatar_url,
+        onboarding_completed,
+        plan_id,
+        plan_status,
+        payment_method,
+        updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
       ON CONFLICT(user_id) DO UPDATE SET
         email = excluded.email,
+        username = COALESCE(excluded.username, runtime_user_auth_cache.username),
         name = excluded.name,
         avatar_url = excluded.avatar_url,
         onboarding_completed = excluded.onboarding_completed,
@@ -147,6 +306,7 @@ export async function upsertRuntimeUserAuth(
     .bind(
       user.id,
       user.email,
+      normalizeUsername(options.username),
       user.name,
       user.avatar_url ?? null,
       Number(user.onboarding_completed) === 1 ? 1 : 0,

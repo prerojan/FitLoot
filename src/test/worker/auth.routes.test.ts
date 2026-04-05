@@ -244,6 +244,128 @@ describe("auth routes", () => {
     });
   });
 
+  it("serves runtime auth availability directly without primary backfill scans", async () => {
+    let primaryAvailabilityReads = 0;
+    const runtimeRows = [
+      {
+        user_id: "active-user",
+        email: "runner@example.com",
+        username: "runnerone",
+        name: "Runner One",
+        avatar_url: null,
+        onboarding_completed: 1,
+        plan_id: "pro",
+        plan_status: "active",
+        payment_method: "pix",
+        updated_at: "2026-04-04T00:00:00.000Z",
+      },
+    ];
+
+    const { db, calls } = createMockD1Database([
+      {
+        match: (sql) =>
+          sql.includes("FROM users u") &&
+          sql.includes("LEFT JOIN user_profiles p ON p.user_id = u.id") &&
+          sql.includes("WHERE"),
+        all: () => {
+          primaryAvailabilityReads += 1;
+          return { results: [] };
+        },
+      },
+      {
+        match: "COALESCE(onboarding_completed, 0)",
+        first: createUserRow({
+          onboardingCompleted: 1,
+          planId: "pro",
+          planStatus: "active",
+          paymentMethod: "pix",
+        }),
+      },
+      {
+        match: (sql) => sql.includes("PRAGMA table_info('users')"),
+        all: createUsersPragmaColumns(),
+      },
+      {
+        match: (sql) => sql.includes("PRAGMA table_info('"),
+        all: { results: [] },
+      },
+    ]);
+
+    const { db: runtimeDb, calls: runtimeCalls } = createMockD1Database([
+      {
+        match: "CREATE TABLE IF NOT EXISTS runtime_user_auth_cache",
+        run: { success: true, meta: { changes: 0 } },
+      },
+      {
+        match: "PRAGMA table_info('runtime_user_auth_cache')",
+        all: {
+          results: [
+            { name: "user_id" },
+            { name: "email" },
+            { name: "username" },
+            { name: "name" },
+            { name: "avatar_url" },
+            { name: "onboarding_completed" },
+            { name: "plan_id" },
+            { name: "plan_status" },
+            { name: "payment_method" },
+            { name: "updated_at" },
+          ],
+        },
+      },
+      {
+        match: "CREATE INDEX IF NOT EXISTS idx_runtime_user_auth_updated_at",
+        run: { success: true, meta: { changes: 0 } },
+      },
+      {
+        match: "CREATE INDEX IF NOT EXISTS idx_runtime_user_auth_email_lower",
+        run: { success: true, meta: { changes: 0 } },
+      },
+      {
+        match: "CREATE INDEX IF NOT EXISTS idx_runtime_user_auth_username_lower",
+        run: { success: true, meta: { changes: 0 } },
+      },
+      {
+        match: (sql) =>
+          sql.includes("FROM runtime_user_auth_cache") &&
+          sql.includes("lower(username) = ?"),
+        all: () => ({ results: [...runtimeRows] }),
+      },
+    ]);
+
+    const env = createTestEnv(db, { fitloot_runtime_db: runtimeDb });
+    const deps = createAuthDeps();
+    const app = new Hono<AppContext>();
+    registerAuthRoutes(app, deps);
+    const { executionCtx } = createExecutionContext();
+
+    const response = await app.fetch(
+      new Request(
+        "http://localhost/api/auth/check-availability?username=runnerone",
+      ),
+      env,
+      executionCtx,
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      emailAvailable: null,
+      usernameAvailable: false,
+    });
+    expect(primaryAvailabilityReads).toBe(0);
+    expect(
+      calls.some(
+        (call) =>
+          call.sql.includes("FROM users u") &&
+          call.sql.includes("LEFT JOIN user_profiles p ON p.user_id = u.id") &&
+          !call.sql.includes("WHERE"),
+      ),
+    ).toBe(false);
+    expect(runtimeCalls.some((call) => call.sql.includes("FROM runtime_user_auth_cache"))).toBe(
+      true,
+    );
+  });
+
   it("accepts login with mixed-case email and trims spaces", async () => {
     const { db, calls } = createMockD1Database([
       {

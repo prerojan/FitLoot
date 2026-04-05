@@ -85,8 +85,60 @@ describe("onboarding routes", () => {
         match: "INSERT INTO user_skills",
         run: { success: true, meta: {} },
       },
+      {
+        match: "COALESCE(onboarding_completed, 0) as onboarding_completed",
+        first: {
+          id: TEST_USER.id,
+          email: TEST_USER.email,
+          name: TEST_USER.name,
+          avatar_url: null,
+          onboarding_completed: 0,
+          plan_id: "basic",
+          plan_status: "cancelled",
+          payment_method: "none",
+        },
+      },
     ]);
-    const env = createTestEnv(db) as Env;
+    const { db: runtimeDb, calls: runtimeCalls } = createMockD1Database([
+      {
+        match: "CREATE TABLE IF NOT EXISTS runtime_user_auth_cache",
+        run: { success: true, meta: {} },
+      },
+      {
+        match: "PRAGMA table_info('runtime_user_auth_cache')",
+        all: {
+          results: [
+            { name: "user_id" },
+            { name: "email" },
+            { name: "username" },
+            { name: "name" },
+            { name: "avatar_url" },
+            { name: "onboarding_completed" },
+            { name: "plan_id" },
+            { name: "plan_status" },
+            { name: "payment_method" },
+            { name: "updated_at" },
+          ],
+        },
+      },
+      {
+        match: "CREATE INDEX IF NOT EXISTS idx_runtime_user_auth_updated_at",
+        run: { success: true, meta: {} },
+      },
+      {
+        match: "CREATE INDEX IF NOT EXISTS idx_runtime_user_auth_email_lower",
+        run: { success: true, meta: {} },
+      },
+      {
+        match: "CREATE INDEX IF NOT EXISTS idx_runtime_user_auth_username_lower",
+        run: { success: true, meta: {} },
+      },
+      {
+        match: "INSERT INTO runtime_user_auth_cache",
+        run: { success: true, meta: {} },
+      },
+    ]);
+    const env = createTestEnv(db, { fitloot_runtime_db: runtimeDb }) as Env;
     const deps = createOnboardingDeps();
     const app = new Hono<AppContext>();
     registerOnboardingRoutes(app, deps);
@@ -130,5 +182,12 @@ describe("onboarding routes", () => {
     expect(deps.startCheckoutForUser).not.toHaveBeenCalled();
     expect(deps.ensurePeriodicMissions).toHaveBeenCalledWith(env, db, TEST_USER.id);
     expect(deps.invalidateMissionListCache).toHaveBeenCalledWith(TEST_USER.id);
+    expect(
+      runtimeCalls.some(
+        (call) =>
+          call.sql.includes("INSERT INTO runtime_user_auth_cache") &&
+          call.params[2] === "testeuser",
+      ),
+    ).toBe(true);
   });
 });
