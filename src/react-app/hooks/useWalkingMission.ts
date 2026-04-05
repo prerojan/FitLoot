@@ -372,7 +372,7 @@ export const useWalkingMission = ({ mission, onComplete, autoRefresh = true }: U
         error: "Falha ao iniciar a missao. Tente novamente.",
       }));
     }
-  }, [healthData, isDistanceMission]);
+  }, [healthData, isDistanceMission, mission]);
 
   const togglePause = useCallback(() => {
     if (!stateRef.current.isRunning || stateRef.current.isCompleted) {

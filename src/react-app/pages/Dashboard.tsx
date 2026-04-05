@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { useAuth } from "@/react-app/auth/context";
-import { useRewardNotifications } from "@/react-app/contexts/rewardNotifications";
+import { useRewardNotifications } from "@/react-app/contexts/useRewardNotifications";
 import { useDailyMetrics } from "@/react-app/hooks/useDailyMetrics";
 import AppPageShell from "@/react-app/components/AppPageShell";
 import PaymentStatusPopup from "@/react-app/components/PaymentStatusPopup";

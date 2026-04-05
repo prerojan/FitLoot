@@ -409,27 +409,32 @@ function RouteMissionExecutionModal({
   );
 }
 
-export function MissionExecutionModal({
-  mission,
-  metricType,
-  open,
-  onClose,
-  onFinish,
-}: MissionExecutionModalProps) {
+export function MissionExecutionModal(props: MissionExecutionModalProps) {
+  const { mission } = props;
   const isRouteTrackingMission =
     mission.execution_mode === "route_tracking"
     && (mission.activity_kind === "walking" || mission.activity_kind === "running");
   if (isRouteTrackingMission) {
     return (
       <RouteMissionExecutionModal
-        mission={mission}
-        open={open}
-        onClose={onClose}
-        onFinish={onFinish}
+        mission={props.mission}
+        open={props.open}
+        onClose={props.onClose}
+        onFinish={props.onFinish}
       />
     );
   }
 
+  return <StandardMissionExecutionModal {...props} />;
+}
+
+function StandardMissionExecutionModal({
+  mission,
+  metricType,
+  open,
+  onClose,
+  onFinish,
+}: MissionExecutionModalProps) {
   const [state, setState] = useState<MissionExecutionState>(DEFAULT_EXECUTION_STATE);
   const [videoVisibleControls, setVideoVisibleControls] = useState(false);
   const [finishing, setFinishing] = useState(false);

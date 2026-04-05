@@ -189,7 +189,7 @@ export default function PaymentPending() {
         ...(completionCopy.badge ? { badge: completionCopy.badge } : {}),
       });
     },
-    [checkAuth, clearScheduledPoll, logout, navigate, user?.onboarding_completed],
+    [androidDownloadInfo, checkAuth, clearScheduledPoll, logout, navigate, user?.onboarding_completed],
   );
 
   const verifyStatus = useCallback(async (options: VerifyStatusOptions = {}) => {

@@ -1,7 +1,9 @@
 import { lazy, type ComponentType, type LazyExoticComponent } from "react";
 import { ROUTE_PATHS } from "../auth/constants";
 
-type PreloadableRouteComponent<T extends ComponentType<any>> = LazyExoticComponent<T> & {
+type RouteComponentProps = Record<string, never>;
+
+type PreloadableRouteComponent<T extends ComponentType<RouteComponentProps>> = LazyExoticComponent<T> & {
   preload: () => Promise<{ default: T }>;
   isPreloaded: () => boolean;
 };
@@ -11,7 +13,7 @@ type RoutePreloader = {
   isPreloaded: () => boolean;
 };
 
-function lazyWithPreload<T extends ComponentType<any>>(
+function lazyWithPreload<T extends ComponentType<RouteComponentProps>>(
   loader: () => Promise<{ default: T }>,
 ): PreloadableRouteComponent<T> {
   let loaded = false;

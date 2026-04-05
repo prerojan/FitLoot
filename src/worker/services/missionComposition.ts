@@ -8,6 +8,7 @@ import {
   inferMissionVisualTarget,
   localizeMissionText,
 } from "../../shared/missionLocalization";
+import { resolveSupportedRouteMissionActivityKind } from "../../shared/exerciseCatalog";
 import {
   MISSION_LIMITS,
   formatMissionGoal,
@@ -132,19 +133,14 @@ export function normalizeExerciseCategory(
   ) {
     return "strength";
   }
-  if (
-    /\bwalk(?:ing)?\b/.test(normalizedName) ||
-    normalizedName.includes("caminha")
-  ) {
+  const routeActivityKind = resolveSupportedRouteMissionActivityKind(name);
+  if (routeActivityKind === "walking") {
     return "walk";
   }
-  if (
-    /\brun(?:ning)?\b/.test(normalizedName) ||
-    normalizedName.includes("corrid") ||
-    normalizedName.includes("jog") ||
-    normalizedName.includes("sprint") ||
-    normalizedName.includes("cicl")
-  ) {
+  if (routeActivityKind === "running") {
+    return "run";
+  }
+  if (normalizedName.includes("cicl")) {
     return "run";
   }
   if (normalizedName.includes("yoga") || normalizedName.includes("pose")) return "yoga";

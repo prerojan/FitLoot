@@ -1,7 +1,5 @@
 import {
-  createContext,
   useCallback,
-  useContext,
   useEffect,
   useMemo,
   useRef,
@@ -18,21 +16,7 @@ import {
   isExpectedApiCancellation,
 } from "@/react-app/utils/api";
 import type { RewardNotification } from "@/shared/types";
-
-type RewardNotificationsContextValue = {
-  pushRewardNotifications: (
-    notifications: RewardNotification[] | null | undefined,
-  ) => void;
-  refreshRewardNotifications: (options?: {
-    force?: boolean;
-  }) => Promise<void>;
-};
-
-const RewardNotificationsContext =
-  createContext<RewardNotificationsContextValue>({
-    pushRewardNotifications: () => undefined,
-    refreshRewardNotifications: async () => undefined,
-  });
+import { RewardNotificationsContext } from "@/react-app/contexts/rewardNotificationsContext";
 
 const TOAST_DURATION_MS = 4_500;
 const INITIAL_REFRESH_DELAY_MS = 1_500;
@@ -344,8 +328,4 @@ export function RewardNotificationsProvider({
       ) : null}
     </RewardNotificationsContext.Provider>
   );
-}
-
-export function useRewardNotifications(): RewardNotificationsContextValue {
-  return useContext(RewardNotificationsContext);
 }

@@ -34,7 +34,7 @@ describe("clearPersistedAuthenticatedUserState", () => {
     expect(localStorage.getItem("fitloot.dashboard.step-mission-progress.v1:u1")).toBeNull();
     expect(localStorage.getItem("fitloot.offline-sync.queue.v1")).toBe("[]");
     expect(localStorage.getItem("fitloot.offline-sync.metrics-cursor.v1")).toBe(
-      JSON.stringify({ date: "", steps: 0, calories: 0 }),
+      JSON.stringify({ date: "", steps: 0, calories: 0, distanceMeters: 0 }),
     );
     expect(localStorage.getItem("fitloot_onboarding_draft")).toBeNull();
     expect(sessionStorage.getItem("fitloot_activation_notice")).toBeNull();

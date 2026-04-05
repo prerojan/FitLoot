@@ -1,4 +1,5 @@
 import type { MissionMetricType } from "@/shared/types";
+import { resolveSupportedRouteMissionActivityKind } from "@/shared/exerciseCatalog";
 
 export const MISSION_LIMITS = {
   daily: 8,
@@ -40,8 +41,6 @@ const EXERCISE_METRIC_RULES: ReadonlyArray<{
   { match: /\bwall sit\b/, type: "duration_seconds" },
   { match: /\bdead hang\b/, type: "duration_seconds" },
   { match: /\bl[\s-]?sit\b/, type: "duration_seconds" },
-  { match: /\bwalk(?:ing)?\b|\bcaminhada\b/, type: "distance_meters" },
-  { match: /\brun(?:ning)?\b|\bcorrida\b|\btrote\b|\bjog\b/, type: "distance_meters" },
   { match: /\bcycling\b|\bciclismo\b/, type: "distance_meters" },
   { match: /\byoga\b/, type: "duration_minutes" },
   { match: /\bstretch(?:ing)?\b|\balongamento\b/, type: "duration_minutes" },
@@ -63,6 +62,11 @@ function normalizeText(value: string): string {
 }
 
 export function getMissionMetricType(exerciseName: string): MissionMetricType {
+  const routeActivityKind = resolveSupportedRouteMissionActivityKind(exerciseName);
+  if (routeActivityKind === "walking" || routeActivityKind === "running") {
+    return "distance_meters";
+  }
+
   const lower = normalizeText(exerciseName);
   for (const rule of EXERCISE_METRIC_RULES) {
     if (rule.match.test(lower)) return rule.type;

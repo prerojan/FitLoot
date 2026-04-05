@@ -47,6 +47,13 @@ function createUserRow(options: {
   };
 }
 
+function matchesAvailabilityLookupQuery(sql: string): boolean {
+  return (
+    sql.includes("(SELECT id FROM users WHERE lower(email) = ? LIMIT 1)") &&
+    sql.includes("(SELECT user_id FROM user_profiles WHERE lower(username) = ? LIMIT 1)")
+  );
+}
+
 describe("auth routes", () => {
   it("reuses email from incomplete account and registers a fresh user", async () => {
     let insertAttempts = 0;
@@ -87,7 +94,7 @@ describe("auth routes", () => {
         all: { results: [] },
       },
       {
-        match: "DELETE FROM users WHERE id = ?",
+        match: (sql) => sql.startsWith("DELETE FROM "),
         run: { success: true, meta: { changes: 1 } },
       },
       {
@@ -201,7 +208,7 @@ describe("auth routes", () => {
   it("reports reclaimable email as available in check-availability", async () => {
     const { db } = createMockD1Database([
       {
-        match: "SELECT\n            (SELECT id FROM users WHERE lower(email) = ? LIMIT 1) AS email_user_id",
+        match: matchesAvailabilityLookupQuery,
         first: { email_user_id: "old-user", username_user_id: null },
       },
       {
@@ -263,7 +270,7 @@ describe("auth routes", () => {
 
     const { db, calls } = createMockD1Database([
       {
-        match: "SELECT\n            (SELECT id FROM users WHERE lower(email) = ? LIMIT 1) AS email_user_id",
+        match: matchesAvailabilityLookupQuery,
         first: () => {
           primaryAvailabilityReads += 1;
           return { email_user_id: null, username_user_id: null };
@@ -350,7 +357,7 @@ describe("auth routes", () => {
       usernameAvailable: false,
     });
     expect(primaryAvailabilityReads).toBe(0);
-    expect(calls.some((call) => call.method === "first" && call.sql.includes("SELECT\n            (SELECT id FROM users WHERE lower(email) = ? LIMIT 1) AS email_user_id"))).toBe(false);
+    expect(calls.some((call) => call.method === "first" && matchesAvailabilityLookupQuery(call.sql))).toBe(false);
     expect(runtimeCalls.some((call) => call.sql.includes("FROM runtime_user_auth_cache"))).toBe(
       true,
     );
@@ -359,7 +366,7 @@ describe("auth routes", () => {
   it("falls back to the primary database when runtime auth cache misses", async () => {
     const { db, calls } = createMockD1Database([
       {
-        match: "SELECT\n            (SELECT id FROM users WHERE lower(email) = ? LIMIT 1) AS email_user_id",
+        match: matchesAvailabilityLookupQuery,
         first: { email_user_id: null, username_user_id: "runner-user" },
       },
       {
@@ -451,9 +458,7 @@ describe("auth routes", () => {
       usernameAvailable: false,
     });
     expect(
-      calls.some((call) =>
-        call.sql.includes("SELECT\n            (SELECT id FROM users WHERE lower(email) = ? LIMIT 1) AS email_user_id"),
-      ),
+      calls.some((call) => matchesAvailabilityLookupQuery(call.sql)),
     ).toBe(true);
     expect(
       runtimeCalls.some((call) => call.sql.includes("INSERT INTO runtime_user_auth_cache")),

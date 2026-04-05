@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { registerMetricsRoutes } from "../../worker/routes/metrics";
 import type { AppContext } from "../../worker/core/types";
 import { createMockD1Database } from "./mockD1";
