@@ -1,3 +1,8 @@
+import {
+  ensureRuntimeSchemaReady,
+  runRuntimeCleanupThrottled,
+} from "./runtimeSchemaCoordinator";
+
 type RuntimeHttpCacheRecord = {
   cache_key: string;
   session_id: string;
@@ -30,66 +35,55 @@ type RuntimeHttpCacheUpsertInput = {
   snapshot: RuntimeHttpCacheSnapshot;
 };
 
-const RUNTIME_HTTP_CACHE_SCHEMA_TTL_MS = 60_000;
 const RUNTIME_HTTP_CACHE_CLEANUP_INTERVAL_MS = 60_000;
-const runtimeHttpCacheSchemaState = new WeakMap<
-  D1Database,
-  { checkedAt: number; ready: boolean }
->();
-const runtimeHttpCacheCleanupState = new WeakMap<D1Database, { cleanedAt: number }>();
+const RUNTIME_HTTP_CACHE_SCHEMA_KEY = "runtime_http_cache";
+const RUNTIME_HTTP_CACHE_CLEANUP_KEY = "runtime_http_cache:cleanup";
 
 async function maybeCleanupRuntimeHttpCache(db: D1Database, now: number): Promise<void> {
-  const state = runtimeHttpCacheCleanupState.get(db);
-  if (state && now - state.cleanedAt < RUNTIME_HTTP_CACHE_CLEANUP_INTERVAL_MS) {
-    return;
-  }
-
-  await db
-    .prepare("DELETE FROM runtime_http_cache WHERE stale_until <= ?")
-    .bind(now)
-    .run();
-
-  runtimeHttpCacheCleanupState.set(db, { cleanedAt: now });
+  await runRuntimeCleanupThrottled(
+    db,
+    RUNTIME_HTTP_CACHE_CLEANUP_KEY,
+    RUNTIME_HTTP_CACHE_CLEANUP_INTERVAL_MS,
+    async () => {
+      await db
+        .prepare("DELETE FROM runtime_http_cache WHERE stale_until <= ?")
+        .bind(now)
+        .run();
+    },
+    now,
+  );
 }
 
 async function ensureRuntimeHttpCacheSchema(db: D1Database): Promise<void> {
-  const now = Date.now();
-  const cached = runtimeHttpCacheSchemaState.get(db);
-  if (cached?.ready && now - cached.checkedAt < RUNTIME_HTTP_CACHE_SCHEMA_TTL_MS) {
-    await maybeCleanupRuntimeHttpCache(db, now);
-    return;
-  }
+  await ensureRuntimeSchemaReady(db, RUNTIME_HTTP_CACHE_SCHEMA_KEY, async () => {
+    await db
+      .prepare(
+        `CREATE TABLE IF NOT EXISTS runtime_http_cache (
+          cache_key TEXT PRIMARY KEY,
+          session_id TEXT NOT NULL,
+          path TEXT NOT NULL,
+          status INTEGER NOT NULL,
+          headers_json TEXT NOT NULL,
+          body_text TEXT NOT NULL,
+          expires_at INTEGER NOT NULL,
+          stale_until INTEGER NOT NULL,
+          updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )`,
+      )
+      .run();
 
-  await db
-    .prepare(
-      `CREATE TABLE IF NOT EXISTS runtime_http_cache (
-        cache_key TEXT PRIMARY KEY,
-        session_id TEXT NOT NULL,
-        path TEXT NOT NULL,
-        status INTEGER NOT NULL,
-        headers_json TEXT NOT NULL,
-        body_text TEXT NOT NULL,
-        expires_at INTEGER NOT NULL,
-        stale_until INTEGER NOT NULL,
-        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-      )`,
-    )
-    .run();
+    await db
+      .prepare(
+        "CREATE INDEX IF NOT EXISTS idx_runtime_http_cache_session ON runtime_http_cache(session_id)",
+      )
+      .run();
 
-  await db
-    .prepare(
-      "CREATE INDEX IF NOT EXISTS idx_runtime_http_cache_session ON runtime_http_cache(session_id)",
-    )
-    .run();
-
-  await db
-    .prepare(
-      "CREATE INDEX IF NOT EXISTS idx_runtime_http_cache_expiry ON runtime_http_cache(expires_at)",
-    )
-    .run();
-
-  runtimeHttpCacheSchemaState.set(db, { checkedAt: now, ready: true });
-  await maybeCleanupRuntimeHttpCache(db, now);
+    await db
+      .prepare(
+        "CREATE INDEX IF NOT EXISTS idx_runtime_http_cache_expiry ON runtime_http_cache(expires_at)",
+      )
+      .run();
+  });
 }
 
 function safeParseHeaders(rawValue: string): Array<[string, string]> | null {
@@ -195,6 +189,7 @@ export async function upsertRuntimeHttpCache(
       Math.max(0, Math.floor(input.staleUntil)),
     )
     .run();
+  await maybeCleanupRuntimeHttpCache(db, Date.now());
 }
 
 export async function deleteRuntimeHttpCacheBySession(
@@ -206,6 +201,7 @@ export async function deleteRuntimeHttpCacheBySession(
     .prepare("DELETE FROM runtime_http_cache WHERE session_id = ?")
     .bind(sessionId)
     .run();
+  await maybeCleanupRuntimeHttpCache(db, Date.now());
 }
 
 export async function deleteRuntimeHttpCacheBySessionPaths(
@@ -228,4 +224,5 @@ export async function deleteRuntimeHttpCacheBySessionPaths(
     )
     .bind(sessionId, ...normalizedPaths)
     .run();
+  await maybeCleanupRuntimeHttpCache(db, Date.now());
 }

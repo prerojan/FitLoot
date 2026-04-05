@@ -15,6 +15,7 @@ import { upsertRuntimeSession } from "../core/runtimeSessionStore";
 import {
   deleteRuntimeUserAuth,
   readRuntimeUserAuthAvailability,
+  type RuntimeUserAvailabilityMatch,
   upsertRuntimeUserAuth,
 } from "../core/runtimeUserAuthStore";
 import type { AppContext } from "../core/types";
@@ -26,6 +27,11 @@ import {
 type AuthRouteDeps = {
   generateCookie: (sessionId: string, requestUrl: string) => string;
   hashPassword: (password: string, salt: string) => Promise<string>;
+};
+
+type AvailabilityLookupRow = {
+  email_user_id: string | null;
+  username_user_id: string | null;
 };
 
 function resolveRuntimeSessionDb(c: import("hono").Context<AppContext>): D1Database | null {
@@ -62,6 +68,73 @@ function isConnectionTimeoutLike(error: unknown): boolean {
 
 async function sleep(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function resolveRuntimeAvailability(
+  queryValue: string,
+  match: RuntimeUserAvailabilityMatch | null,
+): boolean | null {
+  if (!queryValue) {
+    return null;
+  }
+
+  if (!match) {
+    return null;
+  }
+
+  return isReusableIncompleteAccount(match);
+}
+
+async function readAvailabilityLookupWithRetry(
+  db: D1Database,
+  emailLower: string,
+  usernameLower: string,
+): Promise<AvailabilityLookupRow | null> {
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    try {
+      if (!emailLower && !usernameLower) {
+        return null;
+      }
+
+      return await db
+        .prepare(
+          `SELECT
+            (SELECT id FROM users WHERE lower(email) = ? LIMIT 1) AS email_user_id,
+            (SELECT user_id FROM user_profiles WHERE lower(username) = ? LIMIT 1) AS username_user_id`,
+        )
+        .bind(emailLower || null, usernameLower || null)
+        .first<AvailabilityLookupRow>();
+    } catch (error) {
+      if (!isConnectionTimeoutLike(error) || attempt >= 2) {
+        throw error;
+      }
+
+      await sleep(140 * attempt);
+    }
+  }
+
+  return null;
+}
+
+async function syncRuntimeAvailabilityUser(
+  runtimeDb: D1Database,
+  primaryDb: D1Database,
+  userId: string,
+): Promise<void> {
+  const authRecord = await getUserAuthRecordById(primaryDb, userId);
+  if (!authRecord) {
+    return;
+  }
+
+  const profileRow = await primaryDb
+    .prepare("SELECT username FROM user_profiles WHERE user_id = ? LIMIT 1")
+    .bind(userId)
+    .first<{ username: string | null }>()
+    .catch(() => null);
+
+  await upsertRuntimeUserAuth(runtimeDb, authRecord, {
+    username: profileRow?.username ?? null,
+  });
 }
 
 // Registers the authentication surface responsible for account creation and session login.
@@ -295,26 +368,33 @@ export function registerAuthRoutes(
     }
 
     try {
-        const runtimeSessionDb = resolveRuntimeSessionDb(c);
-        if (runtimeSessionDb) {
-          try {
-            const runtimeLookup = await readRuntimeUserAuthAvailability(
-              runtimeSessionDb,
-              {
-                emailLower: emailQuery || null,
-                usernameLower: normalizedUsernameQuery || null,
-              },
-            );
+      const runtimeSessionDb = resolveRuntimeSessionDb(c);
+      if (runtimeSessionDb) {
+        try {
+          const runtimeLookup = await readRuntimeUserAuthAvailability(runtimeSessionDb, {
+            emailLower: emailQuery || null,
+            usernameLower: normalizedUsernameQuery || null,
+          });
 
+          const runtimeEmailAvailability = resolveRuntimeAvailability(
+            emailQuery,
+            runtimeLookup.email,
+          );
+          const runtimeUsernameAvailability = resolveRuntimeAvailability(
+            normalizedUsernameQuery,
+            runtimeLookup.username,
+          );
+
+          const resolvedAllFromRuntime =
+            (!emailQuery || runtimeEmailAvailability !== null) &&
+            (!normalizedUsernameQuery || runtimeUsernameAvailability !== null);
+
+          if (resolvedAllFromRuntime) {
             return c.json({
-              emailAvailable: emailQuery
-                ? !runtimeLookup.email || isReusableIncompleteAccount(runtimeLookup.email)
-                : null,
-              usernameAvailable: normalizedUsernameQuery
-                ? !runtimeLookup.username ||
-                  isReusableIncompleteAccount(runtimeLookup.username)
-                : null,
+              emailAvailable: runtimeEmailAvailability,
+              usernameAvailable: runtimeUsernameAvailability,
             });
+          }
         } catch (runtimeLookupError) {
           console.warn("[check-availability][runtime]", {
             message:
@@ -334,21 +414,15 @@ export function registerAuthRoutes(
           const existingUser = await getUserAuthRecordById(c.env.fitloot_db, userId);
           return isReusableIncompleteAccount(existingUser);
         })();
-        reusableByUserId.set(userId, started);
-        return started;
-      };
+          reusableByUserId.set(userId, started);
+          return started;
+        };
 
-      const availabilityLookup =
-        emailQuery || normalizedUsernameQuery
-          ? await c.env.fitloot_db
-              .prepare(
-                `SELECT
-                  (SELECT id FROM users WHERE lower(email) = ? LIMIT 1) AS email_user_id,
-                  (SELECT user_id FROM user_profiles WHERE lower(username) = ? LIMIT 1) AS username_user_id`,
-              )
-              .bind(emailQuery || null, normalizedUsernameQuery || null)
-              .first<{ email_user_id: string | null; username_user_id: string | null }>()
-          : null;
+      const availabilityLookup = await readAvailabilityLookupWithRetry(
+        c.env.fitloot_db,
+        emailQuery,
+        normalizedUsernameQuery,
+      );
       const emailUserId = availabilityLookup?.email_user_id ?? null;
       const usernameUserId = availabilityLookup?.username_user_id ?? null;
 
@@ -367,6 +441,29 @@ export function registerAuthRoutes(
           usernameAvailable = true;
         } else {
           usernameAvailable = await isReusableByUserId(usernameUserId);
+        }
+      }
+
+      if (runtimeSessionDb) {
+        const userIdsToSync = [
+          ...new Set(
+            [emailUserId, usernameUserId].filter(
+              (userId): userId is string => typeof userId === "string" && userId.length > 0,
+            ),
+          ),
+        ];
+        for (const userId of userIdsToSync) {
+          await syncRuntimeAvailabilityUser(runtimeSessionDb, c.env.fitloot_db, userId).catch(
+            (runtimeSyncError) => {
+              console.warn("[check-availability][runtime-sync]", {
+                message:
+                  runtimeSyncError instanceof Error
+                    ? runtimeSyncError.message
+                    : String(runtimeSyncError),
+                userId,
+              });
+            },
+          );
         }
       }
 

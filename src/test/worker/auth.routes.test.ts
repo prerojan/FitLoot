@@ -201,8 +201,8 @@ describe("auth routes", () => {
   it("reports reclaimable email as available in check-availability", async () => {
     const { db } = createMockD1Database([
       {
-        match: "SELECT id FROM users WHERE lower(email) = ?",
-        first: { id: "old-user" },
+        match: "SELECT\n            (SELECT id FROM users WHERE lower(email) = ? LIMIT 1) AS email_user_id",
+        first: { email_user_id: "old-user", username_user_id: null },
       },
       {
         match: "COALESCE(onboarding_completed, 0)",
@@ -263,13 +263,10 @@ describe("auth routes", () => {
 
     const { db, calls } = createMockD1Database([
       {
-        match: (sql) =>
-          sql.includes("FROM users u") &&
-          sql.includes("LEFT JOIN user_profiles p ON p.user_id = u.id") &&
-          sql.includes("WHERE"),
-        all: () => {
+        match: "SELECT\n            (SELECT id FROM users WHERE lower(email) = ? LIMIT 1) AS email_user_id",
+        first: () => {
           primaryAvailabilityReads += 1;
-          return { results: [] };
+          return { email_user_id: null, username_user_id: null };
         },
       },
       {
@@ -353,17 +350,114 @@ describe("auth routes", () => {
       usernameAvailable: false,
     });
     expect(primaryAvailabilityReads).toBe(0);
-    expect(
-      calls.some(
-        (call) =>
-          call.sql.includes("FROM users u") &&
-          call.sql.includes("LEFT JOIN user_profiles p ON p.user_id = u.id") &&
-          !call.sql.includes("WHERE"),
-      ),
-    ).toBe(false);
+    expect(calls.some((call) => call.method === "first" && call.sql.includes("SELECT\n            (SELECT id FROM users WHERE lower(email) = ? LIMIT 1) AS email_user_id"))).toBe(false);
     expect(runtimeCalls.some((call) => call.sql.includes("FROM runtime_user_auth_cache"))).toBe(
       true,
     );
+  });
+
+  it("falls back to the primary database when runtime auth cache misses", async () => {
+    const { db, calls } = createMockD1Database([
+      {
+        match: "SELECT\n            (SELECT id FROM users WHERE lower(email) = ? LIMIT 1) AS email_user_id",
+        first: { email_user_id: null, username_user_id: "runner-user" },
+      },
+      {
+        match: "COALESCE(onboarding_completed, 0)",
+        first: createUserRow({
+          onboardingCompleted: 1,
+          planId: "pro",
+          planStatus: "active",
+          paymentMethod: "pix",
+        }),
+      },
+      {
+        match: "SELECT username FROM user_profiles WHERE user_id = ? LIMIT 1",
+        first: { username: "runnerone" },
+      },
+      {
+        match: (sql) => sql.includes("PRAGMA table_info('users')"),
+        all: createUsersPragmaColumns(),
+      },
+      {
+        match: (sql) => sql.includes("PRAGMA table_info('"),
+        all: { results: [] },
+      },
+    ]);
+
+    const { db: runtimeDb, calls: runtimeCalls } = createMockD1Database([
+      {
+        match: "CREATE TABLE IF NOT EXISTS runtime_user_auth_cache",
+        run: { success: true, meta: { changes: 0 } },
+      },
+      {
+        match: "PRAGMA table_info('runtime_user_auth_cache')",
+        all: {
+          results: [
+            { name: "user_id" },
+            { name: "email" },
+            { name: "username" },
+            { name: "name" },
+            { name: "avatar_url" },
+            { name: "onboarding_completed" },
+            { name: "plan_id" },
+            { name: "plan_status" },
+            { name: "payment_method" },
+            { name: "updated_at" },
+          ],
+        },
+      },
+      {
+        match: "CREATE INDEX IF NOT EXISTS idx_runtime_user_auth_updated_at",
+        run: { success: true, meta: { changes: 0 } },
+      },
+      {
+        match: "CREATE INDEX IF NOT EXISTS idx_runtime_user_auth_email_lower",
+        run: { success: true, meta: { changes: 0 } },
+      },
+      {
+        match: "CREATE INDEX IF NOT EXISTS idx_runtime_user_auth_username_lower",
+        run: { success: true, meta: { changes: 0 } },
+      },
+      {
+        match: (sql) =>
+          sql.includes("FROM runtime_user_auth_cache") &&
+          sql.includes("lower(username) = ?"),
+        all: { results: [] },
+      },
+      {
+        match: "INSERT INTO runtime_user_auth_cache",
+        run: { success: true, meta: { changes: 1 } },
+      },
+    ]);
+
+    const env = createTestEnv(db, { fitloot_runtime_db: runtimeDb });
+    const deps = createAuthDeps();
+    const app = new Hono<AppContext>();
+    registerAuthRoutes(app, deps);
+    const { executionCtx } = createExecutionContext();
+
+    const response = await app.fetch(
+      new Request(
+        "http://localhost/api/auth/check-availability?username=runnerone",
+      ),
+      env,
+      executionCtx,
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      emailAvailable: null,
+      usernameAvailable: false,
+    });
+    expect(
+      calls.some((call) =>
+        call.sql.includes("SELECT\n            (SELECT id FROM users WHERE lower(email) = ? LIMIT 1) AS email_user_id"),
+      ),
+    ).toBe(true);
+    expect(
+      runtimeCalls.some((call) => call.sql.includes("INSERT INTO runtime_user_auth_cache")),
+    ).toBe(true);
   });
 
   it("accepts login with mixed-case email and trims spaces", async () => {

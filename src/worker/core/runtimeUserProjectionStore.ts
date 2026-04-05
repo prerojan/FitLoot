@@ -1,3 +1,8 @@
+import {
+  ensureRuntimeSchemaReady,
+  runRuntimeCleanupThrottled,
+} from "./runtimeSchemaCoordinator";
+
 type RuntimeProjectionRecord = {
   payload_json: string;
   updated_at: number;
@@ -8,87 +13,75 @@ export type RuntimeProjectionScope =
   | "profile"
   | `dashboard:${string}`;
 
-const RUNTIME_PROJECTION_SCHEMA_TTL_MS = 60_000;
 const RUNTIME_PROJECTION_CLEANUP_INTERVAL_MS = 60_000;
 const RUNTIME_PROJECTION_RETENTION_MS = 24 * 60 * 60 * 1000;
-
-const runtimeProjectionSchemaState = new WeakMap<
-  D1Database,
-  { checkedAt: number; ready: boolean }
->();
-const runtimeProjectionCleanupState = new WeakMap<D1Database, { cleanedAt: number }>();
+const RUNTIME_PROJECTION_SCHEMA_KEY = "runtime_user_projection";
+const RUNTIME_PROJECTION_CLEANUP_KEY = "runtime_user_projection:cleanup";
 
 async function maybeCleanupRuntimeProjections(db: D1Database, now: number): Promise<void> {
-  const cached = runtimeProjectionCleanupState.get(db);
-  if (cached && now - cached.cleanedAt < RUNTIME_PROJECTION_CLEANUP_INTERVAL_MS) {
-    return;
-  }
-
-  const minUpdatedAt = now - RUNTIME_PROJECTION_RETENTION_MS;
-  await db
-    .prepare("DELETE FROM runtime_profile_projection WHERE updated_at < ?")
-    .bind(minUpdatedAt)
-    .run();
-  await db
-    .prepare("DELETE FROM runtime_bootstrap_projection WHERE updated_at < ?")
-    .bind(minUpdatedAt)
-    .run();
-  await db
-    .prepare("DELETE FROM runtime_dashboard_projection WHERE updated_at < ?")
-    .bind(minUpdatedAt)
-    .run();
-
-  runtimeProjectionCleanupState.set(db, { cleanedAt: now });
+  await runRuntimeCleanupThrottled(
+    db,
+    RUNTIME_PROJECTION_CLEANUP_KEY,
+    RUNTIME_PROJECTION_CLEANUP_INTERVAL_MS,
+    async () => {
+      const minUpdatedAt = now - RUNTIME_PROJECTION_RETENTION_MS;
+      await db
+        .prepare("DELETE FROM runtime_profile_projection WHERE updated_at < ?")
+        .bind(minUpdatedAt)
+        .run();
+      await db
+        .prepare("DELETE FROM runtime_bootstrap_projection WHERE updated_at < ?")
+        .bind(minUpdatedAt)
+        .run();
+      await db
+        .prepare("DELETE FROM runtime_dashboard_projection WHERE updated_at < ?")
+        .bind(minUpdatedAt)
+        .run();
+    },
+    now,
+  );
 }
 
 async function ensureRuntimeProjectionSchema(db: D1Database): Promise<void> {
-  const now = Date.now();
-  const cached = runtimeProjectionSchemaState.get(db);
-  if (cached?.ready && now - cached.checkedAt < RUNTIME_PROJECTION_SCHEMA_TTL_MS) {
-    await maybeCleanupRuntimeProjections(db, now);
-    return;
-  }
+  await ensureRuntimeSchemaReady(db, RUNTIME_PROJECTION_SCHEMA_KEY, async () => {
+    await db
+      .prepare(
+        `CREATE TABLE IF NOT EXISTS runtime_profile_projection (
+          user_id TEXT PRIMARY KEY,
+          payload_json TEXT NOT NULL,
+          updated_at INTEGER NOT NULL
+        )`,
+      )
+      .run();
 
-  await db
-    .prepare(
-      `CREATE TABLE IF NOT EXISTS runtime_profile_projection (
-        user_id TEXT PRIMARY KEY,
-        payload_json TEXT NOT NULL,
-        updated_at INTEGER NOT NULL
-      )`,
-    )
-    .run();
+    await db
+      .prepare(
+        `CREATE TABLE IF NOT EXISTS runtime_bootstrap_projection (
+          user_id TEXT PRIMARY KEY,
+          payload_json TEXT NOT NULL,
+          updated_at INTEGER NOT NULL
+        )`,
+      )
+      .run();
 
-  await db
-    .prepare(
-      `CREATE TABLE IF NOT EXISTS runtime_bootstrap_projection (
-        user_id TEXT PRIMARY KEY,
-        payload_json TEXT NOT NULL,
-        updated_at INTEGER NOT NULL
-      )`,
-    )
-    .run();
+    await db
+      .prepare(
+        `CREATE TABLE IF NOT EXISTS runtime_dashboard_projection (
+          user_id TEXT NOT NULL,
+          projection_key TEXT NOT NULL,
+          payload_json TEXT NOT NULL,
+          updated_at INTEGER NOT NULL,
+          PRIMARY KEY (user_id, projection_key)
+        )`,
+      )
+      .run();
 
-  await db
-    .prepare(
-      `CREATE TABLE IF NOT EXISTS runtime_dashboard_projection (
-        user_id TEXT NOT NULL,
-        projection_key TEXT NOT NULL,
-        payload_json TEXT NOT NULL,
-        updated_at INTEGER NOT NULL,
-        PRIMARY KEY (user_id, projection_key)
-      )`,
-    )
-    .run();
-
-  await db
-    .prepare(
-      "CREATE INDEX IF NOT EXISTS idx_runtime_dashboard_projection_user_updated ON runtime_dashboard_projection(user_id, updated_at DESC)",
-    )
-    .run();
-
-  runtimeProjectionSchemaState.set(db, { checkedAt: now, ready: true });
-  await maybeCleanupRuntimeProjections(db, now);
+    await db
+      .prepare(
+        "CREATE INDEX IF NOT EXISTS idx_runtime_dashboard_projection_user_updated ON runtime_dashboard_projection(user_id, updated_at DESC)",
+      )
+      .run();
+  });
 }
 
 function parseProjectionPayload<T>(raw: string): T | null {
@@ -144,6 +137,7 @@ export async function upsertRuntimeProfileProjection<T>(
     )
     .bind(userId, JSON.stringify(payload), Date.now())
     .run();
+  await maybeCleanupRuntimeProjections(db, Date.now());
 }
 
 export async function deleteRuntimeProfileProjection(
@@ -155,6 +149,7 @@ export async function deleteRuntimeProfileProjection(
     .prepare("DELETE FROM runtime_profile_projection WHERE user_id = ?")
     .bind(userId)
     .run();
+  await maybeCleanupRuntimeProjections(db, Date.now());
 }
 
 export async function readRuntimeBootstrapProjection<T>(
@@ -202,6 +197,7 @@ export async function upsertRuntimeBootstrapProjection<T>(
     )
     .bind(userId, JSON.stringify(payload), Date.now())
     .run();
+  await maybeCleanupRuntimeProjections(db, Date.now());
 }
 
 export async function deleteRuntimeBootstrapProjection(
@@ -213,6 +209,7 @@ export async function deleteRuntimeBootstrapProjection(
     .prepare("DELETE FROM runtime_bootstrap_projection WHERE user_id = ?")
     .bind(userId)
     .run();
+  await maybeCleanupRuntimeProjections(db, Date.now());
 }
 
 export async function readRuntimeDashboardProjection<T>(
@@ -271,6 +268,7 @@ export async function upsertRuntimeDashboardProjection<T>(
     )
     .bind(userId, projectionKey, JSON.stringify(payload), Date.now())
     .run();
+  await maybeCleanupRuntimeProjections(db, Date.now());
 }
 
 export async function deleteRuntimeDashboardProjection(
@@ -287,6 +285,7 @@ export async function deleteRuntimeDashboardProjection(
     )
     .bind(userId, projectionKey)
     .run();
+  await maybeCleanupRuntimeProjections(db, Date.now());
 }
 
 export async function deleteRuntimeUserProjections(
@@ -306,6 +305,7 @@ export async function deleteRuntimeUserProjections(
     .prepare("DELETE FROM runtime_dashboard_projection WHERE user_id = ?")
     .bind(userId)
     .run();
+  await maybeCleanupRuntimeProjections(db, Date.now());
 }
 
 export async function deleteRuntimeUserProjectionScopes(
@@ -350,4 +350,6 @@ export async function deleteRuntimeUserProjectionScopes(
       .bind(userId, ...dashboardKeys)
       .run();
   }
+
+  await maybeCleanupRuntimeProjections(db, Date.now());
 }

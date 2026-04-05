@@ -1,3 +1,5 @@
+import { ensureRuntimeSchemaReady } from "./runtimeSchemaCoordinator";
+
 type RuntimeSessionRecord = {
   id: string;
   user_id: string;
@@ -9,8 +11,7 @@ type RuntimeSessionLookup = {
   user_id: string;
 };
 
-const RUNTIME_SESSION_SCHEMA_TTL_MS = 60_000;
-const runtimeSessionSchemaState = new WeakMap<D1Database, { checkedAt: number; ready: boolean }>();
+const RUNTIME_SESSION_SCHEMA_KEY = "runtime_session";
 
 type D1SessionCapable = D1Database & {
   withSession?: ((constraintOrBookmark?: string) => D1DatabaseSession) | undefined;
@@ -30,24 +31,18 @@ function resolvePrimaryReadSession(db: D1Database): D1DatabaseSession | D1Databa
 }
 
 async function ensureRuntimeSessionSchema(db: D1Database): Promise<void> {
-  const now = Date.now();
-  const cached = runtimeSessionSchemaState.get(db);
-  if (cached?.ready && now - cached.checkedAt < RUNTIME_SESSION_SCHEMA_TTL_MS) {
-    return;
-  }
-
-  await db
-    .prepare(
-      "CREATE TABLE IF NOT EXISTS runtime_sessions (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, expires_at TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now')))",
-    )
-    .run();
-  await db
-    .prepare(
-      "CREATE INDEX IF NOT EXISTS idx_runtime_sessions_expires_at ON runtime_sessions(expires_at)",
-    )
-    .run();
-
-  runtimeSessionSchemaState.set(db, { checkedAt: now, ready: true });
+  await ensureRuntimeSchemaReady(db, RUNTIME_SESSION_SCHEMA_KEY, async () => {
+    await db
+      .prepare(
+        "CREATE TABLE IF NOT EXISTS runtime_sessions (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, expires_at TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now')))",
+      )
+      .run();
+    await db
+      .prepare(
+        "CREATE INDEX IF NOT EXISTS idx_runtime_sessions_expires_at ON runtime_sessions(expires_at)",
+      )
+      .run();
+  });
 }
 
 export async function readRuntimeSession(

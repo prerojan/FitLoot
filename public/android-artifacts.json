@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-04-05T01:41:57.682Z",
+  "generatedAt": "2026-04-05T02:36:34.897Z",
   "byChannel": {
     "dev": {
       "channel": "dev",
@@ -7,9 +7,10 @@
       "publicPath": "/FitLoot-Dev.apk",
       "fileName": "FitLoot-Dev.apk",
       "available": true,
-      "sizeBytes": 9276014,
-      "updatedAt": "2026-04-04T18:14:26.745Z",
-      "cacheBust": "1775326466744-9276014"
+      "sizeBytes": 9273443,
+      "updatedAt": "2026-04-05T02:30:42.584Z",
+      "cacheBust": "1775356242584-9273443",
+      "sourceFingerprint": "b139f05936c7d62e7df5af49f9dde0a5b682f053366740da9df188dfee9f1d4f"
     },
     "internal": {
       "channel": "internal",
@@ -17,9 +18,10 @@
       "publicPath": "/FitLoot-Internal.apk",
       "fileName": "FitLoot-Internal.apk",
       "available": true,
-      "sizeBytes": 9256927,
-      "updatedAt": "2026-04-04T00:19:18.472Z",
-      "cacheBust": "1775261958471-9256927"
+      "sizeBytes": 10398803,
+      "updatedAt": "2026-04-05T02:31:06.893Z",
+      "cacheBust": "1775356266892-10398803",
+      "sourceFingerprint": "b139f05936c7d62e7df5af49f9dde0a5b682f053366740da9df188dfee9f1d4f"
     },
     "release": {
       "channel": "release",
@@ -27,9 +29,10 @@
       "publicPath": "/FitLoot.apk",
       "fileName": "FitLoot.apk",
       "available": true,
-      "sizeBytes": 2019830,
-      "updatedAt": "2026-04-04T00:21:12.084Z",
-      "cacheBust": "1775262072083-2019830"
+      "sizeBytes": 2019794,
+      "updatedAt": "2026-04-05T02:32:25.109Z",
+      "cacheBust": "1775356345109-2019794",
+      "sourceFingerprint": "b139f05936c7d62e7df5af49f9dde0a5b682f053366740da9df188dfee9f1d4f"
     }
   }
 }

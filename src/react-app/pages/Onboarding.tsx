@@ -525,6 +525,17 @@ type StableAvailabilityCacheEntry = {
 type AvailabilityValidationIntent = "typing" | "commit";
 
 const AVAILABILITY_CACHE_TTL_MS = 15_000;
+const AVAILABILITY_TIMEOUT_BY_REQUEST_CLASS: Record<ApiRequestClass, number> = {
+  background: 8_000,
+  foreground: 12_000,
+};
+const AVAILABILITY_RETRY_DELAY_MS = 180;
+
+async function waitForAvailabilityRetryWindow(): Promise<void> {
+  await new Promise((resolve) => {
+    window.setTimeout(resolve, AVAILABILITY_RETRY_DELAY_MS);
+  });
+}
 
 export default function Onboarding() {
   const { user, loading: authLoading, checkAuth } = useAuth();
@@ -627,16 +638,33 @@ export default function Onboarding() {
       if (cached) {
         availabilityCacheRef.current.delete(cacheKey);
       }
+      const requestClass = options?.requestClass ?? "background";
+      const runAvailabilityRequest = async (timeoutMs: number) =>
+        fetchJson<AvailabilityPayload>(
+          `/api/auth/check-availability?${query.toString()}`,
+          {
+            timeoutMs,
+            orchestrationKey: `onboarding:availability:${cacheKey}`,
+            orchestrationPolicy: "join",
+            requestClass,
+          },
+        );
 
-      const payload = await fetchJson<AvailabilityPayload>(
-        `/api/auth/check-availability?${query.toString()}`,
-        {
-          timeoutMs: 8_000,
-          orchestrationKey: `onboarding:availability:${cacheKey}`,
-          orchestrationPolicy: "join",
-          requestClass: options?.requestClass ?? "background",
-        },
-      );
+      let payload: AvailabilityPayload;
+      try {
+        payload = await runAvailabilityRequest(
+          AVAILABILITY_TIMEOUT_BY_REQUEST_CLASS[requestClass],
+        );
+      } catch (error) {
+        if (!isApiTimeoutError(error)) {
+          throw error;
+        }
+
+        await waitForAvailabilityRetryWindow();
+        payload = await runAvailabilityRequest(
+          AVAILABILITY_TIMEOUT_BY_REQUEST_CLASS.foreground,
+        );
+      }
 
       if (normalizedEmail && typeof payload.emailAvailable !== "boolean") return null;
       if (normalizedUsername && typeof payload.usernameAvailable !== "boolean") return null;

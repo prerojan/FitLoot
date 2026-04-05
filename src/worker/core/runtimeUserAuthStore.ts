@@ -1,3 +1,5 @@
+import { ensureRuntimeSchemaReady } from "./runtimeSchemaCoordinator";
+
 import type {
   PlanId,
   PlanStatus,
@@ -5,11 +7,7 @@ import type {
   UserPaymentMethod,
 } from "./types";
 
-const RUNTIME_USER_AUTH_SCHEMA_TTL_MS = 60_000;
-const runtimeUserAuthSchemaState = new WeakMap<
-  D1Database,
-  { checkedAt: number; ready: boolean }
->();
+const RUNTIME_USER_AUTH_SCHEMA_KEY = "runtime_user_auth";
 
 type RuntimeUserAuthRow = {
   user_id: string;
@@ -131,48 +129,42 @@ function toAvailabilityMatch(row: RuntimeUserAuthRow): RuntimeUserAvailabilityMa
 }
 
 async function ensureRuntimeUserAuthSchema(db: D1Database): Promise<void> {
-  const now = Date.now();
-  const cached = runtimeUserAuthSchemaState.get(db);
-  if (cached?.ready && now - cached.checkedAt < RUNTIME_USER_AUTH_SCHEMA_TTL_MS) {
-    return;
-  }
-
-  await db
-    .prepare(
-      "CREATE TABLE IF NOT EXISTS runtime_user_auth_cache (user_id TEXT PRIMARY KEY, email TEXT NOT NULL, username TEXT, name TEXT NOT NULL, avatar_url TEXT, onboarding_completed INTEGER NOT NULL DEFAULT 0, plan_id TEXT NOT NULL DEFAULT 'basic', plan_status TEXT NOT NULL DEFAULT 'failed', payment_method TEXT NOT NULL DEFAULT 'none', updated_at TEXT NOT NULL DEFAULT (datetime('now')))",
-    )
-    .run();
-
-  const columns = await db
-    .prepare("PRAGMA table_info('runtime_user_auth_cache')")
-    .all<{ name: string | null }>();
-  const hasUsernameColumn = (columns.results ?? []).some(
-    (column) => String(column.name ?? "").toLowerCase() === "username",
-  );
-  if (!hasUsernameColumn) {
+  await ensureRuntimeSchemaReady(db, RUNTIME_USER_AUTH_SCHEMA_KEY, async () => {
     await db
-      .prepare("ALTER TABLE runtime_user_auth_cache ADD COLUMN username TEXT")
-      .run()
-      .catch(() => undefined);
-  }
+      .prepare(
+        "CREATE TABLE IF NOT EXISTS runtime_user_auth_cache (user_id TEXT PRIMARY KEY, email TEXT NOT NULL, username TEXT, name TEXT NOT NULL, avatar_url TEXT, onboarding_completed INTEGER NOT NULL DEFAULT 0, plan_id TEXT NOT NULL DEFAULT 'basic', plan_status TEXT NOT NULL DEFAULT 'failed', payment_method TEXT NOT NULL DEFAULT 'none', updated_at TEXT NOT NULL DEFAULT (datetime('now')))",
+      )
+      .run();
 
-  await db
-    .prepare(
-      "CREATE INDEX IF NOT EXISTS idx_runtime_user_auth_updated_at ON runtime_user_auth_cache(updated_at)",
-    )
-    .run();
-  await db
-    .prepare(
-      "CREATE INDEX IF NOT EXISTS idx_runtime_user_auth_email_lower ON runtime_user_auth_cache(lower(email))",
-    )
-    .run();
-  await db
-    .prepare(
-      "CREATE INDEX IF NOT EXISTS idx_runtime_user_auth_username_lower ON runtime_user_auth_cache(lower(username))",
-    )
-    .run();
+    const columns = await db
+      .prepare("PRAGMA table_info('runtime_user_auth_cache')")
+      .all<{ name: string | null }>();
+    const hasUsernameColumn = (columns.results ?? []).some(
+      (column) => String(column.name ?? "").toLowerCase() === "username",
+    );
+    if (!hasUsernameColumn) {
+      await db
+        .prepare("ALTER TABLE runtime_user_auth_cache ADD COLUMN username TEXT")
+        .run()
+        .catch(() => undefined);
+    }
 
-  runtimeUserAuthSchemaState.set(db, { checkedAt: now, ready: true });
+    await db
+      .prepare(
+        "CREATE INDEX IF NOT EXISTS idx_runtime_user_auth_updated_at ON runtime_user_auth_cache(updated_at)",
+      )
+      .run();
+    await db
+      .prepare(
+        "CREATE INDEX IF NOT EXISTS idx_runtime_user_auth_email_lower ON runtime_user_auth_cache(lower(email))",
+      )
+      .run();
+    await db
+      .prepare(
+        "CREATE INDEX IF NOT EXISTS idx_runtime_user_auth_username_lower ON runtime_user_auth_cache(lower(username))",
+      )
+      .run();
+  });
 }
 
 export async function readRuntimeUserAuth(

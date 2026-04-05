@@ -31,7 +31,7 @@ import { useTheme } from "@/react-app/contexts/theme";
 import { getAndroidDownloadInfoForCurrentEnvironment } from "@/react-app/services/androidAppDownload";
 import { fetchCurrentUser, hasPlanAccess } from "@/react-app/services/authService";
 import { getHostContext } from "@/react-app/services/runtime/hostRuntime";
-import { api } from "@/react-app/utils/api";
+import { api, isApiTimeoutError } from "@/react-app/utils/api";
 import {
   completeActivationAndEnterApp,
   resolveActivationCompletionCopy,
@@ -76,6 +76,16 @@ type PromoValidationResult = {
   effectValue: string | null;
   benefitLabel: string;
 };
+
+const PROMO_VALIDATION_INITIAL_TIMEOUT_MS = 10_000;
+const PROMO_VALIDATION_RETRY_TIMEOUT_MS = 15_000;
+const PROMO_VALIDATION_RETRY_DELAY_MS = 180;
+
+async function waitForPromoValidationRetryWindow(): Promise<void> {
+  await new Promise((resolve) => {
+    window.setTimeout(resolve, PROMO_VALIDATION_RETRY_DELAY_MS);
+  });
+}
 
 function normalizePromoCode(value: string): string {
   return value.trim();
@@ -316,10 +326,27 @@ export default function Checkout() {
     const requestId = ++promoValidationRequestIdRef.current;
     const validationPromise = (async () => {
       try {
-        const response = await api("/api/promo/validate", {
-          method: "POST",
-          body: JSON.stringify({ code: normalizedCode }),
-        });
+        const performValidationRequest = async (timeoutMs: number) =>
+          api("/api/promo/validate", {
+            method: "POST",
+            body: JSON.stringify({ code: normalizedCode }),
+            timeoutMs,
+            orchestrationKey: `checkout:promo:${normalizedCode}`,
+            orchestrationPolicy: "replace",
+            requestClass: "foreground",
+          });
+
+        let response: Response;
+        try {
+          response = await performValidationRequest(PROMO_VALIDATION_INITIAL_TIMEOUT_MS);
+        } catch (error) {
+          if (!isApiTimeoutError(error)) {
+            throw error;
+          }
+
+          await waitForPromoValidationRetryWindow();
+          response = await performValidationRequest(PROMO_VALIDATION_RETRY_TIMEOUT_MS);
+        }
         const payload = (await response.json().catch(() => null)) as PromoValidationResponse | null;
         const promoDescription = typeof payload?.description === "string" ? payload.description.trim() : "";
         const promoEffect = payload?.effect;
