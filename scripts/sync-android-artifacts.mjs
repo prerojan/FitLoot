@@ -1,4 +1,4 @@
-import { copyFile, mkdir, rm, stat, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -97,6 +97,38 @@ async function resolvePublicFallbackArtifact(fileName) {
   };
 }
 
+async function readExistingManifest() {
+  try {
+    const content = await readFile(PUBLIC_MANIFEST_PATH, "utf8");
+    const parsed = JSON.parse(content);
+    if (!parsed || typeof parsed !== "object" || !parsed.byChannel || typeof parsed.byChannel !== "object") {
+      return null;
+    }
+
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function resolveExistingDescriptor(existingManifest, config) {
+  const descriptor = existingManifest?.byChannel?.[config.channel];
+  if (!descriptor || typeof descriptor !== "object" || descriptor.available !== true) {
+    return null;
+  }
+
+  return {
+    channel: config.channel,
+    label: config.label,
+    publicPath: config.publicPath,
+    fileName: config.fileName,
+    available: true,
+    sizeBytes: Number.isFinite(descriptor.sizeBytes) ? descriptor.sizeBytes : null,
+    updatedAt: typeof descriptor.updatedAt === "string" ? descriptor.updatedAt : null,
+    cacheBust: typeof descriptor.cacheBust === "string" ? descriptor.cacheBust : null,
+  };
+}
+
 function buildDescriptor(config, resolvedSource) {
   if (!resolvedSource) {
     return {
@@ -152,6 +184,7 @@ export const ANDROID_ARTIFACTS: AndroidArtifactManifest = ${JSON.stringify(manif
 async function syncArtifacts() {
   await mkdir(PUBLIC_DIR, { recursive: true });
   await mkdir(GENERATED_DIR, { recursive: true });
+  const existingManifest = await readExistingManifest();
 
   /** @type {Record<AndroidArtifactChannel, AndroidArtifactDescriptor>} */
   const byChannel = {
@@ -191,6 +224,7 @@ async function syncArtifacts() {
     const resolvedSource =
       (await resolveSourceArtifact(artifact.candidates)) ??
       (await resolvePublicFallbackArtifact(artifact.fileName));
+    const preservedDescriptor = resolveExistingDescriptor(existingManifest, artifact);
     const publicFilePaths = [
       path.join(PUBLIC_DIR, artifact.fileName),
       ...(artifact.legacyAliases ?? []).map((alias) => path.join(PUBLIC_DIR, alias)),
@@ -203,12 +237,16 @@ async function syncArtifacts() {
         }
       }
     } else {
-      for (const publicFilePath of publicFilePaths) {
-        await rm(publicFilePath, { force: true });
+      if (!preservedDescriptor) {
+        for (const publicFilePath of publicFilePaths) {
+          await rm(publicFilePath, { force: true });
+        }
       }
     }
 
-    byChannel[artifact.channel] = buildDescriptor(artifact, resolvedSource);
+    byChannel[artifact.channel] = resolvedSource
+      ? buildDescriptor(artifact, resolvedSource)
+      : preservedDescriptor ?? buildDescriptor(artifact, null);
   }
 
   const manifest = {
