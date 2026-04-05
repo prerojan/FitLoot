@@ -85,35 +85,23 @@ function resolveRuntimeAvailability(
   return isReusableIncompleteAccount(match);
 }
 
-async function readAvailabilityLookupWithRetry(
+async function readAvailabilityLookup(
   db: D1Database,
   emailLower: string,
   usernameLower: string,
 ): Promise<AvailabilityLookupRow | null> {
-  for (let attempt = 1; attempt <= 2; attempt += 1) {
-    try {
-      if (!emailLower && !usernameLower) {
-        return null;
-      }
-
-      return await db
-        .prepare(
-          `SELECT
-            (SELECT id FROM users WHERE lower(email) = ? LIMIT 1) AS email_user_id,
-            (SELECT user_id FROM user_profiles WHERE lower(username) = ? LIMIT 1) AS username_user_id`,
-        )
-        .bind(emailLower || null, usernameLower || null)
-        .first<AvailabilityLookupRow>();
-    } catch (error) {
-      if (!isConnectionTimeoutLike(error) || attempt >= 2) {
-        throw error;
-      }
-
-      await sleep(140 * attempt);
-    }
+  if (!emailLower && !usernameLower) {
+    return null;
   }
 
-  return null;
+  return db
+    .prepare(
+      `SELECT
+        (SELECT id FROM users WHERE lower(email) = ? LIMIT 1) AS email_user_id,
+        (SELECT user_id FROM user_profiles WHERE lower(username) = ? LIMIT 1) AS username_user_id`,
+    )
+    .bind(emailLower || null, usernameLower || null)
+    .first<AvailabilityLookupRow>();
 }
 
 async function syncRuntimeAvailabilityUser(
@@ -418,7 +406,7 @@ export function registerAuthRoutes(
           return started;
         };
 
-      const availabilityLookup = await readAvailabilityLookupWithRetry(
+      const availabilityLookup = await readAvailabilityLookup(
         c.env.fitloot_db,
         emailQuery,
         normalizedUsernameQuery,

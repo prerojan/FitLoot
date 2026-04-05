@@ -19,7 +19,7 @@ export type AndroidArtifactManifest = {
 };
 
 export const ANDROID_ARTIFACTS: AndroidArtifactManifest = {
-  "generatedAt": "2026-04-05T02:36:34.897Z",
+  "generatedAt": "2026-04-05T05:36:48.863Z",
   "byChannel": {
     "dev": {
       "channel": "dev",

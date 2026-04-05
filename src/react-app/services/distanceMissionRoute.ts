@@ -55,7 +55,18 @@ function normalizeLookupText(value: string | null | undefined): string {
 }
 
 export function isDistanceRouteMission(mission: Mission): boolean {
-  return mission.type === "daily" && mission.metric_type === "distance_meters";
+  if (mission.type !== "daily") {
+    return false;
+  }
+
+  if (mission.execution_mode === "route_tracking") {
+    return true;
+  }
+
+  return (
+    mission.metric_type === "distance_meters"
+    && (mission.activity_kind === "walking" || mission.activity_kind === "running")
+  );
 }
 
 export function resolveDistanceMissionTargetMeters(mission: Mission): number {
@@ -107,6 +118,13 @@ export function formatDistanceMissionDuration(seconds: number): string {
 }
 
 export function resolveDistanceMissionActivityLabel(mission: Mission): string {
+  if (mission.activity_kind === "running") {
+    return "Corrida";
+  }
+  if (mission.activity_kind === "walking") {
+    return "Caminhada";
+  }
+
   const composedText = normalizeLookupText(
     [mission.title, mission.description, mission.goal, mission.exercise_category, mission.exercise_name]
       .filter((value): value is string => typeof value === "string" && value.trim().length > 0)

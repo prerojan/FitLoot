@@ -23,38 +23,37 @@ export const WEEKLY_MISSION_KEYWORDS = [
   "sessao completa",
 ] as const;
 
-export const EXERCISE_METRIC_MAP: Record<string, MissionMetricType> = {
-  // Priority order: check specific types first
-  abdominal: "sets_reps",
-  crunch: "sets_reps",
-  situp: "sets_reps",
-  plank: "duration_seconds",
-  prancha: "duration_seconds",
-  "hollow body": "duration_seconds",
-  "wall sit": "duration_seconds",
-  "dead hang": "duration_seconds",
-  "l-sit": "duration_seconds",
-  walk: "distance_meters",
-  caminhada: "distance_meters",
-  run: "distance_meters",
-  corrida: "distance_meters",
-  cycling: "distance_meters",
-  yoga: "duration_minutes",
-  stretching: "duration_minutes",
-  alongamento: "duration_minutes",
-  mobility: "duration_minutes",
-  mobilidade: "duration_minutes",
-  "pull-up": "sets_reps",
-  barra: "sets_reps",
-  "push-up": "sets_reps",
-  flexao: "sets_reps",
-  squat: "sets_reps",
-  agachamento: "sets_reps",
-  "full body circuit": "circuit_tasks",
-  "upper body circuit": "circuit_tasks",
-  "lower body circuit": "circuit_tasks",
-  "core circuit": "circuit_tasks",
-};
+const EXERCISE_METRIC_RULES: ReadonlyArray<{
+  match: RegExp;
+  type: MissionMetricType;
+}> = [
+  { match: /\bwalking[\s-]?lunge\b/, type: "sets_reps" },
+  { match: /\bstep[\s-]?up\b/, type: "sets_reps" },
+  { match: /\bmountain climber\b/, type: "sets_reps" },
+  { match: /\bburpee\b/, type: "sets_reps" },
+  { match: /\babdominal\b/, type: "sets_reps" },
+  { match: /\bcrunch\b/, type: "sets_reps" },
+  { match: /\bsit[\s-]?up\b/, type: "sets_reps" },
+  { match: /\bplank\b/, type: "duration_seconds" },
+  { match: /\bprancha\b/, type: "duration_seconds" },
+  { match: /\bhollow body\b/, type: "duration_seconds" },
+  { match: /\bwall sit\b/, type: "duration_seconds" },
+  { match: /\bdead hang\b/, type: "duration_seconds" },
+  { match: /\bl[\s-]?sit\b/, type: "duration_seconds" },
+  { match: /\bwalk(?:ing)?\b|\bcaminhada\b/, type: "distance_meters" },
+  { match: /\brun(?:ning)?\b|\bcorrida\b|\btrote\b|\bjog\b/, type: "distance_meters" },
+  { match: /\bcycling\b|\bciclismo\b/, type: "distance_meters" },
+  { match: /\byoga\b/, type: "duration_minutes" },
+  { match: /\bstretch(?:ing)?\b|\balongamento\b/, type: "duration_minutes" },
+  { match: /\bmobility\b|\bmobilidade\b/, type: "duration_minutes" },
+  { match: /\bpull[\s-]?up\b|\bbarra\b/, type: "sets_reps" },
+  { match: /\bpush[\s-]?up\b|\bflexao\b/, type: "sets_reps" },
+  { match: /\bsquat\b|\bagachamento\b/, type: "sets_reps" },
+  { match: /\bfull body circuit\b/, type: "circuit_tasks" },
+  { match: /\bupper body circuit\b/, type: "circuit_tasks" },
+  { match: /\blower body circuit\b/, type: "circuit_tasks" },
+  { match: /\bcore circuit\b/, type: "circuit_tasks" },
+];
 
 function normalizeText(value: string): string {
   return value
@@ -65,9 +64,8 @@ function normalizeText(value: string): string {
 
 export function getMissionMetricType(exerciseName: string): MissionMetricType {
   const lower = normalizeText(exerciseName);
-  // Iterating through keys in defined order
-  for (const [key, type] of Object.entries(EXERCISE_METRIC_MAP)) {
-    if (lower.includes(normalizeText(key))) return type;
+  for (const rule of EXERCISE_METRIC_RULES) {
+    if (rule.match.test(lower)) return rule.type;
   }
   return "sets_reps";
 }

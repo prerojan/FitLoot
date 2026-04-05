@@ -107,7 +107,7 @@ export function normalizeExerciseCategory(
   muscle: string,
 ): MissionExerciseCategory {
   // Category inference is the base routing layer that decides how each exercise should be framed downstream.
-  const text = `${name} ${muscle}`.toLowerCase();
+  const text = normalizeMatchText(`${name} ${muscle}`);
 
   if (text.includes("plank") || text.includes("prancha")) return "plank";
   if (
@@ -118,14 +118,27 @@ export function normalizeExerciseCategory(
     return "isometric";
   }
   if (
-    text.includes("walk") ||
-    text.includes("caminha") ||
-    text.includes("step")
+    text.includes("walking lunge") ||
+    text.includes("lunge") ||
+    text.includes("step-up") ||
+    text.includes("step up") ||
+    text.includes("mountain climber") ||
+    text.includes("burpee") ||
+    text.includes("push") ||
+    text.includes("squat") ||
+    text.includes("pull") ||
+    text.includes("press")
+  ) {
+    return "strength";
+  }
+  if (
+    /\bwalk(?:ing)?\b/.test(text) ||
+    text.includes("caminha")
   ) {
     return "walk";
   }
   if (
-    text.includes("run") ||
+    /\brun(?:ning)?\b/.test(text) ||
     text.includes("corrid") ||
     text.includes("jog") ||
     text.includes("sprint") ||
@@ -153,15 +166,6 @@ export function normalizeExerciseCategory(
     text.includes("sit up")
   ) {
     return "abdominal";
-  }
-  if (
-    text.includes("push") ||
-    text.includes("squat") ||
-    text.includes("lunge") ||
-    text.includes("pull") ||
-    text.includes("press")
-  ) {
-    return "strength";
   }
   return "default";
 }

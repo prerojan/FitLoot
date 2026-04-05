@@ -65,6 +65,8 @@ const mission: Mission = {
   attributes_benefited: [],
   duration_estimate_minutes: 10,
   exercise_category: "forca",
+  execution_mode: "standard",
+  activity_kind: null,
   mission_origin: "regular",
   goal: "Forca",
   is_ai_special: 0,
@@ -130,12 +132,35 @@ describe("MissionCard", () => {
           metric_value: 3200,
           metric_unit: "m",
           goal: "Percorra 3,2 km",
-          exercise_category: "cardio",
+          exercise_category: "run",
+          execution_mode: "route_tracking",
+          activity_kind: "running",
         }}
         onComplete={vi.fn(async () => undefined)}
       />,
     );
 
     expect(screen.getByTestId("distance-route-preview")).toHaveTextContent("Rota 22");
+  });
+
+  it("keeps walking lunge as a standard mission without route preview", () => {
+    render(
+      <MissionCard
+        mission={{
+          ...mission,
+          id: 23,
+          title: "Walking Lunge",
+          exercise_name: "Walking Lunge",
+          metric_type: "sets_reps",
+          metric_value: 24,
+          exercise_category: "strength",
+          execution_mode: "standard",
+          activity_kind: null,
+        }}
+        onComplete={vi.fn(async () => undefined)}
+      />,
+    );
+
+    expect(screen.queryByTestId("distance-route-preview")).not.toBeInTheDocument();
   });
 });

@@ -10,6 +10,28 @@ let cachedSchemaState: { ready: boolean; checkedAt: number } | null = null;
 const SCHEMA_CACHE_TTL_MS = 60_000;
 const TABLE_COLUMN_CACHE_TTL_MS = 60_000;
 const tableColumnCache = new Map<string, { checkedAt: number; columns: Set<string> }>();
+const BETA_BASELINE_TABLE_COLUMNS = new Map<string, Set<string>>([
+  [
+    "users",
+    new Set(["id", "email", "name", "avatar_url", "password_hash", "password_salt", "plan_id", "plan_status", "payment_method", "onboarding_completed", "created_at", "updated_at"]),
+  ],
+  [
+    "user_profiles",
+    new Set(["id", "user_id", "username", "full_name", "weight", "height", "initial_conditioning", "initial_pushups", "initial_situps", "initial_squats", "injuries", "equipment", "main_goal", "age", "gender", "goals_json", "timezone", "showcased_achievements", "custom_primary_color", "custom_secondary_color", "custom_background_type", "custom_background_value", "custom_font", "created_at", "updated_at"]),
+  ],
+  [
+    "user_event_counters",
+    new Set(["id", "user_id", "missions_completed", "consecutive_days_completed", "longest_consecutive_days", "updated_at"]),
+  ],
+  [
+    "missions",
+    new Set(["id", "user_id", "type", "title", "description", "skill_id", "metric_type", "metric_value", "progress_value", "goal", "status", "is_ai_special", "exercise_db_id", "cycle_date", "target_reps", "target_time", "is_completed", "deadline", "created_at", "updated_at"]),
+  ],
+  [
+    "skills",
+    new Set(["id", "name", "category", "difficulty", "description", "created_at", "updated_at"]),
+  ],
+]);
 
 function isConnectionTimeoutLike(error: unknown): boolean {
   const message = (error instanceof Error ? error.message : String(error))
@@ -115,6 +137,11 @@ async function getTableColumns(db: D1Database, tableName: string): Promise<Set<s
   const cached = tableColumnCache.get(cacheKey);
   if (cached && now - cached.checkedAt < TABLE_COLUMN_CACHE_TTL_MS) {
     return cached.columns;
+  }
+  const baselineColumns = BETA_BASELINE_TABLE_COLUMNS.get(cacheKey);
+  if (baselineColumns) {
+    tableColumnCache.set(cacheKey, { checkedAt: now, columns: baselineColumns });
+    return baselineColumns;
   }
   const staleColumns = cached?.columns ?? null;
 

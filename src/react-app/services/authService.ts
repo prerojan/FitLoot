@@ -22,6 +22,7 @@ export type AuthBootstrapResult =
 
 const APP_OPEN_MIN_INTERVAL_MS = 45_000;
 let lastAppOpenSentAt = 0;
+let scheduledAppOpenTimer: number | null = null;
 
 function canUseSameOriginBeaconTransport(requestUrl: string): boolean {
   if (typeof window === "undefined" || typeof navigator === "undefined") {
@@ -141,6 +142,21 @@ export async function notifyAppOpen(): Promise<void> {
       lastAppOpenSentAt = 0;
       throw error;
     });
+}
+
+export function scheduleAppOpenNotification(delayMs = 250): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  if (scheduledAppOpenTimer !== null) {
+    window.clearTimeout(scheduledAppOpenTimer);
+  }
+
+  scheduledAppOpenTimer = window.setTimeout(() => {
+    scheduledAppOpenTimer = null;
+    void notifyAppOpen().catch(() => undefined);
+  }, delayMs);
 }
 
 type IdleDeadlineLike = {

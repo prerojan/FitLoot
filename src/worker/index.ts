@@ -1549,6 +1549,7 @@ app.use("/api/*", async (c, next) => {
   const runtimeHotCacheDb = resolveRuntimeHotCacheDb(c);
   const isSessionScopedRequestKey = (requestKey: string): boolean =>
     Boolean(sessionId && requestKey.startsWith(`${sessionId}:`));
+  const hotRefreshBypass = c.req.header("X-FitLoot-Hot-Refresh") === "1";
 
   if (method === "GET" && isHotCacheableGetPath(c.req.path)) {
     const requestIdentity = await resolveHotCacheRequestIdentity({
@@ -1589,90 +1590,115 @@ app.use("/api/*", async (c, next) => {
       600_000,
     );
     const now = Date.now();
-    const cached = hotGetResponseCache.get(requestKey);
-    let staleSnapshot: CachedResponseSnapshot | null = null;
-    if (cached && cached.expiresAt > now) {
-      emitHotGetTelemetry(c, {
-        cacheStatus: "memory-hit",
-        requestClass: requestIdentity.requestClass,
-        runtimeCacheHit: false,
-        startedAt: telemetryStartedAt,
-      });
-      return cloneResponseSnapshot(cached.snapshot);
-    }
-    if (cached) {
-      if (cached.staleUntil > now) {
-        staleSnapshot = cached.snapshot;
-      } else {
-        hotGetResponseCache.delete(requestKey);
-      }
-    }
-
     const shouldUseRuntimeEdgeCache =
       Boolean(runtimeHotCacheDb) &&
       (Boolean(runtimeScopeKey) || isSessionScopedRequestKey(requestKey));
-    if (!cached && shouldUseRuntimeEdgeCache && runtimeHotCacheDb) {
-      try {
-        const runtimeLookupKey = requestIdentity.requestClass === "public" ? runtimeCacheKey : requestKey;
-        const runtimeCached = await readRuntimeHttpCache(runtimeHotCacheDb, runtimeLookupKey);
-        if (runtimeCached) {
-          hotGetResponseCache.set(requestKey, {
-            snapshot: runtimeCached.snapshot,
-            expiresAt: runtimeCached.expiresAt,
-            staleUntil: runtimeCached.staleUntil,
-          });
+    let staleSnapshot: CachedResponseSnapshot | null = null;
 
-          if (runtimeCached.expiresAt > now) {
-            emitHotGetTelemetry(c, {
-              cacheStatus: "runtime-hit",
-              requestClass: requestIdentity.requestClass,
-              runtimeCacheHit: true,
-              startedAt: telemetryStartedAt,
+    const scheduleBackgroundRefresh = (): void => {
+      const refreshHeaders = new Headers(c.req.raw.headers);
+      refreshHeaders.set("X-FitLoot-Hot-Refresh", "1");
+      const refreshRequest = new Request(c.req.raw, {
+        headers: refreshHeaders,
+      });
+
+      c.executionCtx.waitUntil(
+        Promise.resolve(app.fetch(refreshRequest, c.env, c.executionCtx)).catch(
+          (refreshError: unknown) => {
+            console.warn("[hot-get-cache][background-refresh]", {
+              path: c.req.path,
+              message: getErrorMessage(refreshError),
             });
-            return cloneResponseSnapshot(runtimeCached.snapshot);
-          }
+          },
+        ),
+      );
+    };
 
-          if (runtimeCached.staleUntil > now) {
-            staleSnapshot = runtimeCached.snapshot;
-          }
-        }
-      } catch (runtimeCacheError) {
-        console.warn("[hot-get-cache][runtime-read]", {
-          path: c.req.path,
-          message: getErrorMessage(runtimeCacheError),
-        });
-      }
-    }
-
-    const inflight = hotGetInflightRequests.get(requestKey);
-    if (inflight && now - inflight.startedAt <= dedupeWindowMs) {
-      const sharedSnapshot = await inflight.promise;
-      if (sharedSnapshot) {
+    if (!hotRefreshBypass) {
+      const cached = hotGetResponseCache.get(requestKey);
+      if (cached && cached.expiresAt > now) {
         emitHotGetTelemetry(c, {
-          cacheStatus: "shared-hit",
+          cacheStatus: "memory-hit",
           requestClass: requestIdentity.requestClass,
           runtimeCacheHit: false,
           startedAt: telemetryStartedAt,
         });
-        return cloneResponseSnapshot(sharedSnapshot);
+        return cloneResponseSnapshot(cached.snapshot);
       }
+      if (cached) {
+        if (cached.staleUntil > now) {
+          staleSnapshot = cached.snapshot;
+        } else {
+          hotGetResponseCache.delete(requestKey);
+        }
+      }
+
+      if (!cached && shouldUseRuntimeEdgeCache && runtimeHotCacheDb) {
+        try {
+          const runtimeLookupKey =
+            requestIdentity.requestClass === "public" ? runtimeCacheKey : requestKey;
+          const runtimeCached = await readRuntimeHttpCache(runtimeHotCacheDb, runtimeLookupKey);
+          if (runtimeCached) {
+            hotGetResponseCache.set(requestKey, {
+              snapshot: runtimeCached.snapshot,
+              expiresAt: runtimeCached.expiresAt,
+              staleUntil: runtimeCached.staleUntil,
+            });
+
+            if (runtimeCached.expiresAt > now) {
+              emitHotGetTelemetry(c, {
+                cacheStatus: "runtime-hit",
+                requestClass: requestIdentity.requestClass,
+                runtimeCacheHit: true,
+                startedAt: telemetryStartedAt,
+              });
+              return cloneResponseSnapshot(runtimeCached.snapshot);
+            }
+
+            if (runtimeCached.staleUntil > now) {
+              staleSnapshot = runtimeCached.snapshot;
+            }
+          }
+        } catch (runtimeCacheError) {
+          console.warn("[hot-get-cache][runtime-read]", {
+            path: c.req.path,
+            message: getErrorMessage(runtimeCacheError),
+          });
+        }
+      }
+
       if (staleSnapshot) {
+        scheduleBackgroundRefresh();
         emitHotGetTelemetry(c, {
           cacheStatus: "stale-fallback",
           requestClass: requestIdentity.requestClass,
-          runtimeCacheHit: false,
+          runtimeCacheHit: shouldUseRuntimeEdgeCache,
           startedAt: telemetryStartedAt,
         });
         return cloneResponseSnapshot(staleSnapshot, { staleFallback: true });
       }
-      await next();
-      emitHotGetTelemetry(c, {
-        cacheStatus: "uncached",
-        requestClass: requestIdentity.requestClass,
-        runtimeCacheHit: false,
-        startedAt: telemetryStartedAt,
-      });
-      return;
+
+      const inflight = hotGetInflightRequests.get(requestKey);
+      if (inflight && now - inflight.startedAt <= dedupeWindowMs) {
+        const sharedSnapshot = await inflight.promise;
+        if (sharedSnapshot) {
+          emitHotGetTelemetry(c, {
+            cacheStatus: "shared-hit",
+            requestClass: requestIdentity.requestClass,
+            runtimeCacheHit: false,
+            startedAt: telemetryStartedAt,
+          });
+          return cloneResponseSnapshot(sharedSnapshot);
+        }
+        await next();
+        emitHotGetTelemetry(c, {
+          cacheStatus: "uncached",
+          requestClass: requestIdentity.requestClass,
+          runtimeCacheHit: false,
+          startedAt: telemetryStartedAt,
+        });
+        return;
+      }
     }
 
     const currentRequest = (async () => {
@@ -1719,6 +1745,7 @@ app.use("/api/*", async (c, next) => {
           runtimeCacheHit: false,
           startedAt: telemetryStartedAt,
         });
+        return;
       } else if (staleSnapshot && c.res.status >= 500) {
         emitHotGetTelemetry(c, {
           cacheStatus: "stale-fallback",

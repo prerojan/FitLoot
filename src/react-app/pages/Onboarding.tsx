@@ -529,13 +529,6 @@ const AVAILABILITY_TIMEOUT_BY_REQUEST_CLASS: Record<ApiRequestClass, number> = {
   background: 8_000,
   foreground: 12_000,
 };
-const AVAILABILITY_RETRY_DELAY_MS = 180;
-
-async function waitForAvailabilityRetryWindow(): Promise<void> {
-  await new Promise((resolve) => {
-    window.setTimeout(resolve, AVAILABILITY_RETRY_DELAY_MS);
-  });
-}
 
 export default function Onboarding() {
   const { user, loading: authLoading, checkAuth } = useAuth();
@@ -639,32 +632,15 @@ export default function Onboarding() {
         availabilityCacheRef.current.delete(cacheKey);
       }
       const requestClass = options?.requestClass ?? "background";
-      const runAvailabilityRequest = async (timeoutMs: number) =>
-        fetchJson<AvailabilityPayload>(
-          `/api/auth/check-availability?${query.toString()}`,
-          {
-            timeoutMs,
-            orchestrationKey: `onboarding:availability:${cacheKey}`,
-            orchestrationPolicy: "join",
-            requestClass,
-          },
-        );
-
-      let payload: AvailabilityPayload;
-      try {
-        payload = await runAvailabilityRequest(
-          AVAILABILITY_TIMEOUT_BY_REQUEST_CLASS[requestClass],
-        );
-      } catch (error) {
-        if (!isApiTimeoutError(error)) {
-          throw error;
-        }
-
-        await waitForAvailabilityRetryWindow();
-        payload = await runAvailabilityRequest(
-          AVAILABILITY_TIMEOUT_BY_REQUEST_CLASS.foreground,
-        );
-      }
+      const payload = await fetchJson<AvailabilityPayload>(
+        `/api/auth/check-availability?${query.toString()}`,
+        {
+          timeoutMs: AVAILABILITY_TIMEOUT_BY_REQUEST_CLASS[requestClass],
+          orchestrationKey: `onboarding:availability:${cacheKey}`,
+          orchestrationPolicy: "join",
+          requestClass,
+        },
+      );
 
       if (normalizedEmail && typeof payload.emailAvailable !== "boolean") return null;
       if (normalizedUsername && typeof payload.usernameAvailable !== "boolean") return null;
@@ -686,11 +662,8 @@ export default function Onboarding() {
 
   const resolveAvailabilityFailureMessage = useCallback(
     (intent: AvailabilityValidationIntent): string | null => {
-      if (intent === "typing") {
-        return null;
-      }
-
-      return "Nao foi possivel validar agora.";
+      void intent;
+      return null;
     },
     [],
   );
@@ -765,10 +738,10 @@ export default function Onboarding() {
       if (requestId === usernameReqRef.current) {
         usernameValidationCacheRef.current = null;
         const failureMessage = resolveAvailabilityFailureMessage(intent);
-        if (failureMessage) {
+        if (failureMessage && !isApiTimeoutError(error)) {
           setUsernameAvailability({
             status: "invalid",
-            message: isApiTimeoutError(error) ? "A validacao demorou mais do que o esperado." : failureMessage,
+            message: failureMessage,
           });
         } else {
           setUsernameAvailability({ status: "idle" });
@@ -849,10 +822,10 @@ export default function Onboarding() {
       if (requestId === emailReqRef.current) {
         emailValidationCacheRef.current = null;
         const failureMessage = resolveAvailabilityFailureMessage(intent);
-        if (failureMessage) {
+        if (failureMessage && !isApiTimeoutError(error)) {
           setEmailAvailability({
             status: "invalid",
-            message: isApiTimeoutError(error) ? "A validacao demorou mais do que o esperado." : failureMessage,
+            message: failureMessage,
           });
         } else {
           setEmailAvailability({ status: "idle" });

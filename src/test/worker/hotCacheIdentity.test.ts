@@ -20,19 +20,24 @@ describe("resolveHotCacheRequestIdentity", () => {
     });
   });
 
-  it("hashes public runtime identifiers for onboarding availability checks", async () => {
+  it("shares public onboarding availability cache keys by normalized query", async () => {
     const identity = await resolveHotCacheRequestIdentity({
       path: "/api/auth/check-availability",
-      url: "https://fitloot.vercel.app/api/auth/check-availability?username=teste",
+      url: "https://fitloot.vercel.app/api/auth/check-availability?username=Teste",
       ipAddress: "203.0.113.12",
       userAgent: "Mozilla/5.0",
     });
+    const repeatedIdentity = await resolveHotCacheRequestIdentity({
+      path: "/api/auth/check-availability",
+      url: "https://fitloot.vercel.app/api/auth/check-availability?username=teste",
+      ipAddress: "198.51.100.99",
+      userAgent: "DifferentAgent/1.0",
+    });
 
+    expect(identity).toEqual(repeatedIdentity);
     expect(identity?.requestClass).toBe("public");
-    expect(identity?.requestKey).toContain("203.0.113.12");
-    expect(identity?.runtimeScopeKey).toMatch(/^anon:[a-f0-9]{32}$/);
-    expect(identity?.runtimeCacheKey).toMatch(/^anon:[a-f0-9]{32}$/);
-    expect(identity?.runtimeCacheKey).not.toContain("203.0.113.12");
-    expect(identity?.runtimeCacheKey).not.toContain("Mozilla/5.0");
+    expect(identity?.requestKey).toMatch(/^public:[a-f0-9]{32}$/);
+    expect(identity?.runtimeScopeKey).toBe("public:/api/auth/check-availability");
+    expect(identity?.runtimeCacheKey).toMatch(/^public:[a-f0-9]{32}$/);
   });
 });

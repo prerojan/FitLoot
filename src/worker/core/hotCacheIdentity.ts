@@ -35,6 +35,29 @@ export function isPublicHotCacheablePath(path: string): boolean {
   return PUBLIC_HOT_CACHEABLE_PATHS.has(path);
 }
 
+function buildNormalizedPublicCacheDescriptor(path: string, url: URL): string | null {
+  if (path !== "/api/auth/check-availability") {
+    const normalizedSearch = url.searchParams.toString();
+    return normalizedSearch.length > 0 ? `${path}?${normalizedSearch}` : path;
+  }
+
+  const email = (url.searchParams.get("email") ?? "").trim().toLowerCase();
+  const username = (url.searchParams.get("username") ?? "").trim().toLowerCase();
+  if (!email && !username) {
+    return null;
+  }
+
+  const normalizedQuery = new URLSearchParams();
+  if (email) {
+    normalizedQuery.set("email", email);
+  }
+  if (username) {
+    normalizedQuery.set("username", username);
+  }
+
+  return `${path}?${normalizedQuery.toString()}`;
+}
+
 export async function resolveHotCacheRequestIdentity(input: {
   path: string;
   url: string;
@@ -59,16 +82,16 @@ export async function resolveHotCacheRequestIdentity(input: {
     return null;
   }
 
-  const ipAddress = (input.ipAddress ?? "").trim() || "unknown";
-  const userAgent = (input.userAgent ?? "").trim();
-  const actorSignature = `${ipAddress}|${userAgent}`;
-  const scopeHash = await hashScopeValue(actorSignature);
-  const runtimePathHash = await hashScopeValue(`${scopeHash}|${input.path}|${url.search}`);
+  const publicDescriptor = buildNormalizedPublicCacheDescriptor(input.path, url);
+  if (!publicDescriptor) {
+    return null;
+  }
+  const descriptorHash = await hashScopeValue(publicDescriptor);
 
   return {
-    requestKey: `anon:${ipAddress}:${userAgent}:${input.path}:${url.search}`,
-    runtimeCacheKey: `anon:${runtimePathHash}`,
-    runtimeScopeKey: `anon:${scopeHash}`,
+    requestKey: `public:${descriptorHash}`,
+    runtimeCacheKey: `public:${descriptorHash}`,
+    runtimeScopeKey: `public:${input.path}`,
     requestClass: "public",
   };
 }

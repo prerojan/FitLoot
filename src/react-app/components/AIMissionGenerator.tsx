@@ -31,6 +31,7 @@ function isRegularActiveMission(mission: Mission): boolean {
 
 export default function AIMissionGenerator({ onMissionsGenerated }: AIMissionGeneratorProps) {
   const [loading, setLoading] = useState(false);
+  const [polling, setPolling] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<NoticeState | null>(null);
   const baselineMissionIdsRef = useRef<Set<number>>(new Set());
@@ -72,7 +73,7 @@ export default function AIMissionGenerator({ onMissionsGenerated }: AIMissionGen
 
   // Faz polling temporario enquanto o backend conclui a nova rodada de missoes.
   useEffect(() => {
-    if (!loading) return;
+    if (!polling) return;
 
     const intervalId = window.setInterval(() => {
       void (async () => {
@@ -93,18 +94,19 @@ export default function AIMissionGenerator({ onMissionsGenerated }: AIMissionGen
           );
 
           if (hasNewMission) {
+            setPolling(false);
             hydrateDashboardMissions(Array.isArray(payload) ? payload : []);
           }
         } catch {
           // Polling is best-effort while the backend is generating missions.
         }
       })();
-    }, 2_000);
+    }, 4_000);
 
     return () => {
       window.clearInterval(intervalId);
     };
-  }, [hydrateDashboardMissions, loading]);
+  }, [hydrateDashboardMissions, polling]);
 
   // Limpa automaticamente o aviso visual depois da confirmacao.
   useEffect(() => {
@@ -123,6 +125,7 @@ export default function AIMissionGenerator({ onMissionsGenerated }: AIMissionGen
   const generateMissions = useCallback(async () => {
     try {
       setLoading(true);
+      setPolling(false);
       setError(null);
       setNotice(null);
       refreshTriggeredRef.current = false;
@@ -141,6 +144,7 @@ export default function AIMissionGenerator({ onMissionsGenerated }: AIMissionGen
       if (resolvedMissions.length > 0) {
         hydrateDashboardMissions(resolvedMissions);
       } else {
+        setPolling(true);
         triggerDashboardRefresh();
       }
       setNotice({

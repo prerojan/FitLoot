@@ -131,6 +131,7 @@ export default function Dashboard() {
   const [achievements, setAchievements] = useState<AchievementWithUnlock[]>([]);
   const [activeTitle, setActiveTitle] = useState<Title | null>(null);
   const [loadingState, setLoadingState] = useState<DashboardLoadingState>(DEFAULT_LOADING_STATE);
+  const [assistantToolsReady, setAssistantToolsReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [quickActionsOpen, setQuickActionsOpen] = useState(false);
   const quickActionsRef = useRef<HTMLDivElement | null>(null);
@@ -350,6 +351,26 @@ export default function Dashboard() {
     }
     void loadData();
   }, [user, navigate, loadData]);
+
+  useEffect(() => {
+    const primarySectionsLoaded =
+      !loadingState.profile &&
+      !loadingState.progression &&
+      !loadingState.missions;
+
+    if (!primarySectionsLoaded) {
+      setAssistantToolsReady(false);
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setAssistantToolsReady(true);
+    }, 250);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [loadingState.missions, loadingState.profile, loadingState.progression]);
 
   const refreshData = useCallback(async () => {
     await Promise.all([
@@ -888,8 +909,12 @@ export default function Dashboard() {
 
           {/* Ferramentas auxiliares baseadas em IA. */}
           <section id="assistant-tools" className="space-y-2 sm:space-y-4 min-w-0">
-            <AIRecommendations />
-            <AIMissionGenerator onMissionsGenerated={hydrateGeneratedMissions} />
+            {assistantToolsReady ? (
+              <>
+                <AIRecommendations />
+                <AIMissionGenerator onMissionsGenerated={hydrateGeneratedMissions} />
+              </>
+            ) : null}
           </section>
         </div>
       </main>

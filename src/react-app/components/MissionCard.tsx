@@ -86,12 +86,11 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
   const isMonthlyMission = mission.type === "monthly";
   const isAutoProgressMission = isWeeklyMission || isMonthlyMission;
   const isAIMission = Number(mission.is_ai_special ?? 0) === 1 || mission.mission_origin === "ai";
-  const isWalkingMission = metricType === "steps" || metricType === "distance_meters";
-  const isTrackableWalkingMission = isWalkingMission && mission.type === "daily";
   const isDistanceRouteDailyMission = isDistanceRouteMission(mission);
+  const isTrackableWalkingMission = isDistanceRouteDailyMission;
   const walkingActionLabel = isDistanceRouteDailyMission
     ? `Iniciar ${resolveDistanceMissionActivityLabel(mission).toLowerCase()}`
-    : "Iniciar caminhada";
+    : "Iniciar percurso";
   const circuitTasks = useMemo(() => resolveCircuitTasks(mission), [mission]);
   const focusLabels = useMemo(() => resolveMissionFocusLabels(mission), [mission]);
   const hasTaskProgressMission = circuitTasks.length > 0;
@@ -231,11 +230,11 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
   ]));
   const missionMediaStyle = resolveMissionMediaStyle(missionMediaUrl);
   const detailMissionMediaStyle = resolveMissionMediaStyle(detailMissionMediaUrl);
-  const detailIsTrackableWalkingMission = (detailMetricType === "steps" || detailMetricType === "distance_meters") && missionDetails.type === "daily";
   const detailIsDistanceRouteDailyMission = isDistanceRouteMission(missionDetails);
+  const detailIsTrackableWalkingMission = detailIsDistanceRouteDailyMission;
   const detailWalkingActionLabel = detailIsDistanceRouteDailyMission
     ? `INICIAR ${resolveDistanceMissionActivityLabel(missionDetails).toUpperCase()}`
-    : "INICIAR CAMINHADA";
+    : "INICIAR PERCURSO";
   const detailIsCircuitMission = detailMetricType === "circuit_tasks";
   const missionCycleDateLabel = useMemo(
     () => formatMissionCycleDate(missionDetails.cycle_date),
@@ -847,11 +846,11 @@ function MissionCardComponent({ mission, onComplete, layout = "default" }: Missi
 
       {/* Keeps a lightweight footer context visible while the detail modal is open. */}
       {showDetails && !detailIsAutoProgressMission && (
-        <div className="fl-z-modal fixed bottom-4 left-1/2 z-10 flex max-w-[calc(100vw-2rem)] -translate-x-1/2 flex-wrap items-center justify-center gap-x-3 gap-y-1.5 rounded-full bg-white/88 px-3 py-2 text-[11px] leading-tight text-gray-500 shadow-lg backdrop-blur-sm sm:bottom-5 sm:max-w-[32rem] sm:text-xs">
+        <div className="fl-z-modal fixed bottom-3 left-1/2 z-10 flex max-w-[calc(100vw-1.5rem)] -translate-x-1/2 flex-wrap items-center justify-center gap-x-3 gap-y-1.5 rounded-full bg-white/88 px-3 py-2 text-[11px] leading-tight text-gray-500 shadow-lg backdrop-blur-sm sm:bottom-4 sm:max-w-[32rem] sm:text-xs">
           {detailFocusLabels[0] ? (
-            <span className="flex min-w-0 max-w-full items-center gap-1 whitespace-nowrap">
+            <span className="flex min-w-0 max-w-full items-center gap-1">
               <MapPinned className="h-3 w-3 shrink-0" />
-              <span className="max-w-[10rem] truncate sm:max-w-[14rem]">{detailFocusLabels[0]}</span>
+              <span className="max-w-[8.5rem] truncate sm:max-w-[14rem]">{detailFocusLabels[0]}</span>
             </span>
           ) : null}
           <span className="flex items-center gap-1 whitespace-nowrap">

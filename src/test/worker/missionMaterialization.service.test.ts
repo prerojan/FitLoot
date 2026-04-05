@@ -185,6 +185,8 @@ describe("missionMaterialization.materializeMissionBlueprint", () => {
     expect(mission.exercise_db_image_url).toBeNull();
     expect(mission.image_url).toBeNull();
     expect(mission.exercise_category).toBe("run");
+    expect(mission.execution_mode).toBe("route_tracking");
+    expect(mission.activity_kind).toBe("running");
     expect(enrichExercise).not.toHaveBeenCalled();
   });
 });

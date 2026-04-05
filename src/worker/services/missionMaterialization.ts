@@ -67,6 +67,8 @@ type MissionPayload = {
   points_reward: number;
   duration_estimate_minutes: number | null;
   exercise_category: MissionExerciseCategory;
+  execution_mode: "standard" | "route_tracking";
+  activity_kind: "walking" | "running" | null;
   mission_origin: "regular" | "ai";
   is_ai_special?: number;
   circuit_tasks: CircuitTask[];
@@ -341,6 +343,14 @@ export function createMissionMaterializationService(deps: MissionMaterialization
 
     const metricValue = deps.metricValueByPeriod(metricType, params.period);
     const metricUnit = deps.metricUnitByType(metricType);
+    const isRouteTrackingMission =
+      params.period === "daily"
+      && metricType === "distance_meters"
+      && (category === "walk" || category === "run");
+    const activityKind =
+      isRouteTrackingMission
+        ? (category === "run" ? "running" : "walking")
+        : null;
     const sets = metricType === "circuit_tasks" ? null : deps.inferSets(metricType, params.period);
     const restSeconds = metricType === "circuit_tasks" ? null : deps.inferRestSeconds(metricType);
     const bodyArea = deps.inferBodyArea(params.muscle);
@@ -380,6 +390,8 @@ export function createMissionMaterializationService(deps: MissionMaterialization
       points_reward: params.points,
       duration_estimate_minutes: deps.shouldShowMissionDuration(params.period) ? deps.estimateMissionDuration(metricType, metricValue) : null,
       exercise_category: category,
+      execution_mode: isRouteTrackingMission ? "route_tracking" : "standard",
+      activity_kind: activityKind,
       mission_origin: params.missionOrigin ?? "regular",
       is_ai_special: params.missionOrigin === "ai" ? 1 : 0,
       circuit_tasks: circuitTasks,
@@ -691,6 +703,8 @@ export function createMissionMaterializationService(deps: MissionMaterialization
         attributes_benefited: [],
         duration_estimate_minutes: null,
         exercise_category: blueprint.metricType === "steps" || blueprint.metricType === "distance_meters" ? "walk" : "default",
+        execution_mode: "standard",
+        activity_kind: null,
         mission_origin: blueprint.missionOrigin,
         is_ai_special: blueprint.isAiSpecial ? 1 : 0,
         circuit_tasks: [],
@@ -727,6 +741,8 @@ export function createMissionMaterializationService(deps: MissionMaterialization
       target_reps: null,
       target_time: null,
       exercise_category: "cardio_circuit",
+      execution_mode: "standard",
+      activity_kind: null,
       mission_origin: blueprint.missionOrigin,
       is_ai_special: blueprint.isAiSpecial ? 1 : 0,
       instructions: deps.ensureInstructionSteps(apiInstructionsPt.length > 0 ? apiInstructionsPt : baseMission.instructions, resolvedName, "circuit_tasks", null, null),

@@ -187,6 +187,8 @@ export const MissionSchema = z.object({
   attributes_benefited: z.array(z.string()).optional(),
   duration_estimate_minutes: z.number().optional(),
   exercise_category: z.string().optional(),
+  execution_mode: z.enum(["standard", "route_tracking"]).optional(),
+  activity_kind: z.enum(["walking", "running"]).nullable().optional(),
   mission_origin: z.enum(["regular", "ai"]).optional(),
   goal: z.string().nullable().optional(),
   is_ai_special: z.number().optional(),
