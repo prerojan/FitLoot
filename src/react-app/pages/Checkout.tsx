@@ -248,7 +248,8 @@ export default function Checkout() {
     promoValidationCodeRef.current,
   );
   const androidDownloadInfo = useMemo(() => {
-    return getHostContext().platform === "android" ? null : getAndroidDownloadInfoForCurrentEnvironment();
+    void getHostContext();
+    return getAndroidDownloadInfoForCurrentEnvironment();
   }, []);
 
   useEffect(() => {

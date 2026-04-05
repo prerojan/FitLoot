@@ -61,7 +61,8 @@ export default function PaymentPending() {
   const [activationCompletionInProgress, setActivationCompletionInProgress] = useState(false);
   const [statusPopup, setStatusPopup] = useState<PaymentStatusPopupConfig | null>(null);
   const androidDownloadInfo = useMemo(() => {
-    return getHostContext().platform === "android" ? null : getAndroidDownloadInfoForCurrentEnvironment();
+    void getHostContext();
+    return getAndroidDownloadInfoForCurrentEnvironment();
   }, []);
 
   const clearScheduledPoll = useCallback(() => {

@@ -8,6 +8,7 @@ const navigate = vi.fn();
 const logout = vi.fn();
 const apiMock = vi.fn();
 const completeActivationAndEnterApp = vi.fn(async () => ({ ok: true as const }));
+const getHostContextMock = vi.fn();
 
 vi.mock("react-router", async () => {
   const actual = await vi.importActual<typeof import("react-router")>("react-router");
@@ -48,6 +49,10 @@ vi.mock("../../react-app/utils/api", () => ({
   api: (...args: Parameters<typeof apiMock>) => apiMock(...args),
 }));
 
+vi.mock("../../react-app/services/runtime/hostRuntime", () => ({
+  getHostContext: () => getHostContextMock(),
+}));
+
 vi.mock("../../react-app/utils/onboardingDraft", () => ({
   clearOnboardingDraft: vi.fn(),
 }));
@@ -68,6 +73,20 @@ import Checkout from "../../react-app/pages/Checkout";
 describe("Checkout", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    getHostContextMock.mockReturnValue({
+      platform: "android",
+      webMode: "remote",
+      buildType: "prod",
+      networkOnline: true,
+      capabilities: {
+        camera: true,
+        gallery: true,
+        healthMetrics: true,
+        offlineQueue: true,
+        lifecycleEvents: true,
+        location: true,
+      },
+    });
   });
 
   it("starts activation through /api/checkout/start even when the user just came from onboarding", async () => {

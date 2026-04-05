@@ -7,6 +7,22 @@ const navigate = vi.fn();
 const logout = vi.fn();
 const apiMock = vi.fn();
 const completeActivationAndEnterApp = vi.fn(async () => ({ ok: true as const }));
+const { getHostContextMock } = vi.hoisted(() => ({
+  getHostContextMock: vi.fn(() => ({
+    platform: "android",
+    webMode: "remote",
+    buildType: "prod",
+    networkOnline: true,
+    capabilities: {
+      camera: true,
+      gallery: true,
+      healthMetrics: true,
+      offlineQueue: true,
+      lifecycleEvents: true,
+      location: true,
+    },
+  })),
+}));
 
 vi.mock("react-router", async () => {
   const actual = await vi.importActual<typeof import("react-router")>("react-router");
@@ -36,6 +52,10 @@ vi.mock("../../react-app/utils/api", () => ({
   api: (...args: Parameters<typeof apiMock>) => apiMock(...args),
 }));
 
+vi.mock("../../react-app/services/runtime/hostRuntime", () => ({
+  getHostContext: () => getHostContextMock(),
+}));
+
 vi.mock("../../react-app/utils/onboardingDraft", () => ({
   clearOnboardingDraft: vi.fn(),
 }));
@@ -56,6 +76,20 @@ import PaymentPending from "../../react-app/pages/PaymentPending";
 describe("PaymentPending", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    getHostContextMock.mockReturnValue({
+      platform: "android",
+      webMode: "remote",
+      buildType: "prod",
+      networkOnline: true,
+      capabilities: {
+        camera: true,
+        gallery: true,
+        healthMetrics: true,
+        offlineQueue: true,
+        lifecycleEvents: true,
+        location: true,
+      },
+    });
   });
 
   it("uses the shared activation finalizer when payment approval grants access", async () => {
@@ -99,6 +133,9 @@ describe("PaymentPending", () => {
 
     expect(
       screen.getByText(/Conta criada e acesso liberado/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: /Baixar app Android/i }),
     ).toBeInTheDocument();
     expect(navigate).not.toHaveBeenCalledWith("/home", { replace: true });
   });
