@@ -1,5 +1,5 @@
-import type { MissionMetricType } from "@/shared/types";
-import { resolveSupportedRouteMissionActivityKind } from "@/shared/exerciseCatalog";
+import type { MissionMetricType } from "../shared/types";
+import { resolveSupportedRouteMissionActivityKind } from "../shared/exerciseCatalog";
 
 export const MISSION_LIMITS = {
   daily: 8,
