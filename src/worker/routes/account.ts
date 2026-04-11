@@ -3,9 +3,14 @@ import { zValidator } from "@hono/zod-validator";
 
 import {
   UpdateMeRequestSchema,
+  UpdateUserAvatarRequestSchema,
   UserPlanRequestSchema,
 } from "../../shared/types";
-import { purgeUserAccountData } from "../core/database";
+import {
+  isTransientDatabaseError,
+  purgeUserAccountData,
+  runWithTransientDatabaseRetry,
+} from "../core/database";
 import {
   getErrorMessage,
   internalErrorResponse,
@@ -19,9 +24,17 @@ import {
 } from "../core/runtimeUserAuthStore";
 import {
   deleteRuntimeUserProjections,
+  upsertRuntimeDashboardProjection,
+  upsertRuntimeProfileProjection,
   readRuntimeBootstrapProjection,
   upsertRuntimeBootstrapProjection,
 } from "../core/runtimeUserProjectionStore";
+import {
+  extractManagedAvatarPathFromUrl,
+  isSupabaseAvatarStorageConfigured,
+  removeStoredAvatar,
+  storeUserAvatar,
+} from "../services/userAvatar";
 import type {
   AppContext,
   UserAuthRecord,
@@ -51,6 +64,7 @@ type AccountRouteDeps = {
     userId: string,
     customizations: Record<string, unknown>,
   ) => Promise<void>;
+  invalidateRankingCache: () => void;
   shouldPurgeUserOnLogout: (user: UserAuthRecord) => boolean;
   unlockAchievementIfNeeded: (
     db: D1Database,
@@ -60,36 +74,6 @@ type AccountRouteDeps = {
     progressRequired: number,
   ) => Promise<void>;
 };
-
-function isTransientDatabaseError(error: unknown): boolean {
-  const message = getErrorMessage(error).toLowerCase();
-  return (
-    message.includes("query read timeout") ||
-    message.includes("timeout exceeded when trying to connect") ||
-    message.includes("read etimedout") ||
-    message.includes("socket hang up") ||
-    message.includes("connection terminated")
-  );
-}
-
-async function runWithTransientRetry(
-  task: () => Promise<void>,
-  maxAttempts = 2,
-): Promise<void> {
-  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    try {
-      await task();
-      return;
-    } catch (error) {
-      if (!isTransientDatabaseError(error) || attempt >= maxAttempts) {
-        throw error;
-      }
-      await new Promise((resolve) => {
-        setTimeout(resolve, 150 * attempt);
-      });
-    }
-  }
-}
 
 function resolveRuntimeCacheDb(
   c: import("hono").Context<AppContext>,
@@ -105,7 +89,64 @@ const RUNTIME_BOOTSTRAP_PROJECTION_TTL_MS = 30_000;
 type BootstrapRuntimeProjection = {
   profile: Record<string, unknown> | null;
   progression: Record<string, unknown> | null;
+  attributes: Record<string, unknown> | null;
 };
+
+async function readStoredAvatarUrl(
+  db: D1Database,
+  userId: string,
+): Promise<string | null> {
+  const row = await db
+    .prepare("SELECT avatar_url FROM users WHERE id = ?")
+    .bind(userId)
+    .first<{ avatar_url: string | null }>();
+  return typeof row?.avatar_url === "string" ? row.avatar_url : null;
+}
+
+function scheduleAvatarDeletion(
+  c: import("hono").Context<AppContext>,
+  storagePath: string | null,
+  logContext: string,
+): void {
+  if (!storagePath || !isSupabaseAvatarStorageConfigured(c.env)) return;
+  c.executionCtx.waitUntil(
+    removeStoredAvatar(c.env, storagePath).catch((error) => {
+      console.warn(`[${logContext}][avatar-delete]`, {
+        storagePath,
+        message: getErrorMessage(error),
+      });
+    }),
+  );
+}
+
+function scheduleUpdatedUserRuntimeSync(
+  c: import("hono").Context<AppContext>,
+  userId: string,
+  updatedUser: UserAuthRecord | null,
+  logContext: string,
+  options: {
+    clearRuntimeUserProjections?: boolean;
+  } = {},
+): void {
+  const runtimeCacheDb = resolveRuntimeCacheDb(c);
+  if (!runtimeCacheDb) return;
+
+  c.executionCtx.waitUntil(
+    Promise.allSettled([
+      updatedUser
+        ? upsertRuntimeUserAuth(runtimeCacheDb, updatedUser)
+        : Promise.resolve(),
+      options.clearRuntimeUserProjections
+        ? deleteRuntimeUserProjections(runtimeCacheDb, userId)
+        : Promise.resolve(),
+    ]).catch((runtimeError) => {
+      console.warn(`[${logContext}][runtime-sync]`, {
+        message: getErrorMessage(runtimeError),
+        userId,
+      });
+    }),
+  );
+}
 
 function buildProfileThemeProjection(
   profile: Record<string, unknown> | null | undefined,
@@ -140,6 +181,7 @@ export function registerAccountRoutes(
     logUserEvent,
     onAppOpen,
     onProfileCustomization,
+    invalidateRankingCache,
     shouldPurgeUserOnLogout,
     unlockAchievementIfNeeded,
   }: AccountRouteDeps,
@@ -228,6 +270,7 @@ export function registerAccountRoutes(
               profile: cachedProjection.profile ?? null,
               profile_theme: profileTheme,
               progression: cachedProjection.progression ?? null,
+              attributes: cachedProjection.attributes ?? null,
               app_open_degraded: false,
             });
           }
@@ -241,17 +284,24 @@ export function registerAccountRoutes(
 
       let profile: Record<string, unknown> | null = null;
       let progression: Record<string, unknown> | null = null;
+      let attributes: Record<string, unknown> | null = null;
       let bootstrapDegraded = false;
 
       try {
-        profile = await c.env.fitloot_db
-          .prepare(
-            `SELECT *
-            FROM user_profiles
-            WHERE user_id = ?`,
-          )
-          .bind(user.id)
-          .first<Record<string, unknown>>();
+        profile = await runWithTransientDatabaseRetry(() =>
+          c.env.fitloot_db
+            .prepare(
+              `SELECT
+                up.*,
+                u.avatar_url
+              FROM user_profiles up
+              INNER JOIN users u
+                ON u.id = up.user_id
+              WHERE up.user_id = ?`,
+            )
+            .bind(user.id)
+            .first<Record<string, unknown>>(),
+        );
       } catch (profileError) {
         if (!isTransientDatabaseError(profileError)) {
           throw profileError;
@@ -264,14 +314,16 @@ export function registerAccountRoutes(
       }
 
       try {
-        progression = await c.env.fitloot_db
-          .prepare(
-            `SELECT *
-            FROM user_progression
-            WHERE user_id = ?`,
-          )
-          .bind(user.id)
-          .first<Record<string, unknown>>();
+        progression = await runWithTransientDatabaseRetry(() =>
+          c.env.fitloot_db
+            .prepare(
+              `SELECT *
+              FROM user_progression
+              WHERE user_id = ?`,
+            )
+            .bind(user.id)
+            .first<Record<string, unknown>>(),
+        );
       } catch (progressionError) {
         if (!isTransientDatabaseError(progressionError)) {
           throw progressionError;
@@ -283,14 +335,58 @@ export function registerAccountRoutes(
         });
       }
 
+      try {
+        attributes = await runWithTransientDatabaseRetry(() =>
+          c.env.fitloot_db
+            .prepare(
+              `SELECT *
+              FROM user_attributes
+              WHERE user_id = ?`,
+            )
+            .bind(user.id)
+            .first<Record<string, unknown>>(),
+        );
+      } catch (attributesError) {
+        if (!isTransientDatabaseError(attributesError)) {
+          throw attributesError;
+        }
+        bootstrapDegraded = true;
+        console.warn("[/api/app/bootstrap][attributes]", {
+          message: getErrorMessage(attributesError),
+          userId: user.id,
+        });
+      }
+
       const profileTheme = buildProfileThemeProjection(profile);
 
       if (runtimeCacheDb) {
         c.executionCtx.waitUntil(
-          upsertRuntimeBootstrapProjection(runtimeCacheDb, user.id, {
-            profile: profile ?? null,
-            progression: progression ?? null,
-          }).catch((runtimeProjectionError) => {
+          Promise.allSettled([
+            upsertRuntimeBootstrapProjection(runtimeCacheDb, user.id, {
+              profile: profile ?? null,
+              progression: progression ?? null,
+              attributes: attributes ?? null,
+            }),
+            profile
+              ? upsertRuntimeProfileProjection(runtimeCacheDb, user.id, profile)
+              : Promise.resolve(),
+            progression
+              ? upsertRuntimeDashboardProjection(
+                  runtimeCacheDb,
+                  user.id,
+                  "progression",
+                  progression,
+                )
+              : Promise.resolve(),
+            attributes
+              ? upsertRuntimeDashboardProjection(
+                  runtimeCacheDb,
+                  user.id,
+                  "attributes",
+                  attributes,
+                )
+              : Promise.resolve(),
+          ]).catch((runtimeProjectionError) => {
             console.warn("[/api/app/bootstrap][runtime-write]", {
               message: getErrorMessage(runtimeProjectionError),
               userId: user.id,
@@ -314,6 +410,7 @@ export function registerAccountRoutes(
         profile: profile ?? null,
         profile_theme: profileTheme,
         progression: progression ?? null,
+        attributes: attributes ?? null,
         app_open_degraded: bootstrapDegraded,
       });
     } catch (error) {
@@ -336,9 +433,9 @@ export function registerAccountRoutes(
 
     const timestamp = new Date().toISOString();
     c.executionCtx.waitUntil(
-      runWithTransientRetry(
+      runWithTransientDatabaseRetry(
         () => onAppOpen(c.env.fitloot_db, user.id, timestamp),
-        2,
+        { maxAttempts: 2, baseDelayMs: 150 },
       ).catch((error) => {
         console.error("[/api/app/open]", {
           message: getErrorMessage(error),
@@ -388,6 +485,10 @@ export function registerAccountRoutes(
       const data = c.req.valid("json");
 
       try {
+        const previousAvatarUrl =
+          data.photo_url !== undefined
+            ? await readStoredAvatarUrl(c.env.fitloot_db, user.id)
+            : null;
         if (data.name !== undefined) {
           await c.env.fitloot_db
             .prepare("UPDATE users SET name = ? WHERE id = ?")
@@ -415,17 +516,25 @@ export function registerAccountRoutes(
         }
 
         const updated = await getUserAuthRecordById(c.env.fitloot_db, user.id);
-        const runtimeCacheDb = resolveRuntimeCacheDb(c);
-        if (updated && runtimeCacheDb) {
-          c.executionCtx.waitUntil(
-            upsertRuntimeUserAuth(runtimeCacheDb, updated).catch((runtimeError) => {
-              console.warn("[/api/users/me][runtime-sync]", {
-                message: getErrorMessage(runtimeError),
-                userId: user.id,
-              });
-            }),
+        scheduleUpdatedUserRuntimeSync(c, user.id, updated, "/api/users/me", {
+          clearRuntimeUserProjections: data.photo_url !== undefined,
+        });
+
+        if (data.photo_url !== undefined) {
+          invalidateRankingCache();
+          const previousAvatarPath = extractManagedAvatarPathFromUrl(
+            previousAvatarUrl,
+            c.env.SUPABASE_URL,
           );
+          const nextAvatarPath = extractManagedAvatarPathFromUrl(
+            data.photo_url,
+            c.env.SUPABASE_URL,
+          );
+          if (previousAvatarPath && previousAvatarPath !== nextAvatarPath) {
+            scheduleAvatarDeletion(c, previousAvatarPath, "/api/users/me");
+          }
         }
+
         return c.json(updated ?? c.get("user"));
       } catch (error) {
         console.error("[/api/users/me][patch]", {
@@ -441,6 +550,159 @@ export function registerAccountRoutes(
       }
     },
   );
+
+  app.post(
+    "/api/users/me/avatar",
+    authMiddleware,
+    zValidator("json", UpdateUserAvatarRequestSchema),
+    async (c) => {
+      const user = c.get("user");
+      if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+      if (!isSupabaseAvatarStorageConfigured(c.env)) {
+        return c.json(
+          {
+            error: "Armazenamento de avatar do Supabase nao configurado.",
+            code: "AVATAR_STORAGE_NOT_CONFIGURED",
+          },
+          503,
+        );
+      }
+
+      const data = c.req.valid("json");
+      const previousAvatarUrl = await readStoredAvatarUrl(c.env.fitloot_db, user.id);
+
+      try {
+        const storedAvatar = await storeUserAvatar({
+          env: c.env,
+          imageBase64: data.image_base64,
+          imageMimeType: data.image_mime_type,
+          userId: user.id,
+        });
+
+        try {
+          await c.env.fitloot_db
+            .prepare("UPDATE users SET avatar_url = ? WHERE id = ?")
+            .bind(storedAvatar.publicUrl, user.id)
+            .run();
+        } catch (error) {
+          await removeStoredAvatar(c.env, storedAvatar.path).catch(() => undefined);
+          throw error;
+        }
+
+        try {
+          await onProfileCustomization(c.env.fitloot_db, user.id, {
+            photo_changed: true,
+            avatar_storage: "supabase",
+          });
+        } catch (error) {
+          console.error("[/api/users/me/avatar][profile-hook]", {
+            message: getErrorMessage(error),
+            userId: user.id,
+          });
+        }
+
+        const updated = await getUserAuthRecordById(c.env.fitloot_db, user.id);
+        scheduleUpdatedUserRuntimeSync(
+          c,
+          user.id,
+          updated,
+          "/api/users/me/avatar",
+          { clearRuntimeUserProjections: true },
+        );
+        invalidateRankingCache();
+
+        const previousAvatarPath = extractManagedAvatarPathFromUrl(
+          previousAvatarUrl,
+          c.env.SUPABASE_URL,
+        );
+        if (previousAvatarPath && previousAvatarPath !== storedAvatar.path) {
+          scheduleAvatarDeletion(c, previousAvatarPath, "/api/users/me/avatar");
+        }
+
+        return c.json(updated ?? { ...user, avatar_url: storedAvatar.publicUrl });
+      } catch (error) {
+        console.error("[/api/users/me/avatar][post]", {
+          message: getErrorMessage(error),
+          userId: user.id,
+        });
+
+        if (isMissingSchemaError(error)) {
+          return schemaMismatchResponse(c);
+        }
+
+        const lowerMessage = getErrorMessage(error).toLowerCase();
+        if (
+          lowerMessage.includes("nao suportado") ||
+          lowerMessage.includes("limite") ||
+          lowerMessage.includes("2 mb") ||
+          lowerMessage.includes("decodificar") ||
+          lowerMessage.includes("vazia")
+        ) {
+          return c.json({ error: getErrorMessage(error) }, 400);
+        }
+
+        return internalErrorResponse(c);
+      }
+    },
+  );
+
+  app.delete("/api/users/me/avatar", authMiddleware, async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    try {
+      const previousAvatarUrl = await readStoredAvatarUrl(c.env.fitloot_db, user.id);
+
+      await c.env.fitloot_db
+        .prepare("UPDATE users SET avatar_url = NULL WHERE id = ?")
+        .bind(user.id)
+        .run();
+
+      try {
+        await onProfileCustomization(c.env.fitloot_db, user.id, {
+          photo_changed: true,
+          avatar_removed: true,
+        });
+      } catch (error) {
+        console.error("[/api/users/me/avatar][remove-hook]", {
+          message: getErrorMessage(error),
+          userId: user.id,
+        });
+      }
+
+      const updated = await getUserAuthRecordById(c.env.fitloot_db, user.id);
+      scheduleUpdatedUserRuntimeSync(
+        c,
+        user.id,
+        updated,
+        "/api/users/me/avatar",
+        { clearRuntimeUserProjections: true },
+      );
+      invalidateRankingCache();
+
+      const previousAvatarPath = extractManagedAvatarPathFromUrl(
+        previousAvatarUrl,
+        c.env.SUPABASE_URL,
+      );
+      if (previousAvatarPath) {
+        scheduleAvatarDeletion(c, previousAvatarPath, "/api/users/me/avatar");
+      }
+
+      return c.json(updated ?? { ...user, avatar_url: undefined });
+    } catch (error) {
+      console.error("[/api/users/me/avatar][delete]", {
+        message: getErrorMessage(error),
+        userId: user.id,
+      });
+
+      if (isMissingSchemaError(error)) {
+        return schemaMismatchResponse(c);
+      }
+
+      return internalErrorResponse(c);
+    }
+  });
 
   app.post(
     "/api/users/plan",

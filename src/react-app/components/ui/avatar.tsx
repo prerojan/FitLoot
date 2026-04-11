@@ -1,4 +1,7 @@
-import { cn } from '@/react-app/utils';
+import { useEffect, useState } from "react";
+
+import { cn } from "@/react-app/utils";
+import { resolveApiRequestUrl } from "@/react-app/utils/api";
 
 interface AvatarProps {
   src?: string | null | undefined;
@@ -7,6 +10,13 @@ interface AvatarProps {
 }
 
 export function Avatar({ src, name, className }: AvatarProps) {
+  const normalizedSrc = normalizeAvatarSrc(src);
+  const [imageErrored, setImageErrored] = useState(false);
+
+  useEffect(() => {
+    setImageErrored(false);
+  }, [normalizedSrc]);
+
   // Deriva iniciais legiveis quando o usuario nao possui imagem carregada.
   const initials = name
     ?.split(' ')
@@ -15,8 +25,19 @@ export function Avatar({ src, name, className }: AvatarProps) {
     .map((part) => part.charAt(0).toUpperCase())
     .join('') || '?';
 
-  if (src) {
-    return <img src={src} alt={name || 'avatar'} className={cn('h-12 w-12 rounded-full object-cover', className)} />;
+  if (normalizedSrc && !imageErrored) {
+    return (
+      <img
+        src={normalizedSrc}
+        alt={name || "avatar"}
+        className={cn("h-12 w-12 rounded-full object-cover", className)}
+        decoding="async"
+        loading="lazy"
+        onError={() => {
+          setImageErrored(true);
+        }}
+      />
+    );
   }
 
   // Fallback visual padrao para perfis sem avatar remoto.
@@ -31,4 +52,22 @@ export function Avatar({ src, name, className }: AvatarProps) {
       {initials}
     </div>
   );
+}
+
+function normalizeAvatarSrc(src: string | null | undefined): string | null {
+  if (typeof src !== "string") return null;
+  const trimmed = src.trim();
+  if (!trimmed) return null;
+  if (
+    trimmed.startsWith("data:") ||
+    trimmed.startsWith("blob:") ||
+    trimmed.startsWith("http://") ||
+    trimmed.startsWith("https://")
+  ) {
+    return trimmed;
+  }
+  if (trimmed.startsWith("/")) {
+    return resolveApiRequestUrl(trimmed);
+  }
+  return trimmed;
 }

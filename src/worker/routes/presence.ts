@@ -130,11 +130,13 @@ export function registerPresenceRoutes(
           )
           .bind(user.id, visibility, sessionId, currentActivity)
           .run();
-      });
+      }, 1);
 
       const runtimeDb = resolveRuntimeFriendCacheDb(c);
       if (runtimeDb) {
-        void clearRuntimeFriendSnapshots(runtimeDb, user.id).catch(() => undefined);
+        c.executionCtx.waitUntil(
+          clearRuntimeFriendSnapshots(runtimeDb, user.id).catch(() => undefined),
+        );
       }
 
       return c.json({ success: true });
@@ -176,11 +178,13 @@ export function registerPresenceRoutes(
           )
           .bind(user.id)
           .run();
-      });
+      }, 1);
 
       const runtimeDb = resolveRuntimeFriendCacheDb(c);
       if (runtimeDb) {
-        void clearRuntimeFriendSnapshots(runtimeDb, user.id).catch(() => undefined);
+        c.executionCtx.waitUntil(
+          clearRuntimeFriendSnapshots(runtimeDb, user.id).catch(() => undefined),
+        );
       }
 
       return c.json({ success: true });

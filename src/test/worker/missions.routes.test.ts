@@ -33,6 +33,11 @@ function createMissionDeps(overrides: Partial<Parameters<typeof registerMissionR
       invalid_ratio: 0,
       missions: [],
     })),
+    getCurrentCycleMissionCounts: vi.fn(async () => ({
+      daily: 1,
+      weekly: 1,
+      monthly: 1,
+    })),
     getMonthlyCounters: vi.fn(async () => ({})),
     getRewardNotificationCursor: vi.fn(async () => 0),
     hydrateMissionRowsWithSubtasks: vi.fn(async (_db: D1Database, rows: Record<string, unknown>[]) => rows),
@@ -113,6 +118,59 @@ describe("mission routes", () => {
     expect(deps.scheduleLegacyDailyMetadataRepairWithGuard).not.toHaveBeenCalled();
     expect(deps.schedulePeriodicProgressRecomputeWithGuard).not.toHaveBeenCalled();
     expect(deps.streamJsonArrayResponse).toHaveBeenCalledWith(cachedMissions);
+  });
+
+  it("does not trust an empty cached mission list and runs the self-heal read path", async () => {
+    const { db } = createMockD1Database([
+      {
+        match: "PRAGMA table_info('missions')",
+        all: [
+          { name: "id" },
+          { name: "user_id" },
+          { name: "status" },
+          { name: "skill_id" },
+        ],
+      },
+      {
+        match: "PRAGMA table_info('skills')",
+        all: [],
+      },
+      {
+        match: "SELECT m.*, s.name as skill_name FROM missions m",
+        all: [],
+      },
+    ]);
+    const env = createTestEnv(db);
+    const deps = createMissionDeps({
+      readMissionListCache: vi.fn(() => []),
+      getCurrentCycleMissionCounts: vi.fn(async () => ({
+        daily: 0,
+        weekly: 1,
+        monthly: 1,
+      })),
+    });
+    const app = new Hono<AppContext>();
+    registerMissionRoutes(app, deps, createAuthMiddleware());
+    const { executionCtx } = createExecutionContext();
+
+    const response = await app.fetch(
+      new Request("http://localhost/api/missions"),
+      env,
+      executionCtx,
+    );
+
+    expect(response.status).toBe(200);
+    expect(deps.invalidateMissionListCache).toHaveBeenCalledWith(TEST_USER.id);
+    expect(deps.ensurePeriodicMissionsWithGuard).toHaveBeenCalledWith(
+      env,
+      db,
+      TEST_USER.id,
+      {
+        force: true,
+        mode: "full",
+      },
+    );
+    expect(deps.writeMissionListCache).not.toHaveBeenCalled();
   });
 
   it("bypasses cached daily missions that are outside the ExerciseDB-backed catalog", async () => {
@@ -243,6 +301,127 @@ describe("mission routes", () => {
     expect(deps.schedulePeriodicProgressRecomputeWithGuard).not.toHaveBeenCalled();
   });
 
+  it("self-heals the mission cycle when the current daily or weekly set is missing", async () => {
+    const { db } = createMockD1Database([
+      {
+        match: "PRAGMA table_info('missions')",
+        all: [
+          { name: "id" },
+          { name: "user_id" },
+          { name: "status" },
+          { name: "skill_id" },
+        ],
+      },
+      {
+        match: "PRAGMA table_info('skills')",
+        all: [],
+      },
+      {
+        match: "SELECT m.*, s.name as skill_name FROM missions m",
+        all: [],
+      },
+    ]);
+    const env = createTestEnv(db);
+    const deps = createMissionDeps({
+      getCurrentCycleMissionCounts: vi.fn(async () => ({
+        daily: 0,
+        weekly: 0,
+        monthly: 5,
+      })),
+    });
+    const app = new Hono<AppContext>();
+    registerMissionRoutes(app, deps, createAuthMiddleware());
+    const { executionCtx } = createExecutionContext();
+
+    const response = await app.fetch(
+      new Request("http://localhost/api/missions?refresh=1"),
+      env,
+      executionCtx,
+    );
+
+    expect(response.status).toBe(200);
+    expect(deps.ensurePeriodicMissionsWithGuard).toHaveBeenCalledWith(
+      env,
+      db,
+      TEST_USER.id,
+      {
+        force: true,
+        mode: "full",
+      },
+    );
+    expect(deps.invalidateMissionListCache).toHaveBeenCalledWith(TEST_USER.id);
+  });
+
+  it("filters out settled missions from the previous cycle while keeping the current cycle payload", async () => {
+    const { db } = createMockD1Database([
+      {
+        match: "PRAGMA table_info('missions')",
+        all: [
+          { name: "id" },
+          { name: "user_id" },
+          { name: "status" },
+          { name: "skill_id" },
+        ],
+      },
+      {
+        match: "PRAGMA table_info('skills')",
+        all: [],
+      },
+      {
+        match: "SELECT m.*, s.name as skill_name FROM missions m",
+        all: [
+          {
+            id: 11,
+            user_id: TEST_USER.id,
+            type: "daily",
+            title: "Missao Diaria: Agachamento livre",
+            status: "pending",
+            is_completed: 0,
+            cycle_date: "2026-04-08",
+            created_at: "2026-04-08T03:10:00.000Z",
+            updated_at: "2026-04-08T03:10:00.000Z",
+          },
+          {
+            id: 12,
+            user_id: TEST_USER.id,
+            type: "daily",
+            title: "Missao Diaria: Flexao tradicional",
+            status: "expired",
+            is_completed: 0,
+            cycle_date: "2026-04-07",
+            created_at: "2026-04-07T03:10:00.000Z",
+            updated_at: "2026-04-08T03:00:00.000Z",
+          },
+        ],
+      },
+    ]);
+    const env = createTestEnv(db);
+    const deps = createMissionDeps();
+    const app = new Hono<AppContext>();
+    registerMissionRoutes(app, deps, createAuthMiddleware());
+    const { executionCtx } = createExecutionContext();
+
+    const response = await app.fetch(
+      new Request("http://localhost/api/missions", {
+        headers: {
+          "X-FitLoot-Timezone": "America/Sao_Paulo",
+        },
+      }),
+      env,
+      executionCtx,
+    );
+
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload).toHaveLength(1);
+    expect(payload[0]).toMatchObject({
+      id: 11,
+      status: "pending",
+      cycle_date: "2026-04-08",
+    });
+  });
+
   it("hydrates weekly and monthly step progress from the periodic progress resolver", async () => {
     const { db } = createMockD1Database([
       {
@@ -317,7 +496,7 @@ describe("mission routes", () => {
     expect(deps.resolvePeriodicMissionProgressValue).toHaveBeenCalledTimes(2);
   });
 
-  it("reuses stored periodic progress during mission list reads when available", async () => {
+  it("prefers live accumulated progress over stale stored values for periodic step missions", async () => {
     const { db } = createMockD1Database([
       {
         match: "PRAGMA table_info('missions')",
@@ -338,7 +517,7 @@ describe("mission routes", () => {
           {
             id: 43,
             user_id: TEST_USER.id,
-            type: "weekly",
+            type: "monthly",
             title: "Passos persistidos",
             metric_type: "steps",
             metric_value: 15000,
@@ -350,6 +529,14 @@ describe("mission routes", () => {
     ]);
     const env = createTestEnv(db);
     const deps = createMissionDeps({
+      getMonthlyCounters: vi.fn(async () => ({
+        month_key: "2026-04",
+        missions_completed: 0,
+        steps: 9876,
+        distance_meters: 0,
+        streak_days: 0,
+        weekly_circuits_completed: 0,
+      })),
       normalizeMissionRow: vi.fn((row: Record<string, unknown>) => ({
         ...row,
         circuit_tasks: [],
@@ -357,6 +544,8 @@ describe("mission routes", () => {
         exercise_instructions_pt: [],
         instructions: [],
       })),
+      normalizeMissionMetricType: vi.fn(() => "steps"),
+      resolvePeriodicMissionProgressValue: vi.fn(async () => 9876),
     });
     const app = new Hono<AppContext>();
     registerMissionRoutes(app, deps, createAuthMiddleware());
@@ -372,9 +561,9 @@ describe("mission routes", () => {
 
     expect(response.status).toBe(200);
     expect(payload).toEqual([
-      expect.objectContaining({ id: 43, progress_value: 4321 }),
+      expect.objectContaining({ id: 43, progress_value: 9876 }),
     ]);
-    expect(deps.resolvePeriodicMissionProgressValue).not.toHaveBeenCalled();
+    expect(deps.resolvePeriodicMissionProgressValue).toHaveBeenCalledTimes(1);
   });
 
   it("hydrates mission detail progress for active periodic step missions", async () => {
@@ -419,6 +608,61 @@ describe("mission routes", () => {
     expect(payload).toMatchObject({
       id: 51,
       progress_value: 5432,
+    });
+    expect(deps.resolvePeriodicMissionProgressValue).toHaveBeenCalledTimes(1);
+  });
+
+  it("recomputes mission detail progress when stored accumulated progress is stale", async () => {
+    const { db } = createMockD1Database([
+      {
+        match: "SELECT m.*, NULL as skill_name",
+        first: {
+          id: 52,
+          user_id: TEST_USER.id,
+          type: "monthly",
+          title: "Passos do mes",
+          metric_type: "steps",
+          metric_value: 120000,
+          progress_value: 0,
+          is_completed: 0,
+        },
+      },
+    ]);
+    const env = createTestEnv(db);
+    const deps = createMissionDeps({
+      getMonthlyCounters: vi.fn(async () => ({
+        month_key: "2026-04",
+        missions_completed: 0,
+        steps: 7654,
+        distance_meters: 0,
+        streak_days: 0,
+        weekly_circuits_completed: 0,
+      })),
+      normalizeMissionRow: vi.fn((row: Record<string, unknown>) => ({
+        ...row,
+        circuit_tasks: [],
+        exercise_instructions_en: [],
+        exercise_instructions_pt: [],
+        instructions: [],
+      })),
+      normalizeMissionMetricType: vi.fn(() => "steps"),
+      resolvePeriodicMissionProgressValue: vi.fn(async () => 7654),
+    });
+    const app = new Hono<AppContext>();
+    registerMissionRoutes(app, deps, createAuthMiddleware());
+    const { executionCtx } = createExecutionContext();
+
+    const response = await app.fetch(
+      new Request("http://localhost/api/missions/52"),
+      env,
+      executionCtx,
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload).toMatchObject({
+      id: 52,
+      progress_value: 7654,
     });
     expect(deps.resolvePeriodicMissionProgressValue).toHaveBeenCalledTimes(1);
   });
@@ -497,6 +741,57 @@ describe("mission routes", () => {
       code: "MISSION_AUTO_PROGRESS_ONLY",
     });
     expect(String(payload.error)).toContain("semanais");
+    expect(deps.withTransaction).not.toHaveBeenCalled();
+  });
+
+  it("blocks manual completion of route-tracking missions before the target is reached", async () => {
+    const { db } = createMockD1Database([
+      {
+        match: "SELECT * FROM missions WHERE id = ? AND user_id = ? AND is_completed = 0",
+        first: {
+          id: 88,
+          type: "daily",
+          user_id: TEST_USER.id,
+          is_completed: 0,
+          xp_reward: 100,
+          points_reward: 10,
+          metric_type: "distance_meters",
+          metric_value: 1200,
+          target_time: null,
+          skill_id: null,
+          execution_mode: "route_tracking",
+        },
+      },
+    ]);
+    const env = createTestEnv(db);
+    const deps = createMissionDeps({
+      normalizeMissionMetricType: vi.fn(() => "distance_meters"),
+    });
+    const app = new Hono<AppContext>();
+    registerMissionRoutes(app, deps, createAuthMiddleware());
+    const { executionCtx } = createExecutionContext();
+
+    const response = await app.fetch(
+      createJsonRequest("/api/missions/complete", {
+        method: "POST",
+        body: {
+          mission_id: 88,
+          metric_completed: 850,
+          sensor_verified: true,
+        },
+      }),
+      env,
+      executionCtx,
+    );
+
+    const payload = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(payload).toMatchObject({
+      code: "MISSION_TARGET_NOT_REACHED",
+      target: 1200,
+      current: 850,
+    });
     expect(deps.withTransaction).not.toHaveBeenCalled();
   });
 

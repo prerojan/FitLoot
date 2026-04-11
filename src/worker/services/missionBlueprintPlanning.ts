@@ -1,11 +1,11 @@
 import type { MissionMetricType } from "../../shared/types";
 import { localizeMissionText } from "../../shared/missionLocalization";
 import { getMissionMetricType, metricUnitByType } from "../../constants/missionMetrics";
-import { getHuggingFaceApiKey } from "../core/providerConfig";
+import { getOpenRouterApiKey } from "../core/providerConfig";
 import type { Env } from "../core/types";
 import {
   ApiIntegrationError,
-  requestHuggingFaceStructuredContent,
+  requestOpenRouterStructuredContent,
 } from "./aiTransport";
 import type { StructuredGenerationOptions } from "./missionGeneration";
 
@@ -553,17 +553,18 @@ export function createMissionBlueprintPlanningService(
     env: Env,
     prompt: string,
   ): Promise<StructuredMissionPlanDraft> {
-    const apiKey = getHuggingFaceApiKey(env);
+    const apiKey = getOpenRouterApiKey(env);
     if (!apiKey) {
       throw new ApiIntegrationError(
         "SERVICE_NOT_CONFIGURED",
         503,
-        "Hugging Face nao configurada.",
+        "OpenRouter nao configurado.",
       );
     }
 
-    const content = await requestHuggingFaceStructuredContent(
+    const content = await requestOpenRouterStructuredContent(
       apiKey,
+      env,
       [{ role: "user", content: prompt }],
       2200,
       "requestStructuredMissionPlanFromAI",

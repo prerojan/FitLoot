@@ -3,7 +3,7 @@ import { ROUTE_PATHS } from "@/react-app/auth/constants";
 import { clearPersistedAuthenticatedUserState } from "@/react-app/auth/clientStateCleanup";
 import type { User } from "@/react-app/auth/types";
 import type { UserProfileTheme } from "@/react-app/types/profile";
-import type { UserProfile, UserProgression } from "@/shared/types";
+import type { UserAttributes, UserProfile, UserProgression } from "@/shared/types";
 import { preloadProtectedRoute } from "@/react-app/routes/lazyPages";
 import { getHostContext } from "@/react-app/services/runtime/hostRuntime";
 
@@ -12,6 +12,7 @@ export type AuthBootstrapPayload = {
   profile: UserProfile | null;
   profile_theme: UserProfileTheme | null;
   progression: UserProgression | null;
+  attributes?: UserAttributes | null;
   app_open_degraded?: boolean | undefined;
 };
 

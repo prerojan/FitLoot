@@ -79,5 +79,279 @@
     background: var(--fl-surface-glass);
     border-color: var(--fl-border-strong);
   }
+
+  .fl-social-hub-page {
+    --fl-social-hub-panel-bg:
+      linear-gradient(
+        180deg,
+        color-mix(in srgb, var(--fl-surface-gradient-top) 96%, transparent),
+        color-mix(in srgb, var(--fl-surface-gradient-bottom) 98%, transparent)
+      );
+    --fl-social-hub-thread-bg:
+      linear-gradient(
+        180deg,
+        color-mix(in srgb, var(--fl-surface-muted) 94%, transparent),
+        color-mix(in srgb, var(--app-bg-color) 96%, transparent)
+      );
+    --fl-social-hub-card-bg: color-mix(in srgb, var(--fl-surface-strong) 96%, transparent);
+    --fl-social-hub-soft-bg: color-mix(in srgb, var(--fl-surface-muted) 92%, transparent);
+    --fl-social-hub-search-bg: color-mix(in srgb, var(--fl-surface-muted) 96%, transparent);
+    --fl-social-hub-input-bg: color-mix(in srgb, var(--fl-surface-strong) 98%, transparent);
+    --fl-social-hub-input-border: color-mix(in srgb, var(--fl-border-soft) 100%, transparent);
+    --fl-social-hub-muted-border: color-mix(in srgb, var(--fl-border-soft) 92%, transparent);
+    --fl-social-hub-own-bubble-bg: #121212;
+    --fl-social-hub-own-bubble-text: #ffffff;
+    --fl-social-hub-other-bubble-bg: color-mix(in srgb, var(--fl-surface-strong) 98%, transparent);
+    --fl-social-hub-other-bubble-text: var(--fl-color-text);
+    --fl-social-hub-overlay: rgba(15, 23, 42, 0.38);
+    --fl-social-hub-danger: #b42318;
+    --fl-social-hub-danger-bg: color-mix(in srgb, #b42318 8%, transparent);
+  }
+
+  [data-theme="dark"] .fl-social-hub-page {
+    --fl-social-hub-panel-bg:
+      linear-gradient(
+        180deg,
+        color-mix(in srgb, var(--fl-surface-gradient-top) 98%, transparent),
+        color-mix(in srgb, var(--fl-surface-gradient-bottom) 100%, transparent)
+      );
+    --fl-social-hub-thread-bg:
+      linear-gradient(
+        180deg,
+        color-mix(in srgb, var(--fl-surface-muted) 88%, transparent),
+        color-mix(in srgb, #040806 92%, transparent)
+      );
+    --fl-social-hub-card-bg: color-mix(in srgb, var(--fl-surface-strong) 98%, transparent);
+    --fl-social-hub-soft-bg: color-mix(in srgb, var(--fl-surface-muted) 86%, transparent);
+    --fl-social-hub-search-bg: color-mix(in srgb, var(--fl-surface-muted) 92%, transparent);
+    --fl-social-hub-input-bg: color-mix(in srgb, var(--fl-surface-strong) 94%, transparent);
+    --fl-social-hub-input-border: color-mix(in srgb, var(--fl-border-strong) 86%, transparent);
+    --fl-social-hub-muted-border: color-mix(in srgb, var(--fl-border-soft) 100%, transparent);
+    --fl-social-hub-own-bubble-bg: color-mix(in srgb, var(--app-primary-color) 18%, #050806);
+    --fl-social-hub-own-bubble-text: #f7fbf8;
+    --fl-social-hub-other-bubble-bg: color-mix(in srgb, var(--fl-surface-strong) 94%, transparent);
+    --fl-social-hub-other-bubble-text: var(--fl-color-text);
+    --fl-social-hub-overlay: rgba(0, 0, 0, 0.52);
+    --fl-social-hub-danger-bg: color-mix(in srgb, #b42318 14%, transparent);
+  }
+
+  .fl-social-hub-panel {
+    background: var(--fl-social-hub-panel-bg);
+    border: 1px solid var(--fl-social-hub-muted-border);
+    box-shadow: var(--fl-shadow-glass);
+    color: var(--fl-color-text);
+  }
+
+  .fl-social-hub-thread-panel {
+    background: var(--fl-social-hub-thread-bg);
+    border: 1px solid var(--fl-social-hub-muted-border);
+    box-shadow: var(--fl-shadow-glass);
+    color: var(--fl-color-text);
+  }
+
+  .fl-social-hub-soft-card {
+    background: var(--fl-social-hub-soft-bg);
+    border: 1px solid var(--fl-social-hub-muted-border);
+    color: var(--fl-color-text);
+  }
+
+  .fl-social-hub-icon-button {
+    border: 1px solid var(--fl-social-hub-muted-border);
+    background: var(--fl-social-hub-card-bg);
+    color: var(--fl-color-text);
+    box-shadow: 0 16px 30px color-mix(in srgb, var(--fl-color-text) 8%, transparent);
+  }
+
+  .fl-social-hub-icon-button:hover {
+    background: color-mix(in srgb, var(--fl-social-hub-card-bg) 92%, var(--app-primary-color));
+    border-color: var(--fl-border-strong);
+  }
+
+  .fl-social-hub-search,
+  .fl-social-hub-composer-input {
+    border: 1px solid transparent;
+    background: var(--fl-social-hub-search-bg);
+    color: var(--fl-color-text);
+  }
+
+  .fl-social-hub-search::placeholder,
+  .fl-social-hub-composer-input::placeholder {
+    color: color-mix(in srgb, var(--fl-color-text-muted) 82%, transparent);
+  }
+
+  .fl-social-hub-search:focus,
+  .fl-social-hub-composer-input:focus {
+    border-color: var(--fl-border-strong);
+  }
+
+  .fl-social-hub-composer-shell,
+  .fl-social-hub-thread-header,
+  .fl-social-hub-menu,
+  .fl-social-hub-modal {
+    background: var(--fl-social-hub-card-bg);
+    color: var(--fl-color-text);
+  }
+
+  .fl-social-hub-menu,
+  .fl-social-hub-modal {
+    border: 1px solid var(--fl-social-hub-muted-border);
+    box-shadow: var(--fl-shadow-glass);
+  }
+
+  .fl-social-hub-thread-header,
+  .fl-social-hub-composer-shell {
+    border-color: var(--fl-social-hub-muted-border);
+  }
+
+  .fl-social-hub-bubble-own {
+    background: var(--fl-social-hub-own-bubble-bg);
+    color: var(--fl-social-hub-own-bubble-text);
+    box-shadow: 0 16px 36px color-mix(in srgb, var(--fl-social-hub-own-bubble-bg) 24%, transparent);
+  }
+
+  .fl-social-hub-bubble-other {
+    background: var(--fl-social-hub-other-bubble-bg);
+    color: var(--fl-social-hub-other-bubble-text);
+    box-shadow: 0 14px 32px color-mix(in srgb, var(--fl-color-text) 8%, transparent);
+  }
+
+  .fl-social-hub-danger-action {
+    color: var(--fl-social-hub-danger);
+  }
+
+  .fl-social-hub-danger-action:hover {
+    background: var(--fl-social-hub-danger-bg);
+  }
+
+  .fl-route-leaflet-map {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    isolation: isolate;
+    background-color: var(--app-bg-color);
+    background-image:
+      radial-gradient(circle at 18% 18%, color-mix(in srgb, var(--app-primary-color) 12%, transparent), transparent 28%),
+      linear-gradient(180deg, color-mix(in srgb, var(--fl-surface-strong) 94%, transparent), color-mix(in srgb, var(--app-bg-color) 92%, transparent)),
+      linear-gradient(color-mix(in srgb, var(--fl-color-text) 7%, transparent) 1px, transparent 1px),
+      linear-gradient(90deg, color-mix(in srgb, var(--fl-color-text) 7%, transparent) 1px, transparent 1px);
+    background-size: auto, auto, 36px 36px, 36px 36px;
+    background-position: center, center, center, center;
+  }
+
+  .fl-route-leaflet-map[data-theme="dark"] {
+    background-color: #090d12;
+    background-image:
+      radial-gradient(circle at 18% 18%, color-mix(in srgb, var(--app-primary-color) 10%, transparent), transparent 30%),
+      linear-gradient(180deg, rgba(9, 13, 18, 0.98), rgba(13, 18, 24, 0.94)),
+      linear-gradient(rgba(229, 231, 235, 0.055) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(229, 231, 235, 0.055) 1px, transparent 1px);
+  }
+
+  .fl-route-leaflet-map .leaflet-container {
+    height: 100%;
+    width: 100%;
+    background: transparent;
+    font-family: var(--fl-font-display);
+  }
+
+  .fl-route-leaflet-map .leaflet-top,
+  .fl-route-leaflet-map .leaflet-bottom {
+    transition: inset 180ms ease, bottom 180ms ease;
+  }
+
+  .fl-route-leaflet-map .leaflet-bottom {
+    bottom: var(--fl-route-controls-bottom, 0px);
+  }
+
+  .fl-route-leaflet-map .leaflet-tile-pane {
+    filter: brightness(1.01) contrast(1.02) saturate(0.94);
+    opacity: 0.96;
+  }
+
+  .fl-route-leaflet-map[data-theme="dark"] .leaflet-tile-pane {
+    filter: brightness(0.88) contrast(1.06) saturate(0.92);
+    opacity: 0.92;
+  }
+
+  .fl-route-leaflet-map--execution .leaflet-tile-pane,
+  .fl-route-leaflet-map--screen .leaflet-tile-pane {
+    filter: brightness(1.01) contrast(1.03) saturate(0.94);
+    opacity: 0.98;
+  }
+
+  .fl-route-leaflet-map[data-theme="dark"].fl-route-leaflet-map--execution .leaflet-tile-pane,
+  .fl-route-leaflet-map[data-theme="dark"].fl-route-leaflet-map--screen .leaflet-tile-pane {
+    filter: brightness(0.9) contrast(1.08) saturate(0.9);
+    opacity: 0.95;
+  }
+
+  .fl-route-leaflet-map .leaflet-control-container {
+    pointer-events: none;
+  }
+
+  .fl-route-leaflet-map .leaflet-control {
+    pointer-events: auto;
+  }
+
+  .fl-route-leaflet-map--execution .leaflet-container,
+  .fl-route-leaflet-map--screen .leaflet-container {
+    touch-action: none;
+    cursor: grab;
+  }
+
+  .fl-route-leaflet-map--execution .leaflet-container:active,
+  .fl-route-leaflet-map--screen .leaflet-container:active,
+  .fl-route-leaflet-map--execution .leaflet-grab,
+  .fl-route-leaflet-map--screen .leaflet-grab {
+    cursor: grabbing;
+  }
+
+  .fl-route-leaflet-map .leaflet-control-zoom {
+    border: 1px solid color-mix(in srgb, var(--fl-color-text) 12%, transparent);
+    border-radius: 999px;
+    overflow: hidden;
+    box-shadow: var(--fl-shadow-glass);
+    backdrop-filter: blur(18px);
+  }
+
+  .fl-route-leaflet-map .leaflet-control-zoom a {
+    background: color-mix(in srgb, var(--app-bg-color) 78%, transparent);
+    color: var(--fl-color-text);
+    border-bottom: 1px solid color-mix(in srgb, var(--fl-color-text) 10%, transparent);
+  }
+
+  .fl-route-leaflet-map .leaflet-control-zoom a:last-child {
+    border-bottom: none;
+  }
+
+  .fl-route-leaflet-map .leaflet-control-zoom a:hover,
+  .fl-route-leaflet-map .leaflet-control-zoom a:focus {
+    background: color-mix(in srgb, var(--app-bg-color) 88%, transparent);
+    color: var(--app-primary-color);
+  }
+
+  .fl-route-leaflet-map .leaflet-control-attribution {
+    pointer-events: none;
+    background: color-mix(in srgb, var(--app-bg-color) 76%, transparent);
+    border: 1px solid color-mix(in srgb, var(--fl-color-text) 10%, transparent);
+    border-radius: 999px;
+    color: var(--fl-color-text-muted);
+    margin: 0 0 0.9rem 0.9rem;
+    padding: 0.28rem 0.65rem;
+    backdrop-filter: blur(18px);
+  }
+
+  .fl-route-leaflet-map .leaflet-control-attribution a {
+    color: inherit;
+  }
+
+  .fl-route-leaflet-map--details .leaflet-control-attribution {
+    margin-bottom: 1rem;
+  }
+
+  .fl-route-leaflet-map--execution .leaflet-control-attribution,
+  .fl-route-leaflet-map--screen .leaflet-control-attribution {
+    margin-bottom: calc(env(safe-area-inset-bottom, 0px) + 8.5rem);
+  }
 }
 

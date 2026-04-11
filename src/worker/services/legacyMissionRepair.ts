@@ -15,7 +15,7 @@ import {
   normalizeMissionMediaUrl,
 } from "../../shared/missionLocalization";
 import { hasTableColumn } from "../core/database";
-import { getHuggingFaceApiKey } from "../core/providerConfig";
+import { getOpenRouterApiKey } from "../core/providerConfig";
 import type { Env } from "../core/types";
 import {
   enrichExercise,
@@ -412,7 +412,7 @@ export function createLegacyMissionRepairService(deps: LegacyMissionRepairDeps) 
         row.exercise_instructions_pt_json,
       );
       const requiresInstructionTranslationRepair =
-        Boolean(getHuggingFaceApiKey(env))
+        Boolean(getOpenRouterApiKey(env))
         && exerciseInstructionPtNeedsAiTranslation(
           deps,
           currentInstructionsEn,

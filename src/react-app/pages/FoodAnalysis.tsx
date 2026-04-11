@@ -27,6 +27,71 @@ import type {
   WebCameraStartResult,
 } from "./food-analysis/types";
 
+function formatMacroGrams(value: number | null | undefined): string {
+  const normalized = Number(value ?? 0);
+  if (!Number.isFinite(normalized)) {
+    return "0g";
+  }
+
+  return `${normalized % 1 === 0 ? normalized.toFixed(0) : normalized.toFixed(1)}g`;
+}
+
+type MacroEnergyProfile = {
+  protein: number;
+  carbs: number;
+  fats: number;
+  total: number;
+};
+
+function resolveMacroEnergyProfile(
+  protein: number | null | undefined,
+  carbs: number | null | undefined,
+  fats: number | null | undefined,
+): MacroEnergyProfile {
+  const proteinEnergy = Math.max(0, Number(protein ?? 0) || 0) * 4;
+  const carbsEnergy = Math.max(0, Number(carbs ?? 0) || 0) * 4;
+  const fatsEnergy = Math.max(0, Number(fats ?? 0) || 0) * 9;
+
+  return {
+    protein: proteinEnergy,
+    carbs: carbsEnergy,
+    fats: fatsEnergy,
+    total: proteinEnergy + carbsEnergy + fatsEnergy,
+  };
+}
+
+function resolveEnergySource(
+  protein: number | null | undefined,
+  carbs: number | null | undefined,
+  fats: number | null | undefined,
+): { label: string; share: number } {
+  const energyProfile = resolveMacroEnergyProfile(protein, carbs, fats);
+  const entries = [
+    { label: "Carboidratos", value: energyProfile.carbs },
+    { label: "Proteina", value: energyProfile.protein },
+    { label: "Gorduras", value: energyProfile.fats },
+  ].sort((left, right) => right.value - left.value);
+
+  const primary = safeGet(entries, 0);
+  const secondary = safeGet(entries, 1);
+
+  if (!primary || primary.value <= 0) {
+    return { label: "Nao identificado", share: 0 };
+  }
+
+  const total = energyProfile.total;
+  const share = total > 0 ? Number(((primary.value / total) * 100).toFixed(1)) : 0;
+  const secondaryShare = secondary && total > 0
+    ? Number(((secondary.value / total) * 100).toFixed(1))
+    : 0;
+
+  if (secondary && Math.abs(share - secondaryShare) <= 8) {
+    return { label: "Mista", share };
+  }
+
+  return { label: primary.label, share };
+}
+
 export default function FoodAnalysis() {
   const navigate = useNavigate();
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -660,6 +725,10 @@ export default function FoodAnalysis() {
   };
 
   const macroBars = useMemo(() => result?.totals.macro_percentages ?? { protein: 0, carbs: 0, fats: 0 }, [result]);
+  const energySource = useMemo(
+    () => resolveEnergySource(result?.totals.protein, result?.totals.carbs, result?.totals.fats),
+    [result],
+  );
   const handleBack = () => navigate(-1);
   const scannerControlSurfaceClass = reduceInlineCameraEffects
     ? "bg-black/70"
@@ -828,9 +897,9 @@ export default function FoodAnalysis() {
 
           {/* Grade de macros */}
           <div className="mb-8 grid grid-cols-3 gap-2 sm:mb-10 sm:gap-3">
-            <MacroCard label="Proteínas" value={`${result.totals.protein}g`} percentage={macroBars.protein} />
-            <MacroCard label="Carbs" value={`${result.totals.carbs}g`} percentage={macroBars.carbs} />
-            <MacroCard label="Gorduras" value={`${result.totals.fats}g`} percentage={macroBars.fats} />
+            <MacroCard label="Proteina" value={formatMacroGrams(result.totals.protein)} percentage={macroBars.protein} />
+            <MacroCard label="Carbo" value={formatMacroGrams(result.totals.carbs)} percentage={macroBars.carbs} />
+            <MacroCard label="Fonte de energia" value={energySource.label} percentage={energySource.share} />
           </div>
 
           <div className="mb-8">
@@ -862,10 +931,18 @@ export default function FoodAnalysis() {
                     </div>
                     <div>
                       <p className="text-sm font-bold" style={{ color: "var(--fl-color-text)" }}>{item.food_name}</p>
+                      <p className="mt-1 text-[10px] uppercase tracking-[0.14em]" style={{ color: "var(--fl-color-text-muted)" }}>
+                        {formatMacroGrams(item.carbs)} carbo | {formatMacroGrams(item.protein)} prot
+                      </p>
                       <p className="text-[10px] uppercase tracking-widest" style={{ color: "var(--fl-color-text-muted)" }}>{item.portion_description} • {item.calories || 0} kcal</p>
                     </div>
                   </div>
-                  <CheckCircle2 className="w-5 h-5" style={{ color: 'var(--app-primary-color)' }} />
+                  <div className="flex flex-col items-end gap-2">
+                    <span className="rounded-full border px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.18em]" style={{ borderColor: "color-mix(in srgb, var(--app-primary-color) 24%, transparent)", backgroundColor: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)", color: "var(--app-primary-color)" }}>
+                      {resolveEnergySource(item.protein, item.carbs, item.fats).label}
+                    </span>
+                    <CheckCircle2 className="w-5 h-5" style={{ color: 'var(--app-primary-color)' }} />
+                  </div>
                 </div>
               ))}
             </div>
@@ -974,16 +1051,51 @@ export default function FoodAnalysis() {
                     ))}
                   </div>
 
+                  <div className="mt-4 grid grid-cols-3 gap-2 sm:gap-3">
+                    <div className="rounded-2xl border px-3 py-3" style={{ borderColor: "var(--fl-border-soft)", backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 65%, transparent)" }}>
+                      <p className="text-[10px] font-bold uppercase tracking-[0.18em]" style={{ color: "var(--fl-color-text-muted)" }}>
+                        Carbo
+                      </p>
+                      <p className="mt-2 text-base font-bold" style={{ color: "var(--fl-color-text)" }}>
+                        {formatMacroGrams(result.totals.carbs)}
+                      </p>
+                    </div>
+                    <div className="rounded-2xl border px-3 py-3" style={{ borderColor: "var(--fl-border-soft)", backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 65%, transparent)" }}>
+                      <p className="text-[10px] font-bold uppercase tracking-[0.18em]" style={{ color: "var(--fl-color-text-muted)" }}>
+                        Proteina
+                      </p>
+                      <p className="mt-2 text-base font-bold" style={{ color: "var(--fl-color-text)" }}>
+                        {formatMacroGrams(result.totals.protein)}
+                      </p>
+                    </div>
+                    <div className="rounded-2xl border px-3 py-3" style={{ borderColor: "var(--fl-border-soft)", backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 65%, transparent)" }}>
+                      <p className="text-[10px] font-bold uppercase tracking-[0.18em]" style={{ color: "var(--fl-color-text-muted)" }}>
+                        Fonte de energia
+                      </p>
+                      <p className="mt-2 text-[clamp(0.9rem,3.5vw,1rem)] font-bold leading-tight" style={{ color: "var(--fl-color-text)" }}>
+                        {energySource.label}
+                      </p>
+                    </div>
+                  </div>
+
                   <div className="mt-4 space-y-2">
                     {result.items.slice(0, 3).map((item) => (
                       <div key={`${item.food_name}-${item.portion_description}-summary`} className="flex items-center justify-between rounded-2xl border px-3 py-2.5" style={{ borderColor: "var(--fl-border-soft)", backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 65%, transparent)" }}>
                         <div className="min-w-0">
                           <p className="truncate text-sm font-bold" style={{ color: "var(--fl-color-text)" }}>{item.food_name}</p>
                           <p className="text-[10px] uppercase tracking-[0.16em]" style={{ color: "var(--fl-color-text-muted)" }}>{item.portion_description}</p>
+                          <p className="mt-1 text-[10px] font-bold uppercase tracking-[0.14em]" style={{ color: "var(--fl-color-text-muted)" }}>
+                        {formatMacroGrams(item.carbs)} carbo | {formatMacroGrams(item.protein)} prot
+                          </p>
                         </div>
-                        <span className="ml-3 text-xs font-bold uppercase tracking-[0.18em]" style={{ color: "var(--app-primary-color)" }}>
-                          {item.calories ?? 0} kcal
-                        </span>
+                        <div className="ml-3 flex flex-col items-end gap-1">
+                          <span className="text-xs font-bold uppercase tracking-[0.18em]" style={{ color: "var(--app-primary-color)" }}>
+                            {item.calories ?? 0} kcal
+                          </span>
+                          <span className="rounded-full border px-2 py-1 text-[9px] font-bold uppercase tracking-[0.14em]" style={{ borderColor: "color-mix(in srgb, var(--app-primary-color) 24%, transparent)", backgroundColor: "color-mix(in srgb, var(--app-primary-color) 8%, transparent)", color: "var(--app-primary-color)" }}>
+                            {resolveEnergySource(item.protein, item.carbs, item.fats).label}
+                          </span>
+                        </div>
                       </div>
                     ))}
                   </div>

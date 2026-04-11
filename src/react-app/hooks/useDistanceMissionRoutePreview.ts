@@ -15,6 +15,7 @@ export type DistanceMissionRoutePreviewLoadStrategy = "passive" | "eager" | "man
 
 type UseDistanceMissionRoutePreviewOptions = {
   loadStrategy?: DistanceMissionRoutePreviewLoadStrategy;
+  disabled?: boolean;
 };
 
 type DistanceMissionRoutePreviewState = {
@@ -31,7 +32,7 @@ export function useDistanceMissionRoutePreview(
   mission: Mission,
   options: UseDistanceMissionRoutePreviewOptions = {},
 ) {
-  const { loadStrategy = "eager" } = options;
+  const { loadStrategy = "eager", disabled = false } = options;
   const initialCachedPreview = useMemo(
     () => findCachedDistanceMissionRoutePreview(mission.id),
     [mission.id],
@@ -107,7 +108,7 @@ export function useDistanceMissionRoutePreview(
   );
 
   useEffect(() => {
-    if (!supportsRoutePreview) {
+    if (!supportsRoutePreview || disabled) {
       return;
     }
 
@@ -120,7 +121,7 @@ export function useDistanceMissionRoutePreview(
     }
 
     void loadPreview();
-  }, [canPassiveLoad, hasCachedPreview, loadPreview, loadStrategy, supportsRoutePreview]);
+  }, [canPassiveLoad, disabled, hasCachedPreview, loadPreview, loadStrategy, supportsRoutePreview]);
 
   return {
     preview: state.preview,
@@ -133,6 +134,7 @@ export function useDistanceMissionRoutePreview(
     locationPrecision: runtimeState.permission.precision,
     showPassivePlaceholder:
       supportsRoutePreview
+      && !disabled
       && loadStrategy === "passive"
       && !hasCachedPreview
       && !canPassiveLoad

@@ -1,7 +1,12 @@
 import { Hono, type MiddlewareHandler } from "hono";
 
-import { getErrorMessage } from "../core/errors";
 import type { AppContext } from "../core/types";
+import {
+  areUsersBlocked,
+  listAcceptedFriendsWithPresence,
+  listPendingFriendRequests,
+  type SocialFriendRow,
+} from "../services/socialGraph";
 import type { WithTransaction } from "./contracts";
 
 type FriendsRouteDeps = {
@@ -11,11 +16,11 @@ type FriendsRouteDeps = {
 };
 
 const RUNTIME_FRIEND_PROJECTION_TTL_MS = 10_000;
-const FRIEND_ONLINE_WINDOW_MS = 10 * 60 * 1000;
 let runtimeFriendProjectionSchemaReady = false;
 
 async function ensureRuntimeFriendProjectionSchema(runtimeDb: D1Database): Promise<void> {
   if (runtimeFriendProjectionSchemaReady) return;
+
   await runtimeDb.exec(
     `CREATE TABLE IF NOT EXISTS runtime_friend_snapshots (
       user_id TEXT NOT NULL,
@@ -29,6 +34,7 @@ async function ensureRuntimeFriendProjectionSchema(runtimeDb: D1Database): Promi
     CREATE INDEX IF NOT EXISTS idx_runtime_friend_snapshots_user_rank
       ON runtime_friend_snapshots (user_id, friend_level DESC, friend_xp DESC, friend_user_id ASC);`,
   );
+
   runtimeFriendProjectionSchemaReady = true;
 }
 
@@ -37,8 +43,9 @@ async function readRuntimeFriendProjection(
   userId: string,
   limit: number,
   offset: number,
-): Promise<Record<string, unknown>[] | null> {
+): Promise<SocialFriendRow[] | null> {
   await ensureRuntimeFriendProjectionSchema(runtimeDb);
+
   const freshness = await runtimeDb
     .prepare(
       `SELECT snapshot_at
@@ -68,70 +75,97 @@ async function readRuntimeFriendProjection(
   return rows.results
     .map((row) => {
       try {
-        return JSON.parse(row.payload_json) as Record<string, unknown>;
+        return JSON.parse(row.payload_json) as SocialFriendRow;
       } catch {
         return null;
       }
     })
-    .filter((row): row is Record<string, unknown> => row !== null);
+    .filter((row): row is SocialFriendRow => row !== null);
 }
 
 async function writeRuntimeFriendProjection(
   runtimeDb: D1Database,
   userId: string,
-  friends: ReadonlyArray<Record<string, unknown>>,
+  friends: readonly SocialFriendRow[],
 ): Promise<void> {
   await ensureRuntimeFriendProjectionSchema(runtimeDb);
+
   const snapshotAt = new Date().toISOString();
-  await runtimeDb
-    .prepare("DELETE FROM runtime_friend_snapshots WHERE user_id = ?")
-    .bind(userId)
-    .run();
+  await runtimeDb.prepare("DELETE FROM runtime_friend_snapshots WHERE user_id = ?").bind(userId).run();
 
   if (friends.length === 0) return;
 
-  const statements: D1PreparedStatement[] = [];
-  for (const friend of friends) {
-    statements.push(
-      runtimeDb
-        .prepare(
-          `INSERT INTO runtime_friend_snapshots (
-            user_id,
-            friend_user_id,
-            friend_level,
-            friend_xp,
-            payload_json,
-            snapshot_at
-          ) VALUES (?, ?, ?, ?, ?, ?)`,
-        )
-        .bind(
-          userId,
-          String(friend.friend_user_id ?? ""),
-          Math.max(0, Number(friend.friend_level ?? 0)),
-          Math.max(0, Number(friend.friend_xp ?? 0)),
-          JSON.stringify(friend),
-          snapshotAt,
-        ),
-    );
-  }
+  const statements = friends.map((friend) =>
+    runtimeDb
+      .prepare(
+        `INSERT INTO runtime_friend_snapshots (
+          user_id,
+          friend_user_id,
+          friend_level,
+          friend_xp,
+          payload_json,
+          snapshot_at
+        ) VALUES (?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(
+        userId,
+        friend.friend_user_id,
+        Math.max(0, friend.friend_level),
+        Math.max(0, friend.friend_xp),
+        JSON.stringify(friend),
+        snapshotAt,
+      ),
+  );
+
   await runtimeDb.batch(statements);
 }
 
-async function clearRuntimeFriendProjection(
-  runtimeDb: D1Database,
-  ...userIds: string[]
-): Promise<void> {
+async function clearRuntimeFriendProjection(runtimeDb: D1Database, ...userIds: string[]): Promise<void> {
   const uniqueUserIds = [...new Set(userIds.filter(Boolean))];
   if (uniqueUserIds.length === 0) return;
 
   await ensureRuntimeFriendProjectionSchema(runtimeDb);
-  const statements = uniqueUserIds.map((userId) =>
-    runtimeDb.prepare("DELETE FROM runtime_friend_snapshots WHERE user_id = ?").bind(userId),
+  await runtimeDb.batch(
+    uniqueUserIds.map((userId) =>
+      runtimeDb.prepare("DELETE FROM runtime_friend_snapshots WHERE user_id = ?").bind(userId),
+    ),
   );
-  await runtimeDb.batch(statements);
 }
 
-// Route registration for friend discovery, requests, and legacy aliases.
+function normalizeSearchQuery(value: string | null | undefined): string {
+  return String(value ?? "").trim();
+}
+
+async function resolveTargetUserId(
+  db: D1Database,
+  currentUserId: string,
+  friendUserId: string,
+  username: string,
+): Promise<string | null> {
+  const explicitUserId = friendUserId.trim();
+  if (explicitUserId) {
+    return explicitUserId;
+  }
+
+  const normalizedUsername = username.trim();
+  if (!normalizedUsername) {
+    return null;
+  }
+
+  const target = await db
+    .prepare(
+      `SELECT user_id
+         FROM user_profiles
+        WHERE username = ?
+          AND user_id <> ?
+        LIMIT 1`,
+    )
+    .bind(normalizedUsername, currentUserId)
+    .first<{ user_id: string }>();
+
+  return target?.user_id?.trim() || null;
+}
+
 export function registerFriendsRoutes(
   app: Hono<AppContext>,
   { authMiddleware, onFriendAdded, withTransaction }: FriendsRouteDeps,
@@ -140,39 +174,76 @@ export function registerFriendsRoutes(
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
 
-    const username = (c.req.query("username") ?? "").trim();
+    const username = normalizeSearchQuery(c.req.query("username"));
     if (username.length < 3) return c.json([]);
 
     const users = await c.env.fitloot_db
       .prepare(
-        `SELECT up.user_id, up.username, up.full_name, pr.level, pr.xp
-          FROM user_profiles up
-          INNER JOIN user_progression pr ON up.user_id = pr.user_id
-          WHERE up.user_id != ? AND up.username LIKE ?
-          LIMIT 20`,
+        `SELECT
+           up.user_id,
+           up.username,
+           up.full_name,
+           u.avatar_url,
+           pr.level,
+           pr.xp
+         FROM user_profiles up
+         LEFT JOIN users u
+           ON up.user_id = u.id
+         INNER JOIN user_progression pr
+           ON up.user_id = pr.user_id
+        WHERE up.user_id <> ?
+          AND up.username LIKE ?
+          AND NOT EXISTS (
+            SELECT 1
+              FROM user_blocks ub
+             WHERE (ub.blocker_user_id = ? AND ub.blocked_user_id = up.user_id)
+                OR (ub.blocker_user_id = up.user_id AND ub.blocked_user_id = ?)
+          )
+        ORDER BY up.username ASC
+        LIMIT 20`,
       )
-      .bind(user.id, `%${username}%`)
+      .bind(user.id, `%${username}%`, user.id, user.id)
       .all();
 
-    return c.json(users.results);
+    return c.json(Array.isArray(users.results) ? users.results : []);
   });
 
   app.get("/api/users/search", authMiddleware, async (c) => {
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
-    const q = (c.req.query("q") ?? "").trim();
-    if (q.length < 3) return c.json([]);
+
+    const query = normalizeSearchQuery(c.req.query("q"));
+    if (query.length < 3) return c.json([]);
+
     const users = await c.env.fitloot_db
       .prepare(
-        `SELECT up.user_id, up.username, up.full_name, pr.level, pr.xp
-          FROM user_profiles up
-          INNER JOIN user_progression pr ON up.user_id = pr.user_id
-          WHERE up.user_id != ? AND up.username LIKE ?
-          LIMIT 20`,
+        `SELECT
+           up.user_id,
+           up.username,
+           up.full_name,
+           u.avatar_url,
+           pr.level,
+           pr.xp
+         FROM user_profiles up
+         LEFT JOIN users u
+           ON up.user_id = u.id
+         INNER JOIN user_progression pr
+           ON up.user_id = pr.user_id
+        WHERE up.user_id <> ?
+          AND up.username LIKE ?
+          AND NOT EXISTS (
+            SELECT 1
+              FROM user_blocks ub
+             WHERE (ub.blocker_user_id = ? AND ub.blocked_user_id = up.user_id)
+                OR (ub.blocker_user_id = up.user_id AND ub.blocked_user_id = ?)
+          )
+        ORDER BY up.username ASC
+        LIMIT 20`,
       )
-      .bind(user.id, `%${q}%`)
+      .bind(user.id, `%${query}%`, user.id, user.id)
       .all();
-    return c.json(users.results);
+
+    return c.json(Array.isArray(users.results) ? users.results : []);
   });
 
   app.post("/api/friends/request", authMiddleware, async (c) => {
@@ -183,46 +254,63 @@ export function registerFriendsRoutes(
       username?: string | undefined;
       friend_user_id?: string | undefined;
     };
-    const username = String(body.username ?? "").trim();
-    let targetUserId = String(body.friend_user_id ?? "").trim();
+
+    const targetUserId = await resolveTargetUserId(
+      c.env.fitloot_db,
+      user.id,
+      String(body.friend_user_id ?? ""),
+      String(body.username ?? ""),
+    );
 
     if (!targetUserId) {
-      if (!username) return c.json({ error: "username é obrigatório" }, 400);
-      const target = await c.env.fitloot_db
-        .prepare("SELECT user_id FROM user_profiles WHERE username = ?")
-        .bind(username)
-        .first<{ user_id: string }>();
-      if (!target?.user_id) {
-        return c.json({ error: "Usuário não encontrado" }, 404);
-      }
-      targetUserId = target.user_id;
+      return c.json({ error: "Usuario nao encontrado." }, 404);
+    }
+    if (targetUserId === user.id) {
+      return c.json({ error: "Nao e possivel adicionar a si mesmo." }, 400);
     }
 
-    if (targetUserId === user.id) {
-      return c.json({ error: "Não é possível adicionar a si mesmo" }, 400);
+    const blocked = await areUsersBlocked(c.env.fitloot_db, user.id, targetUserId);
+    if (blocked) {
+      return c.json({ error: "Este usuario nao esta disponivel para solicitacoes." }, 403);
     }
 
     const existingFriend = await c.env.fitloot_db
       .prepare(
-        `SELECT id FROM friendships
+        `SELECT id
+           FROM friendships
           WHERE (user_id = ? AND COALESCE(friend_id, friend_user_id) = ?)
-             OR (user_id = ? AND COALESCE(friend_id, friend_user_id) = ?)`,
+             OR (user_id = ? AND COALESCE(friend_id, friend_user_id) = ?)
+          LIMIT 1`,
       )
       .bind(user.id, targetUserId, targetUserId, user.id)
       .first();
-    if (existingFriend) return c.json({ error: "Já são amigos" }, 400);
+    if (existingFriend) {
+      return c.json({ error: "Voce ja e amigo deste usuario." }, 400);
+    }
 
-    const existingReq = await c.env.fitloot_db
+    const existingRequest = await c.env.fitloot_db
       .prepare(
-        `SELECT id FROM friend_requests WHERE ((from_user_id = ? AND to_user_id = ?) OR (from_user_id = ? AND to_user_id = ?)) AND status = 'pending'`,
+        `SELECT id
+           FROM friend_requests
+          WHERE ((from_user_id = ? AND to_user_id = ?) OR (from_user_id = ? AND to_user_id = ?))
+            AND status = 'pending'
+          LIMIT 1`,
       )
       .bind(user.id, targetUserId, targetUserId, user.id)
       .first();
-    if (existingReq) return c.json({ error: "Solicitação pendente" }, 400);
+    if (existingRequest) {
+      return c.json({ error: "Ja existe uma solicitacao pendente." }, 400);
+    }
 
     await c.env.fitloot_db
       .prepare(
-        `INSERT INTO friend_requests (from_user_id, to_user_id, status, updated_at) VALUES (?, ?, 'pending', datetime('now'))`,
+        `INSERT INTO friend_requests (
+           from_user_id,
+           to_user_id,
+           status,
+           created_at,
+           updated_at
+         ) VALUES (?, ?, 'pending', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
       )
       .bind(user.id, targetUserId)
       .run();
@@ -237,41 +325,89 @@ export function registerFriendsRoutes(
     const body = (await c.req.json().catch(() => ({}))) as {
       request_id?: number | undefined;
     };
-    const requestId = Number(body.request_id);
-    if (!requestId) return c.json({ error: "request_id obrigatório" }, 400);
+    const requestId = Number(body.request_id ?? 0);
+    if (!Number.isFinite(requestId) || requestId <= 0) {
+      return c.json({ error: "request_id obrigatorio." }, 400);
+    }
 
     const request = await c.env.fitloot_db
       .prepare(
-        `SELECT * FROM friend_requests WHERE id = ? AND to_user_id = ? AND status = 'pending'`,
+        `SELECT id, from_user_id, to_user_id
+           FROM friend_requests
+          WHERE id = ?
+            AND to_user_id = ?
+            AND status = 'pending'
+          LIMIT 1`,
       )
       .bind(requestId, user.id)
-      .first<{ id: number; from_user_id: string; to_user_id: string }>();
+      .first<{
+        id: number;
+        from_user_id: string;
+        to_user_id: string;
+      }>();
+
     if (!request) {
-      return c.json({ error: "Solicitação não encontrada" }, 404);
+      return c.json({ error: "Solicitacao nao encontrada." }, 404);
     }
 
-    await withTransaction(c.env.fitloot_db, async () => {
-      await c.env.fitloot_db
-        .prepare(
-          "UPDATE friend_requests SET status = 'accepted', updated_at = datetime('now') WHERE id = ?",
-        )
-        .bind(requestId)
-        .run();
-      await c.env.fitloot_db
-        .prepare(
-          `INSERT OR IGNORE INTO friendships (user_id, friend_user_id, friend_id, status, created_at, updated_at)
-          VALUES (?, ?, ?, 'accepted', datetime('now'), datetime('now'))`,
-        )
-        .bind(request.from_user_id, request.to_user_id, request.to_user_id)
-        .run();
-      await c.env.fitloot_db
-        .prepare(
-          `INSERT OR IGNORE INTO friendships (user_id, friend_user_id, friend_id, status, created_at, updated_at)
-          VALUES (?, ?, ?, 'accepted', datetime('now'), datetime('now'))`,
-        )
-        .bind(request.to_user_id, request.from_user_id, request.from_user_id)
-        .run();
-    }, c.env);
+    const blocked = await areUsersBlocked(c.env.fitloot_db, user.id, request.from_user_id);
+    if (blocked) {
+      return c.json({ error: "Nao e possivel aceitar esta solicitacao." }, 403);
+    }
+
+    await withTransaction(
+      c.env.fitloot_db,
+      async () => {
+        await c.env.fitloot_db
+          .prepare(
+            `UPDATE friend_requests
+                SET status = 'accepted',
+                    updated_at = CURRENT_TIMESTAMP
+              WHERE id = ?`,
+          )
+          .bind(requestId)
+          .run();
+
+        await c.env.fitloot_db
+          .prepare(
+            `INSERT OR IGNORE INTO friendships (
+               user_id,
+               friend_user_id,
+               friend_id,
+               status,
+               created_at,
+               updated_at
+             ) VALUES (?, ?, ?, 'accepted', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+          )
+          .bind(request.from_user_id, request.to_user_id, request.to_user_id)
+          .run();
+
+        await c.env.fitloot_db
+          .prepare(
+            `INSERT OR IGNORE INTO friendships (
+               user_id,
+               friend_user_id,
+               friend_id,
+               status,
+               created_at,
+               updated_at
+             ) VALUES (?, ?, ?, 'accepted', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+          )
+          .bind(request.to_user_id, request.from_user_id, request.from_user_id)
+          .run();
+      },
+      c.env,
+    );
+
+    if (c.env.fitloot_runtime_db) {
+      c.executionCtx.waitUntil(
+        clearRuntimeFriendProjection(
+          c.env.fitloot_runtime_db,
+          request.from_user_id,
+          request.to_user_id,
+        ).catch(() => undefined),
+      );
+    }
 
     await onFriendAdded(c.env.fitloot_db, request.to_user_id);
     await onFriendAdded(c.env.fitloot_db, request.from_user_id);
@@ -286,12 +422,18 @@ export function registerFriendsRoutes(
     const body = (await c.req.json().catch(() => ({}))) as {
       request_id?: number | undefined;
     };
-    const requestId = Number(body.request_id);
-    if (!requestId) return c.json({ error: "request_id obrigatório" }, 400);
+    const requestId = Number(body.request_id ?? 0);
+    if (!Number.isFinite(requestId) || requestId <= 0) {
+      return c.json({ error: "request_id obrigatorio." }, 400);
+    }
 
     await c.env.fitloot_db
       .prepare(
-        `UPDATE friend_requests SET status = 'rejected', updated_at = datetime('now') WHERE id = ? AND to_user_id = ?`,
+        `UPDATE friend_requests
+            SET status = 'rejected',
+                updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+            AND to_user_id = ?`,
       )
       .bind(requestId, user.id)
       .run();
@@ -303,7 +445,11 @@ export function registerFriendsRoutes(
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
 
-    const friendId = c.req.param("friendId");
+    const friendId = normalizeSearchQuery(c.req.param("friendId"));
+    if (!friendId) {
+      return c.json({ error: "Amigo invalido." }, 400);
+    }
+
     await c.env.fitloot_db
       .prepare(
         `DELETE FROM friendships
@@ -314,8 +460,8 @@ export function registerFriendsRoutes(
       .run();
 
     if (c.env.fitloot_runtime_db) {
-      void clearRuntimeFriendProjection(c.env.fitloot_runtime_db, user.id, friendId).catch(
-        () => undefined,
+      c.executionCtx.waitUntil(
+        clearRuntimeFriendProjection(c.env.fitloot_runtime_db, user.id, friendId).catch(() => undefined),
       );
     }
 
@@ -325,11 +471,12 @@ export function registerFriendsRoutes(
   app.get("/api/friends", authMiddleware, async (c) => {
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
+
     c.header("Cache-Control", "no-store");
     const limit = Math.min(Math.max(Number(c.req.query("limit") ?? 120), 1), 300);
     const offset = Math.max(Number(c.req.query("offset") ?? 0), 0);
-
     const runtimeDb = c.env.fitloot_runtime_db;
+
     if (runtimeDb) {
       try {
         const projected = await readRuntimeFriendProjection(runtimeDb, user.id, limit, offset);
@@ -337,114 +484,31 @@ export function registerFriendsRoutes(
           return c.json(projected);
         }
       } catch {
-        // projection read should never block canonical source fetch
+        // Runtime projection is opportunistic and should never block the canonical source.
       }
     }
 
-    try {
-      const friendsWithPresence = await c.env.fitloot_db
-        .prepare(
-          `SELECT
-            f.id,
-            COALESCE(f.friend_id, f.friend_user_id) as friend_user_id,
-            up.username as friend_username,
-            up.full_name as friend_full_name,
-            pr.level as friend_level,
-            pr.xp as friend_xp,
-            pr.current_streak as friend_streak,
-            fp.last_heartbeat_at,
-            COALESCE(fp.is_online, 0) as is_online
-          FROM friendships f
-          INNER JOIN user_profiles up
-            ON COALESCE(f.friend_id, f.friend_user_id) = up.user_id
-          INNER JOIN user_progression pr
-            ON COALESCE(f.friend_id, f.friend_user_id) = pr.user_id
-          LEFT JOIN friend_online_presence fp
-            ON fp.user_id = f.user_id
-           AND fp.friend_user_id = COALESCE(f.friend_id, f.friend_user_id)
-          WHERE f.user_id = ?
-          ORDER BY friend_level DESC, friend_xp DESC
-          LIMIT ? OFFSET ?`,
-        )
-        .bind(user.id, limit, offset)
-        .all<Record<string, unknown>>();
+    const friends = await listAcceptedFriendsWithPresence(c.env.fitloot_db, user.id, limit, offset);
 
-      const normalized = friendsWithPresence.results.map((friend) => ({
-        ...friend,
-        is_online: Number(friend.is_online ?? 0) > 0,
-      }));
-
-      if (runtimeDb) {
-        void writeRuntimeFriendProjection(runtimeDb, user.id, normalized).catch(() => undefined);
-      }
-      return c.json(normalized);
-    } catch (error) {
-      const errorMessage = getErrorMessage(error).toLowerCase();
-      const canFallback =
-        errorMessage.includes("friend_online_presence") ||
-        errorMessage.includes("user_presence") ||
-        errorMessage.includes("no such table") ||
-        errorMessage.includes("relation");
-
-      if (!canFallback) {
-        throw error;
-      }
-
-      // Fallback de compatibilidade para ambientes sem a view de presença.
-      const friends = await c.env.fitloot_db
-        .prepare(
-          `SELECT f.id, COALESCE(f.friend_id, f.friend_user_id) as friend_user_id, up.username as friend_username,
-            up.full_name as friend_full_name, pr.level as friend_level, pr.xp as friend_xp,
-            pr.current_streak as friend_streak, pr.last_activity_date as last_heartbeat_at
-          FROM friendships f
-          INNER JOIN user_profiles up ON COALESCE(f.friend_id, f.friend_user_id) = up.user_id
-          INNER JOIN user_progression pr ON COALESCE(f.friend_id, f.friend_user_id) = pr.user_id
-          WHERE f.user_id = ?
-          ORDER BY friend_level DESC, friend_xp DESC
-          LIMIT ? OFFSET ?`,
-        )
-        .bind(user.id, limit, offset)
-        .all();
-
-      const onlineWindowStart = new Date(Date.now() - FRIEND_ONLINE_WINDOW_MS).toISOString();
-      const friendsWithOnlineStatus = friends.results.map((friend) => ({
-        ...friend,
-        is_online: friend.last_heartbeat_at
-          ? new Date(friend.last_heartbeat_at as string) > new Date(onlineWindowStart)
-          : false,
-      }));
-
-      if (runtimeDb) {
-        void writeRuntimeFriendProjection(runtimeDb, user.id, friendsWithOnlineStatus).catch(() => undefined);
-      }
-
-      return c.json(friendsWithOnlineStatus);
+    if (runtimeDb) {
+      c.executionCtx.waitUntil(
+        writeRuntimeFriendProjection(runtimeDb, user.id, friends).catch(() => undefined),
+      );
     }
+
+    return c.json(friends);
   });
 
   app.get("/api/friends/requests", authMiddleware, async (c) => {
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
+
     c.header("Cache-Control", "no-store");
     const limit = Math.min(Math.max(Number(c.req.query("limit") ?? 80), 1), 200);
     const offset = Math.max(Number(c.req.query("offset") ?? 0), 0);
 
-    const requests = await c.env.fitloot_db
-      .prepare(
-        `SELECT fr.id, fr.from_user_id as friend_user_id, up.username as friend_username,
-          up.full_name as friend_full_name, pr.level as friend_level, pr.xp as friend_xp,
-          pr.current_streak as friend_streak, fr.created_at
-        FROM friend_requests fr
-        INNER JOIN user_profiles up ON fr.from_user_id = up.user_id
-        INNER JOIN user_progression pr ON fr.from_user_id = pr.user_id
-        WHERE fr.to_user_id = ? AND fr.status = 'pending'
-        ORDER BY fr.created_at DESC
-        LIMIT ? OFFSET ?`,
-      )
-      .bind(user.id, limit, offset)
-      .all();
-
-    return c.json(requests.results);
+    const requests = await listPendingFriendRequests(c.env.fitloot_db, user.id, limit, offset);
+    return c.json(requests);
   });
 
   app.get("/api/friends/list", authMiddleware, async (c) =>
@@ -457,6 +521,7 @@ export function registerFriendsRoutes(
       c.executionCtx,
     ),
   );
+
   app.post("/api/friends/:id/accept", authMiddleware, async (c) =>
     app.fetch(
       new Request(new URL("/api/friends/accept", c.req.url).toString(), {
@@ -468,6 +533,7 @@ export function registerFriendsRoutes(
       c.executionCtx,
     ),
   );
+
   app.post("/api/friends/:id/reject", authMiddleware, async (c) =>
     app.fetch(
       new Request(new URL("/api/friends/reject", c.req.url).toString(), {

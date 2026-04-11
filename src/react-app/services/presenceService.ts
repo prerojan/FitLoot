@@ -1,6 +1,11 @@
 import { api, resolveApiRequestUrl } from "@/react-app/utils/api";
+import {
+  subscribeToLifecycleState,
+  subscribeToNetworkStatus,
+} from "@/react-app/services/runtime/hostRuntime";
 
-const DEFAULT_PRESENCE_INTERVAL_MS = 15_000;
+const DEFAULT_PRESENCE_INTERVAL_MS = 30_000;
+const DEFAULT_PRESENCE_TIMEOUT_MS = 6_000;
 const OFFLINE_DEDUPE_WINDOW_MS = 3_000;
 
 let lastOfflineSentAt = 0;
@@ -22,7 +27,7 @@ function canUseSameOriginBeaconTransport(requestUrl: string): boolean {
   }
 }
 
-function trySendPresenceBeacon(
+function trySendPresenceOfflineBeacon(
   path: string,
   payload?: Record<string, unknown>,
 ): boolean {
@@ -43,20 +48,26 @@ function isDocumentVisible(): boolean {
   return document.visibilityState === "visible";
 }
 
-async function sendPresenceHeartbeat(): Promise<void> {
-  if (trySendPresenceBeacon("/api/presence/heartbeat", { visibility: "friends" })) {
-    return;
+function isNavigatorOnline(): boolean {
+  if (typeof navigator === "undefined") return true;
+  return navigator.onLine !== false;
+}
+
+async function sendPresenceHeartbeat(): Promise<boolean> {
+  if (!isNavigatorOnline()) {
+    return false;
   }
 
-  await api("/api/presence/heartbeat", {
+  const response = await api("/api/presence/heartbeat", {
     method: "POST",
     body: JSON.stringify({ visibility: "friends" }),
-    keepalive: true,
+    timeoutMs: DEFAULT_PRESENCE_TIMEOUT_MS,
     orchestrationKey: "presence:heartbeat",
     orchestrationPolicy: "join",
     requestClass: "background",
-  })
-    .then(() => undefined);
+  });
+
+  return response.ok;
 }
 
 async function sendPresenceOffline(): Promise<void> {
@@ -66,7 +77,7 @@ async function sendPresenceOffline(): Promise<void> {
   }
 
   lastOfflineSentAt = now;
-  if (trySendPresenceBeacon("/api/presence/offline")) {
+  if (trySendPresenceOfflineBeacon("/api/presence/offline")) {
     return;
   }
 
@@ -90,24 +101,61 @@ export function startPresenceHeartbeat(
 
   let timer: number | null = null;
   let stopped = false;
+  let heartbeatInFlight = false;
 
-  const safeInterval = Math.max(12_000, Math.min(25_000, Math.floor(intervalMs)));
+  const safeInterval = Math.max(20_000, Math.min(45_000, Math.floor(intervalMs)));
 
-  const tick = () => {
-    if (stopped || !isDocumentVisible()) return;
-    void sendPresenceHeartbeat().catch(() => undefined);
+  const clearScheduledTick = () => {
+    if (timer === null) return;
+    window.clearTimeout(timer);
+    timer = null;
+  };
+
+  const scheduleNextTick = (delay = safeInterval) => {
+    if (stopped) return;
+    clearScheduledTick();
+    timer = window.setTimeout(() => {
+      void runHeartbeatCycle();
+    }, delay);
+  };
+
+  const runHeartbeatCycle = async () => {
+    if (stopped) return;
+    if (!isDocumentVisible() || !isNavigatorOnline() || heartbeatInFlight) {
+      scheduleNextTick();
+      return;
+    }
+
+    heartbeatInFlight = true;
+    try {
+      await sendPresenceHeartbeat();
+    } catch {
+      // The next scheduled heartbeat will retry naturally without stacking requests.
+    } finally {
+      heartbeatInFlight = false;
+      scheduleNextTick();
+    }
+  };
+
+  const triggerImmediateHeartbeat = () => {
+    if (stopped || !isDocumentVisible() || heartbeatInFlight) return;
+    clearScheduledTick();
+    void runHeartbeatCycle();
   };
 
   const onVisibilityChange = () => {
-    if (stopped) return;
-    if (isDocumentVisible()) {
-      tick();
-    }
+    if (stopped || !isDocumentVisible()) return;
+    triggerImmediateHeartbeat();
   };
 
   const onFocus = () => {
     if (stopped) return;
-    tick();
+    triggerImmediateHeartbeat();
+  };
+
+  const onOnline = () => {
+    if (stopped) return;
+    triggerImmediateHeartbeat();
   };
 
   const onPageHide = () => {
@@ -115,28 +163,43 @@ export function startPresenceHeartbeat(
     void sendPresenceOffline().catch(() => undefined);
   };
 
-  timer = window.setInterval(() => {
-    tick();
-  }, safeInterval);
-
   document.addEventListener("visibilitychange", onVisibilityChange);
   window.addEventListener("focus", onFocus);
   window.addEventListener("pageshow", onFocus);
+  window.addEventListener("online", onOnline);
   window.addEventListener("pagehide", onPageHide);
   window.addEventListener("beforeunload", onPageHide);
-  tick();
+  const unsubscribeLifecycle = subscribeToLifecycleState((state) => {
+    if (stopped) return;
+    if (state === "foreground") {
+      triggerImmediateHeartbeat();
+      return;
+    }
+    void sendPresenceOffline().catch(() => undefined);
+  });
+  const unsubscribeNetwork = subscribeToNetworkStatus((status) => {
+    if (stopped) return;
+    if (status.online) {
+      triggerImmediateHeartbeat();
+      return;
+    }
+    void sendPresenceOffline().catch(() => undefined);
+  });
+
+  triggerImmediateHeartbeat();
+  scheduleNextTick();
 
   return () => {
     stopped = true;
-    if (timer !== null) {
-      window.clearInterval(timer);
-      timer = null;
-    }
+    clearScheduledTick();
     document.removeEventListener("visibilitychange", onVisibilityChange);
     window.removeEventListener("focus", onFocus);
     window.removeEventListener("pageshow", onFocus);
+    window.removeEventListener("online", onOnline);
     window.removeEventListener("pagehide", onPageHide);
     window.removeEventListener("beforeunload", onPageHide);
+    unsubscribeLifecycle();
+    unsubscribeNetwork();
     void sendPresenceOffline().catch(() => undefined);
   };
 }

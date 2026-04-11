@@ -1,16 +1,21 @@
 /**
- * Serviço base de mapas e rotas usado pelo frontend.
- * Centraliza geocoding, rota, POI e configuração visual do OpenStreetMap.
+ * Camada de mapas do frontend.
+ * O cliente não fala mais direto com provedores públicos; toda leitura externa
+ * passa pelo Worker em `/api/maps/*`.
  */
 
-export interface OSMConfig {
-  center: [number, number];
-  zoom: number;
-  maxZoom: number;
-  minZoom: number;
-  tileSize: number;
-  attribution: string;
-}
+import type {
+  MapCoordinate,
+  MapDirectionsProfile,
+  MapDirectionsResponse,
+  MapGeocodeResult,
+  MapPoiResult,
+  MapTileConfig,
+} from "@/shared/mapTypes";
+import { fetchJson } from "@/react-app/utils/api";
+
+export type OSMConfig = MapTileConfig;
+export type NominatimResult = MapGeocodeResult;
 
 export interface OSMMarker {
   id: string;
@@ -30,52 +35,165 @@ export interface OSMRoute {
   opacity?: number;
 }
 
-export interface NominatimResult {
-  place_id: number;
-  licence: string;
-  osm_type: string;
-  osm_id: number;
-  lat: string;
-  lon: string;
-  display_name: string;
-  address: {
-    house_number?: string;
-    road?: string;
-    suburb?: string;
-    city?: string;
-    county?: string;
-    state?: string;
-    postcode?: string;
-    country?: string;
-  };
-  boundingbox: [string, string, string, string];
-}
-
-// Mantém a configuração externa de rota em um único ponto.
-const OPENROUTESERVICE_CONFIG = {
-  API_KEY: 'eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6IjZhYThlNWM4NDNhNzRiNzdiMTEwZjg3ZjRmMzIxM2E4IiwiaCI6Im11cm11cjY0In0=',
-  BASE_URL: 'https://api.openrouteservice.org/v2',
+type MapProviderStatus = {
+  initialized: boolean;
+  tileServer: string;
+  geocoderServer: string;
+  directionsProvider: string;
 };
 
+const DEFAULT_OSM_CONFIG: OSMConfig = {
+  center: [-46.6333, -23.5505],
+  zoom: 12,
+  maxZoom: 19,
+  minZoom: 1,
+  tileSize: 256,
+  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+  tileUrlTemplate: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+};
+
+const MAP_REQUEST_TIMEOUT_MS = 8_000;
+const DIRECTIONS_REQUEST_TIMEOUT_MS = 10_000;
+
+function normalizeLookupText(value: string): string {
+  return value.trim().replace(/\s+/g, " ");
+}
+
+function roundCoordinate(value: number, decimals = 6): number {
+  const factor = 10 ** decimals;
+  return Math.round(value * factor) / factor;
+}
+
+function buildDirectionsQuery(
+  start: MapCoordinate,
+  end: MapCoordinate,
+  profile: MapDirectionsProfile,
+): string {
+  const params = new URLSearchParams();
+  params.set("start", `${roundCoordinate(start[0])},${roundCoordinate(start[1])}`);
+  params.set("end", `${roundCoordinate(end[0])},${roundCoordinate(end[1])}`);
+  params.set("profile", profile);
+  return params.toString();
+}
+
+function buildStaticMapSvgDataUrl(
+  center: MapCoordinate,
+  width: number,
+  height: number,
+  markers?: OSMMarker[],
+): string {
+  const safeWidth = Math.max(160, Math.round(width));
+  const safeHeight = Math.max(120, Math.round(height));
+  const markerItems = Array.isArray(markers) ? markers : [];
+  const markersByAxis = markerItems.map((marker) => ({
+    longitude: marker.longitude,
+    latitude: marker.latitude,
+    color: marker.color ?? "#10b981",
+  }));
+  const allLongitudes = [center[0], ...markersByAxis.map((marker) => marker.longitude)];
+  const allLatitudes = [center[1], ...markersByAxis.map((marker) => marker.latitude)];
+  const minLongitude = Math.min(...allLongitudes);
+  const maxLongitude = Math.max(...allLongitudes);
+  const minLatitude = Math.min(...allLatitudes);
+  const maxLatitude = Math.max(...allLatitudes);
+  const longitudeRange = Math.max(0.002, maxLongitude - minLongitude);
+  const latitudeRange = Math.max(0.002, maxLatitude - minLatitude);
+  const padding = 28;
+
+  const toSvgPoint = (coordinate: MapCoordinate): { x: number; y: number } => ({
+    x: padding + ((coordinate[0] - minLongitude) / longitudeRange) * (safeWidth - padding * 2),
+    y: padding + (1 - ((coordinate[1] - minLatitude) / latitudeRange)) * (safeHeight - padding * 2),
+  });
+
+  const readCssVariable = (variableName: string, fallback: string): string => {
+    if (typeof window === "undefined" || typeof document === "undefined") {
+      return fallback;
+    }
+
+    const resolvedValue = window.getComputedStyle(document.documentElement)
+      .getPropertyValue(variableName)
+      .trim();
+    return resolvedValue.length > 0 ? resolvedValue : fallback;
+  };
+
+  const isDarkTheme = typeof document !== "undefined"
+    && document.documentElement.getAttribute("data-theme") === "dark";
+
+  const palette = {
+    background: isDarkTheme
+      ? "#0b1117"
+      : readCssVariable("--app-bg-color", "#f5fbf8"),
+    surface: isDarkTheme
+      ? "rgba(16,24,32,0.96)"
+      : readCssVariable("--fl-surface-strong", "rgba(255,255,255,0.94)"),
+    surfaceMuted: isDarkTheme
+      ? "rgba(15,23,32,0.88)"
+      : readCssVariable("--fl-surface-muted", "rgba(244,248,246,0.82)"),
+    border: isDarkTheme
+      ? "rgba(229,231,235,0.1)"
+      : readCssVariable("--fl-border-soft", "rgba(15,23,42,0.08)"),
+    accent: readCssVariable("--app-primary-color", "#10b981"),
+    accentSoft: readCssVariable("--app-secondary-color", "#14b8a6"),
+  };
+
+  const centerPoint = toSvgPoint(center);
+  const markerCircles = markerItems.map((marker) => {
+    const point = toSvgPoint([marker.longitude, marker.latitude]);
+    return `
+      <circle cx="${point.x}" cy="${point.y}" r="9" fill="${marker.color ?? "#10b981"}" fill-opacity="0.92" />
+      <circle cx="${point.x}" cy="${point.y}" r="4.2" fill="#ffffff" />
+    `;
+  }).join("");
+
+  const streetLines = Array.from({ length: 7 }, (_, index) => {
+    const vertical = padding + ((safeWidth - padding * 2) / 6) * index;
+    const horizontal = padding + ((safeHeight - padding * 2) / 6) * index;
+    const diagonalOffset = ((safeWidth - padding * 2) / 10) * (index % 3);
+    return `
+      <line x1="${vertical}" y1="${padding}" x2="${vertical}" y2="${safeHeight - padding}" stroke="${isDarkTheme ? "rgba(229,231,235,0.3)" : "rgba(255,255,255,0.12)"}" />
+      <line x1="${padding}" y1="${horizontal}" x2="${safeWidth - padding}" y2="${horizontal}" stroke="${isDarkTheme ? "rgba(229,231,235,0.3)" : "rgba(255,255,255,0.12)"}" />
+      <line x1="${padding + diagonalOffset}" y1="${safeHeight - padding}" x2="${safeWidth - diagonalOffset}" y2="${padding}" stroke="${isDarkTheme ? "rgba(209,213,219,0.18)" : "rgba(255,255,255,0.07)"}" />
+    `;
+  }).join("");
+
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="${safeWidth}" height="${safeHeight}" viewBox="0 0 ${safeWidth} ${safeHeight}">
+      <defs>
+        <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="${palette.surface}" />
+          <stop offset="100%" stop-color="${palette.background}" />
+        </linearGradient>
+        <radialGradient id="accent" cx="50%" cy="18%" r="80%">
+          <stop offset="0%" stop-color="${palette.accent}" stop-opacity="0.12" />
+          <stop offset="100%" stop-color="${palette.accent}" stop-opacity="0" />
+        </radialGradient>
+        <linearGradient id="roads" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="${isDarkTheme ? "rgba(229,231,235,0.34)" : palette.border}" />
+          <stop offset="100%" stop-color="${isDarkTheme ? "rgba(209,213,219,0.2)" : palette.accentSoft}" stop-opacity="${isDarkTheme ? "1" : "0.2"}" />
+        </linearGradient>
+      </defs>
+      <rect width="${safeWidth}" height="${safeHeight}" rx="28" fill="url(#bg)" />
+      <rect width="${safeWidth}" height="${safeHeight}" rx="28" fill="url(#accent)" />
+      <rect x="1" y="1" width="${safeWidth - 2}" height="${safeHeight - 2}" rx="27" fill="none" stroke="${palette.border}" />
+      <g stroke-width="1.6" stroke="url(#roads)" stroke-linecap="round">
+        ${streetLines}
+      </g>
+      <circle cx="${centerPoint.x}" cy="${centerPoint.y}" r="16" fill="${palette.accent}" fill-opacity="0.08" />
+      <circle cx="${centerPoint.x}" cy="${centerPoint.y}" r="7" fill="${palette.accent}" />
+      ${markerCircles}
+    </svg>
+  `.trim();
+
+  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+}
+
 class OpenStreetMapService {
-  private config: OSMConfig;
-  private isInitialized: boolean = false;
+  private config: OSMConfig = DEFAULT_OSM_CONFIG;
+  private initialized = false;
   private initializationPromise: Promise<void> | null = null;
 
-  constructor() {
-    this.config = {
-      center: [-46.6333, -23.5505], // São Paulo, Brazil
-      zoom: 12,
-      maxZoom: 19,
-      minZoom: 1,
-      tileSize: 256,
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-    };
-  }
-
-  // Valida a disponibilidade mínima dos provedores antes do uso.
   async initialize(): Promise<void> {
-    if (this.isInitialized) {
+    if (this.initialized) {
       return;
     }
 
@@ -84,306 +202,181 @@ class OpenStreetMapService {
     }
 
     this.initializationPromise = (async () => {
-      try {
-        const response = await fetch('https://nominatim.openstreetmap.org/search?q=sao+paulo&format=json&limit=1');
-        
-        if (!response.ok) {
-          throw new Error('OpenStreetMap services are not available');
+      const config = await fetchJson<OSMConfig>("/api/maps/config", {
+        timeoutMs: MAP_REQUEST_TIMEOUT_MS,
+        orchestrationKey: "maps:config",
+        orchestrationPolicy: "join",
+        requestClass: "background",
+      });
+      this.config = {
+        ...DEFAULT_OSM_CONFIG,
+        ...config,
+      };
+      this.initialized = true;
+    })()
+      .finally(() => {
+        if (!this.initialized) {
+          this.initializationPromise = null;
         }
+      });
 
-        this.isInitialized = true;
-        console.log('OpenStreetMap service initialized successfully');
-      } catch (error) {
-        console.error('Failed to initialize OpenStreetMap service:', error);
-        throw new Error('Failed to initialize OpenStreetMap service');
-      } finally {
-        this.initializationPromise = null;
-      }
-    })();
-
-    try {
-      await this.initializationPromise;
-    } finally {
-      if (!this.isInitialized) {
-        this.initializationPromise = null;
-      }
-    }
+    return this.initializationPromise;
   }
 
-  // Expõe a configuração visual ativa do serviço.
   getConfig(): OSMConfig {
-    if (!this.isInitialized) {
-      throw new Error('OpenStreetMap service is not initialized');
-    }
     return { ...this.config };
   }
 
-  // Permite ajustar a configuração sem recriar a instância.
   updateConfig(updates: Partial<OSMConfig>): void {
     this.config = { ...this.config, ...updates };
   }
 
-  // Converte endereço em coordenadas usando o Nominatim.
   async geocode(address: string): Promise<NominatimResult[]> {
-    if (!this.isInitialized) {
-      throw new Error('OpenStreetMap service is not initialized');
+    await this.initialize();
+    const normalizedAddress = normalizeLookupText(address);
+    if (normalizedAddress.length < 2) {
+      return [];
     }
 
-    try {
-      const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}&limit=5&addressdetails=1`;
-      
-      const response = await fetch(url, {
-        headers: {
-          'User-Agent': 'FitLoot App/1.0'
-        }
-      });
-      
-      if (!response.ok) {
-        throw new Error('Geocoding request failed');
-      }
+    const params = new URLSearchParams({
+      q: normalizedAddress,
+      limit: "5",
+    });
 
-      const data = await response.json();
-      return data || [];
-    } catch (error) {
-      console.error('Geocoding failed:', error);
-      throw new Error('Failed to geocode address');
-    }
+    return fetchJson<NominatimResult[]>(`/api/maps/geocode?${params.toString()}`, {
+      timeoutMs: MAP_REQUEST_TIMEOUT_MS,
+      orchestrationKey: `maps:geocode:${normalizedAddress.toLowerCase()}`,
+      orchestrationPolicy: "join",
+    });
   }
 
-  // Converte coordenadas em endereço usando o Nominatim.
   async reverseGeocode(longitude: number, latitude: number): Promise<NominatimResult[]> {
-    if (!this.isInitialized) {
-      throw new Error('OpenStreetMap service is not initialized');
-    }
+    await this.initialize();
+    const params = new URLSearchParams({
+      lon: String(roundCoordinate(longitude, 6)),
+      lat: String(roundCoordinate(latitude, 6)),
+    });
 
-    try {
-      const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&addressdetails=1`;
-      
-      const response = await fetch(url, {
-        headers: {
-          'User-Agent': 'FitLoot App/1.0'
-        }
-      });
-      
-      if (!response.ok) {
-        throw new Error('Reverse geocoding request failed');
-      }
-
-      const data = await response.json();
-      return data ? [data] : [];
-    } catch (error) {
-      console.error('Reverse geocoding failed:', error);
-      throw new Error('Failed to reverse geocode coordinates');
-    }
+    return fetchJson<NominatimResult[]>(`/api/maps/reverse?${params.toString()}`, {
+      timeoutMs: MAP_REQUEST_TIMEOUT_MS,
+      orchestrationKey: `maps:reverse:${params.toString()}`,
+      orchestrationPolicy: "join",
+    });
   }
 
-  // Busca rota real e cai para linha reta apenas quando o provedor falha.
   async getDirections(
-    start: [number, number],
-    end: [number, number],
-    profile: 'foot-walking' | 'cycling-regular' | 'driving-car' = 'foot-walking'
+    start: MapCoordinate,
+    end: MapCoordinate,
+    profile: MapDirectionsProfile = "foot-walking",
   ): Promise<{
     distance: number;
     duration: number;
-    geometry: [number, number][];
+    geometry: MapCoordinate[];
+    provider: MapDirectionsResponse["provider"];
+    usedFallbackRoute: boolean;
   }> {
-    if (!this.isInitialized) {
-      throw new Error('OpenStreetMap service is not initialized');
-    }
+    await this.initialize();
+    const query = buildDirectionsQuery(start, end, profile);
+    const response = await fetchJson<MapDirectionsResponse>(`/api/maps/directions?${query}`, {
+      timeoutMs: DIRECTIONS_REQUEST_TIMEOUT_MS,
+      orchestrationKey: `maps:directions:${query}`,
+      orchestrationPolicy: "join",
+      requestClass: "background",
+    });
 
-    try {
-      if (OPENROUTESERVICE_CONFIG.API_KEY) {
-        const url = `${OPENROUTESERVICE_CONFIG.BASE_URL}/directions/${profile}?` +
-          `api_key=${OPENROUTESERVICE_CONFIG.API_KEY}&` +
-          `start=${start[0]},${start[1]}&` +
-          `end=${end[0]},${end[1]}`;
-        
-        const response = await fetch(url);
-        
-        if (!response.ok) {
-          throw new Error('OpenRouteService request failed');
-        }
-
-        const data = await response.json();
-        
-        if (!data.features || data.features.length === 0) {
-          throw new Error('No route found');
-        }
-
-        const route = data.features[0];
-        const geometry = route.geometry.coordinates as [number, number][];
-        
-        return {
-          distance: route.properties.segments[0].distance,
-          duration: route.properties.segments[0].duration,
-          geometry,
-        };
-      }
-      
-      console.warn('Using fallback straight-line route. Get OpenRouteService API key for real directions.');
-      
-      const distance = this.calculateDistance(start, end);
-      const duration = distance / (profile === 'foot-walking' ? 1.4 : profile === 'cycling-regular' ? 4.2 : 8.3);
-      
-      const geometry = [start, end];
-      
-      return {
-        distance,
-        duration,
-        geometry,
-      };
-    } catch (error) {
-      console.error('Directions failed:', error);
-      throw new Error('Failed to get directions');
-    }
+    return {
+      distance: response.distance,
+      duration: response.duration,
+      geometry: response.geometry,
+      provider: response.provider,
+      usedFallbackRoute: response.used_fallback_route,
+    };
   }
 
-  // Reaproveita o geocoding e filtra os resultados por distância.
   async searchNearby(
-    center: [number, number],
+    center: MapCoordinate,
     query: string,
-    radius: number = 1000 // meters
+    radius = 1000,
   ): Promise<NominatimResult[]> {
-    if (!this.isInitialized) {
-      throw new Error('OpenStreetMap service is not initialized');
-    }
+    await this.initialize();
+    const results = await this.geocode(query);
 
-    try {
-      const nominatimResults = await this.geocode(query);
-      
-      const nearbyResults = nominatimResults.filter(result => {
-        const resultCoords: [number, number] = [parseFloat(result.lon), parseFloat(result.lat)];
-        const distance = this.calculateDistance(center, resultCoords);
-        return distance <= radius;
-      });
-
-      return nearbyResults;
-    } catch (error) {
-      console.error('Nearby search failed:', error);
-      throw new Error('Failed to search nearby places');
-    }
+    return results.filter((result) => {
+      const distance = this.calculateDistance(
+        center,
+        [result.longitude, result.latitude],
+      );
+      return distance <= radius;
+    });
   }
 
-  // Gera uma imagem estática para previews e fallbacks.
   async getStaticImage(
-    center: [number, number],
-    zoom: number,
-    width: number = 600,
-    height: number = 400,
-    markers?: OSMMarker[]
+    center: MapCoordinate,
+    _zoom: number,
+    width = 600,
+    height = 400,
+    markers?: OSMMarker[],
   ): Promise<string> {
-    if (!this.isInitialized) {
-      throw new Error('OpenStreetMap service is not initialized');
-    }
-
-    try {
-      let staticMapUrl = `https://staticmap.openstreetmap.de/staticmap.php?center=${center[1]},${center[0]}&zoom=${zoom}&size=${width}x${height}&maptype=mapnik`;
-      
-      if (markers && markers.length > 0) {
-        const markerParams = markers.map(marker => 
-          `${marker.latitude},${marker.longitude},${marker.color || 'red'}`
-        ).join('|');
-        staticMapUrl += `&markers=${markerParams}`;
-      }
-
-      return staticMapUrl;
-    } catch (error) {
-      console.error('Failed to generate static map image:', error);
-      throw new Error('Failed to generate static map image');
-    }
+    await this.initialize();
+    return buildStaticMapSvgDataUrl(center, width, height, markers);
   }
 
-  // Expõe a URL de tiles usada na camada visual.
   getTileUrl(): string {
-    return 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
+    return this.config.tileUrlTemplate;
   }
 
-  // Garante que coordenadas inválidas não avancem no fluxo.
   validateCoordinates(longitude: number, latitude: number): boolean {
     return longitude >= -180 && longitude <= 180 && latitude >= -90 && latitude <= 90;
   }
 
-  // Calcula distância em metros pela fórmula de Haversine.
-  calculateDistance(
-    point1: [number, number],
-    point2: [number, number]
-  ): number {
-    const earthRadiusMeters = 6371e3;
+  calculateDistance(point1: MapCoordinate, point2: MapCoordinate): number {
+    const earthRadiusMeters = 6_371_000;
     const phi1 = (point1[1] * Math.PI) / 180;
     const phi2 = (point2[1] * Math.PI) / 180;
     const deltaPhi = ((point2[1] - point1[1]) * Math.PI) / 180;
     const deltaLambda = ((point2[0] - point1[0]) * Math.PI) / 180;
 
-    const a = Math.sin(deltaPhi / 2) * Math.sin(deltaPhi / 2) +
-              Math.cos(phi1) * Math.cos(phi2) *
-              Math.sin(deltaLambda / 2) * Math.sin(deltaLambda / 2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    const haversine =
+      Math.sin(deltaPhi / 2) * Math.sin(deltaPhi / 2)
+      + Math.cos(phi1) * Math.cos(phi2) * Math.sin(deltaLambda / 2) * Math.sin(deltaLambda / 2);
+    const centralAngle = 2 * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
 
-    return earthRadiusMeters * c;
+    return earthRadiusMeters * centralAngle;
   }
 
-  // Busca pontos de interesse diretamente no Overpass.
   async searchPOI(
-    center: [number, number],
+    center: MapCoordinate,
     tags: Record<string, string>,
-    radius: number = 1000
-  ): Promise<Array<{
-    id: string;
-    lat: number;
-    lon: number;
-    tags: Record<string, string>;
-  }>> {
-    if (!this.isInitialized) {
-      throw new Error('OpenStreetMap service is not initialized');
-    }
-
-    try {
-      const tagQuery = Object.entries(tags)
-        .map(([key, value]) => `"${key}"="${value}"`)
-        .join(' and ');
-      
-      const query = `
-        [out:json];
-        (
-          node[${tagQuery}](around:${radius},${center[1]},${center[0]});
-          way[${tagQuery}](around:${radius},${center[1]},${center[0]});
-          relation[${tagQuery}](around:${radius},${center[1]},${center[0]});
-        );
-        out geom;
-      `;
-
-      const url = 'https://overpass-api.de/api/interpreter';
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          'User-Agent': 'FitLoot App/1.0'
-        },
-        body: `data=${encodeURIComponent(query)}`
-      });
-
-      if (!response.ok) {
-        throw new Error('POI search failed');
-      }
-
-      const data = await response.json();
-      return data.elements || [];
-    } catch (error) {
-      console.error('POI search failed:', error);
-      throw new Error('Failed to search for points of interest');
-    }
+    radius = 1000,
+  ): Promise<MapPoiResult[]> {
+    await this.initialize();
+    return fetchJson<MapPoiResult[]>("/api/maps/poi", {
+      method: "POST",
+      body: JSON.stringify({
+        center,
+        radius,
+        tags,
+      }),
+      timeoutMs: MAP_REQUEST_TIMEOUT_MS,
+      orchestrationKey: `maps:poi:${center.join(",")}:${radius}:${JSON.stringify(tags)}`,
+      orchestrationPolicy: "join",
+      requestClass: "background",
+    });
   }
 
-  // Expõe o estado atual dos provedores usados pelo serviço.
-  getStatus(): {
-    initialized: boolean;
-    tileServer: string;
-    nominatimServer: string;
-  } {
+  getStatus(): MapProviderStatus {
+    let tileServer = "";
+    try {
+      tileServer = new URL(this.config.tileUrlTemplate.replace("{s}.", "").replace("{z}", "0").replace("{x}", "0").replace("{y}", "0")).origin;
+    } catch {
+      tileServer = this.config.tileUrlTemplate;
+    }
+
     return {
-      initialized: this.isInitialized,
-      tileServer: 'https://tile.openstreetmap.org',
-      nominatimServer: 'https://nominatim.openstreetmap.org',
+      initialized: this.initialized,
+      tileServer,
+      geocoderServer: "/api/maps/geocode",
+      directionsProvider: "/api/maps/directions",
     };
   }
 }

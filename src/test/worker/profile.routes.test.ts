@@ -9,12 +9,16 @@ import {
   TEST_USER,
 } from "./testUtils";
 
-vi.mock("../../worker/core/database", () => ({
-  hasTableColumn: vi.fn(async (_db: D1Database, table: string, column: string) => {
-    if (table !== "user_profiles") return false;
-    return column === "age" || column === "gender" || column === "goals_json";
-  }),
-}));
+vi.mock("../../worker/core/database", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../worker/core/database")>();
+  return {
+    ...actual,
+    hasTableColumn: vi.fn(async (_db: D1Database, table: string, column: string) => {
+      if (table !== "user_profiles") return false;
+      return column === "age" || column === "gender" || column === "goals_json";
+    }),
+  };
+});
 
 import { registerProfileRoutes } from "../../worker/routes/profile";
 

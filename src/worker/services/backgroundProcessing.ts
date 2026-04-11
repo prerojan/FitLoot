@@ -2,16 +2,18 @@ import { getErrorMessage } from "../core/errors";
 import type { Env, PhysicalBenchmarkRow } from "../core/types";
 import { processDailyResetForAllUsers } from "./dailyReset";
 import { CRON_WEEKLY_MISSION_RESET } from "../constants/scheduler";
+import type { MissionRefreshMode } from "./missionRuntimeState";
 
 type BackgroundProcessingDeps = {
   cleanupSettledMissionsWithGuard: (
     db: D1Database,
     userId: string,
   ) => Promise<void>;
-  ensurePeriodicMissions: (
+  ensurePeriodicMissionsWithGuard: (
     env: Env,
     db: D1Database,
     userId: string,
+    options?: { force?: boolean | undefined; mode?: MissionRefreshMode | undefined },
   ) => Promise<void>;
   ensureUserCounterRow: (
     db: D1Database,
@@ -201,8 +203,11 @@ export function createBackgroundProcessingService(
         try {
           await deps.ensureUserCounterRow(env.fitloot_db, userId);
           await deps.cleanupSettledMissionsWithGuard(env.fitloot_db, userId);
+          await deps.ensurePeriodicMissionsWithGuard(env, env.fitloot_db, userId, {
+            force: true,
+            mode: "full",
+          });
           await deps.expirePendingMissionsAndUpdateStreak(env.fitloot_db, userId);
-          await deps.ensurePeriodicMissions(env, env.fitloot_db, userId);
           await createDailySnapshot(env.fitloot_db, userId);
         } catch (error) {
           console.error("[processDailyReset][user]", {

@@ -1,4 +1,4 @@
-import { api } from "@/react-app/utils/api";
+import { api, isApiTimeoutError, isExpectedApiCancellation } from "@/react-app/utils/api";
 
 const FRIENDS_CACHE_TTL_MS = 10_000;
 
@@ -7,6 +7,7 @@ export type Friend = {
   friend_user_id: string;
   friend_username: string;
   friend_full_name: string;
+  friend_avatar_url?: string | null | undefined;
   friend_level: number;
   friend_xp: number;
   friend_streak: number;
@@ -19,6 +20,7 @@ export type FriendSearchResult = {
   user_id: string;
   username: string;
   full_name: string;
+  avatar_url?: string | null | undefined;
   level: number;
   xp: number;
 };
@@ -98,6 +100,10 @@ function normalizeFriend(raw: unknown): Friend | null {
     friend_user_id: String(friend.friend_user_id ?? ""),
     friend_username: String(friend.friend_username ?? ""),
     friend_full_name: String(friend.friend_full_name ?? friend.friend_username ?? ""),
+    friend_avatar_url:
+      typeof friend.friend_avatar_url === "string" && friend.friend_avatar_url.trim().length > 0
+        ? friend.friend_avatar_url
+        : null,
     friend_level: Math.max(0, Number(friend.friend_level ?? 0)),
     friend_xp: Math.max(0, Number(friend.friend_xp ?? 0)),
     friend_streak: Math.max(0, Number(friend.friend_streak ?? 0)),
@@ -131,6 +137,22 @@ async function assertSuccessfulResponse(
   );
 }
 
+function parseFriendsRequestError(error: unknown): never {
+  if (isExpectedApiCancellation(error)) {
+    throw error;
+  }
+
+  if (isApiTimeoutError(error)) {
+    throw new FriendsApiError("REQUEST_FAILED", 504, error.message || "Tempo limite na API social.");
+  }
+
+  if (error instanceof FriendsApiError) {
+    throw error;
+  }
+
+  throw new FriendsApiError("REQUEST_FAILED", 500, "Falha na API social.");
+}
+
 export function clearFriendsCache(): void {
   friendsCache = null;
 }
@@ -153,9 +175,17 @@ export async function fetchFriendsBundle(
 
   inflightBundle = (async () => {
     const [friendsRes, requestsRes] = await Promise.all([
-      api("/api/friends"),
-      api("/api/friends/requests"),
-    ]);
+      api("/api/friends", {
+        orchestrationKey: "friends:list",
+        orchestrationPolicy: "join",
+        requestClass: "background",
+      }),
+      api("/api/friends/requests", {
+        orchestrationKey: "friends:requests",
+        orchestrationPolicy: "join",
+        requestClass: "background",
+      }),
+    ]).catch((error) => parseFriendsRequestError(error));
 
     if (
       isUnauthorized(friendsRes.status) ||
@@ -211,11 +241,24 @@ export async function searchUsersByUsername(
 
   const response = await api(
     `/api/friends/search?username=${encodeURIComponent(normalized)}`,
-  );
+    {
+      orchestrationKey: "friends:search",
+      orchestrationPolicy: "replace",
+      requestClass: "background",
+    },
+  ).catch((error) => parseFriendsRequestError(error));
   await assertSuccessfulResponse(response, "Falha na busca de usuários.");
 
   const payload = (await response.json().catch(() => [])) as FriendSearchResult[];
-  return Array.isArray(payload) ? payload : [];
+  return Array.isArray(payload)
+    ? payload.map((result) => ({
+        ...result,
+        avatar_url:
+          typeof result?.avatar_url === "string" && result.avatar_url.trim().length > 0
+            ? result.avatar_url
+            : null,
+      }))
+    : [];
 }
 
 export async function sendFriendRequest(friendUserId: string): Promise<void> {
@@ -223,7 +266,7 @@ export async function sendFriendRequest(friendUserId: string): Promise<void> {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ friend_user_id: friendUserId }),
-  });
+  }).catch((error) => parseFriendsRequestError(error));
   await assertSuccessfulResponse(response, "Não foi possível enviar solicitação.");
   clearFriendsCache();
 }
@@ -236,7 +279,7 @@ export async function respondFriendRequest(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ request_id: requestId }),
-  });
+  }).catch((error) => parseFriendsRequestError(error));
   await assertSuccessfulResponse(
     response,
     "Não foi possível responder a solicitação.",
@@ -247,7 +290,7 @@ export async function respondFriendRequest(
 export async function removeFriend(friendUserId: string): Promise<void> {
   const response = await api(`/api/friends/${encodeURIComponent(friendUserId)}`, {
     method: "DELETE",
-  });
+  }).catch((error) => parseFriendsRequestError(error));
   await assertSuccessfulResponse(
     response,
     "Nao foi possivel remover este amigo.",

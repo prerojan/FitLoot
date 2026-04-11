@@ -7,8 +7,8 @@ type MacroCardProps = {
 export default function MacroCard({ label, value, percentage }: MacroCardProps) {
   return (
     <div className="fl-theme-surface p-3 rounded-2xl flex flex-col items-center">
-      <span className="text-[10px] fl-theme-text-muted uppercase font-medium">{label}</span>
-      <span className="text-xl font-bold tracking-tight">{value}</span>
+      <span className="text-[10px] fl-theme-text-muted uppercase font-medium text-center leading-tight">{label}</span>
+      <span className="text-[clamp(0.95rem,3vw,1.25rem)] font-bold tracking-tight text-center leading-tight text-balance">{value}</span>
       <div className="mt-2 h-1 w-full overflow-hidden rounded-full" style={{ backgroundColor: "color-mix(in srgb, var(--fl-color-text) 8%, transparent)" }}>
         <div
           className="h-full transition-all duration-1000"

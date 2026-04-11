@@ -16,4 +16,5 @@ export interface AuthContextType {
   loading: boolean;
   checkAuth: () => Promise<void>;
   logout: () => void;
+  setAuthenticatedUser: (user: User | null) => void;
 }

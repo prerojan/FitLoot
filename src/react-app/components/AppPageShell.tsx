@@ -12,6 +12,7 @@ type AppPageShellProps = {
   children: ReactNode;
   className?: string | undefined;
   contentClassName?: string | undefined;
+  hideNavigation?: boolean | undefined;
   profile?: UserProfile | null | undefined;
   progression?: UserProgression | null | undefined;
 };
@@ -28,23 +29,25 @@ export default function AppPageShell({
   children,
   className,
   contentClassName,
+  hideNavigation = false,
   profile,
   progression,
 }: AppPageShellProps) {
   const location = useLocation();
   const { missionDetailsOpen, missionExecutionOpen } = useAppChrome();
-  const hideNavigation =
+  const shouldHideNavigation =
+    hideNavigation ||
     missionExecutionOpen ||
     missionDetailsOpen ||
     CHROMELESS_ROUTES.has(location.pathname);
 
   return (
     <div
-      className={cn("fl-app-page", hideNavigation ? "pb-0" : undefined, className)}
+      className={cn("fl-app-page", shouldHideNavigation ? "pb-0" : undefined, className)}
       data-route={location.pathname}
     >
       {/* Navbar desktop compartilhada para paginas com chrome completo. */}
-      {!hideNavigation ? <DesktopAppNavbar profile={profile} progression={progression} /> : null}
+      {!shouldHideNavigation ? <DesktopAppNavbar profile={profile} progression={progression} /> : null}
       {/* Backdrop visual padrao das telas autenticadas. */}
       <div className="fl-theme-backdrop" aria-hidden="true">
         <div className="fl-theme-backdrop-orb fl-theme-backdrop-orb-primary absolute -left-24 top-6 h-72 w-72" />
@@ -56,7 +59,7 @@ export default function AppPageShell({
         {children}
       </div>
       {/* Navegacao inferior exclusiva do mobile. */}
-      {!hideNavigation ? (
+      {!shouldHideNavigation ? (
         <div className="md:hidden">
           <BottomNav active={bottomNavActive} />
         </div>

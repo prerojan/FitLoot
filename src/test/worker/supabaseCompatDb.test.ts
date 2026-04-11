@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { rewriteScalarMaxForTests } from "../../worker/core/supabaseCompatDb";
+import {
+  qualifyUnqualifiedTablesForTests,
+  rewriteScalarMaxForTests,
+} from "../../worker/core/supabaseCompatDb";
 
 describe("supabaseCompatDb scalar MAX rewrite", () => {
   it("rewrites two-argument MAX into GREATEST", () => {
@@ -54,5 +57,21 @@ describe("supabaseCompatDb scalar MAX rewrite", () => {
 
     expect(rewritten).toContain("-- MAX(COALESCE(progress_current, 0), ?)");
     expect(rewritten).toContain("best_streak = GREATEST(best_streak, ?)");
+  });
+});
+
+describe("supabaseCompatDb table qualification", () => {
+  it("qualifies social views that are missing from the default Postgres search_path", () => {
+    const sql = `
+      SELECT fp.is_online
+      FROM friendships f
+      LEFT JOIN friend_online_presence fp
+        ON fp.user_id = f.user_id
+    `;
+
+    const rewritten = qualifyUnqualifiedTablesForTests(sql);
+
+    expect(rewritten).toContain("FROM social.friendships f");
+    expect(rewritten).toContain("LEFT JOIN social.friend_online_presence fp");
   });
 });

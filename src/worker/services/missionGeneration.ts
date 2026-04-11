@@ -1,6 +1,6 @@
 import { MISSION_LIMITS } from "../../constants/missionMetrics";
 import { getErrorMessage } from "../core/errors";
-import { getHuggingFaceApiKey } from "../core/providerConfig";
+import { getOpenRouterApiKey } from "../core/providerConfig";
 import type { Env } from "../core/types";
 import { requestValidatedStructuredPlanWithRetry } from "./structuredPlanRetry";
 
@@ -157,7 +157,7 @@ export function createMissionGenerationService<
     let validation = deps.validateStructuredMissionPlan(fallbackPlan, profile, options);
     let usedAi = false;
 
-    if (getHuggingFaceApiKey(env)) {
+    if (getOpenRouterApiKey(env)) {
       const aiResult = await requestValidatedStructuredPlanWithRetry({
         buildPrompt: (retryReason?: string) =>
           deps.buildStructuredPlanPrompt(profile, options, retryReason),
@@ -244,6 +244,34 @@ export function createMissionGenerationService<
     for (const period of periods) {
       const cycleDate = deps.missionCycleDateKey(period, userTimeZone);
       const cycleStart = deps.missionCycleStartIso(period);
+      const generatedInCycle = hasCycleDateColumn
+        ? await db.prepare(
+            `SELECT COUNT(*) as count
+             FROM missions
+             WHERE user_id = ?
+               AND type = ?
+               AND COALESCE(mission_origin, 'regular') = 'regular'
+               AND COALESCE(cycle_date, substr(CAST(created_at AS TEXT), 1, 10)) = ?`
+          ).bind(userId, period, cycleDate).first<{ count: number }>()
+        : await db.prepare(
+            `SELECT COUNT(*) as count
+             FROM missions
+             WHERE user_id = ?
+               AND type = ?
+               AND COALESCE(mission_origin, 'regular') = 'regular'
+               AND datetime(created_at) >= datetime(?)`
+          ).bind(userId, period, cycleStart).first<{ count: number }>();
+
+      const existingCount = Number(generatedInCycle?.count ?? 0);
+      const missingCount = Math.max(0, MISSION_LIMITS[period] - existingCount);
+      if (missingCount > 0) {
+        if (period === "daily") {
+          await deps.createMissionsForPeriod(env, db, userId, period, missingCount);
+        } else {
+          missingPeriodicTargets[period === "weekly" ? "weeklyTarget" : "monthlyTarget"] = missingCount;
+        }
+      }
+
       if (hasCycleDateColumn) {
         if (hasMissionStatusColumn) {
           await db.prepare(
@@ -290,34 +318,6 @@ export function createMissionGenerationService<
              AND COALESCE(mission_origin, 'regular') = 'regular'
              AND datetime(created_at) < datetime(?)`
         ).bind(userId, period, cycleStart).run();
-      }
-
-      const generatedInCycle = hasCycleDateColumn
-        ? await db.prepare(
-            `SELECT COUNT(*) as count
-             FROM missions
-             WHERE user_id = ?
-               AND type = ?
-               AND COALESCE(mission_origin, 'regular') = 'regular'
-               AND COALESCE(cycle_date, substr(CAST(created_at AS TEXT), 1, 10)) = ?`
-          ).bind(userId, period, cycleDate).first<{ count: number }>()
-        : await db.prepare(
-            `SELECT COUNT(*) as count
-             FROM missions
-             WHERE user_id = ?
-               AND type = ?
-               AND COALESCE(mission_origin, 'regular') = 'regular'
-               AND datetime(created_at) >= datetime(?)`
-          ).bind(userId, period, cycleStart).first<{ count: number }>();
-
-      const existingCount = Number(generatedInCycle?.count ?? 0);
-      const missingCount = Math.max(0, MISSION_LIMITS[period] - existingCount);
-      if (missingCount > 0) {
-        if (period === "daily") {
-          await deps.createMissionsForPeriod(env, db, userId, period, missingCount);
-        } else {
-          missingPeriodicTargets[period === "weekly" ? "weeklyTarget" : "monthlyTarget"] = missingCount;
-        }
       }
     }
 

@@ -52,12 +52,14 @@ interface FriendRequest {
   friend_user_id: string;
   friend_username: string;
   friend_full_name: string;
+  friend_avatar_url?: string | null;
 }
 
 interface SearchResult {
   user_id: string;
   username: string;
   full_name: string;
+  avatar_url?: string | null;
   level: number;
 }
 
@@ -568,7 +570,7 @@ export default function MiniGames() {
                     searchResults.map((result) => (
                       <div key={result.user_id} className="group flex items-center justify-between p-6 transition-colors hover:bg-white/[0.02]">
                         <div className="flex items-center gap-5">
-                          <Avatar name={result.full_name || result.username} className="size-14 rounded-full border border-white/10" />
+                          <Avatar src={result.avatar_url ?? null} name={result.full_name || result.username} className="size-14 rounded-full border border-white/10" />
                           <div>
                             <h5 className="text-base font-bold tracking-tight transition-colors group-hover:text-primary">{result.username}</h5>
                             <div className="mt-1.5 flex items-center gap-2">
@@ -715,7 +717,7 @@ export default function MiniGames() {
                   pendingRequests.map((request) => (
                     <div key={request.id} className="fl-theme-surface rounded-[2.5rem] p-6 shadow-xl">
                       <div className="mb-6 flex items-center gap-4">
-                        <Avatar name={request.friend_full_name} className="size-12 rounded-full border border-white/10 shadow-lg" />
+                        <Avatar src={request.friend_avatar_url ?? null} name={request.friend_full_name} className="size-12 rounded-full border border-white/10 shadow-lg" />
                         <div>
                           <h5 className="text-sm font-bold tracking-tight">{request.friend_username}</h5>
                           <p className="mt-1 text-[9px] font-bold uppercase tracking-[0.2em]" style={{ color: "var(--app-primary-color)" }}>

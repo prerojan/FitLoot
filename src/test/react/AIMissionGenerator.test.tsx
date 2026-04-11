@@ -21,6 +21,19 @@ describe("AIMissionGenerator", () => {
     vi.clearAllMocks();
   });
 
+  it("does not poll the missions list before a generation flow explicitly enters polling mode", async () => {
+    vi.useFakeTimers();
+
+    render(<AIMissionGenerator onMissionsGenerated={vi.fn()} />);
+
+    vi.advanceTimersByTime(12_000);
+    await Promise.resolve();
+
+    expect(apiMock).not.toHaveBeenCalled();
+
+    vi.useRealTimers();
+  });
+
   it("hydrates the dashboard from the generation payload when active missions already exist", async () => {
     const user = userEvent.setup();
     const onMissionsGenerated = vi.fn();

@@ -101,7 +101,11 @@ export const WEBHOOK_SUPPORTED_EVENTS = new Set<string>([
   "checkout_abandonment",
 ]);
 
-export const DEFAULT_HUGGING_FACE_CHAT_MODEL = "openai/gpt-oss-120b";
-export const HUGGING_FACE_CHAT_MODEL = DEFAULT_HUGGING_FACE_CHAT_MODEL;
-export const DEFAULT_HUGGING_FACE_VISION_MODEL = "Qwen/Qwen3.5-9B:together";
+export const DEFAULT_OPENROUTER_CHAT_MODEL = "openrouter/free";
+export const OPENROUTER_CHAT_MODEL = DEFAULT_OPENROUTER_CHAT_MODEL;
+export const DEFAULT_OPENROUTER_VISION_MODEL = "openrouter/free";
 export const DEFAULT_ANTHROPIC_CHAT_MODEL = "claude-sonnet-4-20250514";
+export const DEFAULT_OPENROUTESERVICE_BASE_URL = "https://api.openrouteservice.org/v2";
+export const DEFAULT_MAP_TILE_URL_TEMPLATE = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
+export const DEFAULT_MAP_TILE_ATTRIBUTION =
+  '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';

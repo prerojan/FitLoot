@@ -12,6 +12,7 @@ import {
   X,
 } from "lucide-react";
 import AppPageShell from "@/react-app/components/AppPageShell";
+import { Avatar } from "@/react-app/components/ui/avatar";
 import { useAuth } from "@/react-app/auth/context";
 import { AI_CHAT_STORAGE_PREFIX } from "@/react-app/constants/storage";
 import { api } from "@/react-app/utils/api";
@@ -92,6 +93,8 @@ const QUICK_QUESTIONS: QuickQuestion[] = [
   { text: "Resgatar FitLoot", icon: Gift },
   { text: "Recomendações de refeição", icon: Utensils },
 ];
+
+const MAX_CHAT_HISTORY_REQUEST_ITEMS = 15;
 
 function HistoryModal({
   messages,
@@ -261,6 +264,7 @@ export default function AIChat() {
     };
 
     const nextMessages = [...messages, userMessage];
+    const requestHistory = messages.slice(-MAX_CHAT_HISTORY_REQUEST_ITEMS);
     const nextSessionCount = sessionMessageCount + 1;
 
     setMessages(nextMessages);
@@ -273,7 +277,7 @@ export default function AIChat() {
         method: "POST",
         body: JSON.stringify({
           message: messageContent,
-          history: nextMessages.map((message) => ({
+          history: requestHistory.map((message) => ({
             role: message.role,
             content: message.content,
           })),
@@ -324,11 +328,6 @@ export default function AIChat() {
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     await submitMessage(input);
-  };
-
-  const getInitials = (name?: string) => {
-    if (!name) return "U";
-    return name.substring(0, 2).toUpperCase();
   };
 
   return (
@@ -463,15 +462,11 @@ export default function AIChat() {
                       color: "var(--app-primary-color)",
                     }}
                   >
-                    {user?.avatar_url ? (
-                      <img
-                        src={user.avatar_url}
-                        alt="Avatar do usuário"
-                        className="h-full w-full rounded-full object-cover"
-                      />
-                    ) : (
-                      user?.name ? getInitials(user.name) : "U"
-                    )}
+                    <Avatar
+                      src={user?.avatar_url ?? null}
+                      name={user?.name ?? "Usuario"}
+                      className="h-full w-full rounded-full object-cover text-xs"
+                    />
                   </div>
                 </div>
               </div>

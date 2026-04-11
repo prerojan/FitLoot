@@ -140,6 +140,32 @@ describe("offlineSyncService", () => {
     });
   });
 
+  it("does not drop the first metrics snapshot of a new day", async () => {
+    getHostContextMock.mockReturnValue(buildHostContext(true));
+    apiMock.mockResolvedValue(createResponse({ success: true }));
+
+    const { offlineSyncService } = await import("../../react-app/services/runtime/offlineSyncService");
+
+    await expect(
+      offlineSyncService.publishMetricsSnapshot({
+        date: "2026-04-04",
+        steps: 178,
+        calories: 12,
+        distanceMeters: 140,
+        confidence: "official",
+      }),
+    ).resolves.toBeUndefined();
+
+    await vi.waitFor(() => {
+      expect(apiMock).toHaveBeenCalledWith(
+        "/api/offline/sync",
+        expect.objectContaining({ method: "POST", requestClass: "background" }),
+      );
+    });
+
+    expect(offlineSyncService.getState().operations).toHaveLength(0);
+  });
+
   it("dispatches a mission-synced event after queued missions flush successfully", async () => {
     const { offlineSyncService, OFFLINE_MISSION_SYNCED_EVENT } = await import("../../react-app/services/runtime/offlineSyncService");
 

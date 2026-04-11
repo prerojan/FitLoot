@@ -60,8 +60,14 @@ const TABLE_SCHEMA_MAP: Readonly<Record<string, string>> = {
   cakto_webhook_events: "billing",
   friendships: "social",
   friend_requests: "social",
+  user_blocks: "social",
   user_presence: "social",
   friend_activity_events: "social",
+  friend_online_presence: "social",
+  conversations: "social",
+  conversation_members: "social",
+  conversation_messages: "social",
+  conversation_message_media: "social",
   daily_metrics: "telemetry",
   food_diary: "telemetry",
   offline_sync_operations: "telemetry",
@@ -70,7 +76,11 @@ const TABLE_SCHEMA_MAP: Readonly<Record<string, string>> = {
   app_state: "telemetry",
 };
 
-const poolCache = new Map<string, Pool>();
+type SupabasePoolHandle = {
+  readonly cacheKey: string;
+  current: () => Pool;
+  recycle: (reason?: string) => Promise<void>;
+};
 
 let savepointCounter = 0;
 
@@ -475,6 +485,10 @@ function qualifyUnqualifiedTables(sql: string): string {
   );
 }
 
+export function qualifyUnqualifiedTablesForTests(sql: string): string {
+  return qualifyUnqualifiedTables(sql);
+}
+
 function replaceQuestionMarkParams(sql: string): string {
   let paramIndex = 0;
   let inSingleQuote = false;
@@ -719,22 +733,13 @@ function resolveSupabaseConnection(
   return resolveDefaultSupabaseConnection(env);
 }
 
-function getPgPool(dbUrlRaw: string, useSsl: boolean, poolTuning: SupabasePoolTuning): Pool {
-  const normalized = normalizeConnectionUrl(dbUrlRaw);
-  const cacheKey = [
-    normalized,
-    `ssl=${useSsl ? "1" : "0"}`,
-    `max=${poolTuning.max}`,
-    `connect=${poolTuning.connectionTimeoutMs}`,
-    `idle=${poolTuning.idleTimeoutMs}`,
-    `query=${poolTuning.queryTimeoutMs}`,
-    `stmt=${poolTuning.statementTimeoutMs}`,
-  ].join("::");
-  const cached = poolCache.get(cacheKey);
-  if (cached) return cached;
-
+function createPgPool(
+  normalizedConnectionUrl: string,
+  useSsl: boolean,
+  poolTuning: SupabasePoolTuning,
+): Pool {
   const poolConfig: PoolConfig = {
-    connectionString: normalized,
+    connectionString: normalizedConnectionUrl,
     max: poolTuning.max,
     connectionTimeoutMillis: poolTuning.connectionTimeoutMs,
     idleTimeoutMillis: poolTuning.idleTimeoutMs,
@@ -755,8 +760,70 @@ function getPgPool(dbUrlRaw: string, useSsl: boolean, poolTuning: SupabasePoolTu
     });
   });
 
-  poolCache.set(cacheKey, pool);
   return pool;
+}
+
+async function closePoolSilently(cacheKey: string, pool: Pool, reason?: string): Promise<void> {
+  const maybePoolWithEnd = pool as Pool & { end?: (() => Promise<unknown>) | undefined };
+  if (typeof maybePoolWithEnd.end !== "function") {
+    return;
+  }
+
+  try {
+    await maybePoolWithEnd.end.call(pool);
+  } catch (error) {
+    console.warn("[supabase-compat-db][pool-close-failed]", {
+      cacheKey,
+      reason: reason ?? "unspecified",
+      message: getErrorMessage(error),
+    });
+  }
+}
+
+function getPgPoolHandle(
+  dbUrlRaw: string,
+  useSsl: boolean,
+  poolTuning: SupabasePoolTuning,
+): SupabasePoolHandle {
+  const normalized = normalizeConnectionUrl(dbUrlRaw);
+  const cacheKey = [
+    normalized,
+    `ssl=${useSsl ? "1" : "0"}`,
+    `max=${poolTuning.max}`,
+    `connect=${poolTuning.connectionTimeoutMs}`,
+    `idle=${poolTuning.idleTimeoutMs}`,
+    `query=${poolTuning.queryTimeoutMs}`,
+    `stmt=${poolTuning.statementTimeoutMs}`,
+  ].join("::");
+  let activePool: Pool | null = null;
+
+  const getOrCreatePool = (): Pool => {
+    if (activePool) {
+      return activePool;
+    }
+
+    const pool = createPgPool(normalized, useSsl, poolTuning);
+    activePool = pool;
+    return pool;
+  };
+
+  return {
+    cacheKey,
+    current: getOrCreatePool,
+    recycle: async (reason) => {
+      if (!activePool) {
+        return;
+      }
+
+      const pool = activePool;
+      activePool = null;
+      console.warn("[supabase-compat-db][pool-recycle]", {
+        cacheKey,
+        reason: reason ?? "retryable-read-error",
+      });
+      await closePoolSilently(cacheKey, pool, reason);
+    },
+  };
 }
 
 class SupabasePreparedStatement {
@@ -833,7 +900,7 @@ class SupabaseCompatDatabase {
   private transactionDepth = 0;
 
   constructor(
-    private readonly pool: Pool,
+    private readonly poolHandle: SupabasePoolHandle,
     private readonly retryTuning: SupabaseRetryTuning,
   ) {}
 
@@ -887,7 +954,7 @@ class SupabaseCompatDatabase {
       }
     }
 
-    const client = await this.pool.connect();
+    const client = await this.poolHandle.current().connect();
     this.transactionClient = client;
     this.transactionDepth = 0;
 
@@ -957,7 +1024,7 @@ class SupabaseCompatDatabase {
           // query failure while still reusing healthy ones. Healthy sockets must
           // go back to the pool; destroying them on every success creates
           // connection churn and turns simple reads into repeated reconnects.
-          const client = await this.pool.connect();
+          const client = await this.poolHandle.current().connect();
           try {
             result = await client.query<T>(compiled.sql, [...compiled.params]);
             client.release();
@@ -976,9 +1043,14 @@ class SupabaseCompatDatabase {
           lastRowId,
         };
       } catch (error) {
+        const retryableReadError = isRetryableReadError(error);
+        if (retryableReadError && !this.transactionClient) {
+          await this.poolHandle.recycle("retryable-read-error");
+        }
+
         const shouldRetry =
           attempt < maxAttempts &&
-          isRetryableReadError(error);
+          retryableReadError;
         if (shouldRetry) {
           console.warn("[supabase-compat-db][query-retry]", {
             attempt,
@@ -1025,8 +1097,8 @@ export function createSupabaseCompatDatabase(
   );
   const poolTuning = resolvePoolTuning(env);
   const retryTuning = resolveRetryTuning(env);
-  const pool = getPgPool(connectionUrl, useSsl, poolTuning);
-  const compatDb = new SupabaseCompatDatabase(pool, retryTuning);
+  const poolHandle = getPgPoolHandle(connectionUrl, useSsl, poolTuning);
+  const compatDb = new SupabaseCompatDatabase(poolHandle, retryTuning);
   const db = compatDb as unknown as RuntimeDatabase;
   db.__backend = "supabase";
   db.__transaction = <T>(run: () => Promise<T>) => compatDb.runInTransaction(run);

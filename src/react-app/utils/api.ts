@@ -1,3 +1,8 @@
+import {
+  resolveClientRouteUrl,
+  resolveCurrentClientPath,
+} from "@/react-app/utils/clientRouting";
+
 const DEFAULT_DEV_API_URL = "http://localhost:8787";
 const DEFAULT_CACHE_TTL_MS = 60_000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 20_000;
@@ -179,9 +184,9 @@ async function handlePlanAccessRequired(response: Response): Promise<void> {
   if (!redirectTo) return;
 
   const normalizedRedirect = redirectTo.startsWith("/") ? redirectTo : `/${redirectTo}`;
-  if (window.location.pathname === normalizedRedirect) return;
+  if (resolveCurrentClientPath() === normalizedRedirect) return;
 
-  window.location.assign(normalizedRedirect);
+  window.location.assign(resolveClientRouteUrl(normalizedRedirect));
 }
 
 export async function api(path: string, options: ApiRequestOptions = {}) {
@@ -200,7 +205,13 @@ export async function api(path: string, options: ApiRequestOptions = {}) {
   const method = String(restOptions.method ?? "GET").toUpperCase();
   const requestHeaders = new Headers(headers ?? {});
   const hasBody = typeof restOptions.body !== "undefined" && restOptions.body !== null;
-  const shouldSendJsonContentType = hasBody && method !== "GET" && method !== "HEAD";
+  const isFormDataBody =
+    typeof FormData !== "undefined" && restOptions.body instanceof FormData;
+  const shouldSendJsonContentType =
+    hasBody &&
+    method !== "GET" &&
+    method !== "HEAD" &&
+    !isFormDataBody;
   const normalizedOrchestrationKey =
     typeof orchestrationKey === "string" && orchestrationKey.trim().length > 0 && !signal
       ? buildOrchestratedRequestKey(method, orchestrationKey)

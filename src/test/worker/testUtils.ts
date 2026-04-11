@@ -46,6 +46,7 @@ export function createTestEnv(
   return {
     fitloot_db: fitlootDb,
     ASSETS: { fetch: vi.fn() } as unknown as Fetcher,
+    OPENROUTER_API_KEY: "openrouter-test-key",
     USDA_API_KEY: "usda-test-key",
     RAPID_API_KEY: "rapidapi-test-key",
     RAPID_API_HOST: "nutrition-by-api-ninjas.p.rapidapi.com",

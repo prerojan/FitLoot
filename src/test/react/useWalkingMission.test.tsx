@@ -317,4 +317,86 @@ describe("useWalkingMission", () => {
     expect(completionValue).toBeGreaterThanOrEqual(600);
     expect(completionValue).toBeLessThan(900);
   });
+
+  it("ignores a single gps jump and keeps session calories at zero while there is no trusted movement", async () => {
+    const onComplete = vi.fn(async () => undefined);
+    mockHealthHookReturn = {
+      ...mockHealthHookReturn,
+      healthData: {
+        ...mockHealthHookReturn.healthData,
+        steps: 1800,
+        calories: 150,
+        distance: 1.1,
+      },
+    };
+
+    const { result, rerender } = renderHook(
+      (props: { mission: Mission; onComplete: typeof onComplete }) =>
+        useWalkingMission({ ...props, autoRefresh: false }),
+      {
+        initialProps: { mission: distanceMission, onComplete },
+      },
+    );
+
+    await act(async () => {
+      await result.current.startExecution();
+    });
+
+    mockHealthHookReturn = {
+      ...mockHealthHookReturn,
+      healthData: {
+        ...mockHealthHookReturn.healthData,
+        steps: 1800,
+        calories: 153,
+        distance: 1.1,
+      },
+    };
+
+    rerender({ mission: distanceMission, onComplete });
+
+    await waitFor(() => {
+      expect(result.current.state.currentCalories).toBe(0);
+      expect(result.current.state.currentDistance).toBe(0);
+    });
+
+    act(() => {
+      emitRuntimeLocation({
+        latitude: -23.5488,
+        longitude: -46.6333,
+        accuracyMeters: 8,
+        precision: "precise",
+        timestamp: "2026-03-30T12:01:00.000Z",
+        source: "android-native",
+      });
+    });
+
+    expect(result.current.state.currentDistance).toBe(0);
+    expect(result.current.state.progress).toBe(0);
+  });
+
+  it("does not allow manual completion before reaching 100% of the target", async () => {
+    const onComplete = vi.fn(async () => undefined);
+    const { result } = renderHook(
+      (props: { mission: Mission; onComplete: typeof onComplete }) =>
+        useWalkingMission({ ...props, autoRefresh: false }),
+      {
+        initialProps: { mission: distanceMission, onComplete },
+      },
+    );
+
+    await act(async () => {
+      await result.current.startExecution();
+    });
+
+    expect(result.current.canComplete).toBe(false);
+
+    await act(async () => {
+      await result.current.completeMission(320);
+    });
+
+    expect(onComplete).not.toHaveBeenCalled();
+    expect(result.current.state.error).toBe(
+      "A missao so pode ser concluida ao atingir 100% da meta.",
+    );
+  });
 });

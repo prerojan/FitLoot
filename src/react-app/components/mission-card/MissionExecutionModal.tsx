@@ -1,6 +1,6 @@
 import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import {
-  Activity,
+  ChevronUp,
   CheckCircle2,
   Clock3,
   Dumbbell,
@@ -11,7 +11,6 @@ import {
   MapPinned,
   Pause,
   Play,
-  Route,
   Square,
   X,
 } from "lucide-react";
@@ -23,7 +22,6 @@ import {
   formatDistanceMissionAmount,
   resolveDistanceMissionActivityLabel,
 } from "@/react-app/services/distanceMissionRoute";
-import { formatStepsSourceLabel } from "@/react-app/services/native/stepsService";
 import {
   isUnilateralExecutionMission,
   missionTotalGoal,
@@ -74,35 +72,51 @@ function renderRouteMetricCard(
   icon: ReactNode,
   label: string,
   value: string,
-  helper: string,
+  detail: string | null = null,
+  className = "",
 ) {
   return (
     <div
-      className="rounded-2xl border p-4"
+      className={`rounded-[20px] border px-3 py-2 ${className}`.trim()}
       style={{
-        backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 82%, transparent)",
+        background: "var(--fl-surface-muted)",
         borderColor: "var(--fl-border-soft)",
+        boxShadow: "none",
       }}
     >
-      <div className="mb-3 flex items-center gap-2">
+      <div className="flex items-center gap-2">
         <div
-          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full"
-          style={{ backgroundColor: "color-mix(in srgb, var(--app-primary-color) 14%, transparent)" }}
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full"
+          style={{
+            backgroundColor:
+              "color-mix(in srgb, var(--app-primary-color) 10%, transparent)",
+          }}
         >
           {icon}
         </div>
         <div className="min-w-0">
-          <p className="text-[10px] font-bold uppercase tracking-[0.24em]" style={{ color: "var(--app-primary-color)" }}>
+          <p
+            className="text-[10px] font-bold uppercase tracking-[0.22em]"
+            style={{ color: "var(--app-primary-color)" }}
+          >
             {label}
           </p>
-          <p className="truncate text-lg font-bold" style={{ color: "var(--fl-color-text)" }}>
+          <p
+            className="truncate text-[0.95rem] font-black leading-tight sm:text-[1rem]"
+            style={{ color: "var(--fl-color-text)" }}
+          >
             {value}
           </p>
         </div>
       </div>
-      <p className="text-xs leading-relaxed" style={{ color: "var(--fl-color-text-muted)" }}>
-        {helper}
-      </p>
+      {detail ? (
+        <p
+          className="mt-1 text-[10px] font-semibold leading-tight"
+          style={{ color: "var(--fl-color-text-muted)" }}
+        >
+          {detail}
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -113,8 +127,16 @@ function RouteMissionExecutionModal({
   onClose,
   onFinish,
 }: RouteMissionExecutionModalProps) {
+  const [metricsExpanded, setMetricsExpanded] = useState(true);
+  const bottomControlsRef = useRef<HTMLDivElement | null>(null);
+  const [bottomControlsHeight, setBottomControlsHeight] = useState(0);
   const {
     state,
+    routePreview,
+    routeLoading,
+    routeError,
+    currentLocation,
+    trackedCoordinates,
     progress,
     formattedTime,
     startExecution,
@@ -122,7 +144,6 @@ function RouteMissionExecutionModal({
     completeMission,
     cancelExecution,
     isDistanceMission,
-    healthData,
     canStart,
     canPause,
     canResume,
@@ -135,27 +156,74 @@ function RouteMissionExecutionModal({
     },
   });
 
+  useEffect(() => {
+    if (!open) return;
+    setMetricsExpanded(true);
+  }, [open]);
+
+  useEffect(() => {
+    const element = bottomControlsRef.current;
+    if (!element) {
+      return;
+    }
+
+    const syncHeight = () => {
+      const nextHeight = Math.round(element.getBoundingClientRect().height);
+      setBottomControlsHeight((current) => (current === nextHeight ? current : nextHeight));
+    };
+
+    syncHeight();
+
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", syncHeight);
+      return () => {
+        window.removeEventListener("resize", syncHeight);
+      };
+    }
+
+    const observer = new ResizeObserver(() => {
+      syncHeight();
+    });
+    observer.observe(element);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [metricsExpanded, open]);
+
   if (!open) return null;
 
-  const executionTitle = resolveMissionDisplayTitle(mission.title);
   const activityLabel = resolveDistanceMissionActivityLabel(mission);
   const distanceLabel = formatDistanceMissionAmount(state.currentDistance);
   const targetDistanceLabel = formatDistanceMissionAmount(state.targetDistance);
-  const sourceLabel = formatStepsSourceLabel(healthData?.source);
-  const locationLabel =
-    state.locationPrecision === "approximate"
-      ? "Localização aproximada"
-      : state.locationPrecision === "precise"
-        ? "Localização precisa"
-        : "Localização indisponível";
-  const sessionXp = Math.max(0, Math.round((mission.xp_reward * Math.min(100, progress)) / 100));
-  const statusLabel = state.isCompleted
-    ? "Concluída"
-    : state.isPaused
-      ? "Pausada"
-      : state.isRunning
-        ? "Em andamento"
-        : "Pronta";
+  const progressValue = Math.min(100, Math.max(0, progress));
+  const paceLabel = (() => {
+    if (state.elapsedSeconds <= 0 || state.currentDistance < 100) {
+      return '--';
+    }
+
+    const secondsPerKm = state.elapsedSeconds / Math.max(state.currentDistance / 1000, 0.001);
+    const minutes = Math.floor(secondsPerKm / 60);
+    const seconds = Math.round(secondsPerKm % 60);
+    return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}/km`;
+  })();
+  const safeTopPadding = 'calc(env(safe-area-inset-top, 0px) + 0.75rem)';
+  const safeBottomPadding = 'calc(env(safe-area-inset-bottom, 0px) + 0.75rem)';
+  const progressSweep = Math.max(0, Math.min(360, progressValue * 3.6));
+  const controlsBorderBackground =
+    progressValue > 0
+      ? `conic-gradient(from 180deg at 50% 50%, var(--app-primary-color) 0deg ${progressSweep}deg, color-mix(in srgb, var(--fl-color-text) 10%, transparent) ${progressSweep}deg 360deg)`
+      : 'color-mix(in srgb, var(--fl-color-text) 10%, transparent)';
+  const routeGlassCardStyle = {
+    background: 'var(--fl-surface-strong)',
+    borderColor: 'var(--fl-border-soft)',
+    boxShadow: 'none',
+  } as const;
+  const routeGlassInsetStyle = {
+    background: 'var(--fl-surface-muted)',
+    borderColor: 'var(--fl-border-soft)',
+    boxShadow: 'none',
+  } as const;
 
   const handleClose = () => {
     cancelExecution();
@@ -167,244 +235,230 @@ function RouteMissionExecutionModal({
   };
 
   return (
-    <div className="fl-z-mission-screen fixed inset-0 flex flex-col overflow-x-hidden font-display antialiased min-w-0" style={{ backgroundColor: "var(--app-bg-color)", color: "var(--fl-color-text)" }}>
-      <div className="layout-container flex h-full grow flex-col min-w-0">
-        <header className="flex items-center justify-between border-b px-3 py-2 sm:px-4 sm:py-3 md:px-6 md:py-4" style={{ borderColor: "var(--fl-border-soft)" }}>
-          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
-            <div className="flex size-7 sm:size-8 items-center justify-center rounded shrink-0" style={{ backgroundColor: "var(--app-primary-color)", color: "var(--fl-nav-item-active-text)" }}>
-              <Dumbbell className="w-4 h-4 sm:w-5 sm:h-5" strokeWidth={2.5} />
-            </div>
-            <h2 className="text-lg sm:text-xl font-bold tracking-tight truncate">FitLoot</h2>
-          </div>
-          <button type="button" className="flex size-8 sm:size-10 items-center justify-center rounded-full border transition-opacity hover:opacity-80" onClick={handleClose} style={{ backgroundColor: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)", color: "var(--app-primary-color)", borderColor: "color-mix(in srgb, var(--app-primary-color) 20%, transparent)" }}>
-            <X className="w-4 h-4 sm:w-5 sm:h-5" />
-          </button>
-        </header>
+    <div className="fl-z-mission-screen fixed inset-0 overflow-hidden font-display antialiased" style={{ backgroundColor: 'var(--app-bg-color)', color: 'var(--fl-color-text)' }}>
+      <DistanceMissionRoutePreview
+        mission={mission}
+        variant="screen"
+        loadStrategy="eager"
+        showStats={false}
+        showTopChips={false}
+        className="h-full w-full"
+        userLocation={currentLocation ? [currentLocation.longitude, currentLocation.latitude] : null}
+        traveledCoordinates={trackedCoordinates}
+        mapBottomInsetPx={bottomControlsHeight}
+        {...(state.isRunning || routeLoading || routePreview
+          ? {
+              routeStateOverride: {
+                preview: routePreview,
+                loading: routeLoading,
+                error: routeError,
+              },
+            }
+          : {})}
+      >
+        <div
+          className="pointer-events-none absolute inset-x-0 top-0 z-[1] h-28 sm:h-32"
+          style={{
+            background:
+              'linear-gradient(180deg, color-mix(in srgb, var(--app-bg-color) 12%, transparent), transparent)',
+          }}
+        />
+        <div
+          className="pointer-events-none absolute inset-x-0 bottom-0 z-[1] h-36 sm:h-44"
+          style={{
+            background:
+              'linear-gradient(0deg, color-mix(in srgb, var(--app-bg-color) 14%, transparent), transparent)',
+          }}
+        />
 
-        <main className="flex-1 max-w-5xl mx-auto w-full px-3 py-4 sm:px-6 sm:py-8 flex flex-col min-w-0">
-          <div className="mb-6 sm:mb-8">
-            <div className="flex justify-between items-end mb-2 sm:mb-3 gap-2">
-              <div className="min-w-0 overflow-hidden">
-                <p className="text-[10px] sm:text-xs md:text-sm font-medium uppercase tracking-widest truncate" style={{ color: "var(--app-primary-color)" }}>Missão Ativa</p>
-                <h1 className="text-lg sm:text-xl md:text-2xl lg:text-3xl font-bold mt-0.5 sm:mt-1 truncate">{executionTitle}</h1>
-                <p className="text-xs sm:text-sm mt-2 truncate" style={{ color: "var(--fl-color-text-muted)" }}>
-                  {activityLabel} com rota sugerida e monitoramento da sessão
+        <div className="absolute inset-x-0 top-0 z-10 px-3 sm:px-6" style={{ paddingTop: safeTopPadding }}>
+          <div className="mx-auto relative flex max-w-5xl items-start justify-start">
+            <button
+              type="button"
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border transition-opacity hover:opacity-85"
+              style={{
+                background: 'color-mix(in srgb, var(--app-bg-color) 72%, transparent)',
+                borderColor: 'color-mix(in srgb, var(--fl-color-text) 12%, transparent)',
+                color: 'var(--fl-color-text)',
+                backdropFilter: 'blur(18px)',
+              }}
+              onClick={handleClose}
+              aria-label="Fechar missao"
+            >
+              <X className="h-5 w-5" />
+            </button>
+
+            <div className="pointer-events-none absolute left-1/2 top-0 -translate-x-1/2">
+              <div
+                className="pointer-events-auto w-[11.75rem] rounded-[22px] border px-3.5 py-2 text-center shadow-2xl sm:w-[12.5rem] sm:px-4 sm:py-2.5"
+                style={{
+                  background: 'color-mix(in srgb, var(--app-bg-color) 68%, transparent)',
+                  borderColor: 'color-mix(in srgb, var(--fl-color-text) 12%, transparent)',
+                  backdropFilter: 'blur(18px)',
+                }}
+              >
+                <p
+                  className="text-[clamp(1.65rem,6.1vw,2.5rem)] font-black leading-none tabular-nums"
+                  style={{ color: 'var(--fl-color-text)' }}
+                >
+                  {formattedTime}
                 </p>
               </div>
-              <p className="text-base sm:text-lg md:text-xl font-bold shrink-0" style={{ color: "var(--app-primary-color)" }}>{Math.round(progress)}%</p>
-            </div>
-            <div className="h-3 w-full overflow-hidden rounded-full" style={{ backgroundColor: "color-mix(in srgb, var(--fl-color-text) 8%, transparent)" }}>
-              <div
-                className="h-full rounded-full transition-all duration-500"
-                style={{
-                  width: `${Math.min(100, progress)}%`,
-                  backgroundColor: "var(--app-primary-color)",
-                  boxShadow: "0 0 15px color-mix(in srgb, var(--app-primary-color) 50%, transparent)",
-                }}
-              />
             </div>
           </div>
 
-          {state.error ? (
+          {(state.error ?? routeError) ? (
             <div
-              className="mb-4 rounded-2xl border px-4 py-3 text-sm font-medium"
+              className="mx-auto mt-3 max-w-5xl rounded-[20px] border px-4 py-3 text-sm font-medium"
               style={{
-                backgroundColor: "color-mix(in srgb, #ef4444 12%, transparent)",
-                borderColor: "color-mix(in srgb, #ef4444 28%, transparent)",
-                color: "#991b1b",
+                backgroundColor: 'color-mix(in srgb, #ef4444 14%, transparent)',
+                borderColor: 'color-mix(in srgb, #ef4444 30%, transparent)',
+                color: '#fecaca',
+                backdropFilter: 'blur(12px)',
               }}
             >
-              {state.error}
+              {state.error ?? routeError}
             </div>
           ) : null}
+        </div>
 
-          <div className="grid gap-6 lg:grid-cols-[minmax(0,1.45fr)_minmax(18rem,1fr)]">
-            <div className="min-w-0">
-              <DistanceMissionRoutePreview
-                mission={mission}
-                variant="execution"
-                loadStrategy="eager"
-                showStats={false}
+        <div
+          ref={bottomControlsRef}
+          className="absolute inset-x-0 bottom-0 z-10 px-3 sm:px-6"
+          style={{ paddingBottom: safeBottomPadding }}
+        >
+          <div className="mx-auto flex max-w-5xl flex-col gap-1.5">
+            <button
+              type="button"
+              aria-label={metricsExpanded ? 'Ocultar metricas' : 'Mostrar metricas'}
+              aria-expanded={metricsExpanded}
+              className="mx-auto flex h-9 w-11 items-center justify-center rounded-full border transition-all duration-300 active:scale-95"
+              style={routeGlassInsetStyle}
+              onClick={() => setMetricsExpanded((current) => !current)}
+            >
+              <ChevronUp
+                className="h-4 w-4 transition-transform duration-300"
+                style={{
+                  color: 'var(--fl-color-text)',
+                  transform: metricsExpanded ? 'rotate(0deg)' : 'rotate(180deg)',
+                }}
+              />
+            </button>
+
+            <div
+              className="overflow-hidden transition-all duration-300 ease-out"
+              style={{
+                maxHeight: metricsExpanded ? '13rem' : '0rem',
+                opacity: metricsExpanded ? 1 : 0,
+                transform: metricsExpanded ? 'translateY(0)' : 'translateY(10px)',
+                visibility: metricsExpanded ? 'visible' : 'hidden',
+                pointerEvents: metricsExpanded ? 'auto' : 'none',
+              }}
+              aria-hidden={!metricsExpanded}
+            >
+              <div className="grid grid-cols-2 gap-1.5">
+                {renderRouteMetricCard(
+                  <MapPinned className="h-4 w-4" style={{ color: 'var(--app-primary-color)' }} />,
+                  'Distancia',
+                  distanceLabel,
+                  `GPS da sessao | Meta ${targetDistanceLabel}`,
+                  'min-h-[70px] sm:min-h-[74px]',
+                )}
+                {renderRouteMetricCard(
+                  <Footprints className="h-4 w-4" style={{ color: 'var(--app-primary-color)' }} />,
+                  'Passos',
+                  state.currentSteps.toLocaleString('pt-BR'),
+                  'Sincronizado do aparelho',
+                  'min-h-[70px] sm:min-h-[74px]',
+                )}
+                {renderRouteMetricCard(
+                  <Clock3 className="h-4 w-4" style={{ color: 'var(--app-primary-color)' }} />,
+                  'Ritmo',
+                  paceLabel,
+                  'Liberado apos o trecho inicial',
+                  'min-h-[58px] sm:min-h-[60px]',
+                )}
+                {renderRouteMetricCard(
+                  <Flame className="h-4 w-4" style={{ color: 'var(--app-primary-color)' }} />,
+                  'Energia',
+                  `${state.currentCalories.toLocaleString('pt-BR')} kcal`,
+                  'Estimativa da sessao',
+                  'min-h-[58px] sm:min-h-[60px]',
+                )}
+              </div>
+            </div>
+
+            <div
+              className="rounded-[26px] p-[1.5px] shadow-2xl"
+              style={{
+                background: controlsBorderBackground,
+              }}
+            >
+              <div
+                className="rounded-[24px] px-3.5 py-3 backdrop-blur-xl sm:px-4 sm:py-3.5"
+                style={routeGlassCardStyle}
               >
-                <div className="absolute inset-x-4 top-4 flex items-start justify-between gap-3">
-                  <div className="max-w-[70%] rounded-2xl border border-white/14 bg-black/34 px-4 py-3 text-white backdrop-blur-md">
-                    <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-white/72">{activityLabel}</p>
-                    <p className="mt-1 text-lg font-black leading-tight">{targetDistanceLabel}</p>
-                    <p className="mt-1 text-xs text-white/78">Meta monitorada por rota e progresso oficial.</p>
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-[10px] font-black uppercase tracking-[0.3em]" style={{ color: 'var(--app-primary-color)' }}>
+                      Progresso da missao
+                    </p>
                   </div>
-                  <span className="rounded-full border border-white/14 bg-black/40 px-3 py-2 text-xs font-semibold text-white backdrop-blur-md">
-                    {statusLabel}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <div className="rounded-full px-3 py-1.5 text-sm font-black tabular-nums" style={{ background: 'color-mix(in srgb, var(--app-primary-color) 16%, transparent)', color: 'var(--app-primary-color)' }}>
+                      {Math.round(progressValue)}%
+                    </div>
+                  </div>
                 </div>
 
-                <div className="absolute inset-x-4 bottom-4 rounded-[28px] border border-white/14 bg-black/42 p-4 text-white backdrop-blur-md">
-                  <div className="mb-3 flex items-center justify-between gap-4 text-xs font-semibold text-white/78">
-                    <span>Progresso da missão</span>
-                    <span>{progress.toFixed(1)}%</span>
-                  </div>
-                  <div className="mb-4 h-2.5 overflow-hidden rounded-full bg-white/16">
-                    <div
-                      className="h-full rounded-full transition-all duration-500"
-                      style={{
-                        width: `${Math.min(100, progress)}%`,
-                        background: "linear-gradient(90deg, var(--app-primary-color), color-mix(in srgb, var(--app-primary-color) 45%, white))",
-                      }}
-                    />
-                  </div>
-                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                    <div>
-                      <p className="text-[10px] uppercase tracking-[0.2em] text-white/62">Tempo</p>
-                      <p className="mt-1 text-sm font-bold">{formattedTime}</p>
-                    </div>
-                    <div>
-                      <p className="text-[10px] uppercase tracking-[0.2em] text-white/62">Distância</p>
-                      <p className="mt-1 text-sm font-bold">{distanceLabel}</p>
-                    </div>
-                    <div>
-                      <p className="text-[10px] uppercase tracking-[0.2em] text-white/62">Passos</p>
-                      <p className="mt-1 text-sm font-bold">{state.currentSteps.toLocaleString("pt-BR")}</p>
-                    </div>
-                    <div>
-                      <p className="text-[10px] uppercase tracking-[0.2em] text-white/62">Calorias</p>
-                      <p className="mt-1 text-sm font-bold">{state.currentCalories.toLocaleString("pt-BR")}</p>
-                    </div>
-                  </div>
-                </div>
-              </DistanceMissionRoutePreview>
-            </div>
+                <div className="mt-1.5 grid grid-cols-2 gap-2.5">
+                  <button
+                    type="button"
+                    className="h-11 rounded-[20px] border px-4 font-bold text-sm transition-colors active:scale-95 disabled:opacity-50"
+                    style={routeGlassInsetStyle}
+                    onClick={togglePause}
+                    disabled={(!canPause && !canResume) || state.isCompleted}
+                  >
+                    <span className="flex items-center justify-center gap-2">
+                      {canResume ? <Play className="h-4 w-4 fill-current" strokeWidth={1} /> : <Pause className="h-4 w-4 fill-current" strokeWidth={1} />}
+                      <span>{canResume ? 'Retomar' : 'Pausar'}</span>
+                    </span>
+                  </button>
 
-            <div className="space-y-4">
-              {renderRouteMetricCard(
-                <Clock3 className="h-5 w-5" style={{ color: "var(--app-primary-color)" }} />,
-                "Tempo",
-                formattedTime,
-                "Cronômetro da sessão atual, pausando junto com o rastreamento.",
-              )}
-              {renderRouteMetricCard(
-                <Route className="h-5 w-5" style={{ color: "var(--app-primary-color)" }} />,
-                "Distância",
-                `${distanceLabel} / ${targetDistanceLabel}`,
-                "A distância desta missão é acumulada somente pela sessão ativa.",
-              )}
-              {renderRouteMetricCard(
-                <Footprints className="h-5 w-5" style={{ color: "var(--app-primary-color)" }} />,
-                "Passos",
-                state.currentSteps.toLocaleString("pt-BR"),
-                "Passos consolidados do dispositivo durante a execução.",
-              )}
-              {renderRouteMetricCard(
-                <Flame className="h-5 w-5" style={{ color: "var(--app-primary-color)" }} />,
-                "Calorias",
-                state.currentCalories.toLocaleString("pt-BR"),
-                "Estimativa energética acompanhando a mesma sessão monitorada.",
-              )}
-            </div>
-          </div>
-
-          <div className="mt-6 grid gap-4 lg:grid-cols-2">
-            <div
-              className="rounded-2xl border p-4"
-              style={{
-                backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 82%, transparent)",
-                borderColor: "var(--fl-border-soft)",
-              }}
-            >
-              <div className="mb-3 flex items-center gap-2">
-                <MapPinned className="h-5 w-5" style={{ color: "var(--app-primary-color)" }} />
-                <h3 className="text-sm font-bold uppercase tracking-[0.2em]" style={{ color: "var(--app-primary-color)" }}>
-                  Sessão
-                </h3>
-              </div>
-              <div className="grid gap-3 text-sm sm:grid-cols-3">
-                <div>
-                  <p style={{ color: "var(--fl-color-text-muted)" }}>Status</p>
-                  <p className="mt-1 font-semibold" style={{ color: "var(--fl-color-text)" }}>{statusLabel}</p>
-                </div>
-                <div>
-                  <p style={{ color: "var(--fl-color-text-muted)" }}>Fonte</p>
-                  <p className="mt-1 font-semibold" style={{ color: "var(--fl-color-text)" }}>{sourceLabel}</p>
-                </div>
-                <div>
-                  <p style={{ color: "var(--fl-color-text-muted)" }}>Precisão</p>
-                  <p className="mt-1 font-semibold" style={{ color: "var(--fl-color-text)" }}>{locationLabel}</p>
+                  <button
+                    type="button"
+                    className="h-11 rounded-[20px] px-4 text-sm font-black text-black shadow-lg transition-all active:scale-[0.98] disabled:opacity-50 disabled:grayscale"
+                    style={{
+                      backgroundColor: 'var(--app-primary-color)',
+                      boxShadow:
+                        '0 14px 28px color-mix(in srgb, var(--app-primary-color) 18%, transparent)',
+                    }}
+                    onClick={canStart ? () => { void startExecution(); } : handlePrimaryComplete}
+                    disabled={!canStart && !canComplete}
+                  >
+                    <span className="flex items-center justify-center gap-2">
+                      {canStart ? (
+                        <Play className="h-5 w-5 fill-current" strokeWidth={1} />
+                      ) : (
+                        <CheckCircle2 className="h-5 w-5" />
+                      )}
+                      <span>
+                        {canStart
+                          ? `Iniciar ${activityLabel.toLowerCase()}`
+                          : state.isCompleted
+                            ? 'Concluida'
+                            : progressValue >= 100
+                              ? 'Concluir'
+                              : 'Encerrar'}
+                      </span>
+                    </span>
+                  </button>
                 </div>
               </div>
-              {healthData?.lastUpdated ? (
-                <p className="mt-4 text-xs" style={{ color: "var(--fl-color-text-muted)" }}>
-                  Última atualização das métricas: {new Date(healthData.lastUpdated).toLocaleTimeString("pt-BR")}
-                </p>
-              ) : null}
-            </div>
-
-            <div
-              className="rounded-2xl border p-4"
-              style={{
-                backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 82%, transparent)",
-                borderColor: "var(--fl-border-soft)",
-              }}
-            >
-              <div className="mb-3 flex items-center gap-2">
-                <Activity className="h-5 w-5" style={{ color: "var(--app-primary-color)" }} />
-                <h3 className="text-sm font-bold uppercase tracking-[0.2em]" style={{ color: "var(--app-primary-color)" }}>
-                  Meta da missão
-                </h3>
-              </div>
-              <p className="text-2xl font-black leading-tight" style={{ color: "var(--fl-color-text)" }}>
-                {isDistanceMission ? targetDistanceLabel : `${state.targetSteps.toLocaleString("pt-BR")} passos`}
-              </p>
-              <p className="mt-2 text-sm leading-relaxed" style={{ color: "var(--fl-color-text-muted)" }}>
-                O mapa é a mídia principal da missão, mantendo o mesmo fluxo visual e validando a execução pela sessão real.
-              </p>
             </div>
           </div>
-
-          <div className="grid grid-cols-2 gap-2 sm:gap-4 mt-auto pt-6 sm:pt-8 min-w-0">
-            <button
-              type="button"
-              className="col-span-2 h-12 sm:h-16 rounded-xl sm:rounded-2xl font-bold text-base sm:text-xl flex items-center justify-center gap-2 shadow-lg active:scale-[0.98] transition-all disabled:opacity-50 disabled:grayscale"
-              style={{ backgroundColor: "var(--app-primary-color)", color: "var(--fl-nav-item-active-text)", boxShadow: "0 10px 15px -3px color-mix(in srgb, var(--app-primary-color) 20%, transparent)" }}
-              onClick={canStart ? () => { void startExecution(); } : handlePrimaryComplete}
-              disabled={!canStart && !canComplete}
-            >
-              {canStart ? (
-                <Play className="w-5 h-5 sm:w-6 sm:h-6 fill-current" strokeWidth={1} />
-              ) : (
-                <CheckCircle2 className="w-5 h-5 sm:w-6 sm:h-6" />
-              )}
-              {canStart
-                ? `INICIAR ${activityLabel.toUpperCase()}`
-                : state.isCompleted
-                  ? "MISSÃO CONCLUÍDA"
-                  : "REGISTRAR CONCLUSÃO"}
-            </button>
-
-            <button
-              type="button"
-              className="h-10 sm:h-14 rounded-xl sm:rounded-2xl font-bold text-xs sm:text-sm md:text-base flex items-center justify-center gap-1 sm:gap-2 border transition-colors active:scale-95 hover:bg-white/10 truncate disabled:opacity-50"
-              style={{ backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 82%, transparent)", borderColor: "var(--fl-border-soft)", color: "var(--fl-color-text-muted)" }}
-              onClick={togglePause}
-              disabled={(!canPause && !canResume) || state.isCompleted}
-            >
-              {canResume ? <Play className="w-4 h-4 sm:w-5 sm:h-5 fill-current shrink-0" strokeWidth={1} /> : <Pause className="w-4 h-4 sm:w-5 sm:h-5 fill-current shrink-0" strokeWidth={1} />}
-              <span className="truncate">{canResume ? "RETOMAR" : "PAUSAR"}</span>
-            </button>
-
-            <button
-              type="button"
-              className="h-10 sm:h-14 rounded-xl sm:rounded-2xl font-bold text-xs sm:text-sm md:text-base flex items-center justify-center gap-1 sm:gap-2 border transition-colors active:scale-95 truncate"
-              style={{ backgroundColor: "color-mix(in srgb, var(--app-primary-color) 10%, transparent)", borderColor: "color-mix(in srgb, var(--app-primary-color) 22%, transparent)", color: "var(--app-primary-color)" }}
-              onClick={handleClose}
-            >
-              <X className="w-4 h-4 shrink-0" />
-              <span className="truncate">FECHAR</span>
-            </button>
-          </div>
-        </main>
-
-        <footer className="mt-auto py-3 sm:py-6 flex justify-center uppercase tracking-[0.2em] sm:tracking-[0.3em] font-medium" style={{ color: "var(--fl-color-text-muted)", fontSize: 0 }}>
-          <span className="text-[9px] sm:text-[10px]">Loot desta sessão: {sessionXp} / {mission.xp_reward} XP</span>
-        </footer>
-      </div>
+        </div>
+      </DistanceMissionRoutePreview>
     </div>
   );
 }

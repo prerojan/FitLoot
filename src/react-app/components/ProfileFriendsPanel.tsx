@@ -165,7 +165,7 @@ export default function ProfileFriendsPanel() {
             {searchResults.map((result) => (
               <div key={result.user_id} className="flex items-center justify-between p-2 rounded-xl hover:bg-gray-50">
                 <div className="flex items-center gap-3">
-                  <Avatar name={result.full_name || result.username} className="h-10 w-10 text-sm bg-emerald-100 text-emerald-700" />
+                  <Avatar src={result.avatar_url ?? null} name={result.full_name || result.username} className="h-10 w-10 text-sm bg-emerald-100 text-emerald-700" />
                   <div>
                     <div className="font-semibold text-gray-900">{result.username}</div>
                     <div className="text-xs text-gray-500">{result.full_name}</div>

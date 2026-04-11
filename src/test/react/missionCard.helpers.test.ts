@@ -148,6 +148,19 @@ describe("missionCard helpers - resolveMissionFocusLabels", () => {
     expect(resolveMissionFocusLabels(mission)).toEqual(["Peitoral"]);
   });
 
+  it("ignores polluted target labels when they repeat the exercise name", () => {
+    const mission = buildMission({
+      exercise_db_id: "QChZi3x",
+      exercise_name: "Agachamento livre",
+      exercise_target: "Agachamento livre",
+      exercise_body_part: "Agachamento livre",
+      muscle_groups: ["Agachamento livre"],
+      exercise_secondary_muscles: [],
+    });
+
+    expect(resolveMissionFocusLabels(mission)).toEqual(["Gl\u00fateos", "Quadr\u00edceps", "Pernas"]);
+  });
+
   it("keeps full-body cardio drills labeled as corpo inteiro when the catalog marks them that way", () => {
     const mission = buildMission({
       exercise_db_id: "dK9394r",

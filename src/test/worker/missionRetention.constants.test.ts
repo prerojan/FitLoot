@@ -11,12 +11,12 @@ describe("missionRetention constants", () => {
       "-5 minutes",
     );
     expect(SETTLED_MISSION_RETENTION_MODIFIER_BY_PERIOD.weekly).toBe(
-      "-7 days",
+      "-5 minutes",
     );
     expect(SETTLED_MISSION_RETENTION_MODIFIER_BY_PERIOD.monthly).toBe(
-      "-30 days",
+      "-5 minutes",
     );
-    expect(DEFAULT_SETTLED_MISSION_RETENTION_MODIFIER).toBe("-30 days");
+    expect(DEFAULT_SETTLED_MISSION_RETENTION_MODIFIER).toBe("-5 minutes");
   });
 });
 

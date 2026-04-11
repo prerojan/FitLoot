@@ -2,6 +2,10 @@ import { getSessionIdFromCookieHeader } from "./sessionAuth";
 
 const PUBLIC_HOT_CACHEABLE_PATHS = new Set<string>([
   "/api/auth/check-availability",
+  "/api/maps/config",
+  "/api/maps/geocode",
+  "/api/maps/reverse",
+  "/api/maps/directions",
 ]);
 
 const publicScopeHashes = new Map<string, string>();

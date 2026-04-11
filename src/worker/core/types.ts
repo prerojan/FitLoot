@@ -202,10 +202,15 @@ export interface Env {
   HOT_GET_CACHE_TTL_MS?: string | undefined;
   HOT_GET_STALE_TTL_MS?: string | undefined;
   HOT_GET_LOG_SAMPLE_RATE?: string | undefined;
-  HF_TOKEN?: string | undefined;
-  HF_CHAT_MODEL?: string | undefined;
-  HUGGING_FACE_API_KEY?: string | undefined;
-  HUGGING_FACE_CHAT_MODEL?: string | undefined;
+  OPENROUTER_API_KEY?: string | undefined;
+  OPENROUTER_CHAT_MODEL?: string | undefined;
+  OPENROUTER_VISION_MODEL?: string | undefined;
+  OPENROUTER_HTTP_REFERER?: string | undefined;
+  OPENROUTER_APP_TITLE?: string | undefined;
+  OPENROUTESERVICE_API_KEY?: string | undefined;
+  OPENROUTESERVICE_BASE_URL?: string | undefined;
+  MAP_TILE_URL_TEMPLATE?: string | undefined;
+  MAP_TILE_ATTRIBUTION?: string | undefined;
   USDA_API_KEY: string;
   RAPID_API_KEY?: string | undefined;
   RAPID_API_HOST?: string | undefined;
@@ -222,7 +227,6 @@ export interface Env {
   CAKTO_CLIENT_ID?: string | undefined;
   CAKTO_CLIENT_SECRET?: string | undefined;
   CAKTO_WEBHOOK_SECRET?: string | undefined;
-  HUGGING_FACE_VISION_MODEL?: string | undefined;
 }
 
 export type SkillSeed = {

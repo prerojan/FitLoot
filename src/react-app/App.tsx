@@ -49,6 +49,10 @@ export default function App({ initialThemeMode = DEFAULT_APP_THEME_MODE }: AppPr
     setUser(null);
   }, []);
 
+  const setAuthenticatedUser = useCallback((nextUser: User | null) => {
+    setUser(nextUser);
+  }, []);
+
   useEffect(() => {
     void checkAuth();
   }, [checkAuth]);
@@ -65,7 +69,7 @@ export default function App({ initialThemeMode = DEFAULT_APP_THEME_MODE }: AppPr
   useEffect(() => {
     if (!user?.id) return;
     return startPresenceHeartbeat();
-  }, [user, user?.id]);
+  }, [user?.id]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -123,7 +127,7 @@ export default function App({ initialThemeMode = DEFAULT_APP_THEME_MODE }: AppPr
           setMissionExecutionOpen,
         }}
       >
-        <AuthContext.Provider value={{ user, loading, checkAuth, logout }}>
+        <AuthContext.Provider value={{ user, loading, checkAuth, logout, setAuthenticatedUser }}>
           <RouterComponent>
             <Suspense fallback={<RouteLoader />}>
               <AppRoutes />

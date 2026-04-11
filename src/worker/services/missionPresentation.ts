@@ -2,6 +2,7 @@ import type { CircuitTask, MissionMetricType } from "../../shared/types";
 import {
   resolveExerciseDisplayNamePt,
   resolvePreferredExerciseDbId,
+  resolveSupportedRouteMissionActivityKind,
 } from "../../shared/exerciseCatalog";
 import {
   buildMissionDisplayGoalFromTasks,
@@ -9,6 +10,7 @@ import {
   localizeMissionTextArray,
   normalizeMissionMediaUrl,
 } from "../../shared/missionLocalization";
+import { estimateRouteMissionDurationMinutesFromMeters } from "../../shared/routeMissionDuration";
 import {
   metricUnitByType,
   shouldShowMissionDuration,
@@ -342,10 +344,30 @@ export function createMissionPresentationService({
     const metricValue = Number(
       rawMission.metric_value ?? (metricType === "duration_seconds" ? targetTime : targetReps),
     );
+    const inferredRouteActivityKind = resolveSupportedRouteMissionActivityKind(
+      typeof rawMission.exercise_name === "string" && rawMission.exercise_name.trim().length > 0
+        ? rawMission.exercise_name
+        : typeof rawMission.title === "string"
+          ? rawMission.title
+          : null,
+    );
+    const routeActivityKind =
+      rawMission.activity_kind === "walking" || rawMission.activity_kind === "running"
+        ? rawMission.activity_kind
+        : inferredRouteActivityKind;
+    const isRouteTrackingMission =
+      metricType === "distance_meters"
+      && (
+        rawMission.execution_mode === "route_tracking"
+        || routeActivityKind === "walking"
+        || routeActivityKind === "running"
+      );
     const durationEstimate = shouldShowMissionDuration(
       typeof rawMission.type === "string" ? rawMission.type : undefined,
     )
-      ? Number(rawMission.duration_estimate_minutes ?? 0)
+      ? isRouteTrackingMission
+        ? estimateRouteMissionDurationMinutesFromMeters(metricValue, routeActivityKind)
+        : Number(rawMission.duration_estimate_minutes ?? 0)
       : 0;
     const metricUnit =
       typeof rawMission.metric_unit === "string" && rawMission.metric_unit.length > 0
@@ -477,11 +499,10 @@ export function createMissionPresentationService({
           ? "route_tracking"
           : rawMission.execution_mode === "standard"
             ? "standard"
-            : undefined,
-      activity_kind:
-        rawMission.activity_kind === "walking" || rawMission.activity_kind === "running"
-          ? rawMission.activity_kind
-          : null,
+            : isRouteTrackingMission
+              ? "route_tracking"
+              : undefined,
+      activity_kind: routeActivityKind,
       difficulty_level: localizeDifficultyLabel(
         typeof rawMission.difficulty_level === "string"
           ? rawMission.difficulty_level

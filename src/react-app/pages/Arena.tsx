@@ -1,7 +1,14 @@
-import { Swords, Trophy, Users, Zap } from "lucide-react";
+import { useNavigate } from "react-router";
+import { MessageCircle, Swords, Trophy, Users, Zap } from "lucide-react";
+
+import { ROUTE_PATHS } from "@/react-app/auth/constants";
 import AppPageShell from "@/react-app/components/AppPageShell";
+import { PRIMARY_GLOW_STYLE } from "@/react-app/pages/dashboardUtils";
+import { navigateProtectedRoute } from "@/react-app/services/appNavigation";
 
 export default function Arena() {
+  const navigate = useNavigate();
+
   return (
     <AppPageShell bottomNavActive="arena">
       <main className="mx-auto flex w-full max-w-[48rem] flex-1 items-center justify-center px-4 pb-[98px] pt-4 sm:px-5 md:px-8 md:py-8 min-w-0">
@@ -77,6 +84,22 @@ export default function Arena() {
           </div>
         </section>
       </main>
+
+      {/* Atalho flutuante direto para o Social Hub. */}
+      <div className="fl-z-fab pointer-events-none fixed bottom-28 right-4 md:bottom-8 md:right-8">
+        <button
+          type="button"
+          onClick={() => {
+            void navigateProtectedRoute(navigate, ROUTE_PATHS.friends);
+          }}
+          className="pointer-events-auto flex h-14 w-14 items-center justify-center rounded-full transition-transform duration-200 hover:scale-[1.03]"
+          style={PRIMARY_GLOW_STYLE}
+          aria-label="Abrir Social Hub"
+          title="Abrir Social Hub"
+        >
+          <MessageCircle className="h-6 w-6" />
+        </button>
+      </div>
     </AppPageShell>
   );
 }

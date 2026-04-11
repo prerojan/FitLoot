@@ -1,593 +1,1520 @@
-import { useCallback, useEffect, useState } from "react";
-import { useNavigate } from "react-router";
-import { 
-  Check, 
-  Search, 
-  UserPlus, 
-  X, 
-  Flame, 
-  MoreVertical,
-  UserPlus2,
-  Clock,
-  ShieldCheck,
-  TrendingUp
-} from "lucide-react";
-import LoadingBall from "@/react-app/components/LoadingBall";
-import { Avatar } from "@/react-app/components/ui/avatar";
-import { Button } from "@/react-app/components/ui/button";
-import { ROUTE_PATHS } from "@/react-app/auth/constants";
-import AppPageShell from "@/react-app/components/AppPageShell";
-import { useAuth } from "@/react-app/auth/context";
 import {
-  fetchFriendsBundle,
-  type Friend,
+  startTransition,
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type Dispatch,
+  type FormEvent,
+  type SetStateAction,
+} from "react";
+import { useSearchParams } from "react-router";
+import {
+  Bell,
+  Check,
+  ChevronLeft,
+  CirclePlus,
+  Image as ImageIcon,
+  Loader2,
+  MessageCircle,
+  MoreVertical,
+  Search,
+  SendHorizontal,
+  ShieldBan,
+  UserMinus,
+  Volume2,
+  VolumeX,
+  X,
+} from "lucide-react";
+
+import { Avatar } from "@/react-app/components/ui/avatar";
+import AppPageShell from "@/react-app/components/AppPageShell";
+import LoadingBall from "@/react-app/components/LoadingBall";
+import { useSocialChatNotifications } from "@/react-app/contexts/useSocialChatNotifications";
+import {
+  clearFriendsCache,
   FriendsApiError,
   removeFriend as removeFriendApi,
   respondFriendRequest as respondFriendRequestApi,
   searchUsersByUsername,
   sendFriendRequest as sendFriendRequestApi,
-  type FriendSearchResult as SearchResult,
+  type FriendSearchResult,
 } from "@/react-app/services/friendsService";
+import {
+  blockSocialUser,
+  clearSocialChatCache,
+  fetchSocialConversationMessages,
+  fetchSocialHubBundle,
+  listSocialConversationMedia,
+  markSocialConversationRead,
+  muteSocialConversation,
+  sendSocialConversationMessage,
+  SocialChatApiError,
+  startDirectSocialConversation,
+  uploadSocialConversationMedia,
+} from "@/react-app/services/socialChatService";
+import { cn } from "@/react-app/utils";
+import { isExpectedApiCancellation } from "@/react-app/utils/api";
+import type {
+  SocialConversationMessage,
+  SocialConversationMessageMedia,
+  SocialConversationPreview,
+  SocialHubBundle,
+  SocialHubFriendItem,
+  SocialHubFriendRequest,
+} from "@/shared/types";
 
-type TabType = 'friends' | 'received' | 'sent';
-const ARENA_COMING_SOON_LABEL = "Em breve";
-const ARENA_COMING_SOON_TITLE = "Arena em breve";
+const HUB_REFRESH_INTERVAL_MS = 20_000;
+const ACTIVE_CONVERSATION_REFRESH_INTERVAL_MS = 10_000;
+const SEARCH_DEBOUNCE_MS = 280;
+const EMPTY_HUB_BUNDLE: SocialHubBundle = {
+  friends: [],
+  pending_requests: [],
+};
+
+type HeaderIconButtonProps = {
+  icon: typeof Bell;
+  label: string;
+  onClick: () => void;
+  badge?: number;
+  disabled?: boolean;
+};
+
+type FriendRowProps = {
+  friend: SocialHubFriendItem;
+  active: boolean;
+  busy: boolean;
+  onClick: () => void;
+};
+
+type ConversationBubbleProps = {
+  message: SocialConversationMessage;
+};
+
+type PendingRequestRowProps = {
+  request: SocialHubFriendRequest;
+  busy: boolean;
+  onAccept: () => void;
+  onReject: () => void;
+};
+
+type SearchResultRowProps = {
+  result: FriendSearchResult;
+  busy: boolean;
+  sent: boolean;
+  onSend: () => void;
+};
+
+type ActionsMenuAnchor = "list" | "thread";
+
+function getFriendDisplayName(friend: Pick<SocialHubFriendItem, "friend_full_name" | "friend_username">): string {
+  return friend.friend_full_name.trim() || friend.friend_username;
+}
+
+function parseConversationId(value: string | null): number | null {
+  const parsed = Number(value ?? 0);
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return Math.floor(parsed);
+}
+
+function formatConversationListTime(value: string | null | undefined): string {
+  if (typeof value !== "string" || value.trim().length === 0) return "";
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+
+  const now = new Date();
+  const sameDay =
+    now.getFullYear() === date.getFullYear() &&
+    now.getMonth() === date.getMonth() &&
+    now.getDate() === date.getDate();
+
+  if (sameDay) {
+    return new Intl.DateTimeFormat("pt-BR", {
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(date);
+  }
+
+  const diffDays = Math.floor((now.getTime() - date.getTime()) / 86_400_000);
+  if (diffDays <= 0) {
+    return new Intl.DateTimeFormat("pt-BR", {
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(date);
+  }
+  if (diffDays < 7) return `${diffDays}d`;
+  if (diffDays < 30) return `${Math.max(1, Math.floor(diffDays / 7))}w`;
+
+  return new Intl.DateTimeFormat("pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+  }).format(date);
+}
+
+function formatBubbleTimestamp(value: string): string {
+  try {
+    return new Intl.DateTimeFormat("pt-BR", {
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(new Date(value));
+  } catch {
+    return "";
+  }
+}
+
+function describeMessagePreview(message: Pick<SocialConversationMessage, "message_kind" | "message_text">): string {
+  if (message.message_kind === "image") {
+    return message.message_text.trim() || "Imagem";
+  }
+  return message.message_text.trim();
+}
+
+function matchesFriendQuery(friend: SocialHubFriendItem, query: string): boolean {
+  if (!query) return true;
+  const normalized = query.toLowerCase();
+  const haystack = [
+    friend.friend_full_name,
+    friend.friend_username,
+    friend.last_message_preview ?? "",
+  ]
+    .join(" ")
+    .toLowerCase();
+  return haystack.includes(normalized);
+}
+
+function sortHubFriends(friends: readonly SocialHubFriendItem[]): SocialHubFriendItem[] {
+  return [...friends].sort((left, right) => {
+    const rightActivity = Date.parse(right.last_message_at ?? "");
+    const leftActivity = Date.parse(left.last_message_at ?? "");
+
+    const rightHasActivity = Number.isFinite(rightActivity);
+    const leftHasActivity = Number.isFinite(leftActivity);
+    if (rightHasActivity && leftHasActivity && rightActivity !== leftActivity) {
+      return rightActivity - leftActivity;
+    }
+    if (rightHasActivity !== leftHasActivity) {
+      return rightHasActivity ? 1 : -1;
+    }
+
+    if (left.unread_count !== right.unread_count) {
+      return right.unread_count - left.unread_count;
+    }
+    if (left.is_online !== right.is_online) {
+      return left.is_online ? -1 : 1;
+    }
+
+    return getFriendDisplayName(left).localeCompare(getFriendDisplayName(right), "pt-BR", {
+      sensitivity: "base",
+    });
+  });
+}
+
+function updateHubFriend(
+  bundle: SocialHubBundle,
+  friendUserId: string,
+  updater: (friend: SocialHubFriendItem) => SocialHubFriendItem,
+): SocialHubBundle {
+  return {
+    ...bundle,
+    friends: bundle.friends.map((friend) =>
+      friend.friend_user_id === friendUserId ? updater(friend) : friend,
+    ),
+  };
+}
+
+function removeHubFriend(bundle: SocialHubBundle, friendUserId: string): SocialHubBundle {
+  return {
+    ...bundle,
+    friends: bundle.friends.filter((friend) => friend.friend_user_id !== friendUserId),
+  };
+}
+
+function applyConversationPreviewToFriend(
+  bundle: SocialHubBundle,
+  friendUserId: string,
+  conversation: SocialConversationPreview | null,
+  message?: SocialConversationMessage | null,
+): SocialHubBundle {
+  return updateHubFriend(bundle, friendUserId, (friend) => ({
+    ...friend,
+    direct_conversation_id: conversation?.id ?? friend.direct_conversation_id ?? null,
+    unread_count: Math.max(0, Number(conversation?.unread_count ?? 0)),
+    last_message_preview:
+      conversation?.last_message_preview ??
+      (message ? describeMessagePreview(message) : friend.last_message_preview),
+    last_message_at: conversation?.last_message_at ?? message?.created_at ?? friend.last_message_at,
+    notifications_muted: conversation?.notifications_muted ?? friend.notifications_muted,
+  }));
+}
+
+function upsertConversationMessage(
+  messages: readonly SocialConversationMessage[],
+  incoming: SocialConversationMessage,
+): SocialConversationMessage[] {
+  const existing = messages.find((message) => message.id === incoming.id);
+  if (existing) {
+    return messages.map((message) => (message.id === incoming.id ? incoming : message));
+  }
+
+  return [...messages, incoming].sort((left, right) => left.id - right.id);
+}
+
+function HeaderIconButton({ icon: Icon, label, onClick, badge = 0, disabled = false }: HeaderIconButtonProps) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className="fl-social-hub-icon-button relative flex h-11 w-11 items-center justify-center rounded-full transition-transform hover:scale-[1.02] disabled:cursor-not-allowed disabled:opacity-45"
+      aria-label={label}
+      title={label}
+    >
+      <Icon className="h-4.5 w-4.5" />
+      {badge > 0 ? (
+        <span className="absolute -right-1 -top-1 flex min-h-5 min-w-5 items-center justify-center rounded-full bg-[color:var(--fl-color-text)] px-1 text-[10px] font-black text-[color:var(--app-bg-color)]">
+          {badge > 9 ? "9+" : badge}
+        </span>
+      ) : null}
+    </button>
+  );
+}
+
+function FriendPresenceAvatar({
+  src,
+  name,
+  isOnline,
+  className,
+}: {
+  src: string | null | undefined;
+  name: string;
+  isOnline: boolean | undefined;
+  className?: string | undefined;
+}) {
+  return (
+    <div className={cn("relative shrink-0", className)}>
+      <Avatar src={src ?? null} name={name} className="h-14 w-14 border border-[color:var(--fl-social-hub-muted-border)]" />
+      <span
+        className={cn(
+          "absolute bottom-0 right-0 h-3.5 w-3.5 rounded-full border-2 border-[color:var(--fl-social-hub-card-bg)]",
+          isOnline ? "bg-[#1ec96b]" : "bg-[#c7c7c7]",
+        )}
+        aria-hidden="true"
+      />
+    </div>
+  );
+}
+
+function FriendRow({ friend, active, busy, onClick }: FriendRowProps) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={busy}
+      className={cn(
+        "flex w-full items-center gap-3 border-b border-[color:var(--fl-social-hub-muted-border)] px-1 py-4 text-left transition-colors",
+        active ? "rounded-[1.6rem] bg-black/[0.06] px-3" : "hover:bg-black/[0.03]",
+        busy ? "cursor-wait opacity-70" : "",
+      )}
+    >
+      <FriendPresenceAvatar
+        src={friend.friend_avatar_url}
+        name={getFriendDisplayName(friend)}
+        isOnline={friend.is_online}
+      />
+      <div className="min-w-0 flex-1">
+        <div className="flex items-start gap-3">
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-[1rem] font-semibold text-[color:var(--fl-color-text)]">
+              {getFriendDisplayName(friend)}
+            </p>
+            <p className="truncate text-[0.84rem] text-[color:var(--fl-color-text-muted)]">
+              {friend.last_message_preview?.trim() || `@${friend.friend_username}`}
+            </p>
+          </div>
+          <div className="flex shrink-0 flex-col items-end gap-2">
+            <span className="text-[0.68rem] font-medium text-[color:var(--fl-color-text-muted)]">
+              {formatConversationListTime(friend.last_message_at)}
+            </span>
+            {busy ? (
+              <Loader2 className="h-4 w-4 animate-spin text-[color:var(--fl-color-text-muted)]" />
+            ) : friend.unread_count > 0 ? (
+              <span className="flex min-h-6 min-w-6 items-center justify-center rounded-full bg-[color:var(--fl-color-text)] px-1 text-[0.7rem] font-black text-[color:var(--app-bg-color)]">
+                {friend.unread_count > 9 ? "9+" : friend.unread_count}
+              </span>
+            ) : null}
+          </div>
+        </div>
+      </div>
+    </button>
+  );
+}
+
+function PendingRequestRow({ request, busy, onAccept, onReject }: PendingRequestRowProps) {
+  return (
+    <div className="fl-social-hub-soft-card flex items-center gap-3 rounded-[1.6rem] px-4 py-3">
+      <Avatar
+        src={request.friend_avatar_url}
+        name={request.friend_full_name || request.friend_username}
+        className="h-12 w-12 border border-[color:var(--fl-social-hub-muted-border)]"
+      />
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-semibold text-[color:var(--fl-color-text)]">
+          {request.friend_full_name || request.friend_username}
+        </p>
+        <p className="truncate text-[0.8rem] text-[color:var(--fl-color-text-muted)]">@{request.friend_username}</p>
+      </div>
+      <div className="flex shrink-0 items-center gap-2">
+        <button
+          type="button"
+          onClick={onReject}
+          disabled={busy}
+          className="fl-social-hub-icon-button flex h-10 w-10 items-center justify-center rounded-full transition-transform hover:scale-[1.02] disabled:opacity-50"
+          aria-label={`Recusar solicitacao de ${request.friend_username}`}
+        >
+          <X className="h-4 w-4" />
+        </button>
+        <button
+          type="button"
+          onClick={onAccept}
+          disabled={busy}
+          className="flex h-10 w-10 items-center justify-center rounded-full bg-[color:var(--fl-color-text)] text-[color:var(--app-bg-color)] transition-transform hover:scale-[1.02] disabled:opacity-50"
+          aria-label={`Aceitar solicitacao de ${request.friend_username}`}
+        >
+          {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function SearchResultRow({ result, busy, sent, onSend }: SearchResultRowProps) {
+  return (
+    <div className="fl-social-hub-soft-card flex items-center gap-3 rounded-[1.6rem] px-4 py-3">
+      <Avatar
+        src={result.avatar_url}
+        name={result.full_name || result.username}
+        className="h-12 w-12 border border-[color:var(--fl-social-hub-muted-border)]"
+      />
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-semibold text-[color:var(--fl-color-text)]">
+          {result.full_name || result.username}
+        </p>
+        <p className="truncate text-[0.8rem] text-[color:var(--fl-color-text-muted)]">@{result.username}</p>
+      </div>
+      <button
+        type="button"
+        onClick={onSend}
+        disabled={busy || sent}
+        className="rounded-full bg-[color:var(--fl-color-text)] px-4 py-2 text-[0.72rem] font-black uppercase tracking-[0.16em] text-[color:var(--app-bg-color)] transition-transform hover:scale-[1.02] disabled:cursor-default disabled:opacity-40"
+      >
+        {busy ? "..." : sent ? "Enviado" : "Adicionar"}
+      </button>
+    </div>
+  );
+}
+
+function ConversationActionsMenu({
+  activeFriend,
+  onOpenMediaLibrary,
+  onToggleMute,
+  onRemoveFriend,
+  onBlockFriend,
+}: {
+  activeFriend: SocialHubFriendItem;
+  onOpenMediaLibrary: () => void;
+  onToggleMute: () => void;
+  onRemoveFriend: () => void;
+  onBlockFriend: () => void;
+}) {
+  return (
+    <div className="fl-social-hub-menu absolute right-0 top-[calc(100%+0.65rem)] z-20 w-[16rem] rounded-[1.6rem] p-2.5">
+      <button
+        type="button"
+        onClick={onOpenMediaLibrary}
+        className="flex w-full items-center gap-3 rounded-[1rem] px-3 py-3 text-left text-sm font-medium text-[color:var(--fl-color-text)] transition-colors hover:bg-black/[0.04]"
+      >
+        <ImageIcon className="h-4 w-4" />
+        Midia
+      </button>
+      <button
+        type="button"
+        onClick={onToggleMute}
+        className="flex w-full items-center gap-3 rounded-[1rem] px-3 py-3 text-left text-sm font-medium text-[color:var(--fl-color-text)] transition-colors hover:bg-black/[0.04]"
+      >
+        {activeFriend.notifications_muted ? (
+          <Volume2 className="h-4 w-4" />
+        ) : (
+          <VolumeX className="h-4 w-4" />
+        )}
+        {activeFriend.notifications_muted ? "Ativar notificacoes" : "Silenciar notificacoes"}
+      </button>
+      <button
+        type="button"
+        onClick={onRemoveFriend}
+        className="flex w-full items-center gap-3 rounded-[1rem] px-3 py-3 text-left text-sm font-medium text-[color:var(--fl-color-text)] transition-colors hover:bg-black/[0.04]"
+      >
+        <UserMinus className="h-4 w-4" />
+        Desfazer amizade
+      </button>
+      <button
+        type="button"
+        onClick={onBlockFriend}
+        className="fl-social-hub-danger-action flex w-full items-center gap-3 rounded-[1rem] px-3 py-3 text-left text-sm font-medium transition-colors"
+      >
+        <ShieldBan className="h-4 w-4" />
+        Bloquear usuario
+      </button>
+    </div>
+  );
+}
+
+function ConversationBubble({ message }: ConversationBubbleProps) {
+  return (
+    <div className={cn("flex w-full", message.is_own_message ? "justify-end" : "justify-start")}>
+      <div className="max-w-[82%]">
+        {message.media?.public_url ? (
+          <div
+            className={cn(
+              "overflow-hidden rounded-[1.8rem] border",
+              message.is_own_message
+                ? "border-transparent fl-social-hub-bubble-own"
+                : "border-[color:var(--fl-social-hub-muted-border)] fl-social-hub-bubble-other",
+            )}
+          >
+            <img
+              src={message.media.public_url}
+              alt="Midia compartilhada"
+              className="max-h-[18rem] w-full object-cover"
+              loading="lazy"
+            />
+            {message.message_text.trim() ? (
+              <p className="px-4 pb-4 pt-3 text-sm leading-relaxed">{message.message_text}</p>
+            ) : null}
+          </div>
+        ) : (
+          <div
+            className={cn(
+              "rounded-[1.6rem] px-4 py-3 text-[0.95rem] leading-relaxed",
+              message.is_own_message
+                ? "fl-social-hub-bubble-own"
+                : "fl-social-hub-bubble-other",
+            )}
+          >
+            {message.message_text}
+          </div>
+        )}
+        <div
+          className={cn(
+            "mt-1 px-1 text-[0.68rem] font-medium",
+            message.is_own_message
+              ? "text-right text-[color:var(--fl-color-text-muted)]"
+              : "text-left text-[color:var(--fl-color-text-muted)]",
+          )}
+        >
+          {formatBubbleTimestamp(message.created_at)}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function Friends() {
-  const { user } = useAuth();
-  const navigate = useNavigate();
-  const [friends, setFriends] = useState<Friend[]>([]);
-  const [receivedRequests, setReceivedRequests] = useState<Friend[]>([]);
-  const [sentRequests] = useState<Friend[]>([]); // Mantem a aba enquanto a API nao expoe enviados.
-  const [activeTab, setActiveTab] = useState<TabType>('friends');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const { refreshSocialChatNotifications } = useSocialChatNotifications();
+  const requestedConversationId = parseConversationId(searchParams.get("conversationId"));
+
+  const [hub, setHub] = useState<SocialHubBundle>(EMPTY_HUB_BUNDLE);
+  const [loadingHub, setLoadingHub] = useState(true);
+  const [hubError, setHubError] = useState<string | null>(null);
+  const [threadError, setThreadError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [searching, setSearching] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [activeMenuFriendId, setActiveMenuFriendId] = useState<number | null>(null);
-  const [removingFriendUserId, setRemovingFriendUserId] = useState<string | null>(null);
+  const deferredSearchQuery = useDeferredValue(searchQuery.trim());
+  const [remoteResults, setRemoteResults] = useState<FriendSearchResult[]>([]);
+  const [remoteSearchLoading, setRemoteSearchLoading] = useState(false);
+  const [selectedFriendUserId, setSelectedFriendUserId] = useState<string | null>(null);
+  const [messages, setMessages] = useState<SocialConversationMessage[]>([]);
+  const [messagesLoading, setMessagesLoading] = useState(false);
+  const [messageInput, setMessageInput] = useState("");
+  const [sendingMessage, setSendingMessage] = useState(false);
+  const [uploadingMedia, setUploadingMedia] = useState(false);
+  const [openingConversationUserId, setOpeningConversationUserId] = useState<string | null>(null);
+  const [notificationModalOpen, setNotificationModalOpen] = useState(false);
+  const [actionsMenuAnchor, setActionsMenuAnchor] = useState<ActionsMenuAnchor | null>(null);
+  const [mediaModalOpen, setMediaModalOpen] = useState(false);
+  const [mediaItems, setMediaItems] = useState<SocialConversationMessageMedia[]>([]);
+  const [mediaLoading, setMediaLoading] = useState(false);
+  const [mediaError, setMediaError] = useState<string | null>(null);
+  const [requestActionUserId, setRequestActionUserId] = useState<string | null>(null);
+  const [sendingRequestUserId, setSendingRequestUserId] = useState<string | null>(null);
+  const [sentRequestUserIds, setSentRequestUserIds] = useState<Set<string>>(() => new Set());
+  const [threadConversationId, setThreadConversationId] = useState<number | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const threadEndRef = useRef<HTMLDivElement | null>(null);
+  const lastReadMarkerRef = useRef<string>("");
 
-  const handleFriendsError = useCallback((rawError: unknown, fallbackMessage: string) => {
-    if (rawError instanceof FriendsApiError) {
-      if (rawError.code === "UNAUTHORIZED") {
-        navigate("/app");
-        return;
-      }
-      setError(rawError.message || fallbackMessage);
-      return;
+  const sortedFriends = useMemo(() => sortHubFriends(hub.friends), [hub.friends]);
+  const filteredFriends = useMemo(
+    () => sortedFriends.filter((friend) => matchesFriendQuery(friend, deferredSearchQuery.toLowerCase())),
+    [deferredSearchQuery, sortedFriends],
+  );
+
+  const activeFriend = useMemo(
+    () => hub.friends.find((friend) => friend.friend_user_id === selectedFriendUserId) ?? null,
+    [hub.friends, selectedFriendUserId],
+  );
+  const activeConversationId = activeFriend?.direct_conversation_id ?? null;
+  const activeFriendDisplayName = activeFriend ? getFriendDisplayName(activeFriend) : "";
+  const isConversationOpen = activeFriend !== null;
+
+  const friendUserIds = useMemo(
+    () => new Set(hub.friends.map((friend) => friend.friend_user_id)),
+    [hub.friends],
+  );
+  const pendingRequestUserIds = useMemo(
+    () => new Set(hub.pending_requests.map((request) => request.friend_user_id)),
+    [hub.pending_requests],
+  );
+
+  const visibleRemoteResults = useMemo(
+    () =>
+      remoteResults.filter((result) =>
+        !friendUserIds.has(result.user_id) &&
+        !pendingRequestUserIds.has(result.user_id),
+      ),
+    [friendUserIds, pendingRequestUserIds, remoteResults],
+  );
+
+  const setConversationParam = useCallback((conversationId: number | null) => {
+    const nextParams = new URLSearchParams(searchParams);
+    if (conversationId && conversationId > 0) {
+      nextParams.set("conversationId", String(conversationId));
+    } else {
+      nextParams.delete("conversationId");
     }
+    setSearchParams(nextParams, { replace: true });
+  }, [searchParams, setSearchParams]);
 
-    setError(fallbackMessage);
-  }, [navigate]);
+  const toggleActionsMenu = useCallback((anchor: ActionsMenuAnchor) => {
+    setActionsMenuAnchor((current) => (current === anchor ? null : anchor));
+  }, []);
 
-  const loadFriends = useCallback(async (forceRefresh = false) => {
+  const handleServiceError = useCallback((error: unknown, fallbackMessage: string): string | null => {
+    if (isExpectedApiCancellation(error)) {
+      return null;
+    }
+    if (error instanceof FriendsApiError || error instanceof SocialChatApiError) {
+      return error.message || fallbackMessage;
+    }
+    return fallbackMessage;
+  }, []);
+
+  const applyServiceError = useCallback((
+    setErrorState: Dispatch<SetStateAction<string | null>>,
+    error: unknown,
+    fallbackMessage: string,
+  ) => {
+    const message = handleServiceError(error, fallbackMessage);
+    if (message) {
+      setErrorState(message);
+    }
+  }, [handleServiceError]);
+
+  const loadHub = useCallback(async (forceRefresh = false) => {
     try {
-      setError(null);
-      const bundle = await fetchFriendsBundle({ forceRefresh });
-      setFriends(bundle.friends);
-      setReceivedRequests(bundle.pending);
+      setHubError(null);
+      const payload = await fetchSocialHubBundle({ forceRefresh });
+      setHub(payload);
     } catch (error) {
-      handleFriendsError(error, "Nao foi possivel carregar a lista de amigos agora.");
+      applyServiceError(setHubError, error, "Nao foi possivel carregar o Social Hub agora.");
     } finally {
-      setLoading(false);
+      setLoadingHub(false);
     }
-  }, [handleFriendsError]);
+  }, [applyServiceError]);
 
-  useEffect(() => {
-    if (!user) {
-      navigate("/app");
+  const refreshActiveConversation = useCallback(async (options?: { quiet?: boolean }) => {
+    if (!activeConversationId || !activeFriend) {
+      setMessages([]);
+      setThreadConversationId(null);
       return;
     }
-    void loadFriends(true);
-  }, [user, navigate, loadFriends]);
+
+    if (!options?.quiet) {
+      setMessagesLoading(true);
+    }
+
+    try {
+      setThreadError(null);
+      const payload = await fetchSocialConversationMessages(activeConversationId, { limit: 60 });
+      setMessages(payload.messages);
+      setThreadConversationId(activeConversationId);
+      setHub((current) =>
+        applyConversationPreviewToFriend(
+          current,
+          activeFriend.friend_user_id,
+          payload.conversation,
+          payload.messages[payload.messages.length - 1] ?? null,
+        ),
+      );
+
+      const lastMessage = payload.messages[payload.messages.length - 1] ?? null;
+      if (lastMessage && !lastMessage.is_own_message) {
+        const marker = `${activeConversationId}:${lastMessage.id}`;
+        if (lastReadMarkerRef.current !== marker) {
+          lastReadMarkerRef.current = marker;
+          void markSocialConversationRead(activeConversationId, {
+            last_read_message_id: lastMessage.id,
+          })
+            .then(() => {
+              setHub((current) =>
+                updateHubFriend(current, activeFriend.friend_user_id, (friend) => ({
+                  ...friend,
+                  unread_count: 0,
+                })),
+              );
+              void refreshSocialChatNotifications({ force: true });
+            })
+            .catch(() => {
+              lastReadMarkerRef.current = "";
+            });
+        }
+      }
+    } catch (error) {
+      applyServiceError(setThreadError, error, "Nao foi possivel carregar esta conversa agora.");
+    } finally {
+      setMessagesLoading(false);
+    }
+  }, [activeConversationId, activeFriend, applyServiceError, refreshSocialChatNotifications]);
+
+  const openFriendConversation = useCallback(async (friend: SocialHubFriendItem) => {
+    if (friend.direct_conversation_id) {
+      startTransition(() => {
+        setSelectedFriendUserId(friend.friend_user_id);
+      });
+      setConversationParam(friend.direct_conversation_id);
+      setActionsMenuAnchor(null);
+      return;
+    }
+
+    setOpeningConversationUserId(friend.friend_user_id);
+    setHubError(null);
+
+    try {
+      const conversation = await startDirectSocialConversation({
+        friend_user_id: friend.friend_user_id,
+      });
+
+      setHub((current) =>
+        applyConversationPreviewToFriend(current, friend.friend_user_id, conversation),
+      );
+
+      startTransition(() => {
+        setSelectedFriendUserId(friend.friend_user_id);
+      });
+      setConversationParam(conversation.id);
+    } catch (error) {
+      applyServiceError(setHubError, error, "Nao foi possivel abrir a conversa agora.");
+    } finally {
+      setOpeningConversationUserId((current) =>
+        current === friend.friend_user_id ? null : current,
+      );
+    }
+  }, [applyServiceError, setConversationParam]);
+
+  const loadConversationMedia = useCallback(async () => {
+    if (!activeConversationId) return;
+
+    setMediaLoading(true);
+    setMediaError(null);
+
+    try {
+      const payload = await listSocialConversationMedia(activeConversationId, { limit: 120 });
+      setMediaItems(payload);
+    } catch (error) {
+      applyServiceError(setMediaError, error, "Nao foi possivel carregar a midia desta conversa.");
+    } finally {
+      setMediaLoading(false);
+    }
+  }, [activeConversationId, applyServiceError]);
 
   useEffect(() => {
-    if (!user) return;
+    void loadHub(true);
+  }, [loadHub]);
 
-    const refreshVisibleFriends = () => {
+  useEffect(() => {
+    const refreshVisibleHub = () => {
       if (document.visibilityState !== "visible") return;
-      void loadFriends(true);
+      if (activeConversationId) return;
+      void loadHub(true);
     };
 
-    const timer = window.setInterval(() => {
-      refreshVisibleFriends();
-    }, 15_000);
+    const intervalId = window.setInterval(() => {
+      refreshVisibleHub();
+    }, HUB_REFRESH_INTERVAL_MS);
 
-    window.addEventListener("focus", refreshVisibleFriends);
-    document.addEventListener("visibilitychange", refreshVisibleFriends);
+    window.addEventListener("focus", refreshVisibleHub);
+    document.addEventListener("visibilitychange", refreshVisibleHub);
 
     return () => {
-      window.clearInterval(timer);
-      window.removeEventListener("focus", refreshVisibleFriends);
-      document.removeEventListener("visibilitychange", refreshVisibleFriends);
+      window.clearInterval(intervalId);
+      window.removeEventListener("focus", refreshVisibleHub);
+      document.removeEventListener("visibilitychange", refreshVisibleHub);
     };
-  }, [user, loadFriends]);
+  }, [activeConversationId, loadHub]);
 
   useEffect(() => {
-    if (activeMenuFriendId === null) return;
+    if (requestedConversationId === null) {
+      return;
+    }
+
+    const requestedFriend = hub.friends.find(
+      (friend) => friend.direct_conversation_id === requestedConversationId,
+    );
+
+    if (requestedFriend) {
+      if (selectedFriendUserId !== requestedFriend.friend_user_id) {
+        startTransition(() => {
+          setSelectedFriendUserId(requestedFriend.friend_user_id);
+        });
+      }
+      return;
+    }
+
+    if (!loadingHub) {
+      setConversationParam(null);
+    }
+  }, [hub.friends, loadingHub, requestedConversationId, selectedFriendUserId, setConversationParam]);
+
+  useEffect(() => {
+    if (!selectedFriendUserId) return;
+    const stillExists = hub.friends.some((friend) => friend.friend_user_id === selectedFriendUserId);
+    if (stillExists) return;
+
+    setSelectedFriendUserId(null);
+    setMessages([]);
+    setThreadConversationId(null);
+    setActionsMenuAnchor(null);
+    setMediaModalOpen(false);
+    setConversationParam(null);
+  }, [hub.friends, selectedFriendUserId, setConversationParam]);
+
+  useEffect(() => {
+    if (!activeConversationId) {
+      setMessages([]);
+      setThreadConversationId(null);
+      return;
+    }
+
+    lastReadMarkerRef.current = "";
+    void refreshActiveConversation();
+  }, [activeConversationId, refreshActiveConversation]);
+
+  useEffect(() => {
+    if (!activeConversationId) return;
+
+    const intervalId = window.setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      void refreshActiveConversation({ quiet: true });
+    }, ACTIVE_CONVERSATION_REFRESH_INTERVAL_MS);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [activeConversationId, refreshActiveConversation]);
+
+  useEffect(() => {
+    if (!mediaModalOpen) return;
+    void loadConversationMedia();
+  }, [loadConversationMedia, mediaModalOpen]);
+
+  useEffect(() => {
+    if (!threadEndRef.current || threadConversationId !== activeConversationId) return;
+    threadEndRef.current.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [activeConversationId, messages, threadConversationId]);
+
+  useEffect(() => {
+    const normalizedQuery = deferredSearchQuery;
+    const hasExactFriendMatch = filteredFriends.some((friend) => {
+      const username = friend.friend_username.trim().toLowerCase();
+      const fullName = friend.friend_full_name.trim().toLowerCase();
+      const normalized = normalizedQuery.toLowerCase();
+      return username === normalized || fullName === normalized;
+    });
+
+    if (normalizedQuery.length < 3 || hasExactFriendMatch) {
+      setRemoteResults([]);
+      setRemoteSearchLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    const timeoutId = window.setTimeout(() => {
+      setRemoteSearchLoading(true);
+      searchUsersByUsername(normalizedQuery)
+        .then((payload) => {
+          if (cancelled) return;
+          setRemoteResults(payload);
+        })
+        .catch(() => {
+          if (cancelled) return;
+          setRemoteResults([]);
+        })
+        .finally(() => {
+          if (cancelled) return;
+          setRemoteSearchLoading(false);
+        });
+    }, SEARCH_DEBOUNCE_MS);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeoutId);
+    };
+  }, [deferredSearchQuery, filteredFriends]);
+
+  useEffect(() => {
+    setMessageInput("");
+    setThreadError(null);
+  }, [activeConversationId]);
+
+  useEffect(() => {
+    if (!actionsMenuAnchor) return;
 
     const handlePointerDown = (event: PointerEvent) => {
       const target = event.target;
       if (!(target instanceof Element)) {
-        setActiveMenuFriendId(null);
+        setActionsMenuAnchor(null);
         return;
       }
 
-      const menuRoot = target.closest("[data-friend-menu-root]");
-      if (menuRoot?.getAttribute("data-friend-menu-root") === String(activeMenuFriendId)) {
+      if (target.closest("[data-social-hub-actions-root]")) {
         return;
       }
 
-      setActiveMenuFriendId(null);
+      setActionsMenuAnchor(null);
     };
 
     document.addEventListener("pointerdown", handlePointerDown);
     return () => {
       document.removeEventListener("pointerdown", handlePointerDown);
     };
-  }, [activeMenuFriendId]);
+  }, [actionsMenuAnchor]);
 
-  const searchUsers = async () => {
-    if (!searchQuery.trim()) {
-      setSearchResults([]);
-      return;
-    }
+  const handleSendFriendRequest = useCallback(async (result: FriendSearchResult) => {
+    setSendingRequestUserId(result.user_id);
+    setHubError(null);
 
-    setSearching(true);
     try {
-      const payload = await searchUsersByUsername(searchQuery.trim());
-      setSearchResults(payload);
+      await sendFriendRequestApi(result.user_id);
+      setSentRequestUserIds((current) => {
+        const next = new Set(current);
+        next.add(result.user_id);
+        return next;
+      });
     } catch (error) {
-      handleFriendsError(error, "Nao foi possivel buscar usuarios agora.");
+      applyServiceError(setHubError, error, "Nao foi possivel enviar a solicitacao.");
     } finally {
-      setSearching(false);
+      setSendingRequestUserId((current) => (current === result.user_id ? null : current));
     }
-  };
+  }, [applyServiceError]);
 
-  const handleSendFriendRequest = async (friendUserId: string) => {
+  const handleRespondRequest = useCallback(async (request: SocialHubFriendRequest, accept: boolean) => {
+    setRequestActionUserId(request.friend_user_id);
+    setHubError(null);
+
     try {
-      await sendFriendRequestApi(friendUserId);
-
-      setSearchQuery("");
-      setSearchResults([]);
-      setActiveTab("friends");
-      await loadFriends(true);
+      await respondFriendRequestApi(request.id, accept);
+      clearSocialChatCache();
+      clearFriendsCache();
+      await loadHub(true);
     } catch (error) {
-      handleFriendsError(error, "Nao foi possivel enviar solicitacao.");
+      applyServiceError(setHubError, error, "Nao foi possivel responder a solicitacao.");
+    } finally {
+      setRequestActionUserId((current) => (current === request.friend_user_id ? null : current));
     }
-  };
+  }, [applyServiceError, loadHub]);
 
-  const respondRequest = async (requestId: number, accept: boolean) => {
+  const handleSubmitMessage = useCallback(async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!activeConversationId || !activeFriend) return;
+
+    const normalized = messageInput.trim();
+    if (!normalized) return;
+
+    setSendingMessage(true);
+    setThreadError(null);
+
     try {
-      await respondFriendRequestApi(requestId, accept);
-      await loadFriends(true);
+      const payload = await sendSocialConversationMessage(activeConversationId, {
+        message_text: normalized,
+      });
+      setMessageInput("");
+      setMessages((current) => upsertConversationMessage(current, payload.message));
+      setHub((current) =>
+        applyConversationPreviewToFriend(
+          current,
+          activeFriend.friend_user_id,
+          payload.conversation,
+          payload.message,
+        ),
+      );
+      void refreshSocialChatNotifications({ force: true });
     } catch (error) {
-      handleFriendsError(error, "Nao foi possivel responder a solicitacao.");
+      applyServiceError(setThreadError, error, "Nao foi possivel enviar a mensagem.");
+    } finally {
+      setSendingMessage(false);
     }
-  };
+  }, [
+    activeConversationId,
+    activeFriend,
+    applyServiceError,
+    messageInput,
+    refreshSocialChatNotifications,
+  ]);
 
-  const handleRemoveFriend = async (friend: Friend) => {
-    const confirmed = window.confirm(`Remover ${friend.friend_username} da sua lista de amigos?`);
+  const handleFileSelection = useCallback(async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0] ?? null;
+    event.target.value = "";
+
+    if (!file || !activeConversationId || !activeFriend) return;
+
+    setUploadingMedia(true);
+    setThreadError(null);
+
+    try {
+      const payload = await uploadSocialConversationMedia(activeConversationId, {
+        file,
+      });
+      setMessages((current) => upsertConversationMessage(current, payload.message));
+      setHub((current) =>
+        applyConversationPreviewToFriend(
+          current,
+          activeFriend.friend_user_id,
+          payload.conversation,
+          payload.message,
+        ),
+      );
+      void refreshSocialChatNotifications({ force: true });
+    } catch (error) {
+      applyServiceError(setThreadError, error, "Nao foi possivel enviar a imagem.");
+    } finally {
+      setUploadingMedia(false);
+    }
+  }, [activeConversationId, activeFriend, applyServiceError, refreshSocialChatNotifications]);
+
+  const handleToggleMute = useCallback(async () => {
+    if (!activeConversationId || !activeFriend) return;
+
+    setActionsMenuAnchor(null);
+    setThreadError(null);
+
+    try {
+      const payload = await muteSocialConversation(activeConversationId, {
+        muted: !activeFriend.notifications_muted,
+      });
+
+      setHub((current) =>
+        updateHubFriend(current, activeFriend.friend_user_id, (friend) => ({
+          ...friend,
+          notifications_muted: payload.muted,
+        })),
+      );
+    } catch (error) {
+      applyServiceError(setThreadError, error, "Nao foi possivel atualizar o silencio desta conversa.");
+    }
+  }, [activeConversationId, activeFriend, applyServiceError]);
+
+  const handleRemoveFriend = useCallback(async () => {
+    if (!activeFriend) return;
+
+    const confirmed = window.confirm(
+      `Desfazer amizade com ${getFriendDisplayName(activeFriend)}? O chat ficara somente como historico.`,
+    );
     if (!confirmed) return;
 
-    setRemovingFriendUserId(friend.friend_user_id);
-    setActiveMenuFriendId(null);
+    setActionsMenuAnchor(null);
+    setHubError(null);
 
     try {
-      await removeFriendApi(friend.friend_user_id);
-      await loadFriends(true);
+      await removeFriendApi(activeFriend.friend_user_id);
+      clearSocialChatCache();
+      setHub((current) => removeHubFriend(current, activeFriend.friend_user_id));
+      setSelectedFriendUserId(null);
+      setMessages([]);
+      setConversationParam(null);
     } catch (error) {
-      handleFriendsError(error, "Nao foi possivel remover este amigo agora.");
-    } finally {
-      setRemovingFriendUserId((current) => (
-        current === friend.friend_user_id ? null : current
-      ));
+      applyServiceError(setHubError, error, "Nao foi possivel desfazer esta amizade.");
     }
-  };
+  }, [activeFriend, applyServiceError, setConversationParam]);
 
-  if (loading) {
+  const handleBlockFriend = useCallback(async () => {
+    if (!activeFriend) return;
+
+    const confirmed = window.confirm(
+      `Bloquear ${getFriendDisplayName(activeFriend)}? Isso desfaz a amizade e impede novas mensagens.`,
+    );
+    if (!confirmed) return;
+
+    setActionsMenuAnchor(null);
+    setHubError(null);
+
+    try {
+      await blockSocialUser(activeFriend.friend_user_id);
+      clearFriendsCache();
+      setHub((current) => removeHubFriend(current, activeFriend.friend_user_id));
+      setSelectedFriendUserId(null);
+      setMessages([]);
+      setConversationParam(null);
+      void refreshSocialChatNotifications({ force: true });
+    } catch (error) {
+      applyServiceError(setHubError, error, "Nao foi possivel bloquear este usuario.");
+    }
+  }, [activeFriend, applyServiceError, refreshSocialChatNotifications, setConversationParam]);
+
+  const handleOpenMediaLibrary = useCallback(() => {
+    if (!activeConversationId) return;
+    setActionsMenuAnchor(null);
+    setMediaModalOpen(true);
+  }, [activeConversationId]);
+
+  if (loadingHub) {
     return (
-      <AppPageShell bottomNavActive="arena" className="fl-theme-page">
-        <div className="flex-1 flex items-center justify-center">
+      <AppPageShell bottomNavActive="arena" className="fl-theme-page fl-social-hub-page">
+        <div className="flex min-h-0 flex-1 items-center justify-center">
           <LoadingBall size="md" />
         </div>
       </AppPageShell>
     );
   }
 
-  const onlineFriends = friends.filter((friend) => friend.is_online === true);
-  const offlineFriends = friends.filter((friend) => friend.is_online !== true);
-
   return (
-    <AppPageShell bottomNavActive="arena" className="fl-theme-page">
-      <div className="flex flex-1 min-h-0 flex-col overflow-hidden md:flex-row">
-        
-        {/* Conteudo principal */}
-        <div className="flex-1 overflow-y-auto custom-scrollbar p-4 pb-[98px] sm:p-6 md:p-8 min-w-0">
-          
-          {/* Cabecalho */}
-          <header className="mb-6 sm:mb-10 min-w-0">
-            <h1 className="mb-1 sm:mb-2 text-2xl sm:text-4xl lg:text-5xl font-black leading-none tracking-[0.1em] sm:tracking-[0.2em] truncate" style={{ color: "var(--fl-color-text)" }}>Social Hub</h1>
-            <p className="font-bold text-[9px] sm:text-[10px] uppercase tracking-[0.2em] sm:tracking-[0.3em] truncate">Sua rede de elite e alianças estratégicas.</p>
-            {error && (
-              <div className="mt-4 p-3 sm:p-4 rounded-2xl bg-red-500/10 border border-red-500/20 text-red-500 text-[9px] sm:text-[10px] font-bold uppercase tracking-widest">
-                {error}
-              </div>
-            )}
-          </header>
-
-          {/* Busca */}
-          <div className="relative mb-8 sm:mb-10 group min-w-0">
-            <div className="absolute inset-y-0 left-4 sm:left-5 flex items-center pointer-events-none">
-              <Search className="w-4 h-4 sm:w-5 sm:h-5 transition-colors group-focus-within:text-primary" style={{ color: "var(--fl-color-text-muted)" }} />
-            </div>
-            <input 
-              type="text" 
-              placeholder="Buscar por username..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && searchUsers()}
-              className="fl-theme-input w-full rounded-2xl py-4 sm:py-5 pl-11 sm:pl-14 pr-4 sm:pr-6 placeholder-slate-600 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all text-xs sm:text-sm font-medium"
-            />
-            <button 
-              onClick={searchUsers}
-              disabled={searching}
-              className="absolute right-2 top-1/2 -translate-y-1/2 rounded-xl px-4 sm:px-6 py-2 sm:py-2.5 text-[9px] sm:text-[10px] font-black uppercase tracking-widest shadow-lg transition-all hover:scale-105 active:scale-95"
-              style={{ backgroundColor: 'var(--app-primary-color)', color: 'var(--fl-nav-item-active-text)' }}
-            >
-              {searching ? <LoadingBall size="sm" /> : 'Buscar'}
-            </button>
-          </div>
-
-          {/* Resultados da busca */}
-          {searchResults.length > 0 && (
-            <div className="mb-12 space-y-4 animate-in fade-in slide-in-from-top-4 duration-500">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-[10px] font-bold uppercase tracking-[0.2em]" style={{ color: "var(--fl-color-text-muted)" }}>Resultados da Busca</h3>
-                <button onClick={() => setSearchResults([])} className="text-[10px] font-bold text-primary uppercase tracking-widest hover:underline" style={{ color: 'var(--app-primary-color)' }}>Limpar</button>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {searchResults.map((result) => (
-                  <div key={result.user_id} className="fl-theme-surface rounded-2xl p-4 flex items-center justify-between group hover:border-primary/20 transition-all">
-                    <div className="flex items-center gap-4">
-                      <div className="size-12 overflow-hidden rounded-full border-2 transition-all group-hover:opacity-90" style={{ borderColor: "color-mix(in srgb, var(--app-primary-color) 18%, var(--fl-border-soft))" }}>
-                        <Avatar name={result.username} className="w-full h-full" />
-                      </div>
-                      <div>
-                        <h4 className="text-sm font-bold tracking-tight" style={{ color: "var(--fl-color-text)" }}>{result.username}</h4>
-                        <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--app-primary-color)' }}>Lv {result.level}</span>
-                      </div>
-                    </div>
-                    <button 
-                      onClick={() => handleSendFriendRequest(result.user_id)}
-                      className="fl-theme-surface-soft rounded-xl p-2.5 fl-theme-text-muted transition-opacity hover:opacity-85"
-                    >
-                      <UserPlus className="w-5 h-5" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </div>
+    <AppPageShell
+      bottomNavActive="arena"
+      className="fl-theme-page fl-social-hub-page"
+      hideNavigation={isConversationOpen}
+    >
+      <div
+        className={cn(
+          "flex min-h-0 flex-1 flex-col",
+          isConversationOpen ? "overflow-hidden" : "p-4 pb-[98px] md:px-8 md:pb-8",
+        )}
+      >
+        <div
+          className={cn(
+            "flex min-h-0 w-full flex-1",
+            isConversationOpen ? "" : "mx-auto max-w-[78rem] gap-4 md:gap-6",
           )}
+        >
+          <section
+            className={cn(
+              "fl-social-hub-panel min-h-0 w-full shrink-0 px-5 pb-5 pt-4 md:max-w-[24rem] md:px-6 md:pb-6",
+              isConversationOpen ? "hidden" : "flex rounded-[2.25rem]",
+              "flex-col",
+            )}
+          >
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h1 className="text-[1.7rem] font-semibold tracking-[-0.04em] text-[color:var(--fl-color-text)]">
+                  Messages
+                </h1>
+                <p className="mt-1 text-[0.8rem] text-[color:var(--fl-color-text-muted)]">Social Hub</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <HeaderIconButton
+                  icon={Bell}
+                  label="Abrir solicitacoes recebidas"
+                  onClick={() => {
+                    setNotificationModalOpen(true);
+                    setActionsMenuAnchor(null);
+                  }}
+                  badge={hub.pending_requests.length}
+                />
+                <div className="relative" data-social-hub-actions-root>
+                  <HeaderIconButton
+                    icon={MoreVertical}
+                    label="Abrir acoes da conversa"
+                    onClick={() => {
+                      if (!activeFriend) return;
+                      toggleActionsMenu("list");
+                      setNotificationModalOpen(false);
+                    }}
+                    disabled={!activeFriend}
+                  />
+                  {actionsMenuAnchor === "list" && activeFriend ? (
+                    <ConversationActionsMenu
+                      activeFriend={activeFriend}
+                      onOpenMediaLibrary={handleOpenMediaLibrary}
+                      onToggleMute={handleToggleMute}
+                      onRemoveFriend={handleRemoveFriend}
+                      onBlockFriend={handleBlockFriend}
+                    />
+                  ) : null}
+                </div>
+              </div>
+            </div>
 
-          {/* Abas */}
-          <div className="mb-8 flex gap-8 overflow-x-auto border-b no-scrollbar" style={{ borderColor: "var(--fl-border-soft)" }}>
-            <button 
-              onClick={() => setActiveTab('friends')}
-              className="relative whitespace-nowrap pb-4 text-[10px] font-bold uppercase tracking-[0.2em] transition-opacity hover:opacity-85"
-              style={{ color: activeTab === 'friends' ? 'var(--app-primary-color)' : 'var(--fl-color-text-muted)' }}
-            >
-              Meus Amigos ({friends.length})
-              {activeTab === 'friends' && <div className="absolute bottom-0 left-0 w-full h-0.5 shadow-[0_0_12px_var(--app-primary-color)]" style={{ backgroundColor: 'var(--app-primary-color)' }}></div>}
-            </button>
-            <button 
-              onClick={() => setActiveTab('received')}
-              className="relative whitespace-nowrap pb-4 text-[10px] font-bold uppercase tracking-[0.2em] transition-opacity hover:opacity-85"
-              style={{ color: activeTab === 'received' ? 'var(--app-primary-color)' : 'var(--fl-color-text-muted)' }}
-            >
-              Pedidos Recebidos ({receivedRequests.length})
-              {activeTab === 'received' && <div className="absolute bottom-0 left-0 w-full h-0.5 shadow-[0_0_12px_var(--app-primary-color)]" style={{ backgroundColor: 'var(--app-primary-color)' }}></div>}
-            </button>
-            <button 
-              onClick={() => setActiveTab('sent')}
-              className="relative whitespace-nowrap pb-4 text-[10px] font-bold uppercase tracking-[0.2em] transition-opacity hover:opacity-85"
-              style={{ color: activeTab === 'sent' ? 'var(--app-primary-color)' : 'var(--fl-color-text-muted)' }}
-            >
-              Pedidos Enviados ({sentRequests.length})
-              {activeTab === 'sent' && <div className="absolute bottom-0 left-0 w-full h-0.5 shadow-[0_0_12px_var(--app-primary-color)]" style={{ backgroundColor: 'var(--app-primary-color)' }}></div>}
-            </button>
-          </div>
+            <div className="relative mt-5">
+              <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-[color:var(--fl-color-text-muted)]" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(event) => {
+                  setSearchQuery(event.target.value);
+                }}
+                placeholder="Search chats"
+                className="fl-social-hub-search h-12 w-full rounded-full pl-11 pr-4 text-sm outline-none transition-colors"
+              />
+            </div>
 
-          {/* Conteudo da aba */}
-          <div className="space-y-12 pb-8">
-            {activeTab === 'friends' && (
-              <>
-                {/* Amigos online */}
-                <section>
-                  <div className="flex items-center gap-2 mb-6">
-                    <div className="size-1.5 rounded-full animate-pulse shadow-[0_0_8px_var(--app-primary-color)]" style={{ backgroundColor: 'var(--app-primary-color)' }}></div>
-                    <h2 className="text-[10px] font-bold uppercase tracking-[0.3em]" style={{ color: "var(--fl-color-text-muted)" }}>Amigos Online — {onlineFriends.length}</h2>
+            {hubError ? (
+              <div className="mt-4 rounded-[1.4rem] border border-[#ef4444]/20 bg-[#ef4444]/[0.08] px-4 py-3 text-sm text-[#b42318]">
+                {hubError}
+              </div>
+            ) : null}
+
+            <div className="mt-5 min-h-0 flex-1 overflow-y-auto pr-1">
+              {filteredFriends.length > 0 ? (
+                <div>
+                  {filteredFriends.map((friend) => (
+                    <FriendRow
+                      key={friend.friend_user_id}
+                      friend={friend}
+                      active={friend.friend_user_id === activeFriend?.friend_user_id}
+                      busy={openingConversationUserId === friend.friend_user_id}
+                      onClick={() => {
+                        void openFriendConversation(friend);
+                      }}
+                    />
+                  ))}
+                </div>
+              ) : hub.friends.length > 0 ? (
+                <div className="flex h-full flex-col items-center justify-center px-4 text-center">
+                  <p className="text-base font-semibold text-[color:var(--fl-color-text)]">Nada por aqui</p>
+                  <p className="mt-2 max-w-[15rem] text-sm leading-relaxed text-[color:var(--fl-color-text-muted)]">
+                    Ajuste a busca para encontrar um amigo ou procurar alguem novo.
+                  </p>
+                </div>
+              ) : (
+                <div className="flex h-full flex-col items-center justify-center px-4 text-center">
+                  <MessageCircle className="h-10 w-10 text-[color:var(--fl-color-text-muted)] opacity-40" />
+                  <p className="mt-4 text-base font-semibold text-[color:var(--fl-color-text)]">Seu chat comeca aqui</p>
+                  <p className="mt-2 max-w-[15rem] text-sm leading-relaxed text-[color:var(--fl-color-text-muted)]">
+                    Busque por um username para mandar a primeira solicitacao e iniciar uma conversa.
+                  </p>
+                </div>
+              )}
+
+              {(visibleRemoteResults.length > 0 || remoteSearchLoading) && deferredSearchQuery.length >= 3 ? (
+                <div className="mt-6 space-y-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-[0.72rem] font-black uppercase tracking-[0.18em] text-[color:var(--fl-color-text-muted)]">
+                      Encontrar pessoas
+                    </p>
+                    {remoteSearchLoading ? <Loader2 className="h-4 w-4 animate-spin text-[color:var(--fl-color-text-muted)]" /> : null}
                   </div>
-                  
-                  {onlineFriends.length > 0 ? (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5 min-w-0">
-                      {onlineFriends.map((friend) => (
-                        <div
-                          key={friend.id}
-                          data-friend-menu-root={friend.id}
-                          className="fl-theme-surface rounded-[1.5rem] sm:rounded-[2rem] p-4 sm:p-5 group hover:border-primary/30 transition-all relative overflow-hidden min-w-0"
-                        >
-                          <div className="absolute top-0 right-0 p-3 opacity-100 transition-opacity">
-                            <button
-                              type="button"
-                              onClick={() => setActiveMenuFriendId((current) => current === friend.id ? null : friend.id)}
-                              className="fl-theme-text-muted transition-opacity hover:opacity-85"
-                              aria-label={`Abrir menu de ${friend.friend_username}`}
-                            >
-                              <MoreVertical className="w-4 h-4" />
-                            </button>
-                          </div>
-                          {activeMenuFriendId === friend.id ? (
-                            <div
-                              className="absolute right-3 top-12 z-20 min-w-[10.5rem] rounded-2xl border p-2 shadow-2xl"
-                              style={{
-                                backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 96%, transparent)",
-                                borderColor: "var(--fl-border-soft)",
-                              }}
-                            >
-                              <button
-                                type="button"
-                                onClick={() => { void handleRemoveFriend(friend); }}
-                                disabled={removingFriendUserId === friend.friend_user_id}
-                                className="flex w-full items-center justify-center rounded-xl px-3 py-2 text-[10px] font-black uppercase tracking-[0.16em] text-red-500 transition-colors hover:bg-red-500/10 disabled:opacity-60"
-                              >
-                                {removingFriendUserId === friend.friend_user_id ? "Removendo..." : "Remover amigo"}
-                              </button>
-                            </div>
-                          ) : null}
-                          <div className="flex items-center gap-4 mb-4">
-                            <div className="relative size-14 shrink-0">
-                              <div className="w-full h-full rounded-full border-2 overflow-hidden shadow-[0_0_15px_rgba(var(--app-primary-color-rgb),0.2)]" style={{ borderColor: 'var(--app-primary-color)' }}>
-                                <Avatar name={friend.friend_username} className="w-full h-full" />
-                              </div>
-                              <div className="fl-theme-surface absolute -bottom-1 -right-1 size-5 flex items-center justify-center rounded-full">
-                                <ShieldCheck className="w-3 h-3" style={{ color: 'var(--app-primary-color)' }} />
-                              </div>
-                            </div>
-                            <div className="min-w-0">
-                              <h4 className="truncate text-base font-bold tracking-tight" style={{ color: "var(--fl-color-text)" }}>{friend.friend_username}</h4>
-                              <p className="text-[10px] font-bold uppercase tracking-widest mt-0.5" style={{ color: 'var(--app-primary-color)' }}>RANK ELITE</p>
-                            </div>
-                          </div>
-                          
-                          <div className="flex items-center justify-between border-t pt-4" style={{ borderColor: "var(--fl-border-soft)" }}>
-                            <div className="flex flex-col">
-                              <span className="text-[9px] font-bold text-slate-600 uppercase tracking-widest mb-1">STREAK</span>
-                              <div className="flex items-center gap-1.5" style={{ color: 'var(--app-primary-color)' }}>
-                                <Flame className="w-4 h-4 fill-current" />
-                                <span className="text-sm font-black tracking-tight">{friend.friend_streak}</span>
-                              </div>
-                            </div>
-                            <div className="flex flex-col items-end gap-3">
-                              <span className="text-[9px] font-bold text-slate-600 uppercase tracking-widest mb-1">NÍVEL</span>
-                              <span className="text-sm font-black" style={{ color: "var(--fl-color-text)" }}>{friend.friend_level}</span>
-                              <button
-                                type="button"
-                                disabled
-                                title={ARENA_COMING_SOON_TITLE}
-                                aria-label={ARENA_COMING_SOON_TITLE}
-                                className="cursor-not-allowed rounded-full px-4 py-2 text-[9px] font-black uppercase tracking-[0.18em] opacity-75"
-                                style={{ backgroundColor: "color-mix(in srgb, var(--app-primary-color) 28%, var(--fl-surface-muted))", color: "var(--fl-color-text-muted)" }}
-                              >
-                                {ARENA_COMING_SOON_LABEL}
-                              </button>
-                            </div>
-                          </div>
-                        </div>
+                  {visibleRemoteResults.map((result) => (
+                    <SearchResultRow
+                      key={result.user_id}
+                      result={result}
+                      busy={sendingRequestUserId === result.user_id}
+                      sent={sentRequestUserIds.has(result.user_id)}
+                      onSend={() => {
+                        void handleSendFriendRequest(result);
+                      }}
+                    />
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          </section>
+
+          <section
+            className={cn(
+              "fl-social-hub-thread-panel min-h-0 flex-1 overflow-hidden",
+              isConversationOpen ? "flex rounded-none border-0 shadow-none" : "hidden rounded-[2.25rem] md:flex",
+              "flex-col overflow-hidden",
+            )}
+          >
+            {activeFriend ? (
+              <>
+                <header
+                  className={cn(
+                    "fl-social-hub-thread-header flex items-center gap-3 border-b px-4 py-4",
+                    isConversationOpen ? "md:px-8" : "md:px-6",
+                  )}
+                >
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedFriendUserId(null);
+                      setMessages([]);
+                      setThreadConversationId(null);
+                      setActionsMenuAnchor(null);
+                      setConversationParam(null);
+                    }}
+                    className="fl-social-hub-icon-button flex h-10 w-10 items-center justify-center rounded-full"
+                    aria-label="Voltar para a lista"
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                  </button>
+
+                  <FriendPresenceAvatar
+                    src={activeFriend.friend_avatar_url}
+                    name={activeFriendDisplayName}
+                    isOnline={activeFriend.is_online}
+                    className="shrink-0"
+                  />
+
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-semibold text-[color:var(--fl-color-text)] md:text-base">
+                      {activeFriendDisplayName}
+                    </p>
+                    <p className="truncate text-[0.78rem] text-[color:var(--fl-color-text-muted)]">
+                      @{activeFriend.friend_username}
+                    </p>
+                  </div>
+
+                  <div className="relative" data-social-hub-actions-root>
+                    <HeaderIconButton
+                      icon={MoreVertical}
+                      label="Abrir acoes da conversa"
+                      onClick={() => {
+                        toggleActionsMenu("thread");
+                        setNotificationModalOpen(false);
+                      }}
+                    />
+                    {actionsMenuAnchor === "thread" && activeFriend ? (
+                      <ConversationActionsMenu
+                        activeFriend={activeFriend}
+                        onOpenMediaLibrary={handleOpenMediaLibrary}
+                        onToggleMute={handleToggleMute}
+                        onRemoveFriend={handleRemoveFriend}
+                        onBlockFriend={handleBlockFriend}
+                      />
+                    ) : null}
+                  </div>
+                </header>
+
+                <div
+                  className={cn(
+                    "min-h-0 flex-1 overflow-y-auto px-4 py-5",
+                    isConversationOpen ? "md:px-8 md:py-7" : "md:px-6 md:py-6",
+                  )}
+                >
+                  {threadError ? (
+                    <div className="mb-4 rounded-[1.4rem] border border-[#ef4444]/20 bg-[#ef4444]/[0.08] px-4 py-3 text-sm text-[#b42318]">
+                      {threadError}
+                    </div>
+                  ) : null}
+
+                  {messagesLoading && threadConversationId !== activeConversationId ? (
+                    <div className="flex h-full items-center justify-center">
+                      <LoadingBall size="sm" />
+                    </div>
+                  ) : messages.length > 0 ? (
+                    <div className="space-y-4">
+                      {messages.map((message) => (
+                        <ConversationBubble key={message.id} message={message} />
                       ))}
+                      <div ref={threadEndRef} />
                     </div>
                   ) : (
-                    <p className="rounded-3xl border border-dashed py-12 text-center text-[11px] font-bold italic uppercase tracking-widest" style={{ borderColor: "var(--fl-border-soft)", color: "var(--fl-color-text-muted)" }}>Nenhum guerreiro online no momento.</p>
+                    <div className="flex h-full flex-col items-center justify-center px-6 text-center">
+                      <MessageCircle className="h-10 w-10 text-[color:var(--fl-color-text-muted)] opacity-40" />
+                      <p className="mt-4 text-base font-semibold text-[color:var(--fl-color-text)]">Conversa pronta</p>
+                      <p className="mt-2 max-w-[19rem] text-sm leading-relaxed text-[color:var(--fl-color-text-muted)]">
+                        Escreva a primeira mensagem para abrir esse chat com {activeFriendDisplayName}.
+                      </p>
+                    </div>
                   )}
-                </section>
-
-                {/* Amigos offline */}
-                <section>
-                  <div className="flex items-center gap-2 mb-6">
-                    <div className="size-1.5 rounded-full bg-slate-700"></div>
-                    <h2 className="text-[10px] font-bold uppercase tracking-[0.3em]" style={{ color: "var(--fl-color-text-muted)" }}>Offline — {offlineFriends.length}</h2>
-                  </div>
-                  
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                      {offlineFriends.map((friend) => (
-                      <div
-                        key={friend.id}
-                        data-friend-menu-root={friend.id}
-                        className="fl-theme-surface-muted relative rounded-xl p-4 flex items-center justify-between opacity-60 hover:opacity-100 transition-all"
-                      >
-                        <div className="flex items-center gap-4">
-                          <div className="size-11 overflow-hidden rounded-full border grayscale" style={{ borderColor: "var(--fl-border-soft)" }}>
-                            <Avatar name={friend.friend_username} className="w-full h-full" />
-                          </div>
-                          <div>
-                            <h4 className="max-w-[120px] truncate text-sm font-bold tracking-tight" style={{ color: "var(--fl-color-text)" }}>{friend.friend_username}</h4>
-                            <span className="text-[9px] font-bold uppercase tracking-widest" style={{ color: "var(--fl-color-text-muted)" }}>Lv {friend.friend_level} • {friend.friend_streak}d</span>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <button
-                            type="button"
-                            disabled
-                            title={ARENA_COMING_SOON_TITLE}
-                            aria-label={ARENA_COMING_SOON_TITLE}
-                            className="cursor-not-allowed rounded-lg px-3 py-2 text-[9px] font-black uppercase tracking-[0.16em] opacity-75"
-                            style={{ backgroundColor: "color-mix(in srgb, var(--app-primary-color) 22%, var(--fl-surface-muted))", color: "var(--fl-color-text-muted)" }}
-                          >
-                            {ARENA_COMING_SOON_LABEL}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setActiveMenuFriendId((current) => current === friend.id ? null : friend.id)}
-                            className="rounded-lg p-2 fl-theme-text-muted transition-opacity hover:opacity-85"
-                            aria-label={`Abrir menu de ${friend.friend_username}`}
-                          >
-                            <MoreVertical className="w-4 h-4" />
-                          </button>
-                        </div>
-                        {activeMenuFriendId === friend.id ? (
-                          <div
-                            className="absolute right-4 top-14 z-20 min-w-[10.5rem] rounded-2xl border p-2 shadow-2xl"
-                            style={{
-                              backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 96%, transparent)",
-                              borderColor: "var(--fl-border-soft)",
-                            }}
-                          >
-                            <button
-                              type="button"
-                              onClick={() => { void handleRemoveFriend(friend); }}
-                              disabled={removingFriendUserId === friend.friend_user_id}
-                              className="flex w-full items-center justify-center rounded-xl px-3 py-2 text-[10px] font-black uppercase tracking-[0.16em] text-red-500 transition-colors hover:bg-red-500/10 disabled:opacity-60"
-                            >
-                              {removingFriendUserId === friend.friend_user_id ? "Removendo..." : "Remover amigo"}
-                            </button>
-                          </div>
-                        ) : null}
-                      </div>
-                    ))}
-                  </div>
-                </section>
-              </>
-            )}
-
-            {activeTab === 'received' && (
-              <section className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-                {receivedRequests.length > 0 ? (
-                  <div className="space-y-4 max-w-2xl mx-auto">
-                    {receivedRequests.map((request) => (
-                      <div key={request.id} className="fl-theme-surface rounded-3xl p-6 flex flex-col sm:flex-row items-center gap-6 group hover:border-primary/30 transition-all">
-                        <div className="size-16 overflow-hidden rounded-full border-2 transition-opacity group-hover:opacity-90" style={{ borderColor: "color-mix(in srgb, var(--app-primary-color) 16%, var(--fl-border-soft))" }}>
-                          <Avatar name={request.friend_username} className="w-full h-full text-xl" />
-                        </div>
-                        <div className="flex-1 text-center sm:text-left">
-                          <h4 className="mb-1 text-lg font-bold" style={{ color: "var(--fl-color-text)" }}>{request.friend_username}</h4>
-                          <div className="flex items-center justify-center sm:justify-start gap-4">
-                            <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--app-primary-color)' }}>LVL {request.friend_level}</span>
-                            <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: "var(--fl-color-text-muted)" }}>{request.friend_streak} Dias de Streak</span>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-3">
-                          <button 
-                            onClick={() => respondRequest(request.id, true)}
-                            className="rounded-full px-6 py-3 text-[10px] font-black uppercase tracking-widest shadow-lg transition-all hover:scale-105 active:scale-95"
-                            style={{ backgroundColor: 'var(--app-primary-color)', color: 'var(--fl-nav-item-active-text)' }}
-                          >
-                            Aceitar
-                          </button>
-                          <button 
-                            onClick={() => respondRequest(request.id, false)}
-                            className="fl-theme-input px-6 py-3 rounded-full text-[10px] font-black uppercase tracking-widest hover:bg-red-950 hover:text-red-500 transition-all"
-                          >
-                            Recusar
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="flex flex-col items-center justify-center py-24 text-center">
-                    <UserPlus2 className="mb-6 size-16 fl-theme-text-soft" />
-                    <p className="text-[11px] font-bold text-slate-600 uppercase tracking-[0.2em]">Nenhum pedido pendente por agora.</p>
-                  </div>
-                )}
-              </section>
-            )}
-
-            {activeTab === 'sent' && (
-              <section className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-                <div className="flex flex-col items-center justify-center py-24 text-center">
-                  <Clock className="mb-6 size-16 fl-theme-text-soft" />
-                  <p className="text-[11px] font-bold text-slate-600 uppercase tracking-[0.2em]">Sua lista de pedidos enviados está vazia.</p>
-                  <Button variant="outline" className="mt-8 border-[var(--fl-border-soft)] text-[var(--fl-color-text-muted)] hover:opacity-85" onClick={() => setActiveTab('friends')}>Voltar ao Hub</Button>
                 </div>
-              </section>
-            )}
 
-          </div>
+                <div
+                  className={cn(
+                    "fl-social-hub-composer-shell border-t px-4 py-4",
+                    isConversationOpen ? "md:px-8" : "md:px-6",
+                  )}
+                >
+                  <form onSubmit={handleSubmitMessage} className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        fileInputRef.current?.click();
+                      }}
+                      disabled={!activeConversationId || uploadingMedia}
+                      className="fl-social-hub-icon-button flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition-transform hover:scale-[1.02] disabled:opacity-45"
+                      aria-label="Enviar imagem"
+                    >
+                      {uploadingMedia ? <Loader2 className="h-4 w-4 animate-spin" /> : <CirclePlus className="h-5 w-5" />}
+                    </button>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp,image/gif"
+                      className="hidden"
+                      onChange={handleFileSelection}
+                    />
 
-        </div>
-
-        {/* Painel lateral */}
-        <aside className="hidden w-full flex-col gap-8 border-l p-6 md:w-[340px] md:p-8 lg:flex" style={{ borderColor: "var(--fl-border-soft)", backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 78%, transparent)" }}>
-          
-          <section className="space-y-6">
-            <h3 className="text-[10px] font-bold uppercase tracking-[0.3em]" style={{ color: "var(--fl-color-text-muted)" }}>Pedidos Pendentes</h3>
-            {receivedRequests.length > 0 ? (
-              <div className="space-y-3">
-                {receivedRequests.slice(0, 3).map((r) => (
-                  <div key={r.id} className="fl-theme-surface flex items-center justify-between p-3 rounded-2xl">
-                    <div className="flex items-center gap-3">
-                      <Avatar name={r.friend_username} className="size-8 text-[10px]" />
-                      <span className="max-w-[80px] truncate text-xs font-bold" style={{ color: "var(--fl-color-text)" }}>{r.friend_username}</span>
+                    <div className="flex min-w-0 flex-1 items-center rounded-full border border-[color:var(--fl-social-hub-input-border)] bg-[color:var(--fl-social-hub-input-bg)] px-4">
+                      <input
+                        type="text"
+                        value={messageInput}
+                        onChange={(event) => {
+                          setMessageInput(event.target.value);
+                        }}
+                        placeholder="Message"
+                        className="fl-social-hub-composer-input h-12 min-w-0 flex-1 border-none bg-transparent text-sm outline-none"
+                      />
                     </div>
-                    <div className="flex gap-1">
-                      <button onClick={() => respondRequest(r.id, true)} className="rounded-lg p-1.5 transition-opacity hover:opacity-90" style={{ backgroundColor: 'color-mix(in srgb, var(--app-primary-color) 18%, transparent)', color: 'var(--fl-nav-item-active-text)' }}>
-                        <Check className="size-3.5" />
-                      </button>
-                      <button onClick={() => respondRequest(r.id, false)} className="fl-theme-surface-soft rounded-lg p-1.5 fl-theme-text-muted transition-colors hover:bg-red-500/20 hover:text-red-500">
-                        <X className="size-3.5" />
-                      </button>
-                    </div>
-                  </div>
-                ))}
-                {receivedRequests.length > 3 && (
-                  <button onClick={() => setActiveTab('received')} className="w-full text-center text-[10px] font-black uppercase tracking-widest transition-colors hover:text-primary" style={{ color: "var(--fl-color-text-muted)" }}>Ver todos os {receivedRequests.length} pedidos</button>
-                )}
-              </div>
+
+                    <button
+                      type="submit"
+                      disabled={!activeConversationId || sendingMessage || messageInput.trim().length === 0}
+                      className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[color:var(--fl-color-text)] text-[color:var(--app-bg-color)] transition-transform hover:scale-[1.02] disabled:opacity-45"
+                      aria-label="Enviar mensagem"
+                    >
+                      {sendingMessage ? <Loader2 className="h-4 w-4 animate-spin" /> : <SendHorizontal className="h-4 w-4" />}
+                    </button>
+                  </form>
+                </div>
+              </>
             ) : (
-              <p className="text-[10px] font-bold italic" style={{ color: "var(--fl-color-text-muted)" }}>Limpo por enquanto.</p>
+              <div className="flex h-full flex-col items-center justify-center px-8 text-center">
+                <MessageCircle className="h-12 w-12 text-[color:var(--fl-color-text-muted)] opacity-35" />
+                <p className="mt-5 text-lg font-semibold text-[color:var(--fl-color-text)]">Selecione um amigo</p>
+                <p className="mt-2 max-w-[24rem] text-sm leading-relaxed text-[color:var(--fl-color-text-muted)]">
+                  Escolha um contato da lista para abrir o chat. Os pedidos recebidos ficam no sino e o menu de acoes aparece ao lado dele.
+                </p>
+              </div>
             )}
           </section>
+        </div>
+      </div>
 
-          <section className="relative group overflow-hidden rounded-[2.5rem]">
-            <div className="absolute inset-0 bg-gradient-to-br from-primary/20 via-transparent to-transparent opacity-50 transition-opacity group-hover:opacity-80" style={{ background: 'linear-gradient(to bottom right, color-mix(in srgb, var(--app-primary-color) 20%, transparent), transparent, transparent)' }}></div>
-            <div className="fl-theme-surface relative p-8 flex flex-col items-center text-center">
-              <div className="size-16 rounded-3xl bg-primary/10 flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
-                <UserPlus2 className="size-8 shadow-[0_0_15px_var(--app-primary-color)]" style={{ color: 'var(--app-primary-color)' }} />
+      {notificationModalOpen ? (
+        <div className="fixed inset-0 z-[90] flex items-end justify-center bg-[color:var(--fl-social-hub-overlay)] p-4 md:items-center">
+          <button
+            type="button"
+            onClick={() => {
+              setNotificationModalOpen(false);
+            }}
+            className="absolute inset-0"
+            aria-label="Fechar solicitacoes"
+          />
+          <div className="fl-social-hub-modal relative z-10 w-full max-w-[28rem] rounded-[2rem] p-5 md:p-6">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-lg font-semibold text-[color:var(--fl-color-text)]">Solicitacoes recebidas</p>
+                <p className="mt-1 text-sm text-[color:var(--fl-color-text-muted)]">
+                  Aceite ou recuse os pedidos diretamente daqui.
+                </p>
               </div>
-              <h4 className="mb-2 text-xl font-bold tracking-tight" style={{ color: "var(--fl-color-text)" }}>Cresça sua Guilda</h4>
-              <p className="mb-6 text-[10px] font-bold uppercase tracking-widest leading-relaxed" style={{ color: "var(--fl-color-text-muted)" }}>Convide aliados para ganhar bônus de XP e loot exclusivo em missões.</p>
-              <button 
-                className="w-full rounded-xl py-4 text-[11px] font-black uppercase tracking-[0.2em] transition-all shadow-xl hover:opacity-90"
-                style={{ backgroundColor: 'var(--app-primary-color)', color: 'var(--fl-nav-item-active-text)' }}
-                onClick={() => navigate(ROUTE_PATHS.minigames)}
+              <button
+                type="button"
+                onClick={() => {
+                  setNotificationModalOpen(false);
+                }}
+                className="fl-social-hub-icon-button flex h-10 w-10 items-center justify-center rounded-full"
+                aria-label="Fechar solicitacoes"
               >
-                {ARENA_COMING_SOON_TITLE}
+                <X className="h-4 w-4" />
               </button>
             </div>
-          </section>
 
-          <section className="bg-primary/5 border border-primary/10 rounded-[2rem] p-6" style={{ borderColor: 'color-mix(in srgb, var(--app-primary-color) 10%, transparent)', backgroundColor: 'color-mix(in srgb, var(--app-primary-color) 5%, transparent)' }}>
-            <div className="flex items-center gap-3 mb-4">
-              <TrendingUp className="size-5" style={{ color: 'var(--app-primary-color)' }} />
-              <h3 className="text-[10px] font-bold uppercase tracking-[0.2em]" style={{ color: "var(--fl-color-text)" }}>Atividade Recente</h3>
+            <div className="mt-5 max-h-[24rem] space-y-3 overflow-y-auto pr-1">
+              {hub.pending_requests.length > 0 ? (
+                hub.pending_requests.map((request) => (
+                  <PendingRequestRow
+                    key={request.id}
+                    request={request}
+                    busy={requestActionUserId === request.friend_user_id}
+                    onAccept={() => {
+                      void handleRespondRequest(request, true);
+                    }}
+                    onReject={() => {
+                      void handleRespondRequest(request, false);
+                    }}
+                  />
+                ))
+              ) : (
+                <div className="fl-social-hub-soft-card rounded-[1.6rem] px-4 py-5 text-center text-sm text-[color:var(--fl-color-text-muted)]">
+                  Nenhum pedido novo por enquanto.
+                </div>
+              )}
             </div>
-            <div className="space-y-4">
-              <div className="flex items-center gap-3">
-                <div className="size-1.5 rounded-full" style={{ backgroundColor: 'var(--app-primary-color)' }}></div>
-                <p className="text-[10px] leading-relaxed" style={{ color: "var(--fl-color-text-muted)" }}><span style={{ color: "var(--fl-color-text)" }} className="font-bold">Você</span> adicionou <span style={{ color: "var(--fl-color-text)" }} className="font-bold">IronGuts</span> como amigo.</p>
+          </div>
+        </div>
+      ) : null}
+
+      {mediaModalOpen ? (
+        <div className="fixed inset-0 z-[90] flex items-end justify-center bg-[color:var(--fl-social-hub-overlay)] p-4 md:items-center">
+          <button
+            type="button"
+            onClick={() => {
+              setMediaModalOpen(false);
+            }}
+            className="absolute inset-0"
+            aria-label="Fechar galeria"
+          />
+          <div className="fl-social-hub-modal relative z-10 w-full max-w-[42rem] rounded-[2rem] p-5 md:p-6">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-lg font-semibold text-[color:var(--fl-color-text)]">Midia da conversa</p>
+                <p className="mt-1 text-sm text-[color:var(--fl-color-text-muted)]">
+                  Arquivos compartilhados com {activeFriendDisplayName || "este amigo"}.
+                </p>
               </div>
-              <div className="flex items-center gap-3">
-                <div className="size-1.5 rounded-full bg-slate-700"></div>
-                <p className="text-[10px] leading-relaxed" style={{ color: "var(--fl-color-text-muted)" }}><span style={{ color: "var(--fl-color-text)" }} className="font-bold">FitLoot</span> atualizou os servidores sociais.</p>
-              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setMediaModalOpen(false);
+                }}
+                className="fl-social-hub-icon-button flex h-10 w-10 items-center justify-center rounded-full"
+                aria-label="Fechar galeria"
+              >
+                <X className="h-4 w-4" />
+              </button>
             </div>
-          </section>
 
-        </aside>
-
-      </div>
+            <div className="mt-5 max-h-[28rem] overflow-y-auto pr-1">
+              {mediaError ? (
+                <div className="rounded-[1.4rem] border border-[#ef4444]/20 bg-[#ef4444]/[0.08] px-4 py-3 text-sm text-[#b42318]">
+                  {mediaError}
+                </div>
+              ) : mediaLoading ? (
+                <div className="flex h-40 items-center justify-center">
+                  <LoadingBall size="sm" />
+                </div>
+              ) : mediaItems.length > 0 ? (
+                <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
+                  {mediaItems.map((item) => (
+                    <a
+                      key={item.id}
+                      href={item.public_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="fl-social-hub-soft-card group overflow-hidden rounded-[1.4rem]"
+                    >
+                      <img
+                        src={item.public_url}
+                        alt="Midia da conversa"
+                        className="aspect-square w-full object-cover transition-transform duration-200 group-hover:scale-[1.02]"
+                        loading="lazy"
+                      />
+                    </a>
+                  ))}
+                </div>
+              ) : (
+                <div className="fl-social-hub-soft-card rounded-[1.6rem] px-4 py-10 text-center text-sm text-[color:var(--fl-color-text-muted)]">
+                  Nenhuma midia foi enviada nesta conversa ainda.
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
     </AppPageShell>
   );
 }
-

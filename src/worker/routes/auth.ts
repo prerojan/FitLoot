@@ -10,6 +10,7 @@ import {
   hasCoreSchema,
   hasTableColumn,
   purgeUserAccountData,
+  runWithTransientDatabaseRetry,
 } from "../core/database";
 import { upsertRuntimeSession } from "../core/runtimeSessionStore";
 import {
@@ -482,16 +483,18 @@ export function registerAuthRoutes(
         const data = c.req.valid("json");
         const normalizedEmail = data.email.trim().toLowerCase();
 
-        const userRow = await c.env.fitloot_db
-          .prepare(
-            "SELECT id, password_hash, password_salt FROM users WHERE lower(email) = ?",
-          )
-          .bind(normalizedEmail)
-          .first<{
-            id: string;
-            password_hash: string | null;
-            password_salt: string | null;
-          }>();
+        const userRow = await runWithTransientDatabaseRetry(() =>
+          c.env.fitloot_db
+            .prepare(
+              "SELECT id, password_hash, password_salt FROM users WHERE lower(email) = ?",
+            )
+            .bind(normalizedEmail)
+            .first<{
+              id: string;
+              password_hash: string | null;
+              password_salt: string | null;
+            }>(),
+        );
 
         if (!userRow) {
           return c.json(
@@ -517,12 +520,44 @@ export function registerAuthRoutes(
           Date.now() + 30 * 24 * 60 * 60 * 1000,
         ).toISOString();
 
-        await c.env.fitloot_db
-          .prepare(
-            "INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, ?)",
-          )
-          .bind(sessionId, userRow.id, expiresAt)
-          .run();
+        let sessionInserted = false;
+        for (let attempt = 1; attempt <= 2 && !sessionInserted; attempt += 1) {
+          try {
+            await c.env.fitloot_db
+              .prepare(
+                "INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, ?)",
+              )
+              .bind(sessionId, userRow.id, expiresAt)
+              .run();
+            sessionInserted = true;
+            break;
+          } catch (sessionInsertError) {
+            if (!isConnectionTimeoutLike(sessionInsertError)) {
+              throw sessionInsertError;
+            }
+
+            const existingSession = await c.env.fitloot_db
+              .prepare("SELECT id FROM sessions WHERE id = ? LIMIT 1")
+              .bind(sessionId)
+              .first<{ id: string }>()
+              .catch(() => null);
+
+            if (existingSession?.id) {
+              sessionInserted = true;
+              break;
+            }
+
+            if (attempt >= 2) {
+              throw sessionInsertError;
+            }
+
+            await sleep(140 * attempt);
+          }
+        }
+
+        if (!sessionInserted) {
+          throw new Error("LOGIN_SESSION_INSERT_FAILED");
+        }
 
         const runtimeSessionDb = resolveRuntimeSessionDb(c);
         if (runtimeSessionDb) {

@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { registerMetricsRoutes } from "../../worker/routes/metrics";
 import type { AppContext } from "../../worker/core/types";
 import { createMockD1Database } from "./mockD1";
@@ -8,11 +8,14 @@ import { createAuthMiddleware, createExecutionContext, createJsonRequest, create
 function createMetricsDeps() {
   return {
     authMiddleware: createAuthMiddleware(),
+    invalidateMissionListCache: vi.fn(() => undefined),
+    resolveUserMetricsDate: vi.fn(async () => "2026-04-08"),
+    updateMonthlyMissionProgress: vi.fn(async () => undefined),
   } satisfies Parameters<typeof registerMetricsRoutes>[1];
 }
 
 describe("metrics routes", () => {
-  it("processes offline step sync without touching mission cache state", async () => {
+  it("processes offline step sync and refreshes periodic mission progress", async () => {
     const { db } = createMockD1Database([
       {
         match: "SELECT response_payload",
@@ -20,6 +23,10 @@ describe("metrics routes", () => {
       },
       {
         match: "INSERT INTO daily_metrics",
+        run: { success: true, meta: {} },
+      },
+      {
+        match: "INSERT INTO user_monthly_counters",
         run: { success: true, meta: {} },
       },
       {
@@ -67,12 +74,26 @@ describe("metrics routes", () => {
     );
 
     expect(response.status).toBe(200);
+    expect(deps.updateMonthlyMissionProgress).toHaveBeenCalledWith(TEST_USER.id, db);
+    expect(deps.invalidateMissionListCache).toHaveBeenCalledWith(TEST_USER.id);
   });
 
-  it("persists direct metrics updates without triggering mission refresh side effects", async () => {
+  it("persists direct metrics updates using the server-resolved local date and refreshes periodic mission progress", async () => {
     const { db } = createMockD1Database([
       {
+        match: "SELECT steps, calories_burned, distance_meters",
+        first: {
+          steps: 5000,
+          calories_burned: 280,
+          distance_meters: 900,
+        },
+      },
+      {
         match: "INSERT INTO daily_metrics",
+        run: { success: true, meta: {} },
+      },
+      {
+        match: "INSERT INTO user_monthly_counters",
         run: { success: true, meta: {} },
       },
     ]);
@@ -89,6 +110,7 @@ describe("metrics routes", () => {
           steps: 5400,
           calories_burned: 320,
           distance_meters: 1250,
+          date: "2026-04-08",
         },
       }),
       env,
@@ -96,5 +118,50 @@ describe("metrics routes", () => {
     );
 
     expect(response.status).toBe(200);
+    expect(deps.updateMonthlyMissionProgress).toHaveBeenCalledWith(TEST_USER.id, db);
+    expect(deps.invalidateMissionListCache).toHaveBeenCalledWith(TEST_USER.id);
+    expect(deps.resolveUserMetricsDate).toHaveBeenCalledWith(TEST_USER.id, db, expect.any(Date));
+  });
+
+  it("uses the user's local metrics date when the payload does not provide one", async () => {
+    const { db } = createMockD1Database([
+      {
+        match: "SELECT steps, calories_burned, distance_meters",
+        first: {
+          steps: 200,
+          calories_burned: 50,
+          distance_meters: 90,
+        },
+      },
+      {
+        match: "INSERT INTO daily_metrics",
+        run: { success: true, meta: {} },
+      },
+      {
+        match: "INSERT INTO user_monthly_counters",
+        run: { success: true, meta: {} },
+      },
+    ]);
+    const env = createTestEnv(db);
+    const deps = createMetricsDeps();
+    const app = new Hono<AppContext>();
+    registerMetricsRoutes(app, deps);
+    const { executionCtx } = createExecutionContext();
+
+    const response = await app.fetch(
+      createJsonRequest("/api/metrics/update", {
+        method: "POST",
+        body: {
+          steps: 400,
+          calories_burned: 80,
+          distance_meters: 120,
+        },
+      }),
+      env,
+      executionCtx,
+    );
+
+    expect(response.status).toBe(200);
+    expect(deps.resolveUserMetricsDate).toHaveBeenCalledWith(TEST_USER.id, db, expect.any(Date));
   });
 });

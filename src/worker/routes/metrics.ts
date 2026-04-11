@@ -18,6 +18,13 @@ import {
 
 type MetricsRouteDeps = {
   authMiddleware: MiddlewareHandler<AppContext>;
+  invalidateMissionListCache: (userId: string) => void;
+  resolveUserMetricsDate: (
+    userId: string,
+    db: D1Database,
+    reference?: Date,
+  ) => Promise<string>;
+  updateMonthlyMissionProgress: (userId: string, db: D1Database) => Promise<void>;
 };
 
 type StoredOfflineOperationRow = {
@@ -39,6 +46,63 @@ function resolveMetricsDate(occurredAt: string, fallbackDate?: string | undefine
   }
 
   return assertString(safeGet(new Date().toISOString().split("T"), 0));
+}
+
+function resolveMonthKey(date: string): string {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return date.slice(0, 7);
+  }
+
+  return new Date().toISOString().slice(0, 7);
+}
+
+async function resolveMetricsDateForRequest(
+  db: D1Database,
+  userId: string,
+  resolveUserMetricsDate: MetricsRouteDeps["resolveUserMetricsDate"],
+  explicitDate?: string | undefined,
+): Promise<string> {
+  if (typeof explicitDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(explicitDate)) {
+    return explicitDate;
+  }
+
+  return resolveUserMetricsDate(userId, db, new Date());
+}
+
+async function applyMonthlyMetricDelta(
+  db: D1Database,
+  params: {
+    userId: string;
+    monthKey: string;
+    field: "steps" | "distance_meters";
+    delta: number;
+  },
+): Promise<void> {
+  const delta = roundMetricDelta(params.delta);
+  if (delta <= 0) return;
+
+  const stepsDelta = params.field === "steps" ? delta : 0;
+  const distanceDelta = params.field === "distance_meters" ? delta : 0;
+
+  await db
+    .prepare(
+      `INSERT INTO user_monthly_counters (
+         user_id,
+         month_key,
+         missions_completed,
+         steps,
+         distance_meters,
+         streak_days,
+         weekly_circuits_completed,
+         updated_at
+       ) VALUES (?, ?, 0, ?, ?, 0, 0, datetime('now'))
+       ON CONFLICT(user_id, month_key) DO UPDATE SET
+         steps = MAX(0, COALESCE(steps, 0) + excluded.steps),
+         distance_meters = MAX(0, COALESCE(distance_meters, 0) + excluded.distance_meters),
+         updated_at = datetime('now')`,
+    )
+    .bind(params.userId, params.monthKey, stepsDelta, distanceDelta)
+    .run();
 }
 
 async function readStoredOfflineOperationResult(
@@ -154,6 +218,15 @@ async function applyMetricDeltaOperation(
     .bind(userId, date, initialSteps, initialCalories, initialDistance)
     .run();
 
+  if (field === "steps" || field === "distance_meters") {
+    await applyMonthlyMetricDelta(db, {
+      userId,
+      monthKey: resolveMonthKey(date),
+      field,
+      delta,
+    });
+  }
+
   const metrics = await db
     .prepare(
       `SELECT date, steps, calories_burned, distance_meters
@@ -263,14 +336,23 @@ async function processOfflineSyncOperation(
 // Route registration for daily metrics and food diary persistence.
 export function registerMetricsRoutes(
   app: Hono<AppContext>,
-  { authMiddleware }: MetricsRouteDeps,
+  {
+    authMiddleware,
+    invalidateMissionListCache,
+    resolveUserMetricsDate,
+    updateMonthlyMissionProgress,
+  }: MetricsRouteDeps,
 ): void {
   app.get("/api/metrics/today", authMiddleware, async (c) => {
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
 
     try {
-      const today = assertString(safeGet(new Date().toISOString().split("T"), 0));
+      const today = await resolveMetricsDateForRequest(
+        c.env.fitloot_db,
+        user.id,
+        resolveUserMetricsDate,
+      );
       const nowIso = new Date().toISOString();
 
       let metrics = await c.env.fitloot_db
@@ -319,7 +401,23 @@ export function registerMetricsRoutes(
 
       try {
         const data = c.req.valid("json");
-        const today = assertString(safeGet(new Date().toISOString().split("T"), 0));
+        const today = await resolveMetricsDateForRequest(
+          c.env.fitloot_db,
+          user.id,
+          resolveUserMetricsDate,
+        );
+        const previousMetrics = await c.env.fitloot_db
+          .prepare(
+            `SELECT steps, calories_burned, distance_meters
+             FROM daily_metrics
+             WHERE user_id = ? AND date = ?`,
+          )
+          .bind(user.id, today)
+          .first<{
+            steps: number;
+            calories_burned: number;
+            distance_meters: number;
+          }>();
 
         await c.env.fitloot_db
           .prepare(
@@ -339,6 +437,40 @@ export function registerMetricsRoutes(
             data.distance_meters,
           )
           .run();
+
+        const stepsDelta = Math.max(
+          0,
+          Math.round(Number(data.steps ?? 0) - Number(previousMetrics?.steps ?? 0)),
+        );
+        const distanceDelta = Math.max(
+          0,
+          Math.round(
+            Number(data.distance_meters ?? 0) - Number(previousMetrics?.distance_meters ?? 0),
+          ),
+        );
+
+        if (stepsDelta > 0) {
+          await applyMonthlyMetricDelta(c.env.fitloot_db, {
+            userId: user.id,
+            monthKey: resolveMonthKey(today),
+            field: "steps",
+            delta: stepsDelta,
+          });
+        }
+
+        if (distanceDelta > 0) {
+          await applyMonthlyMetricDelta(c.env.fitloot_db, {
+            userId: user.id,
+            monthKey: resolveMonthKey(today),
+            field: "distance_meters",
+            delta: distanceDelta,
+          });
+        }
+
+        if (stepsDelta > 0 || distanceDelta > 0) {
+          await updateMonthlyMissionProgress(user.id, c.env.fitloot_db);
+          invalidateMissionListCache(user.id);
+        }
 
         return c.json({ success: true });
       } catch (error) {
@@ -367,7 +499,14 @@ export function registerMetricsRoutes(
       try {
         const data = c.req.valid("json");
         const results: Record<string, unknown>[] = [];
+        let touchedPeriodicMissionProgress = false;
         for (const operation of data.operations) {
+          if (
+            operation.type === "step_delta_recorded" ||
+            operation.type === "distance_delta_recorded"
+          ) {
+            touchedPeriodicMissionProgress = true;
+          }
           results.push(
             await processOfflineSyncOperation(
               c.env.fitloot_db,
@@ -375,6 +514,11 @@ export function registerMetricsRoutes(
               operation,
             ),
           );
+        }
+
+        if (touchedPeriodicMissionProgress) {
+          await updateMonthlyMissionProgress(user.id, c.env.fitloot_db);
+          invalidateMissionListCache(user.id);
         }
 
         return c.json({

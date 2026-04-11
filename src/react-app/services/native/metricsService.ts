@@ -1,6 +1,6 @@
 import type { DailyMetrics } from "@/shared/types";
-import { fetchAndCacheJson, readCachedJson } from "@/react-app/utils/api";
-import { debugNativeOnce } from "./androidBridge";
+import { api, fetchAndCacheJson, readCachedJson } from "@/react-app/utils/api";
+import { debugNativeOnce, getAndroidBridge } from "./androidBridge";
 import { offlineSyncService } from "@/react-app/services/runtime/offlineSyncService";
 import {
   stepsService,
@@ -52,12 +52,38 @@ function toIsoString(value: string | null | undefined, fallback: string): string
   return typeof value === "string" && value.trim().length > 0 ? value : fallback;
 }
 
+function formatLocalDateKey(value: Date): string {
+  const year = String(value.getFullYear());
+  const month = String(value.getMonth() + 1).padStart(2, "0");
+  const day = String(value.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function resolveMetricsDateKey(
+  lastUpdated: string,
+  fallbackDate: string | null | undefined,
+): string {
+  if (typeof fallbackDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(fallbackDate)) {
+    const parsedFallback = new Date(`${fallbackDate}T12:00:00`);
+    if (Number.isFinite(parsedFallback.getTime())) {
+      return formatLocalDateKey(parsedFallback);
+    }
+  }
+
+  const parsed = new Date(lastUpdated);
+  if (Number.isFinite(parsed.getTime())) {
+    return formatLocalDateKey(parsed);
+  }
+
+  return formatLocalDateKey(new Date());
+}
+
 function createEmptyDailyMetrics(): DailyMetrics {
   const now = new Date().toISOString();
   return {
     id: 0,
     user_id: "",
-    date: now.slice(0, 10),
+    date: formatLocalDateKey(new Date()),
     steps: 0,
     calories_burned: 0,
     distance_meters: 0,
@@ -98,8 +124,24 @@ export function buildConsolidatedMetrics(
   apiMetrics: DailyMetrics | null,
   stepSnapshot: StepSnapshot | null,
 ): ConsolidatedMetrics {
-  const baseMetrics = cloneDailyMetrics(apiMetrics);
   const lastUpdated = stepSnapshot?.lastUpdated ?? toIsoString(apiMetrics?.updated_at, new Date().toISOString());
+  const metricsDate = stepSnapshot
+    ? resolveMetricsDateKey(lastUpdated, undefined)
+    : resolveMetricsDateKey(lastUpdated, apiMetrics?.date);
+  const clonedBaseMetrics = cloneDailyMetrics(apiMetrics);
+  const baseMetrics =
+    stepSnapshot && clonedBaseMetrics.date !== metricsDate
+      ? {
+          ...createEmptyDailyMetrics(),
+          user_id: clonedBaseMetrics.user_id,
+          date: metricsDate,
+          created_at: lastUpdated,
+          updated_at: lastUpdated,
+        }
+      : {
+          ...clonedBaseMetrics,
+          date: metricsDate,
+        };
 
   if (!stepSnapshot) {
     return {
@@ -163,7 +205,21 @@ function getErrorMessage(error: unknown): string {
 
 function shouldPublishOfflineMetrics(stepSnapshot: StepSnapshot | null): boolean {
   if (!stepSnapshot) return false;
-  return stepSnapshot.source === "android-health-connect" || stepSnapshot.source === "android-sensor";
+  return (
+    stepSnapshot.source === "android-health-connect" ||
+    stepSnapshot.source === "android-sensor" ||
+    stepSnapshot.source === "health-connect" ||
+    stepSnapshot.source === "google-fit"
+  );
+}
+
+function shouldPersistMetricsDirectly(stepSnapshot: StepSnapshot | null): boolean {
+  if (!stepSnapshot) return false;
+  return stepSnapshot.confidence === "official";
+}
+
+function isCurrentLocalMetricsDate(dateValue: string | null | undefined): boolean {
+  return typeof dateValue === "string" && dateValue === formatLocalDateKey(new Date());
 }
 
 class MetricsService {
@@ -174,6 +230,8 @@ class MetricsService {
   private apiMetrics: DailyMetrics | null = readCachedJson<DailyMetrics>(METRICS_API_PATH)?.data ?? null;
   private refreshInFlight: Promise<ConsolidatedMetrics> | null = null;
   private lastSyncedPayloadKey: string | null = null;
+  private bootstrapInFlight: Promise<void> | null = null;
+  private requestedNativeHealthPermissions = false;
 
   // Expõe o snapshot atual para hooks e consumidores diretos.
   getState(): MetricsStoreState {
@@ -224,10 +282,27 @@ class MetricsService {
       });
     }
 
-    void stepsService.startTracking().catch(() => undefined);
-    // The first dashboard/profile subscriber should not compete with the main
-    // app bootstrap by publishing a remote metrics snapshot immediately.
-    void this.refresh({ syncRemote: false });
+    this.bootstrapInFlight = this.bootstrapMetricsSubscription().finally(() => {
+      this.bootstrapInFlight = null;
+    });
+  }
+
+  // Encerra apenas a assinatura local mantida por este serviço.
+  private stop(): void {
+    this.unsubscribeSteps?.();
+    this.unsubscribeSteps = null;
+    this.started = false;
+  }
+
+  private async bootstrapMetricsSubscription(): Promise<void> {
+    await stepsService.startTracking().catch(() => undefined);
+    // Hydrate the server baseline before the first live snapshot to avoid
+    // losing the opening total of the day in the offline delta cursor.
+    await this.refresh({ syncRemote: false }).catch(() => undefined);
+
+    if (!this.started || this.unsubscribeSteps) {
+      return;
+    }
 
     this.unsubscribeSteps = stepsService.subscribeToSteps(
       (snapshot) => {
@@ -240,25 +315,22 @@ class MetricsService {
         intervalMs: SUBSCRIPTION_INTERVAL_MS,
         onError: (error) => {
           const fallbackMetrics = buildConsolidatedMetrics(this.apiMetrics, null);
-          const hasServerMetrics = fallbackMetrics.stepsSource === "server" || fallbackMetrics.caloriesSource === "server";
+          const hasServerMetrics =
+            fallbackMetrics.stepsSource === "server" || fallbackMetrics.caloriesSource === "server";
           this.setState({
             metrics: fallbackMetrics,
             loading: false,
             error: hasServerMetrics ? null : getErrorMessage(error),
           });
           if (hasServerMetrics) {
-            debugNativeOnce("metrics-server-fallback", "Using server metrics fallback while native metrics are unavailable.");
+            debugNativeOnce(
+              "metrics-server-fallback",
+              "Using server metrics fallback while native metrics are unavailable.",
+            );
           }
         },
       },
     );
-  }
-
-  // Encerra apenas a assinatura local mantida por este serviço.
-  private stop(): void {
-    this.unsubscribeSteps?.();
-    this.unsubscribeSteps = null;
-    this.started = false;
   }
 
   // Consolida dados de servidor e nativos em um único snapshot.
@@ -278,6 +350,7 @@ class MetricsService {
 
     try {
       nativeSnapshot = await stepsService.getCurrentSteps({ allowFallback: false });
+      this.maybeRecoverNativeHealthPermissions(nativeSnapshot);
     } catch (error) {
       nativeError = getErrorMessage(error);
     }
@@ -300,35 +373,39 @@ class MetricsService {
 
   // Reaproveita cache local antes de buscar o resumo remoto novamente.
   private async loadApiMetrics(forceApi: boolean): Promise<DailyMetrics | null> {
+    const localMetricsDate = formatLocalDateKey(new Date());
+
     if (!forceApi) {
       const cached = readCachedJson<DailyMetrics>(METRICS_API_PATH);
-      if (cached?.data) {
+      if (cached?.data && cached.data.date === localMetricsDate) {
         this.apiMetrics = cached.data;
-      offlineSyncService.hydrateMetricsBaseline({
-        date: cached.data.date,
-        steps: cached.data.steps,
-        calories: cached.data.calories_burned,
-        distanceMeters: cached.data.distance_meters,
-      });
+        offlineSyncService.hydrateMetricsBaseline({
+          date: cached.data.date,
+          steps: cached.data.steps,
+          calories: cached.data.calories_burned,
+          distanceMeters: cached.data.distance_meters,
+        });
       }
     }
 
-    if (!forceApi && this.apiMetrics) {
+    if (!forceApi && isCurrentLocalMetricsDate(this.apiMetrics?.date)) {
       return this.apiMetrics;
     }
 
     try {
       const metrics = await fetchAndCacheJson<DailyMetrics>(METRICS_API_PATH);
       this.apiMetrics = metrics;
-      offlineSyncService.hydrateMetricsBaseline({
-        date: metrics.date,
-        steps: metrics.steps,
-        calories: metrics.calories_burned,
-        distanceMeters: metrics.distance_meters,
-      });
+      if (metrics.date === localMetricsDate) {
+        offlineSyncService.hydrateMetricsBaseline({
+          date: metrics.date,
+          steps: metrics.steps,
+          calories: metrics.calories_burned,
+          distanceMeters: metrics.distance_meters,
+        });
+      }
       return metrics;
     } catch {
-      return this.apiMetrics;
+      return isCurrentLocalMetricsDate(this.apiMetrics?.date) ? this.apiMetrics : null;
     }
   }
 
@@ -337,6 +414,8 @@ class MetricsService {
     stepSnapshot: StepSnapshot | null,
     consolidatedMetrics: ConsolidatedMetrics,
   ): Promise<void> {
+    this.maybeRecoverNativeHealthPermissions(stepSnapshot);
+
     if (!shouldPublishOfflineMetrics(stepSnapshot)) {
       return;
     }
@@ -363,13 +442,23 @@ class MetricsService {
     }
 
     try {
-      await offlineSyncService.publishMetricsSnapshot({
-        date: consolidatedMetrics.dailyMetrics.date,
-        steps: consolidatedMetrics.dailyMetrics.steps,
-        calories: consolidatedMetrics.dailyMetrics.calories_burned,
-        distanceMeters: Math.max(0, Math.round(consolidatedMetrics.distanceMeters ?? 0)),
-        confidence: stepSnapshot?.confidence === "official" ? "official" : "derived",
-      });
+      if (shouldPersistMetricsDirectly(stepSnapshot)) {
+        await api("/api/metrics/update", {
+          method: "POST",
+          body: JSON.stringify(nextPayload),
+          requestClass: "background",
+          orchestrationKey: "metrics-update",
+          orchestrationPolicy: "replace",
+        });
+      } else {
+        await offlineSyncService.publishMetricsSnapshot({
+          date: consolidatedMetrics.dailyMetrics.date,
+          steps: consolidatedMetrics.dailyMetrics.steps,
+          calories: consolidatedMetrics.dailyMetrics.calories_burned,
+          distanceMeters: Math.max(0, Math.round(consolidatedMetrics.distanceMeters ?? 0)),
+          confidence: stepSnapshot?.confidence === "official" ? "official" : "derived",
+        });
+      }
 
       this.lastSyncedPayloadKey = payloadKey;
       this.apiMetrics = {
@@ -387,7 +476,63 @@ class MetricsService {
         error: null,
       });
     } catch {
-      // Silent failure: the local snapshot remains the source of truth until the next sync attempt.
+      if (shouldPersistMetricsDirectly(stepSnapshot)) {
+        try {
+          await offlineSyncService.publishMetricsSnapshot({
+            date: consolidatedMetrics.dailyMetrics.date,
+            steps: consolidatedMetrics.dailyMetrics.steps,
+            calories: consolidatedMetrics.dailyMetrics.calories_burned,
+            distanceMeters: Math.max(0, Math.round(consolidatedMetrics.distanceMeters ?? 0)),
+            confidence: stepSnapshot?.confidence === "official" ? "official" : "derived",
+          });
+
+          this.lastSyncedPayloadKey = payloadKey;
+          this.apiMetrics = {
+            ...(this.apiMetrics ?? createEmptyDailyMetrics()),
+            steps: nextPayload.steps,
+            calories_burned: nextPayload.calories_burned,
+            distance_meters: nextPayload.distance_meters,
+            date: nextPayload.date,
+            updated_at: consolidatedMetrics.lastUpdated,
+          };
+
+          this.setState({
+            metrics: buildConsolidatedMetrics(this.apiMetrics, stepSnapshot),
+            loading: false,
+            error: null,
+          });
+        } catch {
+          // Silent failure: the local snapshot remains the source of truth until the next sync attempt.
+        }
+      }
+    }
+  }
+
+  private maybeRecoverNativeHealthPermissions(stepSnapshot: StepSnapshot | null): void {
+    if (
+      this.requestedNativeHealthPermissions ||
+      !stepSnapshot ||
+      stepSnapshot.source !== "android-sensor" ||
+      stepSnapshot.error !== "missing_health_permissions"
+    ) {
+      return;
+    }
+
+    const bridge = getAndroidBridge();
+    if (!bridge?.requestPermissions) {
+      return;
+    }
+
+    this.requestedNativeHealthPermissions = true;
+
+    try {
+      bridge.requestPermissions();
+      debugNativeOnce(
+        "metrics-request-health-permissions",
+        "Requested Android health permissions after native metrics reported missing permissions.",
+      );
+    } catch {
+      this.requestedNativeHealthPermissions = false;
     }
   }
 

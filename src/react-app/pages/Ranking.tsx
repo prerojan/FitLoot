@@ -19,6 +19,7 @@ type RankingEntry = {
   userId?: string | undefined;
   username: string;
   full_name: string;
+  avatar_url?: string | null | undefined;
   level: number;
   xp: number;
   current_streak: number;
@@ -32,6 +33,7 @@ function normalizeRankingEntry(player: RankingPlayer): RankingEntry {
     userId: player.user_id,
     username: player.username,
     full_name: player.full_name,
+    avatar_url: player.avatar_url ?? null,
     level: player.level,
     xp: player.xp,
     current_streak: player.current_streak,
@@ -251,6 +253,7 @@ export default function Ranking() {
               <div className="flex min-w-0 flex-1 flex-nowrap items-center gap-2 sm:gap-4">
                 <div className="size-10 shrink-0 overflow-hidden rounded-full border sm:size-14" style={{ borderColor: "var(--fl-border-soft)" }}>
                   <Avatar
+                    src={currentUserEntry.avatar_url ?? null}
                     name={currentUserEntry.username}
                     className="h-full w-full"
                   />
@@ -324,7 +327,7 @@ export default function Ranking() {
                   className="mx-2 size-10 shrink-0 overflow-hidden rounded-full border sm:mx-4 sm:size-12"
                   style={{ borderColor: isCurrentUser ? "var(--app-primary-color)" : "var(--fl-border-soft)" }}
                 >
-                  <Avatar name={player.username} className="h-full w-full" />
+                  <Avatar src={player.avatar_url ?? null} name={player.username} className="h-full w-full" />
                 </div>
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-base font-bold tracking-tight">
@@ -384,7 +387,7 @@ function PodiumCard({
           <Crown className="absolute -top-10 left-1/2 h-12 w-12 -translate-x-1/2" style={{ color: highlightColor }} />
         ) : null}
         <div className={`overflow-hidden rounded-full border-4 ${featured ? "size-20 sm:size-28" : "size-12 sm:size-20"}`} style={{ borderColor: highlightColor }}>
-          <Avatar name={entry.username} className="h-full w-full" />
+          <Avatar src={entry.avatar_url ?? null} name={entry.username} className="h-full w-full" />
         </div>
         <div
           className="absolute -bottom-2 left-1/2 -translate-x-1/2 truncate rounded-full px-2 py-0.5 text-[8px] font-bold uppercase tracking-[0.1em] sm:px-4 sm:py-1 sm:text-[9px] sm:tracking-[0.2em]"

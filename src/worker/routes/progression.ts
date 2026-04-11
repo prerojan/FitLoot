@@ -2,6 +2,7 @@ import { Hono, type MiddlewareHandler } from "hono";
 import { zValidator } from "@hono/zod-validator";
 
 import { ConsumeRewardNotificationsRequestSchema } from "../../shared/types";
+import { runWithTransientDatabaseRetry } from "../core/database";
 import {
   getErrorMessage,
   internalErrorResponse,
@@ -72,6 +73,7 @@ type ProgressionRouteDeps = {
 
 const RUNTIME_DASHBOARD_PROJECTION_TTL_MS = 20_000;
 const RUNTIME_BENCHMARKS_PROJECTION_TTL_MS = 60_000;
+const RUNTIME_SKILLS_PROJECTION_TTL_MS = 20_000;
 const RUNTIME_SKILLS_AVAILABLE_PROJECTION_TTL_MS = 60_000;
 
 function resolveRuntimeProjectionDb(
@@ -122,10 +124,12 @@ export function registerProgressionRoutes(
         }
       }
 
-      let progression = await c.env.fitloot_db
-        .prepare("SELECT * FROM user_progression WHERE user_id = ?")
-        .bind(user.id)
-        .first<Record<string, unknown>>();
+      let progression = await runWithTransientDatabaseRetry(() =>
+        c.env.fitloot_db
+          .prepare("SELECT * FROM user_progression WHERE user_id = ?")
+          .bind(user.id)
+          .first<Record<string, unknown>>(),
+      );
 
       if (!progression) {
         await c.env.fitloot_db
@@ -136,10 +140,12 @@ export function registerProgressionRoutes(
           .bind(user.id)
           .run();
 
-        progression = await c.env.fitloot_db
-          .prepare("SELECT * FROM user_progression WHERE user_id = ?")
-          .bind(user.id)
-          .first<Record<string, unknown>>();
+        progression = await runWithTransientDatabaseRetry(() =>
+          c.env.fitloot_db
+            .prepare("SELECT * FROM user_progression WHERE user_id = ?")
+            .bind(user.id)
+            .first<Record<string, unknown>>(),
+        );
       }
 
       if (!progression) {
@@ -296,10 +302,12 @@ export function registerProgressionRoutes(
         }
       }
 
-      const attributes = await c.env.fitloot_db
-        .prepare("SELECT * FROM user_attributes WHERE user_id = ?")
-        .bind(user.id)
-        .first<Record<string, unknown>>();
+      const attributes = await runWithTransientDatabaseRetry(() =>
+        c.env.fitloot_db
+          .prepare("SELECT * FROM user_attributes WHERE user_id = ?")
+          .bind(user.id)
+          .first<Record<string, unknown>>(),
+      );
 
       if (runtimeProjectionDb && attributes) {
         c.executionCtx.waitUntil(
@@ -673,20 +681,72 @@ export function registerProgressionRoutes(
   app.get("/api/skills", authMiddleware, async (c) => {
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
+    const runtimeProjectionDb = resolveRuntimeProjectionDb(c);
 
-    const userSkills = await c.env.fitloot_db
-      .prepare(
-        `SELECT s.*, us.total_reps, us.total_time, us.best_reps, us.unlocked_at, us.status, us.current_stage,
-          (SELECT COUNT(*) FROM skill_stages ss WHERE ss.skill_id = s.id) as total_stages
-        FROM skills s
-        INNER JOIN user_skills us ON s.id = us.skill_id
-        WHERE us.user_id = ?
-        ORDER BY COALESCE(s.level_required, s.required_level), s.id`,
-      )
-      .bind(user.id)
-      .all();
+    try {
+      if (runtimeProjectionDb) {
+        try {
+          const cachedSkills = await readRuntimeDashboardProjection<unknown[]>(
+            runtimeProjectionDb,
+            user.id,
+            "skills",
+            RUNTIME_SKILLS_PROJECTION_TTL_MS,
+          );
+          if (cachedSkills) {
+            return c.json(Array.isArray(cachedSkills) ? cachedSkills : []);
+          }
+        } catch (runtimeProjectionError) {
+          console.warn("[/api/skills][runtime-read]", {
+            userId: user.id,
+            message: getErrorMessage(runtimeProjectionError),
+          });
+        }
+      }
 
-    return c.json(userSkills.results);
+      const userSkills = await runWithTransientDatabaseRetry(() =>
+        c.env.fitloot_db
+          .prepare(
+            `SELECT s.*, us.total_reps, us.total_time, us.best_reps, us.unlocked_at, us.status, us.current_stage,
+              (SELECT COUNT(*) FROM skill_stages ss WHERE ss.skill_id = s.id) as total_stages
+            FROM skills s
+            INNER JOIN user_skills us ON s.id = us.skill_id
+            WHERE us.user_id = ?
+            ORDER BY COALESCE(s.level_required, s.required_level), s.id`,
+          )
+          .bind(user.id)
+          .all(),
+      );
+
+      const responsePayload = Array.isArray(userSkills.results) ? userSkills.results : [];
+      if (runtimeProjectionDb) {
+        c.executionCtx.waitUntil(
+          upsertRuntimeDashboardProjection(
+            runtimeProjectionDb,
+            user.id,
+            "skills",
+            responsePayload,
+          ).catch((runtimeProjectionError) => {
+            console.warn("[/api/skills][runtime-write]", {
+              userId: user.id,
+              message: getErrorMessage(runtimeProjectionError),
+            });
+          }),
+        );
+      }
+
+      return c.json(responsePayload);
+    } catch (error) {
+      console.error("[/api/skills]", {
+        userId: user.id,
+        message: getErrorMessage(error),
+      });
+
+      if (isMissingSchemaError(error)) {
+        return schemaMismatchResponse(c);
+      }
+
+      return internalErrorResponse(c);
+    }
   });
 
   app.get("/api/skills/available", authMiddleware, async (c) => {
@@ -714,20 +774,20 @@ export function registerProgressionRoutes(
         }
       }
 
-      const progression = await c.env.fitloot_db
-        .prepare("SELECT level FROM user_progression WHERE user_id = ?")
-        .bind(user.id)
-        .first();
-
-      const availableSkills = await c.env.fitloot_db
-        .prepare(
-          `SELECT s.* FROM skills s
-          WHERE COALESCE(s.level_required, s.required_level) <= ?
-          AND s.id NOT IN (SELECT skill_id FROM user_skills WHERE user_id = ?)
-          ORDER BY COALESCE(s.level_required, s.required_level), s.id`,
-        )
-        .bind(progression?.level || 1, user.id)
-        .all();
+      const availableSkills = await runWithTransientDatabaseRetry(
+        () =>
+          c.env.fitloot_db
+            .prepare(
+              `SELECT s.* FROM skills s
+              WHERE COALESCE(s.level_required, s.required_level) <= (
+                SELECT COALESCE(level, 1) FROM user_progression WHERE user_id = ?
+              )
+              AND s.id NOT IN (SELECT skill_id FROM user_skills WHERE user_id = ?)
+              ORDER BY COALESCE(s.level_required, s.required_level), s.id`,
+            )
+            .bind(user.id, user.id)
+            .all(),
+      );
 
       const responsePayload = Array.isArray(availableSkills.results) ? availableSkills.results : [];
       if (runtimeProjectionDb) {

@@ -127,8 +127,7 @@ export function createRegularMissionRebuildService(
   function createDeterministicRebuildEnv(env: Env): Env {
     return {
       ...env,
-      HUGGING_FACE_API_KEY: undefined,
-      HF_TOKEN: undefined,
+      OPENROUTER_API_KEY: undefined,
     };
   }
 

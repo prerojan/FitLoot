@@ -143,4 +143,65 @@ describe("missionPlanValidation.resolvePeriodicMissionBlueprints", () => {
     expect(resolution.blueprints[0].subtasks).toHaveLength(1);
     expect(resolution.blueprints[0].subtasks[0].compatibilityKey).toBe("agachamento");
   });
+
+  it("garante nomes semanais unicos mesmo quando o fallback precisa reciclar drafts", () => {
+    const service = createValidationServiceForTests();
+    const dailyBlueprints = Array.from({ length: 5 }, (_, index) =>
+      createDailyBlueprint({
+        name: `Missao ${index + 1}`,
+        compatibilityKey: `missao-${index + 1}`,
+        compatibilityTerms: [`missao ${index + 1}`],
+      }),
+    );
+
+    const resolution = service.resolvePeriodicMissionBlueprints({
+      period: "weekly",
+      targetCount: 5,
+      drafts: [],
+      fallbackDrafts: [
+        {
+          name: "Full Body Calisthenics Circuit",
+          goal: "Circuito full body",
+          xp_reward: 260,
+          fitcoins_reward: 52,
+          subtasks: [],
+        },
+        {
+          name: "Core and Conditioning Circuit",
+          goal: "Circuito core",
+          xp_reward: 275,
+          fitcoins_reward: 55,
+          subtasks: [],
+        },
+        {
+          name: "Lower Body and Mobility Circuit",
+          goal: "Circuito lower body",
+          xp_reward: 290,
+          fitcoins_reward: 58,
+          subtasks: [],
+        },
+        {
+          name: "Upper Body Strength Circuit",
+          goal: "Circuito upper body",
+          xp_reward: 305,
+          fitcoins_reward: 61,
+          subtasks: [],
+        },
+      ],
+      dailyBlueprints,
+      profile: {
+        conditioning: "iniciante",
+        trainingFrequency: 4,
+        volumeMultiplier: 1,
+      },
+      missionOrigin: "regular",
+      isAiSpecial: false,
+    });
+
+    expect(resolution.blueprints).toHaveLength(5);
+
+    const weeklyNames = resolution.blueprints.map((blueprint) => blueprint.name);
+    expect(new Set(weeklyNames).size).toBe(5);
+    expect(weeklyNames[4]).not.toBe("Full Body Calisthenics Circuit");
+  });
 });

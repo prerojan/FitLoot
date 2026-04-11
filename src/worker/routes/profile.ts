@@ -1,7 +1,10 @@
 import { Hono, type MiddlewareHandler } from "hono";
 
 import { type ConditioningLevel } from "../../shared/types";
-import { hasTableColumn } from "../core/database";
+import {
+  hasTableColumn,
+  runWithTransientDatabaseRetry,
+} from "../core/database";
 import {
   getErrorMessage,
   isMissingSchemaError,
@@ -191,25 +194,30 @@ export function registerProfileRoutes(
         }
       }
 
-      const profileWithState = await c.env.fitloot_db
-        .prepare(
-          `SELECT
-            up.*,
-            ua.user_id as __has_attributes_user_id,
-            pr.user_id as __has_progression_user_id,
-            tp.user_id as __has_training_plan_user_id
-          FROM user_profiles up
-          LEFT JOIN user_attributes ua
-            ON ua.user_id = up.user_id
-          LEFT JOIN user_progression pr
-            ON pr.user_id = up.user_id
-          LEFT JOIN user_training_plans tp
-            ON tp.user_id = up.user_id
-          WHERE up.user_id = ?
-          LIMIT 1`,
-        )
-        .bind(user.id)
-        .first<Record<string, unknown>>();
+      const profileWithState = await runWithTransientDatabaseRetry(() =>
+        c.env.fitloot_db
+          .prepare(
+            `SELECT
+              up.*,
+              u.avatar_url,
+              ua.user_id as __has_attributes_user_id,
+              pr.user_id as __has_progression_user_id,
+              tp.user_id as __has_training_plan_user_id
+            FROM user_profiles up
+            INNER JOIN users u
+              ON u.id = up.user_id
+            LEFT JOIN user_attributes ua
+              ON ua.user_id = up.user_id
+            LEFT JOIN user_progression pr
+              ON pr.user_id = up.user_id
+            LEFT JOIN user_training_plans tp
+              ON tp.user_id = up.user_id
+            WHERE up.user_id = ?
+            LIMIT 1`,
+          )
+          .bind(user.id)
+          .first<Record<string, unknown>>(),
+      );
       let profile: Record<string, unknown> | null = null;
       let hasAttributes = false;
       let hasProgression = false;
@@ -238,12 +246,16 @@ export function registerProfileRoutes(
           user,
         });
         if (recoveredProfile) {
+          const hydratedRecoveredProfile = {
+            ...recoveredProfile,
+            avatar_url: user.avatar_url ?? null,
+          };
           console.warn("[/api/profile][recovered-missing-profile]", {
             userId: user.id,
           });
           if (runtimeProjectionDb) {
             c.executionCtx.waitUntil(
-              upsertRuntimeProfileProjection(runtimeProjectionDb, user.id, recoveredProfile).catch(
+              upsertRuntimeProfileProjection(runtimeProjectionDb, user.id, hydratedRecoveredProfile).catch(
                 (runtimeProjectionError) => {
                   console.warn("[/api/profile][runtime-write-recovered]", {
                     userId: user.id,
@@ -253,7 +265,7 @@ export function registerProfileRoutes(
               ),
             );
           }
-          return c.json(recoveredProfile);
+          return c.json(hydratedRecoveredProfile);
         }
 
         return c.json(
@@ -380,7 +392,15 @@ export function registerProfileRoutes(
     }
 
     const profile = await c.env.fitloot_db
-      .prepare("SELECT * FROM user_profiles WHERE user_id = ?")
+      .prepare(
+        `SELECT
+          up.*,
+          u.avatar_url
+        FROM user_profiles up
+        INNER JOIN users u
+          ON u.id = up.user_id
+        WHERE up.user_id = ?`,
+      )
       .bind(user.id)
       .first();
 

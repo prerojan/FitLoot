@@ -18,6 +18,7 @@ import { deleteRuntimeHttpCacheBySession } from "./runtimeHttpCacheStore";
 import { deleteRuntimeUserProjections } from "./runtimeUserProjectionStore";
 import type {
   AppContext,
+  AuthUser,
   UserAuthRecord,
 } from "./types";
 import { sanitizeMissionTimeZone } from "../services/missionCycle";
@@ -58,6 +59,11 @@ type CreateAuthMiddlewareDeps = {
     db: D1Database,
     userId: string,
   ) => Promise<void>;
+  repairActivatedProfileState?: (params: {
+    db: D1Database;
+    env: AppContext["Bindings"];
+    user: AuthUser;
+  }) => Promise<Record<string, unknown> | null>;
   resolvePlanRedirectPath: (
     onboardingCompleted: number,
     planStatus: UserAuthRecord["plan_status"],
@@ -237,6 +243,7 @@ export function createAuthMiddleware({
   getUserAuthRecordById,
   hasPlanAccess,
   refreshMissionExpiryWithGuard,
+  repairActivatedProfileState,
   resolvePlanRedirectPath,
   shouldBypassPlanGuard,
   tryUnlockSkillsFromPerformance,
@@ -386,6 +393,50 @@ export function createAuthMiddleware({
     if (method.toUpperCase() === "GET") return false;
     // Lightweight auth/bootstrap endpoints should not compete with mission/catalog jobs.
     return !shouldBypassPlanGuard(path);
+  }
+
+  async function hasPersistedOnboardingState(
+    db: D1Database,
+    userId: string,
+  ): Promise<boolean> {
+    const [profile, attributes, progression, trainingPlan] = await Promise.all([
+      db
+        .prepare("SELECT user_id FROM user_profiles WHERE user_id = ? LIMIT 1")
+        .bind(userId)
+        .first<{ user_id: string | null }>(),
+      db
+        .prepare("SELECT user_id FROM user_attributes WHERE user_id = ? LIMIT 1")
+        .bind(userId)
+        .first<{ user_id: string | null }>(),
+      db
+        .prepare("SELECT user_id FROM user_progression WHERE user_id = ? LIMIT 1")
+        .bind(userId)
+        .first<{ user_id: string | null }>(),
+      db
+        .prepare("SELECT user_id FROM user_training_plans WHERE user_id = ? LIMIT 1")
+        .bind(userId)
+        .first<{ user_id: string | null }>(),
+    ]);
+
+    return Boolean(
+      profile?.user_id &&
+        attributes?.user_id &&
+        progression?.user_id &&
+        trainingPlan?.user_id,
+    );
+  }
+
+  function toAuthUser(userRecord: UserAuthRecord): AuthUser {
+    return {
+      id: userRecord.id,
+      email: userRecord.email,
+      name: userRecord.name,
+      avatar_url: userRecord.avatar_url ?? undefined,
+      onboarding_completed: userRecord.onboarding_completed,
+      plan_id: userRecord.plan_id,
+      plan_status: userRecord.plan_status,
+      payment_method: userRecord.payment_method,
+    };
   }
 
   return async function authMiddleware(c, next) {
@@ -548,33 +599,31 @@ export function createAuthMiddleware({
         shouldRunOnboardingReconcile(userRecord.id, now)
       ) {
         try {
-          const [profile, attributes, progression, trainingPlan] = await Promise.all([
-            c.env.fitloot_db
-              .prepare("SELECT user_id FROM user_profiles WHERE user_id = ? LIMIT 1")
-              .bind(userRecord.id)
-              .first<{ user_id: string | null }>(),
-            c.env.fitloot_db
-              .prepare("SELECT user_id FROM user_attributes WHERE user_id = ? LIMIT 1")
-              .bind(userRecord.id)
-              .first<{ user_id: string | null }>(),
-            c.env.fitloot_db
-              .prepare("SELECT user_id FROM user_progression WHERE user_id = ? LIMIT 1")
-              .bind(userRecord.id)
-              .first<{ user_id: string | null }>(),
-            c.env.fitloot_db
-              .prepare("SELECT user_id FROM user_training_plans WHERE user_id = ? LIMIT 1")
-              .bind(userRecord.id)
-              .first<{ user_id: string | null }>(),
-          ]);
-
-          const hasPersistedOnboardingState = Boolean(
-            profile?.user_id &&
-              attributes?.user_id &&
-              progression?.user_id &&
-              trainingPlan?.user_id,
+          let persistedOnboardingState = await hasPersistedOnboardingState(
+            c.env.fitloot_db,
+            userRecord.id,
           );
 
-          if (hasPersistedOnboardingState) {
+          if (
+            !persistedOnboardingState &&
+            shouldBypassPlanGuard(c.req.path) &&
+            repairActivatedProfileState
+          ) {
+            const recoveredProfile = await repairActivatedProfileState({
+              db: c.env.fitloot_db,
+              env: c.env,
+              user: toAuthUser(userRecord),
+            });
+
+            if (recoveredProfile) {
+              persistedOnboardingState = await hasPersistedOnboardingState(
+                c.env.fitloot_db,
+                userRecord.id,
+              );
+            }
+          }
+
+          if (persistedOnboardingState) {
             await c.env.fitloot_db
               .prepare("UPDATE users SET onboarding_completed = 1 WHERE id = ?")
               .bind(userRecord.id)

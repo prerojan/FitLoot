@@ -17,13 +17,14 @@ import {
   type VariantSkillSeed,
   variantSkillSeeds,
 } from "../../shared/coreSkillSeeds";
+import { estimateRouteMissionDurationMinutesFromMeters } from "../../shared/routeMissionDuration";
 import { safeGet } from "../../utils/typeHelpers";
 import { getErrorMessage } from "../core/errors";
-import { getHuggingFaceApiKey } from "../core/providerConfig";
+import { getOpenRouterApiKey } from "../core/providerConfig";
 import type { Env } from "../core/types";
 import {
   ApiIntegrationError,
-  requestHuggingFaceStructuredContent,
+  requestOpenRouterStructuredContent,
   timeoutMsByService,
 } from "./aiTransport";
 import {
@@ -393,7 +394,11 @@ export function createMissionMaterializationService(deps: MissionMaterialization
       attributes_benefited: attributes,
       xp_reward: params.xp,
       points_reward: params.points,
-      duration_estimate_minutes: deps.shouldShowMissionDuration(params.period) ? deps.estimateMissionDuration(metricType, metricValue) : null,
+      duration_estimate_minutes: deps.shouldShowMissionDuration(params.period)
+        ? isRouteTrackingMission
+          ? estimateRouteMissionDurationMinutesFromMeters(metricValue, activityKind)
+          : deps.estimateMissionDuration(metricType, metricValue)
+        : null,
       exercise_category: category,
       execution_mode: isRouteTrackingMission ? "route_tracking" : "standard",
       activity_kind: activityKind,
@@ -430,7 +435,7 @@ export function createMissionMaterializationService(deps: MissionMaterialization
       ensurePortugueseInstructionList(normalizedInstructions, 8),
       8,
     );
-    const apiKey = getHuggingFaceApiKey(env);
+    const apiKey = getOpenRouterApiKey(env);
     if (!apiKey) return fallbackInstructions;
 
     const prompt = [
@@ -447,7 +452,7 @@ export function createMissionMaterializationService(deps: MissionMaterialization
     ].join("\n");
 
     try {
-      const rawContent = await requestHuggingFaceStructuredContent(apiKey, [{ role: "user", content: prompt }], 900, "translateExerciseInstructionsToPt", timeoutMsByService.huggingface);
+      const rawContent = await requestOpenRouterStructuredContent(apiKey, env, [{ role: "user", content: prompt }], 900, "translateExerciseInstructionsToPt", timeoutMsByService.openrouter);
       const parsed = deps.parseJsonObjectFromModelContent<{ instructions_pt?: unknown }>(rawContent);
       const translated = deps.normalizeInstructionList(parsed?.instructions_pt ?? [], 8);
       if (translated.length > 0) {
@@ -493,7 +498,7 @@ export function createMissionMaterializationService(deps: MissionMaterialization
       metricValue: deps.metricValueByPeriod(normalizedMetricType, period),
     };
 
-    const apiKey = getHuggingFaceApiKey(env);
+    const apiKey = getOpenRouterApiKey(env);
     if (!apiKey) return fallback;
 
     const promptLines = [
@@ -533,7 +538,7 @@ export function createMissionMaterializationService(deps: MissionMaterialization
     ].join("\n");
 
     try {
-      const rawContent = await requestHuggingFaceStructuredContent(apiKey, [{ role: "user", content: prompt }], 500, "getExerciseInstructionsFromAI", timeoutMsByService.huggingface);
+      const rawContent = await requestOpenRouterStructuredContent(apiKey, env, [{ role: "user", content: prompt }], 500, "getExerciseInstructionsFromAI", timeoutMsByService.openrouter);
       const parsed = deps.parseJsonObjectFromModelContent<Partial<ExerciseInstructionPayload>>(rawContent) ?? {};
       const parsedMetricType = deps.isMissionMetricType(parsed.metricType) ? parsed.metricType : fallback.metricType;
       const parsedMetricValue = deps.toPositiveInt(parsed.metricValue, fallback.metricValue);

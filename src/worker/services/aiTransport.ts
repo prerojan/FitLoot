@@ -1,11 +1,13 @@
 import { safeGet } from "../../utils/typeHelpers";
-import { DEFAULT_HUGGING_FACE_CHAT_MODEL } from "../core/constants";
+import { DEFAULT_OPENROUTER_CHAT_MODEL } from "../core/constants";
 import { getErrorMessage } from "../core/errors";
 import {
   getAnthropicApiKey,
   getAnthropicChatModel,
-  getHuggingFaceApiKey,
-  getHuggingFaceChatModel,
+  getOpenRouterApiKey,
+  getOpenRouterAppTitle,
+  getOpenRouterChatModel,
+  getOpenRouterHttpReferer,
 } from "../core/providerConfig";
 import type { AppContext } from "../core/types";
 
@@ -34,7 +36,7 @@ const RATE_LIMIT_WINDOW_MS = 60_000;
 const RATE_LIMIT_MAX_CALLS = 20;
 const RATE_LIMIT_MAX_KEYS = 2_000;
 export const timeoutMsByService = {
-  huggingface: 12000,
+  openrouter: 12000,
   anthropic: 12000,
   usda: 8000,
   rapidapi: 8000,
@@ -205,7 +207,7 @@ export async function fetchJsonWithTimeout<T>(
       throw new ApiIntegrationError(
         "RATE_LIMITED",
         429,
-        "Créditos mensais do provedor de IA esgotados. Recarregue os créditos no Hugging Face ou configure uma chave de provedor própria.",
+        "Créditos ou cota do provedor de IA esgotados. Recarregue a conta do OpenRouter ou ajuste o roteamento do modelo.",
         truncateErrorDetails(responseText),
       );
     }
@@ -257,7 +259,7 @@ export async function fetchJsonWithTimeout<T>(
   }
 }
 
-function shouldRetryHuggingFaceError(error: unknown): boolean {
+function shouldRetryOpenRouterError(error: unknown): boolean {
   return error instanceof ApiIntegrationError
     && !isLikelyProviderConfigError(error)
     && !isLikelyProviderCreditsError(error)
@@ -286,13 +288,34 @@ function buildJsonOnlyRouterMessages(messages: Array<{ role: string; content: st
   return [{ role: "system", content: reminder }, ...messages];
 }
 
-export async function requestHuggingFaceStructuredContent(
+function buildOpenRouterHeaders(
+  env: Pick<AppContext["Bindings"], "OPENROUTER_HTTP_REFERER" | "OPENROUTER_APP_TITLE" | "FRONTEND_ORIGIN">,
+): Record<string, string> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+
+  const referer = getOpenRouterHttpReferer(env);
+  if (referer) {
+    headers["HTTP-Referer"] = referer;
+  }
+
+  const title = getOpenRouterAppTitle(env);
+  if (title.length > 0) {
+    headers["X-OpenRouter-Title"] = title;
+  }
+
+  return headers;
+}
+
+export async function requestOpenRouterStructuredContent(
   apiKey: string,
+  env: Pick<AppContext["Bindings"], "OPENROUTER_HTTP_REFERER" | "OPENROUTER_APP_TITLE" | "FRONTEND_ORIGIN">,
   messages: Array<{ role: string; content: string }>,
   maxTokens: number,
   logLabel: string,
   timeoutMs: number,
-  model = DEFAULT_HUGGING_FACE_CHAT_MODEL,
+  model = DEFAULT_OPENROUTER_CHAT_MODEL,
 ): Promise<string> {
   const attempts = [
     { responseFormat: true, requestMessages: messages, label: `${logLabel}:json-mode` },
@@ -307,11 +330,11 @@ export async function requestHuggingFaceStructuredContent(
   for (const attempt of attempts) {
     try {
       const completion = await fetchJsonWithTimeout<OpenAIChatCompletionResponse>(
-        "https://router.huggingface.co/v1/chat/completions",
+        "https://openrouter.ai/api/v1/chat/completions",
         {
           method: "POST",
           headers: {
-            "Content-Type": "application/json",
+            ...buildOpenRouterHeaders(env),
             Authorization: `Bearer ${apiKey}`,
           },
           body: JSON.stringify({
@@ -349,12 +372,13 @@ export async function requestHuggingFaceStructuredContent(
     : new ApiIntegrationError("UPSTREAM_ERROR", 502, "Falha ao consultar serviço externo.");
 }
 
-async function requestHuggingFaceChatCompletion(
+async function requestOpenRouterChatCompletion(
   apiKey: string,
+  env: Pick<AppContext["Bindings"], "OPENROUTER_HTTP_REFERER" | "OPENROUTER_APP_TITLE" | "FRONTEND_ORIGIN">,
   messages: Array<{ role: string; content: string }>,
   maxTokens: number,
   timeoutMs: number,
-  model = DEFAULT_HUGGING_FACE_CHAT_MODEL,
+  model = DEFAULT_OPENROUTER_CHAT_MODEL,
 ): Promise<OpenAIChatCompletionResponse> {
   const attempts = [
     { maxTokens, label: "chat-primary" },
@@ -366,11 +390,11 @@ async function requestHuggingFaceChatCompletion(
     const attempt = attempts[index];
     try {
       const completion = await fetchJsonWithTimeout<OpenAIChatCompletionResponse>(
-        "https://router.huggingface.co/v1/chat/completions",
+        "https://openrouter.ai/api/v1/chat/completions",
         {
           method: "POST",
           headers: {
-            "Content-Type": "application/json",
+            ...buildOpenRouterHeaders(env),
             "Authorization": `Bearer ${apiKey}`,
           },
           body: JSON.stringify({
@@ -388,11 +412,11 @@ async function requestHuggingFaceChatCompletion(
       lastError = new ApiIntegrationError("INVALID_RESPONSE", 502, "Servi\u00e7o externo retornou conte\u00fado vazio.");
     } catch (error) {
       lastError = error;
-      console.warn(`[huggingface:${attempt.label}]`, {
+      console.warn(`[openrouter:${attempt.label}]`, {
         message: getErrorMessage(error),
         details: error instanceof ApiIntegrationError ? error.details : undefined,
       });
-      if (!shouldRetryHuggingFaceError(error) || index === attempts.length - 1) {
+      if (!shouldRetryOpenRouterError(error) || index === attempts.length - 1) {
         break;
       }
       await waitForRetry(450 * (index + 1));
@@ -404,8 +428,9 @@ async function requestHuggingFaceChatCompletion(
     : new ApiIntegrationError("UPSTREAM_ERROR", 502, "Falha ao consultar serviço externo.");
 }
 
-export async function requestHuggingFaceVisionStructuredContent(
+export async function requestOpenRouterVisionStructuredContent(
   apiKey: string,
+  env: Pick<AppContext["Bindings"], "OPENROUTER_HTTP_REFERER" | "OPENROUTER_APP_TITLE" | "FRONTEND_ORIGIN">,
   model: string,
   prompt: string,
   imageDataUrl: string,
@@ -413,11 +438,11 @@ export async function requestHuggingFaceVisionStructuredContent(
   timeoutMs: number,
 ): Promise<string> {
   const completion = await fetchJsonWithTimeout<OpenAIChatCompletionResponse>(
-    "https://router.huggingface.co/v1/chat/completions",
+    "https://openrouter.ai/api/v1/chat/completions",
     {
       method: "POST",
       headers: {
-        "Content-Type": "application/json",
+        ...buildOpenRouterHeaders(env),
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
@@ -594,25 +619,26 @@ export async function fetchResponseWithTimeout(
   }
 }
 
-async function callHuggingFaceChat(
+async function callOpenRouterChat(
   c: import("hono").Context<AppContext>,
   messages: Array<{ role: string; content: string }>,
   maxTokens = 1000,
   jsonMode = false
 ) {
-  const apiKey = getHuggingFaceApiKey(c.env);
-  const model = getHuggingFaceChatModel(c.env);
+  const apiKey = getOpenRouterApiKey(c.env);
+  const model = getOpenRouterChatModel(c.env);
   if (!apiKey) {
-    throw new ApiIntegrationError("SERVICE_NOT_CONFIGURED", 503, "Hugging Face não configurada.");
+    throw new ApiIntegrationError("SERVICE_NOT_CONFIGURED", 503, "OpenRouter nao configurado.");
   }
-  enforceRateLimit(`huggingface:${c.get("user")?.id ?? "anon"}`);
+  enforceRateLimit(`openrouter:${c.get("user")?.id ?? "anon"}`);
   if (jsonMode) {
-    const content = await requestHuggingFaceStructuredContent(
+    const content = await requestOpenRouterStructuredContent(
       apiKey,
+      c.env,
       messages,
       maxTokens,
       "callOpenAIChat",
-      timeoutMsByService.huggingface,
+      timeoutMsByService.openrouter,
       model,
     );
     const structuredResponse: OpenAIChatCompletionResponse = {
@@ -620,11 +646,12 @@ async function callHuggingFaceChat(
     };
     return structuredResponse;
   }
-  return requestHuggingFaceChatCompletion(
+  return requestOpenRouterChatCompletion(
     apiKey,
+    c.env,
     messages,
     maxTokens,
-    timeoutMsByService.huggingface,
+    timeoutMsByService.openrouter,
     model,
   );
 }
@@ -651,15 +678,15 @@ export async function callOpenAIChatWithFallback(
   jsonMode = false,
 ) {
   const providers: Array<{
-    name: "huggingface" | "anthropic";
+    name: "openrouter" | "anthropic";
     execute: () => Promise<OpenAIChatCompletionResponse>;
   }> = [];
 
-  const huggingFaceApiKey = getHuggingFaceApiKey(c.env);
-  if (huggingFaceApiKey) {
+  const openRouterApiKey = getOpenRouterApiKey(c.env);
+  if (openRouterApiKey) {
     providers.push({
-      name: "huggingface",
-      execute: () => callHuggingFaceChat(c, messages, maxTokens, jsonMode),
+      name: "openrouter",
+      execute: () => callOpenRouterChat(c, messages, maxTokens, jsonMode),
     });
   }
 

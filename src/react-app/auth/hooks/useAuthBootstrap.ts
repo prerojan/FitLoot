@@ -17,6 +17,7 @@ import {
 } from "../../services/authService";
 import { applyProfileTheme } from "../../theme/profileTheme";
 import { readCachedJson, writeCachedJson } from "../../utils/api";
+import { resolveCurrentClientPath } from "../../utils/clientRouting";
 
 interface UseAuthBootstrapParams {
   setUser: (user: User | null) => void;
@@ -45,7 +46,7 @@ function shouldProbeCurrentSession(): boolean {
   const hasAuthenticatedHint = localStorage.getItem(AUTHENTICATED_HINT_KEY) === "1";
   if (hasAuthenticatedHint) return true;
 
-  return AUTH_BOOTSTRAP_PROTECTED_PATHS.has(window.location.pathname);
+  return AUTH_BOOTSTRAP_PROTECTED_PATHS.has(resolveCurrentClientPath());
 }
 
 // Canonical auth bootstrap hook that restores session and applies profile theme.
@@ -138,6 +139,9 @@ export function useAuthBootstrap({
 
         if (bootstrap.progression) {
           writeCachedJson("/api/progression", bootstrap.progression);
+        }
+        if (bootstrap.attributes) {
+          writeCachedJson("/api/attributes", bootstrap.attributes);
         }
         writeCachedJson("/api/users/me", user);
 

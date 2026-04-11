@@ -528,6 +528,40 @@ export function createMissionPlanValidationService(
     );
   }
 
+  function buildUniquePeriodicMissionName(
+    baseName: string,
+    period: MissionPeriod,
+    index: number,
+    usedNameKeys: ReadonlySet<string>,
+    subtasks: readonly ResolvedMissionSubtaskLike[],
+  ): string {
+    const fallbackName = period === "weekly"
+      ? `Missao Semanal ${index + 1}`
+      : `Missao Mensal ${index + 1}`;
+    const safeBaseName = deps.toSafeString(baseName, fallbackName);
+    const normalizedBaseName = deps.normalizeMatchText(safeBaseName);
+    if (!usedNameKeys.has(normalizedBaseName)) {
+      return safeBaseName;
+    }
+
+    const primarySubtaskTitle = subtasks[0]?.title?.trim();
+    if (primarySubtaskTitle && primarySubtaskTitle.length > 0) {
+      const subtaskVariantName = `${safeBaseName} - ${primarySubtaskTitle}`;
+      if (!usedNameKeys.has(deps.normalizeMatchText(subtaskVariantName))) {
+        return subtaskVariantName;
+      }
+    }
+
+    let variantIndex = 2;
+    while (true) {
+      const numberedVariantName = `${safeBaseName} ${variantIndex}`;
+      if (!usedNameKeys.has(deps.normalizeMatchText(numberedVariantName))) {
+        return numberedVariantName;
+      }
+      variantIndex += 1;
+    }
+  }
+
   function resolveMissionSubtasks(
     rawSubtasks: string[] | undefined,
     dailyBlueprints: readonly MissionBlueprintLike[],
@@ -608,6 +642,7 @@ export function createMissionPlanValidationService(
     isAiSpecial: boolean;
   }): ValidationResult<MissionBlueprintLike> {
     const blueprints: MissionBlueprintLike[] = [];
+    const usedNameKeys = new Set<string>();
     let invalidCount = 0;
     let totalCount = 0;
 
@@ -624,20 +659,27 @@ export function createMissionPlanValidationService(
       const fallbackName = params.period === "weekly"
         ? `Missao Semanal ${index + 1}`
         : `Missao Mensal ${index + 1}`;
-      const name = deps.toSafeString(source.name, fallbackName);
+      const requestedName = deps.toSafeString(source.name, fallbackName);
       const subtaskResolution = resolveMissionSubtasks(
         source.subtasks,
         params.dailyBlueprints,
         params.period,
         index,
         params.profile,
-        name,
+        requestedName,
       );
       invalidCount += subtaskResolution.invalidCount;
       if (subtaskResolution.subtasks.length === 0) {
         invalidCount += 1;
         continue;
       }
+      const name = buildUniquePeriodicMissionName(
+        requestedName,
+        params.period,
+        index,
+        usedNameKeys,
+        subtaskResolution.subtasks,
+      );
 
       const goalInput = typeof source.goal === "string" ? source.goal.trim() : "";
       if (goalInput.length === 0) {
@@ -691,6 +733,7 @@ export function createMissionPlanValidationService(
         compatibilityTerms: [name, goal],
         subtasks: subtaskResolution.subtasks,
       });
+      usedNameKeys.add(deps.normalizeMatchText(name));
     }
 
     return { blueprints, invalidCount, totalCount };

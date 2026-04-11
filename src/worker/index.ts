@@ -16,7 +16,6 @@ import {
 
 import {
   localizeMissionText,
-  localizeMissionTextArray,
 } from "../shared/missionLocalization";
 import {
   calculateRankBenchmarkScore,
@@ -27,7 +26,6 @@ import {
   scoreToTrainingRank,
 } from "../shared/trainingLevels";
 import {
-  classifyMission,
   getMissionMetricType,
   metricUnitByType,
   shouldShowMissionDuration,
@@ -42,12 +40,10 @@ import {
   enforceRateLimit,
   fetchJsonWithTimeout,
   fetchResponseWithTimeout,
-  requestHuggingFaceStructuredContent,
-  requestHuggingFaceVisionStructuredContent,
+  requestOpenRouterVisionStructuredContent,
   timeoutMsByService,
   toFriendlyErrorResponse,
 } from "./services/aiTransport";
-import { enrichExercise } from "./services/exerciseEnrichment";
 import {
   hasTableColumn,
 } from "./core/database";
@@ -69,9 +65,6 @@ import {
   resolveCorsAllowHeaders,
   resolveCorsOrigin,
 } from "./core/cors";
-import {
-  getHuggingFaceApiKey,
-} from "./core/providerConfig";
 import type {
   AppContext,
   Env,
@@ -109,6 +102,8 @@ import { registerProfileRoutes } from "./routes/profile";
 import { registerMissionRoutes } from "./routes/missions";
 import { registerAiRoutes } from "./routes/ai";
 import { registerAuthRoutes } from "./routes/auth";
+import { registerMapRoutes } from "./routes/maps";
+import { registerSocialChatRoutes } from "./routes/socialChat";
 import {
   createMissionGenerationService,
   type StructuredGenerationOptions,
@@ -146,7 +141,6 @@ import {
 } from "./services/missionParsing";
 import {
   ensureInstructionSteps,
-  fallbackMissionsForPeriod,
   mapWithConcurrency,
   mergeUniqueStrings,
   normalizeInstructionList,
@@ -154,9 +148,7 @@ import {
   resolveExerciseApiBodyArea,
   resolveExerciseApiMuscleGroups,
   resolveMetricTypeForCategory,
-  type ExerciseInstructionPayload,
   type MissionPayload,
-  type MissionPromptContext,
 } from "./services/missionMaterializationSupport";
 import {
   createMissionPresentationService,
@@ -192,10 +184,6 @@ import {
   resolveMissionTimeZone,
   shiftMissionDateKey,
 } from "./services/missionCycle";
-import {
-  createAiMissionGenerationService,
-  type AiMissionGenerationResult,
-} from "./services/aiMissionGeneration";
 import {
   createMissionProgressionService,
   type MissionAttributeDelta,
@@ -438,6 +426,14 @@ const processCaktoWebhook = processCaktoWebhookService;
 const reconcilePendingSubscriptionForUser =
   reconcilePendingSubscriptionForUserService;
 
+const activatedProfileRecoveryService = createActivatedProfileRecoveryService({
+  buildInitialTrainingPlan: buildInitialTrainingPlanService,
+  ensureGoalStatsRow: ensureGoalStatsRowService,
+  normalizeConditioning,
+  normalizeTrainingFrequencyInput: normalizeTrainingFrequencyInputService,
+  upsertTrainingPlan: upsertTrainingPlanService,
+});
+
 // Constrói o middleware de sessão e plano usado pelas rotas protegidas.
 const authMiddleware = createAuthMiddleware({
   catalogCacheTtlMs: 120_000,
@@ -449,6 +445,8 @@ const authMiddleware = createAuthMiddleware({
   getUserAuthRecordById,
   hasPlanAccess,
   refreshMissionExpiryWithGuard,
+  repairActivatedProfileState: ({ db, env, user }) =>
+    activatedProfileRecoveryService.repairActivatedProfileState({ db, env, user }),
   resolvePlanRedirectPath,
   shouldBypassPlanGuard,
   tryUnlockSkillsFromPerformance: tryUnlockSkillsFromPerformanceService,
@@ -605,14 +603,6 @@ const missionPlanValidationService = createMissionPlanValidationService({
   toSafeString,
 });
 
-// Expõe adaptadores compatíveis com os serviços extraídos sem mexer nos contratos.
-const buildMissionPayloadService = (
-  params: Parameters<typeof missionMaterializationService.buildMissionPayload>[0],
-) => {
-  return missionMaterializationService.buildMissionPayload(
-    params,
-  ) as unknown as MissionPayload;
-};
 const extractExerciseNameService = (
   title: string,
 ) => missionMaterializationService.extractExerciseName(title);
@@ -624,22 +614,6 @@ const {
   missionSummaryFromNormalized,
   normalizeMissionRow,
 } = missionPresentationService;
-const getExerciseInstructionsFromAIService = (
-  exerciseName: string,
-  metricType: MissionMetricType,
-  conditioningLevel: string,
-  env: Env,
-  period: MissionPeriod = "daily",
-  promptContext?: MissionPromptContext | undefined,
-) =>
-  missionMaterializationService.getExerciseInstructionsFromAI(
-    exerciseName,
-    metricType,
-    conditioningLevel,
-    env,
-    period,
-    promptContext,
-  ) as unknown as Promise<ExerciseInstructionPayload>;
 const materializeMissionBlueprintService = (
   env: Env,
   profile: MissionGenerationProfileSnapshot,
@@ -890,17 +864,9 @@ const {
   runScheduledWithGuard,
 } = createBackgroundProcessingService({
   cleanupSettledMissionsWithGuard,
-  ensurePeriodicMissions,
+  ensurePeriodicMissionsWithGuard,
   ensureUserCounterRow: ensureUserCounterRowService,
   expirePendingMissionsAndUpdateStreak,
-});
-
-const activatedProfileRecoveryService = createActivatedProfileRecoveryService({
-  buildInitialTrainingPlan: buildInitialTrainingPlanService,
-  ensureGoalStatsRow: ensureGoalStatsRowService,
-  normalizeConditioning,
-  normalizeTrainingFrequencyInput: normalizeTrainingFrequencyInputService,
-  upsertTrainingPlan: upsertTrainingPlanService,
 });
 
 // Centraliza cache, locks e refresh periódico das missões fora do entrypoint.
@@ -1291,6 +1257,10 @@ const app = new Hono<AppContext>();
 
 const HOT_GET_CACHEABLE_PATHS = new Set<string>([
   "/api/auth/check-availability",
+  "/api/maps/config",
+  "/api/maps/geocode",
+  "/api/maps/reverse",
+  "/api/maps/directions",
   "/api/users/me",
   "/api/skills",
   "/api/skills/available",
@@ -1857,11 +1827,14 @@ registerAuthRoutes(app, {
   hashPassword,
 });
 
+registerMapRoutes(app);
+
 registerAccountRoutes(app, {
   authMiddleware,
   generateExpiredSessionCookie,
   getSessionIdFromCookieHeader,
   getUserAuthRecordById,
+  invalidateRankingCache,
   logUserEvent: logUserEventService,
   onAppOpen: onAppOpenService,
   onProfileCustomization: onProfileCustomizationService,
@@ -2192,10 +2165,28 @@ async function resolvePeriodicMissionProgressValue(
 ): Promise<number> {
   const metricType = normalizeMissionMetricType(mission.metric_type, mission.target_time);
   if (metricType === "steps") {
-    return readPeriodicMissionAccumulatedProgress(db, userId, mission, "steps");
+    const accumulated = await readPeriodicMissionAccumulatedProgress(db, userId, mission, "steps");
+    if (String(mission.type ?? "") === "monthly") {
+      const monthlyCounters = options?.monthlyCounters ?? await getMonthlyCounters(db, userId);
+      return Math.max(accumulated, Math.max(0, Number(monthlyCounters.steps ?? 0)));
+    }
+    return accumulated;
   }
   if (metricType === "distance_meters") {
-    return readPeriodicMissionAccumulatedProgress(db, userId, mission, "distance_meters");
+    const accumulated = await readPeriodicMissionAccumulatedProgress(
+      db,
+      userId,
+      mission,
+      "distance_meters",
+    );
+    if (String(mission.type ?? "") === "monthly") {
+      const monthlyCounters = options?.monthlyCounters ?? await getMonthlyCounters(db, userId);
+      return Math.max(
+        accumulated,
+        Math.max(0, Number(monthlyCounters.distance_meters ?? 0)),
+      );
+    }
+    return accumulated;
   }
 
   if (String(mission.type ?? "") === "monthly") {
@@ -2212,6 +2203,17 @@ async function recomputeMonthlyCounters(db: D1Database, userId: string, referenc
   const monthKey = currentMonthKey(reference, timeZone);
   const monthStartDate = missionCycleDateKey("monthly", timeZone, reference);
   const monthEndDate = missionCycleEndDateKey("monthly", monthStartDate);
+  const existingRow = await db.prepare(
+    `SELECT missions_completed, steps, distance_meters, streak_days, weekly_circuits_completed
+     FROM user_monthly_counters
+     WHERE user_id = ? AND month_key = ?`,
+  ).bind(userId, monthKey).first<{
+    missions_completed: number;
+    steps: number;
+    distance_meters: number;
+    streak_days: number;
+    weekly_circuits_completed: number;
+  }>();
   const missionAggregate = await db.prepare(
     `SELECT
        COALESCE(SUM(CASE WHEN is_completed = 1 AND type = 'daily' THEN 1 ELSE 0 END), 0) as missions_completed,
@@ -2241,11 +2243,26 @@ async function recomputeMonthlyCounters(db: D1Database, userId: string, referenc
 
   const snapshot: MonthlyCounterSnapshot = {
     month_key: monthKey,
-    missions_completed: Number(missionAggregate?.missions_completed ?? 0),
-    steps: Number(metricAggregate?.steps ?? 0),
-    distance_meters: Number(metricAggregate?.distance_meters ?? 0),
-    streak_days: Number(missionAggregate?.streak_days ?? 0),
-    weekly_circuits_completed: Number(missionAggregate?.weekly_circuits_completed ?? 0),
+    missions_completed: Math.max(
+      Number(missionAggregate?.missions_completed ?? 0),
+      Number(existingRow?.missions_completed ?? 0),
+    ),
+    steps: Math.max(
+      Number(metricAggregate?.steps ?? 0),
+      Number(existingRow?.steps ?? 0),
+    ),
+    distance_meters: Math.max(
+      Number(metricAggregate?.distance_meters ?? 0),
+      Number(existingRow?.distance_meters ?? 0),
+    ),
+    streak_days: Math.max(
+      Number(missionAggregate?.streak_days ?? 0),
+      Number(existingRow?.streak_days ?? 0),
+    ),
+    weekly_circuits_completed: Math.max(
+      Number(missionAggregate?.weekly_circuits_completed ?? 0),
+      Number(existingRow?.weekly_circuits_completed ?? 0),
+    ),
   };
 
   await db.prepare(
@@ -2620,7 +2637,10 @@ async function recomputeActivePeriodicMissionProgress(userId: string, db: D1Data
         const matchedCount = eligibleDailies.reduce((total, completedMission) =>
           missionSubtaskMatchesCompletedMission(completedMission, subtask) ? total + 1 : total,
         0);
-        const nextCount = Math.min(subtask.required_count, matchedCount);
+        const nextCount = Math.min(
+          subtask.required_count,
+          Math.max(subtask.current_count, matchedCount),
+        );
         const nextCompleted = nextCount >= subtask.required_count ? 1 : 0;
 
         if (nextCount === subtask.current_count && nextCompleted === (subtask.is_completed ? 1 : 0)) {
@@ -2684,7 +2704,10 @@ async function recomputeActivePeriodicMissionProgress(userId: string, db: D1Data
       const matchedCount = eligibleDailies.reduce((total, completedMission) =>
         missionMatchesTask(completedMission, task) ? total + 1 : total,
       0);
-      const currentCount = Math.min(task.required_count, matchedCount);
+      const currentCount = Math.min(
+        task.required_count,
+        Math.max(task.current_count, matchedCount),
+      );
       const completed = currentCount >= task.required_count;
 
       if (currentCount !== task.current_count || completed !== task.completed) {
@@ -2938,6 +2961,7 @@ registerMissionRoutes(
     ensureUserCounterRow,
     extractExerciseName,
     generateStructuredMissionPlanForUser,
+    getCurrentCycleMissionCounts,
     getMonthlyCounters,
     getRewardNotificationCursor,
     hydrateMissionRowsWithSubtasks,
@@ -3013,12 +3037,19 @@ registerShopRoutes(app, {
 
 registerMetricsRoutes(app, {
   authMiddleware,
+  invalidateMissionListCache,
+  resolveUserMetricsDate: async (userId, db, reference = new Date()) => {
+    const timeZone = await readUserMissionTimeZone(db, userId);
+    return currentDateKeyInTimeZone(reference, timeZone);
+  },
+  updateMonthlyMissionProgress,
 });
 
 type RankingRow = {
   user_id: string;
   username: string;
   full_name: string;
+  avatar_url: string | null;
   level: number;
   xp: number;
   current_streak: number;
@@ -3031,6 +3062,7 @@ type TrainingRankingSourceRow = {
   user_id: string;
   username: string;
   full_name: string;
+  avatar_url: string | null;
   level: number | string | null;
   xp: number | string | null;
   current_streak: number | string | null;
@@ -3116,6 +3148,7 @@ function normalizeTrainingRankingRow(row: TrainingRankingSourceRow): RankingRow 
     user_id: row.user_id,
     username: row.username,
     full_name: row.full_name,
+    avatar_url: row.avatar_url ?? null,
     level,
     xp,
     current_streak: currentStreak,
@@ -3152,6 +3185,7 @@ async function loadTrainingRankingRows(
       up.user_id,
       up.username,
       up.full_name,
+      u.avatar_url,
       pr.level,
       pr.xp,
       pr.current_streak,
@@ -3161,6 +3195,8 @@ async function loadTrainingRankingRows(
       COALESCE(skill_stats.unlocked_skill_stages, 0) as unlocked_skill_stages,
       COALESCE(skill_stats.skill_stage_score, 0) as skill_stage_score
     FROM user_profiles up
+    LEFT JOIN users u
+      ON u.id = up.user_id
     INNER JOIN user_progression pr
       ON up.user_id = pr.user_id
     LEFT JOIN (
@@ -3236,6 +3272,11 @@ app.get("/api/ranking/friends", authMiddleware, async (c) => {
 registerFriendsRoutes(app, {
   authMiddleware,
   onFriendAdded,
+  withTransaction,
+});
+
+registerSocialChatRoutes(app, {
+  authMiddleware,
   withTransaction,
 });
 
@@ -3809,21 +3850,9 @@ async function createMissionsForPeriod(
 }
 
 async function ensureMissionJobSchema(db: D1Database): Promise<void> {
-  await aiMissionGenerationService.ensureMissionJobSchema(db);
-}
-
-async function generateAiMissionsForUser(
-  env: Env,
-  db: D1Database,
-  userId: string,
-  conditioningInput?: unknown,
-): Promise<AiMissionGenerationResult> {
-  return aiMissionGenerationService.generateAiMissionsForUser(
-    env,
-    db,
-    userId,
-    conditioningInput,
-  );
+  await db
+    .prepare("SELECT id FROM mission_generation_jobs LIMIT 1")
+    .first<{ id: string }>();
 }
 
 function resolvePeriodicMissionBlueprints(params: {
@@ -3888,11 +3917,56 @@ async function replaceMissionSubtasks(
   subtasks: readonly ResolvedMissionSubtask[],
 ): Promise<void> {
   await ensureMissionSubtaskSchema(db);
+  const existingSubtasks =
+    (await loadMissionSubtasksByParentIds(db, [parentMissionId])).get(parentMissionId)
+    ?? [];
+  const preservedProgressByKey = new Map(
+    existingSubtasks.map((subtask) => [
+      subtask.compatibility_key,
+      {
+        currentCount: Math.max(0, Number(subtask.current_count ?? 0)),
+      },
+    ]),
+  );
   await db.prepare(
     `DELETE FROM mission_subtasks
       WHERE parent_mission_id = ?`
   ).bind(parentMissionId).run();
-  await createMissionSubtasks(db, parentMissionId, subtasks);
+  if (subtasks.length === 0) {
+    return;
+  }
+
+  for (const subtask of subtasks) {
+    const requiredCount = Math.max(1, subtask.requiredCount);
+    const preservedProgress = preservedProgressByKey.get(subtask.compatibilityKey);
+    const currentCount = Math.min(
+      requiredCount,
+      Math.max(0, Number(preservedProgress?.currentCount ?? 0)),
+    );
+    const isCompleted = currentCount >= requiredCount ? 1 : 0;
+
+    await db.prepare(
+      `INSERT INTO mission_subtasks (
+        parent_mission_id,
+        mission_type,
+        subtask_title,
+        compatibility_key,
+        compatibility_terms_json,
+        required_count,
+        current_count,
+        is_completed,
+        updated_at
+      ) VALUES (?, 'daily', ?, ?, ?, ?, ?, ?, datetime('now'))`
+    ).bind(
+      parentMissionId,
+      subtask.title,
+      subtask.compatibilityKey,
+      JSON.stringify(subtask.compatibilityTerms),
+      requiredCount,
+      currentCount,
+      isCompleted,
+    ).run();
+  }
 }
 
 type MissionGenerationScope = "regular" | "ai_special";
@@ -3949,6 +4023,43 @@ async function getActiveCycleMissionCounts(
          ${pendingStatusSql}
          AND ${missionCycleDateSql()} = ?
          AND (deadline IS NULL OR deadline > datetime('now'))`
+    ).bind(userId, period, cycleDate).first<{ count: number }>();
+    counts[period] = Number(row?.count ?? 0);
+  }
+
+  return counts;
+}
+
+async function getCurrentCycleMissionCounts(
+  db: D1Database,
+  userId: string,
+  scope: MissionGenerationScope,
+): Promise<Record<MissionPeriod, number>> {
+  const counts: Record<MissionPeriod, number> = {
+    daily: 0,
+    weekly: 0,
+    monthly: 0,
+  };
+  const [hasAiSpecialColumn, hasMissionStatusColumn] = await Promise.all([
+    hasTableColumn(db, "missions", "is_ai_special"),
+    hasTableColumn(db, "missions", "status"),
+  ]);
+  const { scopeSql } = buildMissionCycleSqlFilters(
+    scope,
+    hasAiSpecialColumn,
+    hasMissionStatusColumn,
+  );
+  const userTimeZone = await readUserMissionTimeZone(db, userId);
+
+  for (const period of ["daily", "weekly", "monthly"] as const) {
+    const cycleDate = missionCycleDateKey(period, userTimeZone);
+    const row = await db.prepare(
+      `SELECT COUNT(*) as count
+       FROM missions
+       WHERE user_id = ?
+         AND type = ?
+         ${scopeSql}
+         AND ${missionCycleDateSql()} = ?`
     ).bind(userId, period, cycleDate).first<{ count: number }>();
     counts[period] = Number(row?.count ?? 0);
   }
@@ -4113,95 +4224,6 @@ function toPositiveInt(value: unknown, fallback: number) {
   return rounded > 0 ? rounded : fallback;
 }
 
-function xpByConditioning(conditioning: ConditioningLevel): number {
-  if (conditioning === "avancado") return 95;
-  if (conditioning === "intermediario") return 75;
-  if (conditioning === "sedentario") return 35;
-  return 55;
-}
-
-function pointsByConditioning(conditioning: ConditioningLevel): number {
-  if (conditioning === "avancado") return 24;
-  if (conditioning === "intermediario") return 18;
-  if (conditioning === "sedentario") return 8;
-  return 12;
-}
-
-const aiMissionGenerationService = createAiMissionGenerationService({
-  applyMissionMetricContext: (mission, period, exerciseName, metricType, metricValue) =>
-    applyMissionMetricContext(
-      mission as MissionPayload,
-      period,
-      exerciseName,
-      metricType,
-      metricValue,
-    ) as unknown as typeof mission,
-  buildMissionDescription,
-  buildMissionDescriptionFromInstructions,
-  buildMissionPayload: (params) =>
-    buildMissionPayloadService({
-      ...params,
-      forceCategory: params.forceCategory as MissionExerciseCategory | undefined,
-    }) as unknown as MissionPayload,
-  classifyMission,
-  enrichExercise,
-  ensureInstructionSteps,
-  extractExerciseName: extractExerciseNameService,
-  fallbackMissionsForPeriod: (period, titlePrefix, xp, points) =>
-    fallbackMissionsForPeriod(
-      period,
-      titlePrefix,
-      xp,
-      points,
-      buildMissionPayloadService,
-    ),
-  futureIsoForPeriod,
-  getExerciseInstructionsFromAI: (
-    exerciseName,
-    metricType,
-    conditioningLevel,
-    env,
-    period,
-  ) =>
-    getExerciseInstructionsFromAIService(
-      exerciseName,
-      metricType,
-      conditioningLevel,
-      env,
-      period,
-    ),
-  getHuggingFaceApiKey,
-  insertMission: (db, userId, period, deadline, mission, skillId) =>
-    insertMission(
-      db,
-      userId,
-      period,
-      deadline,
-      mission as unknown as MissionPayload,
-      skillId,
-    ),
-  invalidateMissionListCache,
-  localizeMissionTextArray,
-  mapWithConcurrency,
-  mergeUniqueStrings,
-  missionMetricRulesPrompt: MISSION_METRIC_RULES_PROMPT,
-  normalizeConditioning,
-  normalizeInstructionList,
-  parseJsonObjectFromModelContent,
-  pointsByConditioning,
-  requestStructuredContent: requestHuggingFaceStructuredContent,
-  resolveExerciseApiBodyArea,
-  resolveExerciseApiMuscleGroups,
-  resolveExerciseDisplayNamePt,
-  resolveSkillIdForExerciseMission: resolveSkillIdForExerciseMissionService,
-  resolveSupportedMissionExerciseName,
-  timeoutMsHuggingFace: timeoutMsByService.huggingface,
-  toPositiveInt,
-  toSafeString,
-  translateExerciseInstructionsToPt: translateExerciseInstructionsToPtService,
-  xpByConditioning,
-});
-
 // Registra IA e saúde depois que toda a cadeia de geração já foi composta.
 registerAiRoutes(app, {
   ApiIntegrationError,
@@ -4211,8 +4233,9 @@ registerAiRoutes(app, {
   ensureUserCounterRow: ensureUserCounterRowService,
   enforceRateLimit,
   fetchJsonWithTimeout,
-  generateAiMissionsForUser,
+  generateStructuredMissionPlanForUser,
   logUserEvent: logUserEventService,
+  repairActivatedProfileState: activatedProfileRecoveryService.repairActivatedProfileState,
   maybeApplyTrainingPlanPreferenceFromChat: (c, params) =>
     trainingPlanPreferencesService.maybeApplyTrainingPlanPreferenceFromChat(c, {
       ...params,
@@ -4227,7 +4250,7 @@ registerAiRoutes(app, {
   onChatMessage: onChatMessageService,
   parseJsonObjectFromModelContent,
   parseStoredPlanRecord: parseStoredPlanRecordService,
-  requestHuggingFaceVisionStructuredContent,
+  requestOpenRouterVisionStructuredContent,
   summarizeTrainingPlanChatPreferences: (preferences) =>
     summarizeTrainingPlanChatPreferencesService(
       preferences as TrainingPlanChatPreferences | null,

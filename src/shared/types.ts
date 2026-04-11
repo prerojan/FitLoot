@@ -8,6 +8,7 @@ export const UserProfileSchema = z.object({
   user_id: z.string(),
   username: z.string(),
   full_name: z.string(),
+  avatar_url: z.string().nullable().optional(),
   weight: z.number().nullable(),
   height: z.number().nullable(),
   initial_conditioning: z.string().nullable(),
@@ -304,6 +305,7 @@ export type RankingPlayer = {
   user_id?: string;
   username: string;
   full_name: string;
+  avatar_url?: string | null;
   level: number;
   xp: number;
   current_streak: number;
@@ -339,6 +341,221 @@ export const ConsumeRewardNotificationsRequestSchema = z.object({
 
 export type ConsumeRewardNotificationsRequest = z.infer<
   typeof ConsumeRewardNotificationsRequestSchema
+>;
+
+export const SocialConversationKindSchema = z.enum([
+  "direct",
+  "group",
+]);
+
+export type SocialConversationKind = z.infer<
+  typeof SocialConversationKindSchema
+>;
+
+export const SocialConversationMessageKindSchema = z.enum([
+  "text",
+  "image",
+]);
+
+export type SocialConversationMessageKind = z.infer<
+  typeof SocialConversationMessageKindSchema
+>;
+
+export const SocialConversationMemberRoleSchema = z.enum([
+  "owner",
+  "member",
+]);
+
+export type SocialConversationMemberRole = z.infer<
+  typeof SocialConversationMemberRoleSchema
+>;
+
+export const SocialConversationParticipantSchema = z.object({
+  user_id: z.string(),
+  username: z.string(),
+  full_name: z.string(),
+  avatar_url: z.string().nullable().optional(),
+  is_online: z.boolean().optional(),
+});
+
+export type SocialConversationParticipant = z.infer<
+  typeof SocialConversationParticipantSchema
+>;
+
+export const SocialConversationPreviewSchema = z.object({
+  id: z.number().int().positive(),
+  conversation_kind: SocialConversationKindSchema,
+  title: z.string().nullable().optional(),
+  display_title: z.string(),
+  avatar_url: z.string().nullable().optional(),
+  member_count: z.number().int().nonnegative(),
+  unread_count: z.number().int().nonnegative(),
+  last_message_id: z.number().int().positive().nullable().optional(),
+  last_message_preview: z.string().nullable().optional(),
+  last_message_at: z.string().nullable().optional(),
+  created_at: z.string(),
+  updated_at: z.string(),
+  notifications_muted: z.boolean().optional(),
+  participants: z.array(SocialConversationParticipantSchema),
+});
+
+export type SocialConversationPreview = z.infer<
+  typeof SocialConversationPreviewSchema
+>;
+
+export const SocialConversationMessageMediaSchema = z.object({
+  id: z.number().int().positive(),
+  media_kind: z.literal("image"),
+  public_url: z.string(),
+  created_at: z.string(),
+});
+
+export type SocialConversationMessageMedia = z.infer<
+  typeof SocialConversationMessageMediaSchema
+>;
+
+export const SocialConversationMessageSchema = z.object({
+  id: z.number().int().positive(),
+  conversation_id: z.number().int().positive(),
+  sender_user_id: z.string(),
+  sender_username: z.string(),
+  sender_full_name: z.string(),
+  sender_avatar_url: z.string().nullable().optional(),
+  message_text: z.string(),
+  message_kind: SocialConversationMessageKindSchema,
+  media: SocialConversationMessageMediaSchema.nullable().optional(),
+  created_at: z.string(),
+  edited_at: z.string().nullable().optional(),
+  is_own_message: z.boolean(),
+});
+
+export type SocialConversationMessage = z.infer<
+  typeof SocialConversationMessageSchema
+>;
+
+export const SocialConversationMessagesResponseSchema = z.object({
+  conversation: SocialConversationPreviewSchema,
+  messages: z.array(SocialConversationMessageSchema),
+});
+
+export type SocialConversationMessagesResponse = z.infer<
+  typeof SocialConversationMessagesResponseSchema
+>;
+
+export const SocialDirectConversationRequestSchema = z.object({
+  friend_user_id: z.string().trim().min(1).max(120),
+});
+
+export type SocialDirectConversationRequest = z.infer<
+  typeof SocialDirectConversationRequestSchema
+>;
+
+export const SocialGroupConversationRequestSchema = z.object({
+  title: z.string().trim().min(2).max(80),
+  member_user_ids: z.array(z.string().trim().min(1).max(120)).min(2).max(20),
+});
+
+export type SocialGroupConversationRequest = z.infer<
+  typeof SocialGroupConversationRequestSchema
+>;
+
+export const SocialConversationMessageRequestSchema = z.object({
+  message_text: z.string().trim().min(1).max(2000),
+});
+
+export type SocialConversationMessageRequest = z.infer<
+  typeof SocialConversationMessageRequestSchema
+>;
+
+export const SocialConversationReadRequestSchema = z.object({
+  last_read_message_id: z.number().int().positive().optional(),
+});
+
+export type SocialConversationReadRequest = z.infer<
+  typeof SocialConversationReadRequestSchema
+>;
+
+export const SocialConversationMuteRequestSchema = z.object({
+  muted: z.boolean(),
+});
+
+export type SocialConversationMuteRequest = z.infer<
+  typeof SocialConversationMuteRequestSchema
+>;
+
+export const SocialHubFriendItemSchema = z.object({
+  id: z.number().int().positive(),
+  friend_user_id: z.string(),
+  friend_username: z.string(),
+  friend_full_name: z.string(),
+  friend_avatar_url: z.string().nullable().optional(),
+  friend_level: z.number().int().nonnegative(),
+  friend_xp: z.number().nonnegative(),
+  friend_streak: z.number().int().nonnegative(),
+  is_online: z.boolean().optional(),
+  last_heartbeat_at: z.string().nullable().optional(),
+  direct_conversation_id: z.number().int().positive().nullable().optional(),
+  unread_count: z.number().int().nonnegative(),
+  last_message_preview: z.string().nullable().optional(),
+  last_message_at: z.string().nullable().optional(),
+  notifications_muted: z.boolean().optional(),
+});
+
+export type SocialHubFriendItem = z.infer<
+  typeof SocialHubFriendItemSchema
+>;
+
+export const SocialHubFriendRequestSchema = z.object({
+  id: z.number().int().positive(),
+  friend_user_id: z.string(),
+  friend_username: z.string(),
+  friend_full_name: z.string(),
+  friend_avatar_url: z.string().nullable().optional(),
+  friend_level: z.number().int().nonnegative(),
+  friend_xp: z.number().nonnegative(),
+  friend_streak: z.number().int().nonnegative(),
+  created_at: z.string(),
+});
+
+export type SocialHubFriendRequest = z.infer<
+  typeof SocialHubFriendRequestSchema
+>;
+
+export const SocialHubBundleSchema = z.object({
+  friends: z.array(SocialHubFriendItemSchema),
+  pending_requests: z.array(SocialHubFriendRequestSchema),
+});
+
+export type SocialHubBundle = z.infer<typeof SocialHubBundleSchema>;
+
+export const SocialChatNotificationSchema = z.object({
+  conversation_id: z.number().int().positive(),
+  conversation_kind: SocialConversationKindSchema,
+  conversation_title: z.string(),
+  message_id: z.number().int().positive(),
+  message_text: z.string(),
+  sender_user_id: z.string(),
+  sender_username: z.string(),
+  sender_full_name: z.string(),
+  sender_avatar_url: z.string().nullable().optional(),
+  created_at: z.string(),
+});
+
+export type SocialChatNotification = z.infer<
+  typeof SocialChatNotificationSchema
+>;
+
+export const ConsumeSocialChatNotificationsRequestSchema = z.object({
+  items: z.array(
+    z.object({
+      conversation_id: z.number().int().positive(),
+      message_id: z.number().int().positive(),
+    }),
+  ).max(25),
+});
+
+export type ConsumeSocialChatNotificationsRequest = z.infer<
+  typeof ConsumeSocialChatNotificationsRequestSchema
 >;
 
 export const PromoCodeEffectSchema = z.enum([
@@ -530,6 +747,10 @@ export const UpdateDailyMetricsRequestSchema = z.object({
   steps: z.number().min(0),
   calories_burned: z.number().min(0),
   distance_meters: z.number().min(0),
+  date: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
 });
 
 export type UpdateDailyMetricsRequest = z.infer<typeof UpdateDailyMetricsRequestSchema>;
@@ -625,6 +846,12 @@ export const UpdateMeRequestSchema = z.object({
   fitness_level: z.string().optional(),
 });
 export type UpdateMeRequest = z.infer<typeof UpdateMeRequestSchema>;
+
+export const UpdateUserAvatarRequestSchema = z.object({
+  image_base64: z.string().trim().min(1),
+  image_mime_type: z.string().trim().min(1),
+});
+export type UpdateUserAvatarRequest = z.infer<typeof UpdateUserAvatarRequestSchema>;
 
 // Training Rank Profile (input para cálculo)
 export interface TrainingRankProfile {

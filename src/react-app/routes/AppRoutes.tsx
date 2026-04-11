@@ -2,6 +2,7 @@ import { Outlet, Route, Routes } from "react-router";
 
 import { ROUTE_PATHS } from "../auth/constants";
 import { RewardNotificationsProvider } from "../contexts/rewardNotifications";
+import { SocialChatNotificationsProvider } from "../contexts/socialChatNotifications";
 import { AppEntryRoute, ProtectedRoute, PublicAuthRoute } from "./guards";
 import {
   Achievements,
@@ -27,7 +28,9 @@ function ProtectedAppArea() {
   return (
     <ProtectedRoute>
       <RewardNotificationsProvider>
-        <Outlet />
+        <SocialChatNotificationsProvider>
+          <Outlet />
+        </SocialChatNotificationsProvider>
       </RewardNotificationsProvider>
     </ProtectedRoute>
   );

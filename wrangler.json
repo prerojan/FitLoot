@@ -50,6 +50,13 @@
   "vars": {
     "DB_BACKEND": "supabase",
     "DB_TOPOLOGY": "hybrid",
+    "OPENROUTER_CHAT_MODEL": "openrouter/free",
+    "OPENROUTER_VISION_MODEL": "openrouter/free",
+    "OPENROUTER_APP_TITLE": "FitLoot",
+    "OPENROUTER_HTTP_REFERER": "https://fitloot.vercel.app",
+    "OPENROUTESERVICE_BASE_URL": "https://api.openrouteservice.org/v2",
+    "MAP_TILE_URL_TEMPLATE": "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+    "MAP_TILE_ATTRIBUTION": "&copy; <a href=\"https://www.openstreetmap.org/copyright\">OpenStreetMap</a> contributors",
     "SUPABASE_ENABLE_READ_SPLIT": "false",
     "SUPABASE_POOL_MAX": "8",
     "SUPABASE_CONNECT_TIMEOUT_MS": "8000",

@@ -98,6 +98,7 @@ export function TrainingRankDisplay({
   }
 
   const config = rankConfig[snapshot.globalRank];
+  const shouldShowFallbackWarning = snapshot.fallbackUsed && snapshot.hasSkillData;
 
   if (compact) {
     return (
@@ -111,7 +112,7 @@ export function TrainingRankDisplay({
       >
         <Shield className="w-3 h-3" />
         <span className="text-xs font-medium">{config.label}</span>
-        {snapshot.fallbackUsed ? (
+        {shouldShowFallbackWarning ? (
           <div className="flex items-center gap-1">
             <AlertTriangle className="w-3 h-3 opacity-60" />
             <span className="text-xs" style={{ color: "var(--fl-color-text-muted)" }}>
@@ -157,7 +158,7 @@ export function TrainingRankDisplay({
       </div>
 
       {/* Avisa quando o rank foi estimado com dados incompletos. */}
-      {snapshot.fallbackUsed ? (
+      {shouldShowFallbackWarning ? (
         <div
           className="mb-3 rounded border p-2"
           style={{

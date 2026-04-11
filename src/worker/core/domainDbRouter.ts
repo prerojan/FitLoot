@@ -61,9 +61,14 @@ const TABLE_DOMAIN_MAP: Readonly<Record<string, DatabaseDomain>> = {
 
   friendships: "social",
   friend_requests: "social",
+  user_blocks: "social",
   user_presence: "social",
   friend_activity_events: "social",
   friend_online_presence: "social",
+  conversations: "social",
+  conversation_members: "social",
+  conversation_messages: "social",
+  conversation_message_media: "social",
 
   daily_metrics: "telemetry",
   food_diary: "telemetry",

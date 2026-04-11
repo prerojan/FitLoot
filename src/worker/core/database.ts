@@ -37,7 +37,7 @@ const BETA_BASELINE_TABLE_COLUMNS = new Map<string, Set<string>>([
   ],
 ]);
 
-function isConnectionTimeoutLike(error: unknown): boolean {
+export function isTransientDatabaseError(error: unknown): boolean {
   const message = (error instanceof Error ? error.message : String(error))
     .toLowerCase()
     .trim();
@@ -46,8 +46,37 @@ function isConnectionTimeoutLike(error: unknown): boolean {
     message.includes("query read timeout") ||
     message.includes("connection terminated") ||
     message.includes("connect etimedout") ||
-    message.includes("connection timeout")
+    message.includes("connection timeout") ||
+    message.includes("read etimedout") ||
+    message.includes("socket hang up")
   );
+}
+
+export async function runWithTransientDatabaseRetry<T>(
+  task: () => Promise<T>,
+  options: {
+    maxAttempts?: number | undefined;
+    baseDelayMs?: number | undefined;
+  } = {},
+): Promise<T> {
+  const maxAttempts = Math.max(1, Math.floor(options.maxAttempts ?? 2));
+  const baseDelayMs = Math.max(1, Math.floor(options.baseDelayMs ?? 150));
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      return await task();
+    } catch (error) {
+      if (!isTransientDatabaseError(error) || attempt >= maxAttempts) {
+        throw error;
+      }
+
+      await new Promise((resolve) => {
+        globalThis.setTimeout(resolve, baseDelayMs * attempt);
+      });
+    }
+  }
+
+  throw new Error("TRANSIENT_DATABASE_RETRY_EXHAUSTED");
 }
 
 function isSupabaseRuntimeDb(db: D1Database): boolean {
@@ -72,7 +101,7 @@ export async function hasCoreSchema(db: D1Database) {
     cachedSchemaState = { ready: true, checkedAt: now };
     return true;
   } catch (error) {
-    if (isConnectionTimeoutLike(error)) {
+    if (isTransientDatabaseError(error)) {
       cachedSchemaState = { ready: false, checkedAt: now };
       return false;
     }
@@ -85,7 +114,7 @@ export async function hasCoreSchema(db: D1Database) {
     cachedSchemaState = { ready: true, checkedAt: now };
     return true;
   } catch (error) {
-    if (isConnectionTimeoutLike(error)) {
+    if (isTransientDatabaseError(error)) {
       cachedSchemaState = { ready: false, checkedAt: now };
       return false;
     }
@@ -166,7 +195,7 @@ async function getTableColumns(db: D1Database, tableName: string): Promise<Set<s
     ).bind(cacheKey).all<{ name: string | null }>();
     rows = Array.isArray(info.results) ? info.results : [];
   } catch (error) {
-    if (staleColumns && isConnectionTimeoutLike(error)) {
+    if (staleColumns && isTransientDatabaseError(error)) {
       return staleColumns;
     }
     if (isSupabaseRuntimeDb(db)) {

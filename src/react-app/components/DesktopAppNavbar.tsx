@@ -4,6 +4,7 @@ import { Avatar } from "./ui/avatar";
 import LoadingBall from "./LoadingBall";
 import { useAuth } from "@/react-app/auth/context";
 import { ROUTE_PATHS } from "@/react-app/auth/constants";
+import { useSocialChatNotifications } from "@/react-app/contexts/useSocialChatNotifications";
 import { MaterialIcon } from "@/react-app/pages/dashboardHelpers";
 import {
   DESKTOP_NAV_ITEMS,
@@ -29,6 +30,7 @@ export default function DesktopAppNavbar({
   className,
 }: DesktopAppNavbarProps) {
   const { user } = useAuth();
+  const { pendingCount } = useSocialChatNotifications();
   const navigate = useNavigate();
   const location = useLocation();
   const [resolvedProfile, setResolvedProfile] = useState<UserProfile | null>(() => profile ?? readCachedJson<UserProfile>("/api/profile")?.data ?? null);
@@ -223,7 +225,20 @@ export default function DesktopAppNavbar({
                     boxShadow: "0 0 22px color-mix(in srgb, var(--app-primary-color) 34%, transparent)",
                   } : { color: "var(--fl-nav-item-muted)" }}
                 >
-                  <MaterialIcon name={item.icon} filled={isActive} className="text-xl" />
+                  <span className="relative flex shrink-0">
+                    <MaterialIcon name={item.icon} filled={isActive} className="text-xl" />
+                    {item.path === ROUTE_PATHS.minigames && pendingCount > 0 ? (
+                      <span
+                        className="absolute -right-2 -top-2 flex min-h-5 min-w-5 items-center justify-center rounded-full px-1 text-[10px] font-black"
+                        style={{
+                          backgroundColor: isActive ? "var(--fl-nav-item-active-text)" : "var(--app-primary-color)",
+                          color: isActive ? "var(--app-primary-color)" : "var(--fl-nav-item-active-text)",
+                        }}
+                      >
+                        {pendingCount > 9 ? "9+" : pendingCount}
+                      </span>
+                    ) : null}
+                  </span>
                   <span className="hidden lg:inline">{item.label}</span>
                 </button>
               );

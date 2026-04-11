@@ -2,9 +2,11 @@ import { Hono, type MiddlewareHandler } from "hono";
 
 import { hasCoreSchema } from "../core/database";
 import {
-  getHuggingFaceApiKey,
-  getHuggingFaceChatModel,
-  getHuggingFaceVisionModel,
+  getMapTileUrlTemplate,
+  getOpenRouterApiKey,
+  getOpenRouterChatModel,
+  getOpenRouteServiceApiKey,
+  getOpenRouterVisionModel,
 } from "../core/providerConfig";
 import type { AppContext } from "../core/types";
 
@@ -26,27 +28,30 @@ export function registerHealthRoutes(
     return c.json({
       ok: true,
       timestamp: new Date().toISOString(),
-      hasHuggingFace: Boolean(getHuggingFaceApiKey(c.env)),
-      huggingFaceChatModel: getHuggingFaceChatModel(c.env),
+      hasOpenRouter: Boolean(getOpenRouterApiKey(c.env)),
+      hasOpenRouteService: Boolean(getOpenRouteServiceApiKey(c.env)),
+      openRouterChatModel: getOpenRouterChatModel(c.env),
       hasOpenAI: false,
       hasUSDA: Boolean(c.env.USDA_API_KEY),
       hasRapidAPI: Boolean(c.env.RAPID_API_KEY),
-      hasVision: false,
+      hasVision: Boolean(getOpenRouterApiKey(c.env)),
       hasDB: Boolean(c.env.fitloot_db),
       hasCoreSchema: schemaReady,
+      mapTileTemplate: getMapTileUrlTemplate(c.env),
       environment,
     });
   });
 
   app.get("/api/health/external", authMiddleware, async (c) => {
     return c.json({
-      huggingface: Boolean(getHuggingFaceApiKey(c.env)),
+      openrouter: Boolean(getOpenRouterApiKey(c.env)),
+      openrouteservice: Boolean(getOpenRouteServiceApiKey(c.env)),
       openai: false,
       usda: Boolean(c.env.USDA_API_KEY),
       rapidapi: Boolean(c.env.RAPID_API_KEY),
       google_vision: false,
-      huggingface_vision: Boolean(getHuggingFaceApiKey(c.env)),
-      huggingface_chat_model: getHuggingFaceChatModel(c.env),
+      openrouter_vision: Boolean(getOpenRouterApiKey(c.env)),
+      openrouter_chat_model: getOpenRouterChatModel(c.env),
       anthropic: Boolean(c.env.ANTHROPIC_API_KEY),
     });
   });
@@ -54,8 +59,8 @@ export function registerHealthRoutes(
   app.get("/api/health/openai", authMiddleware, async (c) =>
     c.json({ ok: false, deprecated: true }),
   );
-  app.get("/api/health/huggingface", authMiddleware, async (c) =>
-    c.json({ ok: Boolean(getHuggingFaceApiKey(c.env)) }),
+  app.get("/api/health/openrouter", authMiddleware, async (c) =>
+    c.json({ ok: Boolean(getOpenRouterApiKey(c.env)) }),
   );
   app.get("/api/health/usda", authMiddleware, async (c) =>
     c.json({ ok: Boolean(c.env.USDA_API_KEY) }),
@@ -65,9 +70,9 @@ export function registerHealthRoutes(
   );
   app.get("/api/health/vision", authMiddleware, async (c) =>
     c.json({
-      ok: Boolean(getHuggingFaceApiKey(c.env)),
-      provider: "huggingface_router",
-      model: getHuggingFaceVisionModel(c.env),
+      ok: Boolean(getOpenRouterApiKey(c.env)),
+      provider: "openrouter",
+      model: getOpenRouterVisionModel(c.env),
     }),
   );
 }

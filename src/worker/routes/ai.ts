@@ -4,6 +4,7 @@ import {
   AiAnalyzeFoodRequestSchema,
   AiChatRequestSchema,
 } from "../../shared/types";
+import { MISSION_LIMITS } from "../../constants/missionMetrics";
 import { assertString, safeGet } from "../../utils/typeHelpers";
 import { toStatusCode } from "../httpHelpers";
 import {
@@ -13,8 +14,8 @@ import {
   schemaMismatchResponse,
 } from "../core/errors";
 import {
-  getHuggingFaceApiKey,
-  getHuggingFaceVisionModel,
+  getOpenRouterApiKey,
+  getOpenRouterVisionModel,
 } from "../core/providerConfig";
 import type {
   AppContext,
@@ -61,8 +62,15 @@ type AiMissionGenerationResult = {
   error: string | null;
 };
 
+type StructuredMissionPlanResult = {
+  already_active: boolean;
+  used_ai: boolean;
+  invalid_ratio: number | null | undefined;
+  missions: unknown[];
+};
+
 type TimeoutMsByService = {
-  huggingface: number;
+  openrouter: number;
   anthropic?: number | undefined;
   usda: number;
   rapidapi: number;
@@ -85,18 +93,28 @@ type AiRouteDeps = {
     init: RequestInit,
     timeoutMs: number,
   ) => Promise<T>;
-  generateAiMissionsForUser: (
+  generateStructuredMissionPlanForUser: (
     env: Env,
     db: D1Database,
     userId: string,
-    conditioningInput?: unknown,
-  ) => Promise<AiMissionGenerationResult>;
+    options: {
+      isAiSpecial: boolean;
+      dailyTarget: number;
+      weeklyTarget: number;
+      monthlyTarget: number;
+    },
+  ) => Promise<StructuredMissionPlanResult>;
   logUserEvent: (
     db: D1Database,
     userId: string,
     eventType: string,
     payload: Record<string, unknown>,
   ) => Promise<void>;
+  repairActivatedProfileState: (params: {
+    db: D1Database;
+    env: Env;
+    user: AppContext["Variables"]["user"];
+  }) => Promise<Record<string, unknown> | null>;
   maybeApplyTrainingPlanPreferenceFromChat: (
     c: Context<AppContext>,
     params: {
@@ -118,8 +136,9 @@ type AiRouteDeps = {
   onChatMessage: (db: D1Database, userId: string, sessionCount: number) => Promise<void>;
   parseJsonObjectFromModelContent: <T extends Record<string, unknown>>(content: string) => T | null;
   parseStoredPlanRecord: (planJson: string | null | undefined) => { chat_preferences?: unknown } | null;
-  requestHuggingFaceVisionStructuredContent: (
+  requestOpenRouterVisionStructuredContent: (
     apiKey: string,
+    env: Pick<Env, "OPENROUTER_HTTP_REFERER" | "OPENROUTER_APP_TITLE" | "FRONTEND_ORIGIN">,
     model: string,
     prompt: string,
     imageDataUrl: string,
@@ -151,8 +170,9 @@ export function registerAiRoutes(
     ensureUserCounterRow,
     enforceRateLimit,
     fetchJsonWithTimeout,
-    generateAiMissionsForUser,
+    generateStructuredMissionPlanForUser,
     logUserEvent,
+    repairActivatedProfileState,
     maybeApplyTrainingPlanPreferenceFromChat,
     normalizeConditioning,
     normalizeMatchText,
@@ -161,7 +181,7 @@ export function registerAiRoutes(
     onChatMessage,
     parseJsonObjectFromModelContent,
     parseStoredPlanRecord,
-    requestHuggingFaceVisionStructuredContent,
+    requestOpenRouterVisionStructuredContent,
     summarizeTrainingPlanChatPreferences,
     timeoutMsByService,
     toFriendlyErrorResponse,
@@ -275,6 +295,48 @@ export function registerAiRoutes(
       .trim();
   };
 
+  const generateMissionPlanWithRecovery = async (
+    env: Env,
+    db: D1Database,
+    user: AppContext["Variables"]["user"],
+  ): Promise<StructuredMissionPlanResult> => {
+    const options = {
+      isAiSpecial: false,
+      dailyTarget: MISSION_LIMITS.daily,
+      weeklyTarget: MISSION_LIMITS.weekly,
+      monthlyTarget: MISSION_LIMITS.monthly,
+    } as const;
+
+    try {
+      return await generateStructuredMissionPlanForUser(
+        env,
+        db,
+        user.id,
+        options,
+      );
+    } catch (error) {
+      if (getErrorMessage(error) !== "MISSION_GENERATION_PROFILE_INCOMPLETE") {
+        throw error;
+      }
+
+      const recoveredProfile = await repairActivatedProfileState({
+        db,
+        env,
+        user,
+      });
+      if (!recoveredProfile) {
+        throw error;
+      }
+
+      return generateStructuredMissionPlanForUser(
+        env,
+        db,
+        user.id,
+        options,
+      );
+    }
+  };
+
 type USDAResponse = {
   foods?: Array<{
     description?: string | undefined;
@@ -348,6 +410,35 @@ function parseNutritionFromOcrLabel(text: string) {
   };
 }
 
+const KCAL_PER_GRAM_PROTEIN = 4;
+const KCAL_PER_GRAM_CARBS = 4;
+const KCAL_PER_GRAM_FATS = 9;
+
+function calculateMacroEnergyPercentages(totals: {
+  protein: number;
+  carbs: number;
+  fats: number;
+}) {
+  const proteinEnergy = Math.max(0, totals.protein) * KCAL_PER_GRAM_PROTEIN;
+  const carbsEnergy = Math.max(0, totals.carbs) * KCAL_PER_GRAM_CARBS;
+  const fatsEnergy = Math.max(0, totals.fats) * KCAL_PER_GRAM_FATS;
+  const totalEnergy = proteinEnergy + carbsEnergy + fatsEnergy;
+
+  if (totalEnergy <= 0) {
+    return {
+      protein: 0,
+      carbs: 0,
+      fats: 0,
+    };
+  }
+
+  return {
+    protein: Number(((proteinEnergy / totalEnergy) * 100).toFixed(1)),
+    carbs: Number(((carbsEnergy / totalEnergy) * 100).toFixed(1)),
+    fats: Number(((fatsEnergy / totalEnergy) * 100).toFixed(1)),
+  };
+}
+
 // Enfileira a geração personalizada de missões sem bloquear a resposta da rota.
 app.post("/api/ai/generate-missions", authMiddleware, async (c) => {
   const user = c.get("user");
@@ -355,7 +446,7 @@ app.post("/api/ai/generate-missions", authMiddleware, async (c) => {
 
   try {
     await ensureMissionJobSchema(c.env.fitloot_db);
-    const requestBody = await c.req.json().catch(() => ({})) as { conditioning?: unknown };
+    await c.req.json().catch(() => ({}));
     const jobId = crypto.randomUUID();
 
     await c.env.fitloot_db.prepare(
@@ -365,12 +456,30 @@ app.post("/api/ai/generate-missions", authMiddleware, async (c) => {
 
     c.executionCtx.waitUntil((async () => {
       try {
-        const result = await generateAiMissionsForUser(c.env, c.env.fitloot_db, user.id, requestBody.conditioning);
+        const result = await generateMissionPlanWithRecovery(
+          c.env,
+          c.env.fitloot_db,
+          user,
+        );
+        const payload: AiMissionGenerationResult & {
+          generated: boolean;
+          used_ai: boolean;
+          invalid_ratio: number | null | undefined;
+          code?: string | undefined;
+        } = {
+          missions: result.missions,
+          fallback: !result.used_ai,
+          error: null,
+          generated: !result.already_active,
+          used_ai: result.used_ai,
+          invalid_ratio: result.invalid_ratio,
+          code: result.already_active ? "MISSIONS_ALREADY_ACTIVE" : undefined,
+        };
         await c.env.fitloot_db.prepare(
           `UPDATE mission_generation_jobs
              SET status = 'completed', result_json = ?, error_message = NULL, updated_at = datetime('now')
            WHERE id = ? AND user_id = ?`
-        ).bind(JSON.stringify(result), jobId, user.id).run();
+        ).bind(JSON.stringify(payload), jobId, user.id).run();
       } catch (jobError) {
         console.error("[/api/ai/generate-missions][job]", {
           message: getErrorMessage(jobError),
@@ -434,13 +543,24 @@ app.get("/api/ai/generate-missions/status", authMiddleware, async (c) => {
     }
 
     if (job.status === "completed") {
-      const parsed = job.result_json ? JSON.parse(job.result_json) as AiMissionGenerationResult : null;
+      const parsed = job.result_json
+        ? JSON.parse(job.result_json) as (AiMissionGenerationResult & {
+          generated?: boolean | undefined;
+          used_ai?: boolean | undefined;
+          invalid_ratio?: number | null | undefined;
+          code?: string | undefined;
+        })
+        : null;
       return c.json({
         success: true,
         status: "completed",
         missions: parsed?.missions ?? [],
         fallback: Boolean(parsed?.fallback),
         error: parsed?.error ?? null,
+        generated: parsed?.generated ?? true,
+        used_ai: parsed?.used_ai ?? false,
+        invalid_ratio: parsed?.invalid_ratio ?? null,
+        code: parsed?.code,
         job_id: job.id,
       });
     }
@@ -1005,7 +1125,7 @@ Objetivo: ${profile?.main_goal}
 Atributos: força ${attributes?.strength}, constituição ${attributes?.constitution}, vitalidade ${attributes?.vitality}, destreza ${attributes?.dexterity}, foco ${attributes?.focus}
 Skills: ${skillRows.slice(0, 5).map((skill) => `${skill.name}:${skill.total_reps}`).join(",")}`;
 
-    if (!getHuggingFaceApiKey(c.env)) {
+    if (!getOpenRouterApiKey(c.env)) {
       return c.json({
         success: true,
         recommendations: fallbackRecommendations,
@@ -1121,9 +1241,9 @@ async function identifyFoodItemsFromImage(
     ocrText?: string | undefined;
   },
 ): Promise<{ items: IdentifiedFoodItem[]; foodDescription?: string | undefined }> {
-  const apiKey = getHuggingFaceApiKey(c.env);
+  const apiKey = getOpenRouterApiKey(c.env);
   if (!apiKey) {
-    throw new ApiIntegrationError("SERVICE_NOT_CONFIGURED", 503, "Hugging Face não configurada.");
+    throw new ApiIntegrationError("SERVICE_NOT_CONFIGURED", 503, "OpenRouter não configurado.");
   }
 
   const normalizedImageBase64 = params.imageBase64.trim();
@@ -1141,13 +1261,14 @@ async function identifyFoodItemsFromImage(
     .filter((line) => line.length > 0)
     .join("\n");
 
-  const content = await requestHuggingFaceVisionStructuredContent(
+  const content = await requestOpenRouterVisionStructuredContent(
     apiKey,
-    getHuggingFaceVisionModel(c.env),
+    c.env,
+    getOpenRouterVisionModel(c.env),
     prompt,
     `data:${params.imageMimeType?.trim() || "image/jpeg"};base64,${normalizedImageBase64}`,
     700,
-    timeoutMsByService.huggingface,
+    timeoutMsByService.openrouter,
   );
 
   const parsed = (parseJsonObjectFromModelContent(content) ?? {}) as {
@@ -1342,12 +1463,7 @@ Texto OCR do rótulo: ${ocr_text || "não identificado"}.`;
       { calories: 0, energy_kj: 0, protein: 0, carbs: 0, fats: 0 }
     );
 
-    const macroTotal = totals.protein + totals.carbs + totals.fats;
-    const percentages = {
-      protein: macroTotal > 0 ? Number(((totals.protein / macroTotal) * 100).toFixed(1)) : 0,
-      carbs: macroTotal > 0 ? Number(((totals.carbs / macroTotal) * 100).toFixed(1)) : 0,
-      fats: macroTotal > 0 ? Number(((totals.fats / macroTotal) * 100).toFixed(1)) : 0,
-    };
+    const percentages = calculateMacroEnergyPercentages(totals);
 
     return c.json({
       success: true,

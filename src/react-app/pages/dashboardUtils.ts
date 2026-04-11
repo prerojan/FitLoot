@@ -1,6 +1,7 @@
 import { formatMissionGoal } from "@/constants/missionMetrics";
 import { STEP_MISSION_PROGRESS_STORAGE_PREFIX } from "@/react-app/constants/storage";
 import type { Mission, MissionMetricType } from "@/shared/types";
+import { SETTLED_MISSION_RETENTION_MS_BY_PERIOD } from "@/shared/missionRetention";
 
 export const MATERIAL_SYMBOLS_LINK_ID = "fitloot-material-symbols";
 export const MATERIAL_SYMBOLS_HREF =
@@ -76,6 +77,33 @@ export function ensureMaterialSymbolsLoaded() {
 
 export function formatNumber(value: number): string {
   return value.toLocaleString("pt-BR");
+}
+
+function parseMissionTimestampMs(
+  value: string | null | undefined,
+): number | null {
+  if (typeof value !== "string" || value.trim().length === 0) return null;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+export function resolveExpiredMissionRefreshDelay(
+  missions: Mission[],
+): number | null {
+  if (missions.length === 0) return null;
+
+  const now = Date.now();
+  return missions.reduce((shortestDelay, mission) => {
+    const retentionMs =
+      SETTLED_MISSION_RETENTION_MS_BY_PERIOD[mission.type as "daily" | "weekly" | "monthly"] ??
+      SETTLED_MISSION_RETENTION_MS_BY_PERIOD.monthly;
+    const referenceTimestamp =
+      parseMissionTimestampMs(mission.updated_at) ??
+      parseMissionTimestampMs(mission.deadline) ??
+      now;
+    const delay = Math.max(0, referenceTimestamp + retentionMs - now);
+    return Math.min(shortestDelay, delay);
+  }, SETTLED_MISSION_RETENTION_MS_BY_PERIOD.monthly);
 }
 
 function canUseStorage(): boolean {
@@ -421,8 +449,9 @@ export function formatDateKey(date: Date): string {
 export function extractDateKey(value: string | null | undefined): string | null {
   if (!value) return null;
 
-  const directMatch = value.match(/\d{4}-\d{2}-\d{2}/);
-  if (directMatch) return directMatch[0];
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value.trim())) {
+    return value.trim();
+  }
 
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return null;
@@ -455,6 +484,62 @@ export function buildCenteredDates(baseDate: Date, radius = 2): Date[] {
     date.setDate(normalizedBaseDate.getDate() + index - radius);
     return date;
   });
+}
+
+function currentCycleDateByMissionType(
+  missionType: Mission["type"],
+  referenceDate: Date,
+): string | null {
+  if (missionType === "daily") {
+    return formatDateKey(referenceDate);
+  }
+  if (missionType === "weekly") {
+    return formatDateKey(startOfWeek(referenceDate));
+  }
+  if (missionType === "monthly") {
+    const monthStart = new Date(referenceDate);
+    monthStart.setHours(0, 0, 0, 0);
+    monthStart.setDate(1);
+    return formatDateKey(monthStart);
+  }
+  return null;
+}
+
+export function cachedMissionListNeedsCycleRefresh(
+  missions: Mission[] | null,
+  referenceDate: Date = new Date(),
+): boolean {
+  if (!Array.isArray(missions) || missions.length === 0) {
+    return true;
+  }
+
+  const pendingMissions = missions.filter((mission) => mission.status !== "expired" && mission.status !== "failed");
+  const pendingCounts = {
+    daily: 0,
+    weekly: 0,
+    monthly: 0,
+  };
+
+  for (const mission of pendingMissions) {
+    const missionType =
+      mission.type === "daily" || mission.type === "weekly" || mission.type === "monthly"
+        ? mission.type
+        : null;
+    if (!missionType) continue;
+
+    pendingCounts[missionType] += 1;
+    const expectedCycleDate = currentCycleDateByMissionType(missionType, referenceDate);
+    const missionCycleDate = extractDateKey(mission.cycle_date ?? mission.created_at);
+    if (expectedCycleDate && missionCycleDate && missionCycleDate !== expectedCycleDate) {
+      return true;
+    }
+  }
+
+  return (
+    pendingCounts.daily === 0 ||
+    pendingCounts.weekly === 0 ||
+    pendingCounts.monthly === 0
+  );
 }
 
 export function capitalizeLabel(value: string): string {

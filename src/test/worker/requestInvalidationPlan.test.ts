@@ -55,11 +55,70 @@ describe("resolveRequestInvalidationPlan", () => {
     });
   });
 
+  it("keeps social chat mutations route-local without broad cache invalidation", () => {
+    expect(
+      resolveRequestInvalidationPlan("POST", "/api/social/conversations/direct"),
+    ).toEqual({
+      hotCachePaths: [],
+      runtimeProjectionScopes: [],
+    });
+
+    expect(
+      resolveRequestInvalidationPlan("POST", "/api/social/groups"),
+    ).toEqual({
+      hotCachePaths: [],
+      runtimeProjectionScopes: [],
+    });
+
+    expect(
+      resolveRequestInvalidationPlan("POST", "/api/social/conversations/18/messages"),
+    ).toEqual({
+      hotCachePaths: [],
+      runtimeProjectionScopes: [],
+    });
+
+    expect(
+      resolveRequestInvalidationPlan("POST", "/api/social/conversations/18/media"),
+    ).toEqual({
+      hotCachePaths: [],
+      runtimeProjectionScopes: [],
+    });
+
+    expect(
+      resolveRequestInvalidationPlan("POST", "/api/social/conversations/18/mute"),
+    ).toEqual({
+      hotCachePaths: [],
+      runtimeProjectionScopes: [],
+    });
+
+    expect(
+      resolveRequestInvalidationPlan("POST", "/api/social/users/friend-9/block"),
+    ).toEqual({
+      hotCachePaths: [],
+      runtimeProjectionScopes: [],
+    });
+  });
+
   it("invalidates only title-facing caches when activating a title", () => {
     expect(
       resolveRequestInvalidationPlan("POST", "/api/titles/12/activate"),
     ).toEqual({
       hotCachePaths: ["/api/titles"],
+      runtimeProjectionScopes: ["bootstrap", "profile"],
+    });
+  });
+
+  it("invalidates identity and ranking caches when mutating the avatar", () => {
+    expect(
+      resolveRequestInvalidationPlan("POST", "/api/users/me/avatar"),
+    ).toEqual({
+      hotCachePaths: [
+        "/api/users/me",
+        "/api/app/bootstrap",
+        "/api/profile",
+        "/api/ranking/global",
+        "/api/ranking/friends",
+      ],
       runtimeProjectionScopes: ["bootstrap", "profile"],
     });
   });

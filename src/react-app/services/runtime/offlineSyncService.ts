@@ -313,21 +313,28 @@ class OfflineSyncService {
     const nextCalories = Math.max(0, Math.round(params.calories));
     const nextDistanceMeters = Math.max(0, Math.round(params.distanceMeters));
     const cursor = this.readMetricsCursor();
+    const effectiveCursor =
+      cursor.date === params.date
+        ? cursor
+        : {
+            date: params.date,
+            steps: 0,
+            calories: 0,
+            distanceMeters: 0,
+          };
 
-    if (!cursor.date || cursor.date !== params.date) {
-      this.writeMetricsCursor({
-        date: params.date,
-        steps: nextSteps,
-        calories: nextCalories,
-        distanceMeters: nextDistanceMeters,
-      });
-      return;
-    }
-
-    const stepDelta = Math.max(0, nextSteps - cursor.steps);
-    const calorieDelta = Math.max(0, nextCalories - cursor.calories);
-    const distanceDelta = Math.max(0, nextDistanceMeters - cursor.distanceMeters);
+    const stepDelta = Math.max(0, nextSteps - effectiveCursor.steps);
+    const calorieDelta = Math.max(0, nextCalories - effectiveCursor.calories);
+    const distanceDelta = Math.max(0, nextDistanceMeters - effectiveCursor.distanceMeters);
     if (stepDelta <= 0 && calorieDelta <= 0 && distanceDelta <= 0) {
+      if (cursor.date !== params.date) {
+        this.writeMetricsCursor({
+          date: params.date,
+          steps: nextSteps,
+          calories: nextCalories,
+          distanceMeters: nextDistanceMeters,
+        });
+      }
       return;
     }
 

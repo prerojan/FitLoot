@@ -175,6 +175,33 @@ describe("missionGeneration.ensurePeriodicMissions", () => {
       setup.ensureStructuredPeriodicMissionsFromExistingDailyBlueprints,
     ).not.toHaveBeenCalled();
   });
+
+  it("does not expire the previous cycle before replacement generation succeeds", async () => {
+    const setup = createService({
+      hasMissionStatusColumn: true,
+      countByPeriod: {
+        daily: 0,
+        weekly: MISSION_LIMITS.weekly,
+        monthly: MISSION_LIMITS.monthly,
+      },
+    });
+    setup.createMissionsForPeriod.mockRejectedValueOnce(new Error("daily_generation_failed"));
+
+    const env = {} as Env;
+
+    await expect(
+      setup.service.ensurePeriodicMissions(
+        env,
+        setup.db,
+        "user-guarded",
+      ),
+    ).rejects.toThrow("daily_generation_failed");
+
+    const statusExpiryUpdates = setup.runCalls.filter((call) =>
+      call.sql.includes("SET status = 'expired'"),
+    );
+    expect(statusExpiryUpdates).toHaveLength(0);
+  });
 });
 
 describe("missionGeneration.generateStructuredMissionPlanForUser", () => {

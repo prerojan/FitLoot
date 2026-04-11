@@ -1,11 +1,15 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { Mission } from "../../shared/types";
 import {
   arePersistentCounterMissionProgressStatesEqual,
   buildCounterMissionProgressSignature,
+  cachedMissionListNeedsCycleRefresh,
   createCounterMissionSnapshot,
+  extractDateKey,
+  formatDateKey,
   reconcilePersistentCounterMissionProgress,
+  resolveExpiredMissionRefreshDelay,
 } from "../../react-app/pages/dashboardUtils";
 
 function buildMission(overrides?: Partial<Mission>): Mission {
@@ -180,5 +184,139 @@ describe("dashboardUtils counter mission helpers", () => {
         progressValue: 5800,
       },
     });
+  });
+
+  it("schedules an immediate near-term refresh when expired missions are still visible past the dashboard cleanup window", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-06T03:10:00.000Z"));
+
+    const delay = resolveExpiredMissionRefreshDelay([
+      buildMission({
+        id: 33,
+        type: "daily",
+        status: "expired",
+        updated_at: "2026-04-06T03:04:30.000Z",
+      }),
+    ]);
+
+    expect(delay).toBe(0);
+
+    vi.useRealTimers();
+  });
+
+  it("does not schedule the aggressive expired-mission refresh while the cleanup window has not elapsed", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-06T03:10:00.000Z"));
+
+    const delay = resolveExpiredMissionRefreshDelay([
+      buildMission({
+        id: 34,
+        type: "daily",
+        status: "expired",
+        updated_at: "2026-04-06T03:09:30.000Z",
+      }),
+    ]);
+
+    expect(delay).toBe(270_000);
+
+    vi.useRealTimers();
+  });
+
+  it("applies the same five-minute cleanup window to expired weekly missions", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-06T03:40:00.000Z"));
+
+    const delay = resolveExpiredMissionRefreshDelay([
+      buildMission({
+        id: 35,
+        type: "weekly",
+        status: "expired",
+        updated_at: "2026-04-06T03:31:15.000Z",
+      }),
+    ]);
+
+    expect(delay).toBe(0);
+ 
+    vi.useRealTimers();
+  });
+
+  it("applies the same five-minute cleanup window to expired monthly missions", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-06T03:40:00.000Z"));
+
+    const delay = resolveExpiredMissionRefreshDelay([
+      buildMission({
+        id: 36,
+        type: "monthly",
+        status: "expired",
+        updated_at: "2026-04-06T03:36:00.000Z",
+      }),
+    ]);
+
+    expect(delay).toBe(60_000);
+
+    vi.useRealTimers();
+  });
+
+  it("derives local date keys from timestamps instead of trusting the UTC date fragment", () => {
+    const timestamp = "2026-04-09T00:01:55.309Z";
+
+    expect(extractDateKey(timestamp)).toBe(formatDateKey(new Date(timestamp)));
+  });
+
+  it("forces a refresh when cached pending missions belong to the previous daily cycle", () => {
+    const shouldRefresh = cachedMissionListNeedsCycleRefresh(
+      [
+        buildMission({
+          id: 40,
+          type: "daily",
+          cycle_date: "2026-04-06",
+          status: "pending",
+        }),
+        buildMission({
+          id: 41,
+          type: "weekly",
+          cycle_date: "2026-04-06",
+          status: "pending",
+        }),
+        buildMission({
+          id: 42,
+          type: "monthly",
+          cycle_date: "2026-04-01",
+          status: "pending",
+        }),
+      ],
+      new Date("2026-04-07T06:00:00.000Z"),
+    );
+
+    expect(shouldRefresh).toBe(true);
+  });
+
+  it("keeps the cached missions when all pending mission cycles match the current local cycle", () => {
+    const shouldRefresh = cachedMissionListNeedsCycleRefresh(
+      [
+        buildMission({
+          id: 43,
+          type: "daily",
+          cycle_date: "2026-04-07",
+          status: "pending",
+        }),
+        buildMission({
+          id: 44,
+          type: "weekly",
+          cycle_date: "2026-04-06",
+          status: "pending",
+        }),
+        buildMission({
+          id: 45,
+          type: "monthly",
+          cycle_date: "2026-04-01",
+          status: "pending",
+        }),
+      ],
+      new Date("2026-04-07T06:00:00.000Z"),
+    );
+
+    expect(shouldRefresh).toBe(false);
   });
 });

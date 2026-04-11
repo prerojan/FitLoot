@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { type ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { 
   Settings, 
@@ -8,7 +8,6 @@ import {
   Badge,
   Trophy, 
   Dumbbell, 
-  Users, 
   Shield,
   Zap,
   Flame,
@@ -23,10 +22,23 @@ import { useTheme } from "@/react-app/contexts/theme";
 import AppPageShell from "@/react-app/components/AppPageShell";
 import LoadingBall from "@/react-app/components/LoadingBall";
 import PageLoader from "@/react-app/components/PageLoader";
+import AvatarCropDialog from "@/react-app/components/profile/AvatarCropDialog";
 import { Avatar } from "@/react-app/components/ui/avatar";
 import { ROUTE_PATHS } from "@/react-app/auth/constants";
 import { TrainingRankDisplay } from "@/react-app/components/TrainingRankDisplay";
 import { useTrainingRank } from "@/react-app/hooks/useTrainingRank";
+import {
+  clearFriendsCache,
+} from "@/react-app/services/friendsService";
+import {
+  cameraService,
+  type NormalizedCameraImage,
+} from "@/react-app/services/native/cameraService";
+import {
+  removeUserAvatar,
+  type AvatarCrop,
+  uploadUserAvatar,
+} from "@/react-app/services/avatarService";
 
 import type {
   AchievementWithUnlock,
@@ -37,7 +49,12 @@ import type {
   UserProfile,
   UserProgression,
 } from "@/shared/types";
-import { ApiRequestError, api, clearJsonCache } from "@/react-app/utils/api";
+import {
+  ApiRequestError,
+  api,
+  clearJsonCache,
+  writeCachedJson,
+} from "@/react-app/utils/api";
 import {
   hydrateCachedResource,
   refreshCachedResource,
@@ -45,6 +62,7 @@ import {
 } from "@/react-app/utils/cachedResourceLoader";
 import { getAchievementShowcaseStyle, resolveShowcasedAchievement, sanitizeAchievementsForDisplay } from "@/react-app/utils/achievementShowcase";
 import { applyProfileTheme } from "@/react-app/theme/profileTheme";
+import { resolveProfilePrimaryLoadState } from "@/react-app/pages/profileLoadState";
 
 const FEEDBACK_TYPES = ["Sugestao", "Bug", "Elogio", "Outro"] as const;
 type FeedbackType = (typeof FEEDBACK_TYPES)[number];
@@ -90,10 +108,12 @@ const ATTRIBUTE_META = [
 ] as const;
 
 export default function Profile() {
-  const { user, logout } = useAuth();
+  const { user, logout, setAuthenticatedUser } = useAuth();
   const { themeMode, toggleThemeMode } = useTheme();
   const navigate = useNavigate();
   const location = useLocation();
+  const cameraInputRef = useRef<HTMLInputElement | null>(null);
+  const galleryInputRef = useRef<HTMLInputElement | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [attributes, setAttributes] = useState<UserAttributes | null>(null);
   const [progression, setProgression] = useState<UserProgression | null>(null);
@@ -110,6 +130,9 @@ export default function Profile() {
   const [feedbackMessage, setFeedbackMessage] = useState("");
   const [feedbackSending, setFeedbackSending] = useState(false);
   const [feedbackStatus, setFeedbackStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
+  const [avatarSubmitting, setAvatarSubmitting] = useState(false);
+  const [avatarStatus, setAvatarStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
+  const [avatarDraftImage, setAvatarDraftImage] = useState<NormalizedCameraImage | null>(null);
 
   // Adapta benchmarks para o calculo de rank de treino.
   const getBenchmarkResults = useCallback(() => {
@@ -183,6 +206,139 @@ export default function Profile() {
     applyProfileTheme(nextProfile);
   }, []);
 
+  const syncAvatarState = useCallback((nextAvatarUrl: string | null | undefined) => {
+    const normalizedAvatarUrl = nextAvatarUrl ?? null;
+    if (user) {
+      const nextUser = {
+        ...user,
+        avatar_url: normalizedAvatarUrl ?? undefined,
+      };
+      setAuthenticatedUser(nextUser);
+      writeCachedJson("/api/users/me", nextUser);
+    }
+
+    setProfile((currentProfile) => {
+      if (!currentProfile) return currentProfile;
+      const nextProfile = {
+        ...currentProfile,
+        avatar_url: normalizedAvatarUrl,
+      };
+      writeCachedJson("/api/profile", nextProfile);
+      return nextProfile;
+    });
+
+    clearFriendsCache();
+    clearJsonCache("/api/friends");
+    clearJsonCache("/api/friends/requests");
+    clearJsonCache("/api/ranking/global");
+    clearJsonCache("/api/ranking/friends");
+    clearJsonCache("/api/mini-games/active");
+  }, [setAuthenticatedUser, user]);
+
+  const processAvatarError = useCallback((avatarError: unknown) => {
+    if (avatarError instanceof ApiRequestError && (avatarError.status === 401 || avatarError.status === 403)) {
+      navigate("/app", { replace: true });
+      return;
+    }
+
+    const message =
+      avatarError instanceof Error && avatarError.message.trim().length > 0
+        ? avatarError.message
+        : "Nao foi possivel atualizar o avatar agora.";
+    setAvatarStatus({ type: "error", message });
+  }, [navigate]);
+
+  const submitAvatarImage = useCallback(async (
+    image: NormalizedCameraImage,
+    crop?: AvatarCrop,
+  ): Promise<boolean> => {
+    setAvatarSubmitting(true);
+    setAvatarStatus(null);
+
+    try {
+      const updatedUser = await uploadUserAvatar(image, crop);
+      syncAvatarState(updatedUser.avatar_url ?? null);
+      setAvatarStatus({ type: "success", message: "Foto de perfil atualizada." });
+      return true;
+    } catch (avatarError) {
+      processAvatarError(avatarError);
+      return false;
+    } finally {
+      setAvatarSubmitting(false);
+    }
+  }, [processAvatarError, syncAvatarState]);
+
+  const startAvatarCrop = useCallback((image: NormalizedCameraImage) => {
+    setAvatarStatus(null);
+    setAvatarDraftImage(image);
+  }, []);
+
+  const handleAvatarCropCancel = useCallback(() => {
+    if (avatarSubmitting) return;
+    setAvatarDraftImage(null);
+  }, [avatarSubmitting]);
+
+  const handleAvatarCropConfirm = useCallback(async (crop: AvatarCrop) => {
+    if (!avatarDraftImage) return;
+    const updated = await submitAvatarImage(avatarDraftImage, crop);
+    if (updated) {
+      setAvatarDraftImage(null);
+    }
+  }, [avatarDraftImage, submitAvatarImage]);
+
+  const openAvatarCamera = useCallback(async () => {
+    if (avatarSubmitting) return;
+    setAvatarStatus(null);
+    await cameraService.openCamera(() => {
+      cameraInputRef.current?.click();
+    });
+  }, [avatarSubmitting]);
+
+  const openAvatarGallery = useCallback(async () => {
+    if (avatarSubmitting) return;
+    setAvatarStatus(null);
+    await cameraService.openGallery(() => {
+      galleryInputRef.current?.click();
+    });
+  }, [avatarSubmitting]);
+
+  const onPickAvatarFile = useCallback(async (
+    event: ChangeEvent<HTMLInputElement>,
+    source: "web-camera" | "web-file",
+  ) => {
+    const input = event.currentTarget;
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const normalizedImage = await cameraService.handleCameraResult({
+        file,
+        source,
+      });
+      startAvatarCrop(normalizedImage);
+    } catch (avatarError) {
+      processAvatarError(avatarError);
+    } finally {
+      input.value = "";
+    }
+  }, [processAvatarError, startAvatarCrop]);
+
+  const handleRemoveAvatar = useCallback(async () => {
+    if (avatarSubmitting || !user?.avatar_url) return;
+    setAvatarSubmitting(true);
+    setAvatarStatus(null);
+
+    try {
+      const updatedUser = await removeUserAvatar();
+      syncAvatarState(updatedUser.avatar_url ?? null);
+      setAvatarStatus({ type: "success", message: "Foto de perfil removida." });
+    } catch (avatarError) {
+      processAvatarError(avatarError);
+    } finally {
+      setAvatarSubmitting(false);
+    }
+  }, [avatarSubmitting, processAvatarError, syncAvatarState, user?.avatar_url]);
+
   const loadData = useCallback(async () => {
     setError(null);
     const cachedProfile = hydrateCachedResource<UserProfile>("/api/profile", syncProfileThemeState);
@@ -226,38 +382,43 @@ export default function Profile() {
 
     const hasCache = Boolean(
       cachedProfile.hasCached &&
-      cachedAttributes.hasCached &&
       cachedProgression.hasCached,
     );
     if (hasCache) setLoading(false);
 
     try {
-      const primaryTasks: Array<Promise<unknown>> = [];
+      const primaryTasks: Array<{
+        key: "profile" | "attributes" | "progression";
+        task: Promise<unknown>;
+      }> = [];
       const secondaryTasks: Array<Promise<unknown>> = [];
 
       if (shouldRefreshCachedResource(cachedProfile)) {
-        primaryTasks.push(
-          refreshCachedResource<UserProfile>("/api/profile", (payload) => {
+        primaryTasks.push({
+          key: "profile",
+          task: refreshCachedResource<UserProfile>("/api/profile", (payload) => {
             syncProfileThemeState(payload);
           }),
-        );
+        });
       }
       if (shouldRefreshCachedResource(cachedAttributes)) {
-        primaryTasks.push(
-          refreshCachedResource<UserAttributes>("/api/attributes", (payload) => {
+        primaryTasks.push({
+          key: "attributes",
+          task: refreshCachedResource<UserAttributes>("/api/attributes", (payload) => {
             setAttributes(payload);
           }),
-        );
+        });
       }
       if (shouldRefreshCachedResource(cachedProgression)) {
-        primaryTasks.push(
-          refreshCachedResource<UserProgression>("/api/progression", (payload) => {
+        primaryTasks.push({
+          key: "progression",
+          task: refreshCachedResource<UserProgression>("/api/progression", (payload) => {
             setProgression(payload);
           }),
-        );
+        });
       }
       if (shouldRefreshCachedResource(cachedSkills)) {
-        primaryTasks.push(
+        secondaryTasks.push(
           refreshCachedResource<SkillWithProgress[]>("/api/skills", (payload) => {
             setSkills(Array.isArray(payload) ? payload : []);
           }),
@@ -295,7 +456,24 @@ export default function Profile() {
       }
 
       if (primaryTasks.length > 0) {
-        await Promise.all(primaryTasks);
+        const primaryResults = await Promise.allSettled(
+          primaryTasks.map(({ task }) => task),
+        );
+        const loadState = resolveProfilePrimaryLoadState({
+          cachedProfileHasCached: cachedProfile.hasCached,
+          cachedProgressionHasCached: cachedProgression.hasCached,
+          primaryTasks,
+          primaryResults,
+        });
+
+        if (loadState.shouldNavigateToApp) {
+          navigate("/app", { replace: true });
+          return;
+        }
+
+        if (loadState.shouldShowCriticalError) {
+          setError("Nao foi possivel carregar o perfil agora.");
+        }
       }
 
       setLoading(false);
@@ -303,12 +481,10 @@ export default function Profile() {
       if (secondaryTasks.length > 0) {
         void Promise.allSettled(secondaryTasks);
       }
-    } catch (loadError) {
-      if (loadError instanceof ApiRequestError && (loadError.status === 401 || loadError.status === 403)) {
-        navigate("/app", { replace: true });
-        return;
+    } catch {
+      if (!hasCache) {
+        setError("Nao foi possivel carregar o perfil agora.");
       }
-      if (!hasCache) setError("Não foi possível carregar o perfil agora.");
     } finally {
       setLoading(false);
     }
@@ -330,6 +506,34 @@ export default function Profile() {
     setSettingsOpen(true);
     navigate(location.pathname, { replace: true, state: null });
   }, [location.pathname, location.state, navigate]);
+
+  useEffect(() => {
+    const handleNativeAvatarError = (avatarError: Error) => {
+      processAvatarError(avatarError);
+    };
+
+    const unsubscribeCamera = cameraService.subscribeToCameraCaptured(
+      (image) => {
+        startAvatarCrop(image);
+      },
+      handleNativeAvatarError,
+    );
+    const unsubscribeGallery = cameraService.subscribeToGallerySelected(
+      (image) => {
+        startAvatarCrop(image);
+      },
+      handleNativeAvatarError,
+    );
+    const unsubscribeNativeErrors = cameraService.subscribeToNativeCameraErrors(
+      handleNativeAvatarError,
+    );
+
+    return () => {
+      unsubscribeCamera();
+      unsubscribeGallery();
+      unsubscribeNativeErrors();
+    };
+  }, [processAvatarError, startAvatarCrop]);
 
   const activeTitle = useMemo(() => titles.find((item) => item.is_active === 1), [titles]);
   const showcasedAchievement = useMemo(
@@ -374,6 +578,10 @@ export default function Profile() {
     }).join(" ");
   }, [attributes]);
 
+  const resolvedAvatarUrl = profile?.avatar_url ?? user?.avatar_url ?? null;
+  const avatarDisplayName =
+    profile?.full_name ?? profile?.username ?? user?.name ?? "Guerreiro";
+
   if (loading && !profile) {
     return (
       <AppPageShell bottomNavActive="profile" className="fl-theme-page">
@@ -400,7 +608,7 @@ export default function Profile() {
       });
       setProfile((current) => (current ? { ...current, active_skill_focus: focus } : current));
     } catch {
-      setError("Não foi possível alterar o foco agora.");
+      setError("Nao foi possivel alterar o foco agora.");
     }
   };
 
@@ -422,7 +630,7 @@ export default function Profile() {
     } catch (submitError) {
       setFeedbackStatus({
         type: "error",
-        message: submitError instanceof Error ? submitError.message : "Não foi possível enviar feedback agora.",
+        message: submitError instanceof Error ? submitError.message : "Nao foi possivel enviar feedback agora.",
       });
     } finally {
       setFeedbackSending(false);
@@ -447,7 +655,7 @@ export default function Profile() {
             
             <div className="relative mb-6 sm:mb-8">
               <div className="size-32 sm:size-40 rounded-full border-4 border-primary p-1 shadow-[0_0_30px_rgba(var(--app-primary-color-rgb),0.2)] animate-pulse-slow" style={{ borderColor: 'var(--app-primary-color)' }}>
-                <Avatar name={profile?.username || "Guerreiro"} className="w-full h-full text-3xl sm:text-4xl" />
+                <Avatar src={resolvedAvatarUrl} name={avatarDisplayName} className="w-full h-full text-3xl sm:text-4xl" />
               </div>
               <div className="absolute bottom-1 right-1 flex size-10 sm:size-12 items-center justify-center rounded-full border-4 text-base font-bold shadow-xl" style={{ backgroundColor: 'var(--app-primary-color)', color: 'var(--fl-nav-item-active-text)', borderColor: 'var(--fl-surface-strong)' }}>
                 {progression?.level || 1}
@@ -498,14 +706,14 @@ export default function Profile() {
                 className="fl-theme-input flex min-w-[7.5rem] flex-1 items-center justify-center gap-1.5 rounded-2xl px-2 py-3 fl-theme-text-muted transition-opacity group hover:opacity-85 sm:min-w-0 sm:gap-2 sm:py-4"
               >
                 <Badge className="size-3.5 shrink-0 transition-colors sm:size-4" style={{ color: 'var(--app-primary-color)' }} />
-                <span className="text-[8px] font-bold uppercase tracking-[0.1em] sm:text-[10px] sm:tracking-widest truncate">Títulos</span>
+                <span className="text-[8px] font-bold uppercase tracking-[0.1em] sm:text-[10px] sm:tracking-widest truncate">Titulos</span>
               </button>
               <button 
-                onClick={() => navigate(ROUTE_PATHS.friends)}
+                onClick={() => setSettingsOpen(true)}
                 className="fl-theme-input flex min-w-[7.5rem] flex-1 items-center justify-center gap-1.5 rounded-2xl px-2 py-3 fl-theme-text-muted transition-opacity group hover:opacity-85 sm:min-w-0 sm:gap-2 sm:py-4"
               >
-                <Users className="size-3.5 shrink-0 transition-colors sm:size-4" style={{ color: 'var(--app-primary-color)' }} />
-                <span className="text-[8px] font-bold uppercase tracking-[0.1em] sm:text-[10px] sm:tracking-widest truncate">Amigos</span>
+                <Settings className="size-3.5 shrink-0 transition-colors sm:size-4" style={{ color: 'var(--app-primary-color)' }} />
+                <span className="text-[8px] font-bold uppercase tracking-[0.1em] sm:text-[10px] sm:tracking-widest truncate">Configuracoes</span>
               </button>
             </div>
           </section>
@@ -532,7 +740,7 @@ export default function Profile() {
           {/* Progresso de XP */}
           <section className="fl-theme-surface rounded-3xl p-6 sm:p-8">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-[10px] font-bold uppercase tracking-[0.2em]" style={{ color: "var(--fl-color-text-muted)" }}>Experiência (XP)</h3>
+              <h3 className="text-[10px] font-bold uppercase tracking-[0.2em]" style={{ color: "var(--fl-color-text-muted)" }}>Experiencia (XP)</h3>
               <span className="text-[10px] font-bold text-primary" style={{ color: 'var(--app-primary-color)' }}>{progression?.xp || 0} / {Math.max(100, (progression?.level || 1) * 100)}</span>
             </div>
             <div className="h-2.5 w-full overflow-hidden rounded-full border" style={{ borderColor: "var(--fl-border-soft)", backgroundColor: "color-mix(in srgb, var(--fl-surface-muted) 70%, transparent)" }}>
@@ -544,16 +752,6 @@ export default function Profile() {
               </div>
             </div>
           </section>
-
-          {/* Atalhos rapidos */}
-          <div className="flex flex-col gap-3">
-             <button 
-                onClick={() => setSettingsOpen(true)}
-                className="fl-theme-surface flex items-center justify-center gap-3 rounded-2xl py-4 text-[10px] font-bold fl-theme-text-muted uppercase tracking-widest transition-opacity hover:opacity-85 md:hidden"
-              >
-                <Settings className="size-4" /> Configurações
-             </button>
-           </div>
         </aside>
 
         {/* Conteudo principal */}
@@ -687,13 +885,13 @@ export default function Profile() {
                   <div className="size-8 rounded-lg bg-primary/10 flex items-center justify-center text-primary" style={{ color: 'var(--app-primary-color)' }}>
                     <Dumbbell className="size-4" />
                   </div>
-                  <h3 className="text-sm font-bold uppercase tracking-widest" style={{ color: "var(--fl-color-text)" }}>Árvore de Habilidades</h3>
+                  <h3 className="text-sm font-bold uppercase tracking-widest" style={{ color: "var(--fl-color-text)" }}>Arvore de Habilidades</h3>
                 </header>
 
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-6 gap-4">
                   {getAllSkillsWithProgress().length === 0 ? (
                     <div className="fl-theme-surface col-span-full rounded-3xl border border-dashed py-12 text-center" style={{ borderColor: "var(--fl-border-soft)" }}>
-                      <p className="text-xs font-bold text-slate-600 uppercase tracking-widest">Nenhuma skill disponível.</p>
+                      <p className="text-xs font-bold text-slate-600 uppercase tracking-widest">Nenhuma skill disponivel.</p>
                     </div>
                   ) : getAllSkillsWithProgress().map((skill) => {
                     const isUnlocked = skill.total_reps > 0;
@@ -748,9 +946,12 @@ export default function Profile() {
         <div className="fl-z-modal fixed inset-0 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 sm:p-6 animate-fadeIn">
           <div className="fl-theme-surface w-full max-w-2xl rounded-[2.5rem] overflow-hidden shadow-2xl animate-scaleIn max-h-[90vh] flex flex-col">
             <header className="flex items-center justify-between border-b p-8 shrink-0" style={{ borderColor: "var(--fl-border-soft)" }}>
-              <h2 className="text-xl font-bold tracking-tight uppercase tracking-widest" style={{ color: "var(--fl-color-text)" }}>Configurações</h2>
+              <h2 className="text-xl font-bold tracking-tight uppercase tracking-widest" style={{ color: "var(--fl-color-text)" }}>Configuracoes</h2>
               <button 
-                onClick={() => setSettingsOpen(false)}
+                onClick={() => {
+                  setSettingsOpen(false);
+                  setAvatarDraftImage(null);
+                }}
                 className="fl-theme-surface-soft size-10 flex items-center justify-center rounded-xl fl-theme-text-muted transition-opacity hover:opacity-80"
               >
                 <X className="size-5" />
@@ -761,6 +962,65 @@ export default function Profile() {
               {/* Conta */}
               <section className="space-y-4">
                 <h3 className="text-[10px] font-bold text-primary uppercase tracking-[0.3em]" style={{ color: 'var(--app-primary-color)' }}>Sua Conta</h3>
+                <div className="fl-theme-input rounded-[1.75rem] p-5 sm:p-6">
+                  <div className="flex flex-col items-center gap-5">
+                    <div
+                      className="size-24 overflow-hidden rounded-full border-2 p-1 shadow-[0_0_18px_rgba(var(--app-primary-color-rgb),0.16)]"
+                      style={{ borderColor: "color-mix(in srgb, var(--app-primary-color) 28%, transparent)" }}
+                    >
+                      <Avatar src={resolvedAvatarUrl} name={avatarDisplayName} className="h-full w-full text-xl" />
+                    </div>
+                    <div
+                      className="grid w-full max-w-sm grid-cols-1 gap-3"
+                      aria-live="polite"
+                      aria-label={avatarStatus?.message ?? "Controles de avatar"}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void openAvatarCamera();
+                        }}
+                        disabled={avatarSubmitting}
+                        className="rounded-2xl py-3 text-[10px] font-black uppercase tracking-[0.18em] transition-opacity hover:opacity-85 disabled:opacity-50"
+                        style={{ backgroundColor: "var(--app-primary-color)", color: "var(--fl-nav-item-active-text)" }}
+                      >
+                        {avatarSubmitting ? "Atualizando..." : "Usar Camera"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void openAvatarGallery();
+                        }}
+                        disabled={avatarSubmitting}
+                        className="fl-theme-surface-soft rounded-2xl py-3 text-[10px] font-black uppercase tracking-[0.18em] fl-theme-text-muted transition-opacity hover:opacity-85 disabled:opacity-50"
+                      >
+                        Escolher Foto
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void handleRemoveAvatar();
+                        }}
+                        disabled={avatarSubmitting || !resolvedAvatarUrl}
+                        className="rounded-2xl border py-3 text-[10px] font-black uppercase tracking-[0.18em] transition-opacity hover:opacity-85 disabled:opacity-50"
+                        style={{
+                          borderColor: "color-mix(in srgb, #ef4444 22%, var(--fl-border-soft))",
+                          color: "#ef4444",
+                        }}
+                      >
+                        Remover Foto
+                      </button>
+                    </div>
+                    {avatarStatus ? (
+                      <p
+                        className="text-center text-[10px] font-bold uppercase tracking-[0.16em]"
+                        style={{ color: avatarStatus.type === "success" ? "var(--app-primary-color)" : "#f87171" }}
+                      >
+                        {avatarStatus.message}
+                      </p>
+                    ) : null}
+                  </div>
+                </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="fl-theme-input rounded-2xl p-4">
                     <p className="mb-1 text-[9px] font-bold uppercase" style={{ color: "var(--fl-color-text-muted)" }}>Nome Real</p>
@@ -771,6 +1031,25 @@ export default function Profile() {
                     <p className="text-sm font-bold uppercase" style={{ color: "var(--fl-color-text)" }}>@{profile?.username}</p>
                   </div>
                 </div>
+                <input
+                  ref={cameraInputRef}
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  className="hidden"
+                  onChange={(event) => {
+                    void onPickAvatarFile(event, "web-camera");
+                  }}
+                />
+                <input
+                  ref={galleryInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(event) => {
+                    void onPickAvatarFile(event, "web-file");
+                  }}
+                />
               </section>
 
               {/* Foco de treino */}
@@ -791,14 +1070,14 @@ export default function Profile() {
               </section>
 
               <section className="space-y-4">
-                <h3 className="text-[10px] font-bold text-primary uppercase tracking-[0.3em]" style={{ color: 'var(--app-primary-color)' }}>Aparência</h3>
+                <h3 className="text-[10px] font-bold text-primary uppercase tracking-[0.3em]" style={{ color: 'var(--app-primary-color)' }}>Aparencia</h3>
                 <div className="fl-theme-input rounded-[1.75rem] p-5 flex items-center justify-between gap-4">
                   <div className="min-w-0">
                     <p className="text-xs font-bold uppercase tracking-widest" style={{ color: "var(--fl-color-text)" }}>
                       {themeMode === "dark" ? "Tema Escuro" : "Tema Claro"}
                     </p>
                     <p className="mt-2 text-[10px] font-bold uppercase tracking-[0.18em]" style={{ color: "var(--fl-color-text-muted)" }}>
-                      Aplicação imediata em todo o app
+                      Aplicacao imediata em todo o app
                     </p>
                   </div>
                   <button
@@ -845,7 +1124,7 @@ export default function Profile() {
                     className="fl-theme-input w-full rounded-2xl px-6 py-4 text-xs font-bold uppercase tracking-widest outline-none transition-all"
                     style={{ color: "var(--fl-color-text)" }}
                   >
-                    <option value="Sugestao">Sugestão</option>
+                    <option value="Sugestao">Sugestao</option>
                     <option value="Bug">Reportar Bug</option>
                     <option value="Elogio">Elogio</option>
                     <option value="Outro">Outro</option>
@@ -853,7 +1132,7 @@ export default function Profile() {
                   <textarea 
                     value={feedbackMessage}
                     onChange={(e) => setFeedbackMessage(e.target.value)}
-                    placeholder="Sugestões de novas skills ou melhorias..."
+                    placeholder="Sugestoes de novas skills ou melhorias..."
                     className="fl-theme-input min-h-[120px] w-full rounded-2xl px-6 py-4 text-xs font-bold uppercase tracking-widest outline-none transition-all"
                     style={{ color: "var(--fl-color-text)" }}
                   />
@@ -867,7 +1146,7 @@ export default function Profile() {
                     disabled={feedbackSending}
                     className="fl-theme-input w-full rounded-2xl py-4 text-[10px] font-bold fl-theme-text-muted uppercase tracking-[0.2em] transition-opacity hover:opacity-85 disabled:opacity-50"
                   >
-                    {feedbackSending ? <LoadingBall size="sm" /> : 'Enviar Relatório de Combate'}
+                    {feedbackSending ? <LoadingBall size="sm" /> : 'Enviar Relatorio de Combate'}
                   </button>
                 </div>
               </section>
@@ -884,20 +1163,29 @@ export default function Profile() {
                     color: "#ef4444",
                   }}
                 >
-                  <LogOut className="size-4" /> Encerrar Sessão
+                  <LogOut className="size-4" /> Encerrar Sessao
                 </button>
                 <button 
                   onClick={() => setSettingsOpen(false)}
                   className="w-full rounded-2xl bg-primary py-5 text-xs font-black uppercase tracking-[0.3em] shadow-lg shadow-primary/20 transition-all hover:scale-[1.02] sm:flex-1"
                   style={{ backgroundColor: 'var(--app-primary-color)', color: 'var(--fl-nav-item-active-text)' }}
                 >
-                  Confirmar Alterações
+                  Confirmar Alteracoes
                 </button>
               </div>
             </footer>
           </div>
         </div>
       )}
+
+      <AvatarCropDialog
+        image={avatarDraftImage}
+        open={Boolean(avatarDraftImage)}
+        submitting={avatarSubmitting}
+        status={avatarStatus}
+        onCancel={handleAvatarCropCancel}
+        onConfirm={handleAvatarCropConfirm}
+      />
     </AppPageShell>
   );
 }

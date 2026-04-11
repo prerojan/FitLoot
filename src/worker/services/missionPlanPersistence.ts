@@ -203,6 +203,38 @@ type MaterializedMissionEntry = {
   mission: MissionPayloadLike;
 };
 
+function buildCurrentCycleMissionDedupKey(
+  deps: MissionPlanPersistenceDeps,
+  mission: Pick<MissionPayloadLike, "title" | "metric_type"> & {
+    type?: MissionPeriod | undefined;
+  },
+): string | null {
+  if (mission.type !== "daily" && mission.type !== "weekly" && mission.type !== "monthly") {
+    return null;
+  }
+
+  if (mission.type === "daily") {
+    const exerciseName = deps.extractExerciseName(mission.title);
+    const normalizedExerciseName = deps.normalizeMatchText(exerciseName);
+    const normalizedMetricType = deps.normalizeMissionMetricType(
+      mission.metric_type,
+      null,
+    );
+    if (normalizedExerciseName.length === 0) {
+      return null;
+    }
+    return `daily:${normalizedExerciseName}:${normalizedMetricType}`;
+  }
+
+  const normalizedTitle = deps.normalizeMatchText(
+    deps.stripMissionDisplayTitlePrefix(mission.title),
+  );
+  if (normalizedTitle.length === 0) {
+    return null;
+  }
+  return `${mission.type}:${normalizedTitle}`;
+}
+
 // Persists and repairs structured mission plans while keeping current-cycle rows compatible with legacy data.
 function buildPeriodicFallbackDraftsFromDailyBlueprints(
   profile: MissionPlanProfileLike,
@@ -212,9 +244,13 @@ function buildPeriodicFallbackDraftsFromDailyBlueprints(
   const monthlyRepeatCount = Math.max(2, Math.min(4, profile.trainingFrequency));
   const weeklyCircuitNames = [
     "Full Body Calisthenics Circuit",
-    "Core and Conditioning Circuit",
-    "Lower Body and Mobility Circuit",
-    "Upper Body Strength Circuit",
+    "Upper Body Strength & Core",
+    "Lower Body Power",
+    "Core Control Circuit",
+    "Mobility & Recovery Circuit",
+    "Upper Body Endurance Circuit",
+    "Lower Body Mobility Circuit",
+    "Full Body Stability Circuit",
   ];
   const weekly = weeklyCircuitNames
     .slice(0, targets.weekly)
@@ -401,7 +437,33 @@ export function createMissionPlanPersistenceService(
 
       await deleteMissionEntries(db, replaceMissionIds);
 
+      const currentScope = materialized.some((entry) => entry.blueprint.isAiSpecial)
+        ? "ai_special"
+        : "regular";
+      const currentCycleMissions = await deps.listCurrentCycleMissions(
+        db,
+        profile.userId,
+        currentScope,
+      );
+      const reservedMissionKeys = new Set(
+        currentCycleMissions
+          .map((mission) => buildCurrentCycleMissionDedupKey(deps, mission))
+          .filter((key): key is string => typeof key === "string" && key.length > 0),
+      );
+
       for (const entry of materialized) {
+        const dedupKey = buildCurrentCycleMissionDedupKey(deps, {
+          type: entry.blueprint.period,
+          title: entry.mission.title,
+          metric_type: entry.mission.metric_type,
+        });
+        if (dedupKey && reservedMissionKeys.has(dedupKey)) {
+          continue;
+        }
+        if (dedupKey) {
+          reservedMissionKeys.add(dedupKey);
+        }
+
         const skillId = await deps.resolveSkillIdForExerciseMission(
           db,
           profile.userId,
@@ -608,13 +670,33 @@ export function createMissionPlanPersistenceService(
         }
 
         const title = `${weeklyConfig.titlePrefix}: ${deps.stripMissionDisplayTitlePrefix(blueprint.name)}`;
+        const existingSubtasks =
+          ((subtasksByParentId.get(missionId) ?? []) as Array<{
+            compatibility_key?: string;
+            current_count?: number;
+          }>);
+        const preservedProgressByKey = new Map(
+          existingSubtasks.map((subtask) => [
+            typeof subtask.compatibility_key === "string"
+              ? subtask.compatibility_key
+              : "",
+            Math.max(0, Number(subtask.current_count ?? 0)),
+          ]),
+        );
         const circuitTasks = blueprint.subtasks.map((subtask) => ({
           id: crypto.randomUUID(),
           label: subtask.title,
           mission_type: subtask.compatibilityKey,
           required_count: Math.max(1, subtask.requiredCount),
-          current_count: 0,
-          completed: false,
+          current_count: Math.min(
+            Math.max(1, subtask.requiredCount),
+            Math.max(0, Number(preservedProgressByKey.get(subtask.compatibilityKey) ?? 0)),
+          ),
+          completed:
+            Math.min(
+              Math.max(1, subtask.requiredCount),
+              Math.max(0, Number(preservedProgressByKey.get(subtask.compatibilityKey) ?? 0)),
+            ) >= Math.max(1, subtask.requiredCount),
         }));
         const muscleGroupsJson = JSON.stringify(
           deps.mergeUniqueStrings(
@@ -625,6 +707,10 @@ export function createMissionPlanPersistenceService(
         const metricValue = Math.max(
           1,
           blueprint.subtasks.reduce((total, subtask) => total + subtask.requiredCount, 0),
+        );
+        const preservedProgressValue = circuitTasks.reduce(
+          (total, task) => total + Math.min(task.required_count, task.current_count),
+          0,
         );
         const weeklySql = hasProgressValueColumn
           ? `UPDATE missions
@@ -646,7 +732,7 @@ export function createMissionPlanPersistenceService(
                    circuit_tasks_json = ?,
                    safety_tips_json = '[]',
                    difficulty_level = ?,
-                   progress_value = 0,
+                   progress_value = ?,
                    image_url = NULL,
                    exercise_db_gif_url = NULL,
                    exercise_db_image_url = NULL,
@@ -703,6 +789,7 @@ export function createMissionPlanPersistenceService(
           deps.metricUnitByType("circuit_tasks"),
           JSON.stringify(circuitTasks),
           blueprint.difficultyLevel,
+          ...(hasProgressValueColumn ? [preservedProgressValue] : []),
           muscleGroupsJson,
           missionId,
         ).run();
@@ -727,17 +814,20 @@ export function createMissionPlanPersistenceService(
             ? blueprint.metricValue
             : null;
         const progressValue = monthlyCounters
-          ? deps.monthlyMissionProgressValue(
-            {
-              title,
-              metric_type: blueprint.metricType,
-              metric_value: blueprint.metricValue,
-              target_reps: targetReps,
-              target_time: targetTime,
-            },
-            monthlyCounters,
+          ? Math.max(
+            Math.max(0, Number(row.progress_value ?? 0)),
+            deps.monthlyMissionProgressValue(
+              {
+                title,
+                metric_type: blueprint.metricType,
+                metric_value: blueprint.metricValue,
+                target_reps: targetReps,
+                target_time: targetTime,
+              },
+              monthlyCounters,
+            ),
           )
-          : 0;
+          : Math.max(0, Number(row.progress_value ?? 0));
         const monthlySql = hasProgressValueColumn
           ? `UPDATE missions
                SET title = ?,

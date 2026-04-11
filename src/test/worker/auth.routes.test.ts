@@ -513,4 +513,78 @@ describe("auth routes", () => {
     ).toBe(true);
     expect(response.headers.get("Set-Cookie")).toBe("session=cookie");
   });
+
+  it("retries transient login reads and session writes before failing auth", async () => {
+    let userLookupAttempts = 0;
+    let sessionInsertAttempts = 0;
+
+    const { db, calls } = createMockD1Database([
+      {
+        match: "SELECT COUNT(*) as count FROM sqlite_master",
+        first: { count: 2 },
+      },
+      {
+        match: "SELECT id, password_hash, password_salt FROM users WHERE lower(email) = ?",
+        first: () => {
+          userLookupAttempts += 1;
+          if (userLookupAttempts === 1) {
+            throw new Error("query read timeout");
+          }
+
+          return {
+            id: "user-123",
+            password_hash: "hash-value",
+            password_salt: "salt-1",
+          };
+        },
+      },
+      {
+        match: "INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, ?)",
+        run: () => {
+          sessionInsertAttempts += 1;
+          if (sessionInsertAttempts === 1) {
+            throw new Error("query read timeout");
+          }
+
+          return { success: true, meta: { changes: 1 } };
+        },
+      },
+      {
+        match: "SELECT id FROM sessions WHERE id = ? LIMIT 1",
+        first: null,
+      },
+    ]);
+
+    const env = createTestEnv(db);
+    const deps = createAuthDeps();
+    const app = new Hono<AppContext>();
+    registerAuthRoutes(app, deps);
+    const { executionCtx } = createExecutionContext();
+
+    const response = await app.fetch(
+      createJsonRequest("/api/auth/login", {
+        method: "POST",
+        body: {
+          email: "legacy@example.com",
+          password: "senha-segura-123",
+        },
+      }),
+      env,
+      executionCtx,
+    );
+
+    expect(response.status).toBe(200);
+    expect(userLookupAttempts).toBe(2);
+    expect(sessionInsertAttempts).toBe(2);
+    expect(
+      calls.filter((call) =>
+        call.sql.includes("SELECT id, password_hash, password_salt FROM users WHERE lower(email) = ?"),
+      ).length,
+    ).toBe(2);
+    expect(
+      calls.filter((call) =>
+        call.sql.includes("INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, ?)"),
+      ).length,
+    ).toBe(2);
+  });
 });

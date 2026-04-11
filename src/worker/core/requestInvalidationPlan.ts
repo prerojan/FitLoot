@@ -62,6 +62,17 @@ const FRIENDS_RELATION_INVALIDATION_PLAN: RequestInvalidationPlan = {
   runtimeProjectionScopes: [],
 };
 
+const AVATAR_MUTATION_INVALIDATION_PLAN: RequestInvalidationPlan = {
+  hotCachePaths: [
+    "/api/users/me",
+    "/api/app/bootstrap",
+    "/api/profile",
+    "/api/ranking/global",
+    "/api/ranking/friends",
+  ],
+  runtimeProjectionScopes: ["bootstrap", "profile"],
+};
+
 type RouteInvalidationPolicy = {
   method?: string;
   pattern: string;
@@ -169,6 +180,16 @@ const ROUTE_INVALIDATION_POLICIES: readonly RouteInvalidationPolicy[] = [
   },
   {
     method: "POST",
+    pattern: "/api/users/me/avatar",
+    plan: AVATAR_MUTATION_INVALIDATION_PLAN,
+  },
+  {
+    method: "DELETE",
+    pattern: "/api/users/me/avatar",
+    plan: AVATAR_MUTATION_INVALIDATION_PLAN,
+  },
+  {
+    method: "POST",
     pattern: "/api/friends/reject",
     plan: NO_INVALIDATION_PLAN,
   },
@@ -181,6 +202,46 @@ const ROUTE_INVALIDATION_POLICIES: readonly RouteInvalidationPolicy[] = [
     method: "DELETE",
     pattern: "/api/friends/:friendId",
     plan: FRIENDS_RELATION_INVALIDATION_PLAN,
+  },
+  {
+    method: "POST",
+    pattern: "/api/social/conversations/direct",
+    plan: NO_INVALIDATION_PLAN,
+  },
+  {
+    method: "POST",
+    pattern: "/api/social/groups",
+    plan: NO_INVALIDATION_PLAN,
+  },
+  {
+    method: "POST",
+    pattern: "/api/social/conversations/:id/messages",
+    plan: NO_INVALIDATION_PLAN,
+  },
+  {
+    method: "POST",
+    pattern: "/api/social/conversations/:id/media",
+    plan: NO_INVALIDATION_PLAN,
+  },
+  {
+    method: "POST",
+    pattern: "/api/social/conversations/:id/read",
+    plan: NO_INVALIDATION_PLAN,
+  },
+  {
+    method: "POST",
+    pattern: "/api/social/conversations/:id/mute",
+    plan: NO_INVALIDATION_PLAN,
+  },
+  {
+    method: "POST",
+    pattern: "/api/social/users/:userId/block",
+    plan: NO_INVALIDATION_PLAN,
+  },
+  {
+    method: "POST",
+    pattern: "/api/social/notifications/consume",
+    plan: NO_INVALIDATION_PLAN,
   },
   {
     method: "POST",

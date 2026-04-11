@@ -44,6 +44,7 @@ import {
   SUBTLE_PANEL_STYLE,
   arePersistentCounterMissionProgressStatesEqual,
   buildCenteredDates,
+  cachedMissionListNeedsCycleRefresh,
   capitalizeLabel,
   clamp,
   extractDateKey,
@@ -53,6 +54,7 @@ import {
   isCounterProgressMission,
   readPersistentCounterMissionProgressState,
   reconcilePersistentCounterMissionProgress,
+  resolveExpiredMissionRefreshDelay,
   sortMissions,
   type PersistentCounterMissionProgressState,
   writePersistentCounterMissionProgressState,
@@ -76,7 +78,6 @@ const DEFAULT_LOADING_STATE: DashboardLoadingState = {
   titles: true,
 };
 
-const EXPIRED_MISSION_AUTO_CLEANUP_MS = 2 * 60_000;
 const DASHBOARD_SECONDARY_CACHE_TTL_MS = 5 * 60_000;
 
 // Detecta progresso inconsistente para forcar reconciliacao com o worker.
@@ -87,29 +88,10 @@ function progressionHasXpOverflow(p: Pick<UserProgression, "xp" | "level">): boo
   return xp >= cap;
 }
 
-function parseMissionTimestampMs(value: string | null | undefined): number | null {
-  if (typeof value !== "string" || value.trim().length === 0) return null;
-  const parsed = Date.parse(value);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function resolveExpiredMissionRefreshDelay(missions: Mission[]): number | null {
-  if (missions.length === 0) return null;
-
-  const now = Date.now();
-  return missions.reduce((shortestDelay, mission) => {
-    const referenceTimestamp =
-      parseMissionTimestampMs(mission.updated_at) ??
-      parseMissionTimestampMs(mission.deadline) ??
-      now;
-    const delay = Math.max(0, referenceTimestamp + EXPIRED_MISSION_AUTO_CLEANUP_MS - now);
-    return Math.min(shortestDelay, delay);
-  }, EXPIRED_MISSION_AUTO_CLEANUP_MS);
-}
-
 function resolveMissionsApiPath(forceRefresh: boolean, cachedMissions: Mission[] | null): string {
-  void cachedMissions;
-  return forceRefresh ? "/api/missions?refresh=1" : "/api/missions";
+  return forceRefresh || cachedMissionListNeedsCycleRefresh(cachedMissions)
+    ? "/api/missions?refresh=1"
+    : "/api/missions";
 }
 
 export default function Dashboard() {
@@ -924,7 +906,7 @@ export default function Dashboard() {
       {/* Atalhos flutuantes para fluxos secundarios. */}
       <div
         ref={quickActionsRef}
-        className="fl-z-fab pointer-events-none fixed bottom-24 right-4 md:bottom-8 md:right-8"
+        className="fl-z-fab pointer-events-none fixed bottom-28 right-4 md:bottom-8 md:right-8"
       >
         <div
           className={`absolute bottom-[calc(100%+0.75rem)] right-0 flex flex-col items-end gap-3 transition-all duration-200 ${quickActionsOpen ? "pointer-events-auto translate-y-0 opacity-100" : "pointer-events-none translate-y-4 opacity-0"}`}

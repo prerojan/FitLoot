@@ -12,6 +12,9 @@ export const AuthContext = createContext<AuthContextType>({
   logout: () => {
     return undefined;
   },
+  setAuthenticatedUser: () => {
+    return undefined;
+  },
 });
 
 export const useAuth = () => useContext(AuthContext);

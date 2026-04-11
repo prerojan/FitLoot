@@ -1,14 +1,10 @@
-export type MissionRetentionPeriod = "daily" | "weekly" | "monthly";
-
-export const SETTLED_MISSION_RETENTION_MODIFIER_BY_PERIOD: Record<
+export type {
   MissionRetentionPeriod,
-  string
-> = {
-  daily: "-5 minutes",
-  weekly: "-7 days",
-  monthly: "-30 days",
-};
+} from "../../shared/missionRetention";
 
-export const DEFAULT_SETTLED_MISSION_RETENTION_MODIFIER =
-  SETTLED_MISSION_RETENTION_MODIFIER_BY_PERIOD.monthly;
+export {
+  DEFAULT_SETTLED_MISSION_RETENTION_MODIFIER,
+  SETTLED_MISSION_RETENTION_MODIFIER_BY_PERIOD,
+  SETTLED_MISSION_RETENTION_MS_BY_PERIOD,
+} from "../../shared/missionRetention";
 

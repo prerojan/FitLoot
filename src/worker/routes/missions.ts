@@ -28,7 +28,9 @@ import {
   SETTLED_MISSION_RETENTION_MODIFIER_BY_PERIOD,
 } from "../constants/missionRetention";
 import {
+  allMissionCycleDates,
   currentDateKeyInTimeZone,
+  missionCycleDateByRow,
   resolveMissionTimeZone,
   sanitizeMissionTimeZone,
   shiftMissionDateKey,
@@ -62,6 +64,12 @@ type StructuredMissionPlanResult = {
   used_ai: boolean;
   invalid_ratio: number | null | undefined;
   missions: unknown[];
+};
+
+type CurrentCycleMissionCounts = {
+  daily: number;
+  weekly: number;
+  monthly: number;
 };
 
 type MissionAttributeDelta = {
@@ -141,6 +149,11 @@ type MissionRouteDeps = {
     db: D1Database,
     userId: string,
   ) => Promise<unknown>;
+  getCurrentCycleMissionCounts: (
+    db: D1Database,
+    userId: string,
+    scope: "regular" | "ai_special",
+  ) => Promise<CurrentCycleMissionCounts>;
   getRewardNotificationCursor: (
     db: D1Database,
     userId: string,
@@ -436,6 +449,42 @@ function missionMetricTargetValue(
   );
 }
 
+function isSettledMissionRow(row: Record<string, unknown>): boolean {
+  const status = typeof row.status === "string"
+    ? row.status.trim().toLowerCase()
+    : "";
+  return Number(row.is_completed ?? 0) === 1
+    || status === "completed"
+    || status === "failed"
+    || status === "expired";
+}
+
+function filterOutPreviousCycleSettledMissions(
+  missions: readonly Record<string, unknown>[],
+  timeZone: string,
+): Record<string, unknown>[] {
+  const currentCycleDates = allMissionCycleDates(timeZone);
+
+  return missions.filter((mission) => {
+    const period = mission.type;
+    if (period !== "daily" && period !== "weekly" && period !== "monthly") {
+      return true;
+    }
+    if (!isSettledMissionRow(mission)) {
+      return true;
+    }
+
+    const missionCycleDate = missionCycleDateByRow(
+      period,
+      typeof mission.cycle_date === "string" ? mission.cycle_date : null,
+      typeof mission.created_at === "string" ? mission.created_at : null,
+      timeZone,
+    );
+
+    return missionCycleDate === currentCycleDates[period];
+  });
+}
+
 function resolveStoredMissionProgressValue(
   mission: Record<string, unknown>,
   normalizedMission?: { progress_value?: number | undefined },
@@ -451,6 +500,10 @@ function resolveStoredMissionProgressValue(
   }
 
   return Math.min(missionMetricTargetValue(mission), Math.max(0, parsed));
+}
+
+function isLiveAccumulatedPeriodicMetric(metricType: string): boolean {
+  return metricType === "steps" || metricType === "distance_meters";
 }
 
 function normalizeCompletedMetricValueForMission(
@@ -624,28 +677,61 @@ export function registerMissionRoutes(
     if (!user) return c.json({ error: "Unauthorized" }, 401);
 
     try {
+      const missionTimeZone = await readMissionRequestTimeZone(c, user.id);
       const forceRefresh = c.req.query("refresh") === "1";
       if (forceRefresh) {
         invalidateMissionListCache(user.id);
       }
 
       const cached = !forceRefresh ? readMissionListCache(user.id) : null;
+      const hasCachedMissionEntries = Array.isArray(cached) && cached.length > 0;
       const cachedNeedsRepair =
         Array.isArray(cached)
         && missionListNeedsDailyCatalogRepair(
           cached as Record<string, unknown>[],
           deps.extractExerciseName,
         );
-      if (!forceRefresh && cached && !cachedNeedsRepair) {
+      if (!forceRefresh && hasCachedMissionEntries && !cachedNeedsRepair) {
         return streamJsonArrayResponse(cached);
       }
-      if (cachedNeedsRepair) {
+      if (cachedNeedsRepair || (Array.isArray(cached) && cached.length === 0)) {
         invalidateMissionListCache(user.id);
       }
 
       // Mantém o endpoint de leitura leve e relega manutenção periódica ao fluxo com debounce.
 
       // Busca missões ativas e histórico recente, com fallback para esquemas antigos sem coluna status.
+      const currentCycleCounts = await deps.getCurrentCycleMissionCounts(
+        c.env.fitloot_db,
+        user.id,
+        "regular",
+      );
+      const hasCurrentCycleGap =
+        currentCycleCounts.daily === 0
+        || currentCycleCounts.weekly === 0
+        || currentCycleCounts.monthly === 0;
+
+      if (hasCurrentCycleGap) {
+        try {
+          await deps.ensurePeriodicMissionsWithGuard(
+            c.env,
+            c.env.fitloot_db,
+            user.id,
+            {
+              force: true,
+              mode: "full",
+            },
+          );
+          invalidateMissionListCache(user.id);
+        } catch (refreshError) {
+          console.error("[/api/missions][cycle-self-heal]", {
+            userId: user.id,
+            counts: currentCycleCounts,
+            message: getErrorMessage(refreshError),
+          });
+        }
+      }
+
       const { hasMissionStatus, includeSkillJoin } =
         await resolveMissionReadSchemaCapabilities(c.env.fitloot_db);
       const { selectSkillName, skillJoinClause } =
@@ -705,14 +791,21 @@ export function registerMissionRoutes(
           row as Record<string, unknown>,
         ) as NormalizedMissionRowLike;
         const isPeriodic = row.type === "weekly" || row.type === "monthly";
+        const metricType = deps.normalizeMissionMetricType(
+          row.metric_type,
+          row.target_time,
+        );
         return (
           isPeriodic &&
           normalizedMission.circuit_tasks.length === 0 &&
           Number(row.is_completed ?? 0) !== 1 &&
-          resolveStoredMissionProgressValue(
-            row as Record<string, unknown>,
-            normalizedMission,
-          ) === null
+          (
+            resolveStoredMissionProgressValue(
+              row as Record<string, unknown>,
+              normalizedMission,
+            ) === null ||
+            (row.type === "monthly" && isLiveAccumulatedPeriodicMetric(metricType))
+          )
         );
       });
       const monthlyCounters = requiresLivePeriodicFallback
@@ -738,34 +831,49 @@ export function registerMissionRoutes(
           rawMission,
           normalizedMission,
         );
+        const metricType = deps.normalizeMissionMetricType(
+          rawMission.metric_type,
+          rawMission.target_time,
+        );
+        const shouldResolveLiveProgress =
+          storedProgress === null || isLiveAccumulatedPeriodicMetric(metricType);
+        const liveProgress = shouldResolveLiveProgress
+          ? await resolvePeriodicMissionProgressValue(
+              user.id,
+              rawMission,
+              c.env.fitloot_db,
+              isMonthly
+                ? monthlyCounters ?? undefined
+                : undefined,
+            )
+          : null;
         return {
           ...normalizedMission,
           progress_value: Math.min(
             target,
             isCompleted
               ? target
-              : storedProgress !== null
-                ? storedProgress
-              : await resolvePeriodicMissionProgressValue(
-                  user.id,
-                  rawMission,
-                  c.env.fitloot_db,
-                  isMonthly
-                    ? monthlyCounters ?? undefined
-                    : undefined,
-                ),
+              : liveProgress !== null
+                ? Math.max(storedProgress ?? 0, liveProgress)
+                : storedProgress ?? 0,
           ),
         };
       }));
-      const summaries = withProgress.map((mission) =>
+      const visibleMissions = filterOutPreviousCycleSettledMissions(
+        withProgress,
+        missionTimeZone,
+      );
+      const summaries = visibleMissions.map((mission) =>
         missionSummaryFromNormalized(mission),
       );
       const listNeedsRepair = missionListNeedsDailyCatalogRepair(
         summaries,
         deps.extractExerciseName,
       );
-      if (!listNeedsRepair) {
+      if (!listNeedsRepair && summaries.length > 0) {
         writeMissionListCache(user.id, summaries);
+      } else {
+        invalidateMissionListCache(user.id);
       }
       return streamJsonArrayResponse(summaries);
     } catch (error) {
@@ -836,24 +944,31 @@ export function registerMissionRoutes(
         normalized.circuit_tasks.length === 0
       ) {
         const storedProgress = resolveStoredMissionProgressValue(row, normalized);
-        if (storedProgress !== null) {
-          normalized.progress_value = storedProgress;
-        } else {
+        const metricType = deps.normalizeMissionMetricType(
+          row.metric_type,
+          row.target_time,
+        );
+        const shouldResolveLiveProgress =
+          storedProgress === null || isLiveAccumulatedPeriodicMetric(metricType);
+        if (shouldResolveLiveProgress) {
           const monthlyCounters = normalized.type === "monthly"
             ? await getMonthlyCounters(
                 c.env.fitloot_db,
                 user.id,
               )
             : undefined;
+          const liveProgress = await resolvePeriodicMissionProgressValue(
+            user.id,
+            row,
+            c.env.fitloot_db,
+            monthlyCounters,
+          );
           normalized.progress_value = Math.min(
             missionMetricTargetValue(row),
-            await resolvePeriodicMissionProgressValue(
-              user.id,
-              row,
-              c.env.fitloot_db,
-              monthlyCounters,
-            ),
+            Math.max(storedProgress ?? 0, liveProgress),
           );
+        } else {
+          normalized.progress_value = storedProgress;
         }
       }
 
@@ -1140,6 +1255,29 @@ export function registerMissionRoutes(
           missionMetricType,
           completedMetricValue,
         );
+        const targetMetricValue = missionMetricTargetValue(mission);
+        const isRouteTrackingMission =
+          String(mission.execution_mode ?? "") === "route_tracking"
+          && (
+            missionMetricType === "distance_meters"
+            || missionMetricType === "steps"
+          );
+
+        if (
+          isRouteTrackingMission
+          && normalizedCompletedMetricValue < targetMetricValue
+        ) {
+          return c.json(
+            {
+              error:
+                "A missao de caminhada ou corrida so pode ser concluida ao atingir 100% da meta.",
+              code: "MISSION_TARGET_NOT_REACHED",
+              target: targetMetricValue,
+              current: normalizedCompletedMetricValue,
+            },
+            400,
+          );
+        }
 
         let streakMultiplier = 1;
         let xpGained = 0;

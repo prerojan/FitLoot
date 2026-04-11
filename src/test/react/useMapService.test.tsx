@@ -30,8 +30,8 @@ describe("useMapService", () => {
       {
         place_id: 1,
         display_name: "Parque Ibirapuera, Sao Paulo",
-        lon: "-46.6576",
-        lat: "-23.5874",
+        longitude: -46.6576,
+        latitude: -23.5874,
         address: {
           road: "Avenida Pedro Alvares Cabral",
           city: "Sao Paulo",

@@ -1,8 +1,13 @@
-import { openStreetMapService } from "@/react-app/services/openStreetMapService";
+import {
+  openStreetMapService,
+  type OSMMarker,
+} from "@/react-app/services/openStreetMapService";
 import {
   locationRuntimeService,
   type RuntimeLocation,
 } from "@/react-app/services/runtime/locationRuntimeService";
+import type { MapDirectionsProfile } from "@/shared/mapTypes";
+import { estimateRouteMissionDurationSecondsFromMeters } from "@/shared/routeMissionDuration";
 import type { Mission } from "@/shared/types";
 
 type RouteCoordinate = [number, number];
@@ -13,6 +18,7 @@ export type DistanceMissionRoutePreviewData = {
   routeDistanceMeters: number;
   minimumDurationSeconds: number;
   origin: RouteCoordinate;
+  returnOrigin: RouteCoordinate;
   checkpoint: RouteCoordinate;
   coordinates: RouteCoordinate[];
   center: RouteCoordinate;
@@ -21,6 +27,8 @@ export type DistanceMissionRoutePreviewData = {
   locationPrecision: "precise" | "approximate" | "unavailable";
   generatedAt: string;
   usedFallbackRoute: boolean;
+  profile: MapDirectionsProfile;
+  routeMode: "round_trip" | "return_to_origin";
 };
 
 type CachedDistanceMissionRoutePreview = {
@@ -33,15 +41,35 @@ type PreviewViewport = {
   zoom: number;
 };
 
+type GeneratedRouteLeg = {
+  coordinates: RouteCoordinate[];
+  distance: number;
+  duration: number;
+  usedFallbackRoute: boolean;
+};
+
+type BuildDistanceMissionRoutePreviewOptions = {
+  mission: Mission;
+  origin: RouteCoordinate;
+  returnOrigin?: RouteCoordinate;
+  targetDistanceMeters?: number;
+  locationPrecision?: DistanceMissionRoutePreviewData["locationPrecision"];
+};
+
 const DISTANCE_ROUTE_CACHE_TTL_MS = 10 * 60_000;
+const MIN_TARGET_DISTANCE_METERS = 800;
+const MIN_CHECKPOINT_DISTANCE_METERS = 250;
 const STATIC_MAP_WIDTH = 960;
 const STATIC_MAP_HEIGHT = 540;
 const STATIC_MAP_PADDING = 52;
-const MIN_TARGET_DISTANCE_METERS = 800;
-const MIN_CHECKPOINT_DISTANCE_METERS = 250;
-const FALLBACK_WALKING_SPEED_METERS_PER_SECOND = 1.4;
 const MAX_STATIC_MAP_ZOOM = 16;
 const MIN_STATIC_MAP_ZOOM = 11;
+const START_LOCATION_MAX_AGE_MS = 20_000;
+const START_LOCATION_MAX_ACCURACY_METERS = 250;
+const PREVIEW_LOCATION_MAX_AGE_MS = 3 * 60_000;
+const RETURN_TO_ORIGIN_DISTANCE_RATIO = 1.15;
+const DIRECT_RETURN_DISTANCE_BUFFER_METERS = 80;
+const COORDINATE_MATCH_TOLERANCE = 0.000015;
 
 const previewCache = new Map<string, CachedDistanceMissionRoutePreview>();
 const previewPromiseCache = new Map<number, Promise<DistanceMissionRoutePreviewData>>();
@@ -92,6 +120,14 @@ export function resolveDistanceMissionTargetMeters(mission: Mission): number {
   }
 
   return Math.max(MIN_TARGET_DISTANCE_METERS, Math.round(numericValue));
+}
+
+export function resolveDistanceMissionMinimumDurationSeconds(mission: Mission): number {
+  const targetDistanceMeters = resolveDistanceMissionTargetMeters(mission);
+  return estimateRouteMissionDurationSecondsFromMeters(
+    targetDistanceMeters,
+    mission.activity_kind,
+  );
 }
 
 export function formatDistanceMissionAmount(valueInMeters: number): string {
@@ -147,6 +183,20 @@ export function resolveDistanceMissionActivityLabel(mission: Mission): string {
   return "Percurso";
 }
 
+export function resolveDistanceMissionDirectionsProfile(
+  mission: Mission,
+): MapDirectionsProfile {
+  if (mission.activity_kind === "running") {
+    return "foot-walking";
+  }
+
+  return "foot-walking";
+}
+
+export function toRouteCoordinate(location: Pick<RuntimeLocation, "longitude" | "latitude">): RouteCoordinate {
+  return [location.longitude, location.latitude];
+}
+
 function roundCoordinate(value: number): number {
   return Math.round(value * 10_000) / 10_000;
 }
@@ -161,6 +211,13 @@ function resolveCacheKey(mission: Mission, location: RuntimeLocation): string {
   ].join(":");
 }
 
+function coordinatesMatch(first: RouteCoordinate, second: RouteCoordinate): boolean {
+  return (
+    Math.abs(first[0] - second[0]) <= COORDINATE_MATCH_TOLERANCE
+    && Math.abs(first[1] - second[1]) <= COORDINATE_MATCH_TOLERANCE
+  );
+}
+
 function createDeterministicBearingRadians(mission: Mission): number {
   const seedSource = `${mission.id}:${mission.cycle_date ?? mission.created_at ?? mission.updated_at ?? "fitloot"}`;
   let hash = 0;
@@ -170,6 +227,22 @@ function createDeterministicBearingRadians(mission: Mission): number {
 
   const normalized = Math.abs(hash % 360);
   return (normalized * Math.PI) / 180;
+}
+
+function calculateBearingRadians(
+  start: RouteCoordinate,
+  end: RouteCoordinate,
+): number {
+  const latitudeStart = (start[1] * Math.PI) / 180;
+  const latitudeEnd = (end[1] * Math.PI) / 180;
+  const longitudeDelta = ((end[0] - start[0]) * Math.PI) / 180;
+
+  const y = Math.sin(longitudeDelta) * Math.cos(latitudeEnd);
+  const x =
+    Math.cos(latitudeStart) * Math.sin(latitudeEnd)
+    - Math.sin(latitudeStart) * Math.cos(latitudeEnd) * Math.cos(longitudeDelta);
+
+  return Math.atan2(y, x);
 }
 
 function destinationFromDistance(
@@ -196,23 +269,6 @@ function destinationFromDistance(
     (destinationLongitude * 180) / Math.PI,
     (destinationLatitude * 180) / Math.PI,
   ];
-}
-
-function buildRoundTripCoordinates(
-  origin: RouteCoordinate,
-  checkpoint: RouteCoordinate,
-  outboundCoordinates: RouteCoordinate[],
-): RouteCoordinate[] {
-  if (outboundCoordinates.length === 0) {
-    return [origin, checkpoint, origin];
-  }
-
-  if (outboundCoordinates.length === 1) {
-    return [origin, checkpoint, origin];
-  }
-
-  const returnCoordinates = [...outboundCoordinates].reverse().slice(1);
-  return [...outboundCoordinates, ...returnCoordinates];
 }
 
 function mercatorY(latitude: number): number {
@@ -254,86 +310,347 @@ function resolveRouteViewport(coordinates: RouteCoordinate[]): PreviewViewport {
   };
 }
 
-async function resolveStaticMapUrl(
-  viewport: PreviewViewport,
-  origin: RouteCoordinate,
-  checkpoint: RouteCoordinate,
-): Promise<string | null> {
-  try {
-    return await openStreetMapService.getStaticImage(
-      viewport.center,
-      viewport.zoom,
-      STATIC_MAP_WIDTH,
-      STATIC_MAP_HEIGHT,
-      [
-        {
-          id: "start",
-          longitude: origin[0],
-          latitude: origin[1],
-          color: "green",
-        },
-        {
-          id: "checkpoint",
-          longitude: checkpoint[0],
-          latitude: checkpoint[1],
-          color: "red",
-        },
-      ],
-    );
-  } catch {
-    return null;
+function resolveFallbackDurationSeconds(
+  mission: Mission,
+  distanceMeters: number,
+): number {
+  return estimateRouteMissionDurationSecondsFromMeters(
+    distanceMeters,
+    mission.activity_kind,
+  );
+}
+
+function buildFallbackRouteLeg(
+  mission: Mission,
+  start: RouteCoordinate,
+  end: RouteCoordinate,
+): GeneratedRouteLeg {
+  const distance = openStreetMapService.calculateDistance(start, end);
+  return {
+    coordinates: coordinatesMatch(start, end) ? [start] : [start, end],
+    distance,
+    duration: resolveFallbackDurationSeconds(mission, distance),
+    usedFallbackRoute: true,
+  };
+}
+
+async function requestRouteLeg(
+  mission: Mission,
+  start: RouteCoordinate,
+  end: RouteCoordinate,
+  profile: MapDirectionsProfile,
+): Promise<GeneratedRouteLeg> {
+  if (coordinatesMatch(start, end)) {
+    return {
+      coordinates: [start],
+      distance: 0,
+      duration: 0,
+      usedFallbackRoute: false,
+    };
   }
+
+  try {
+    const directions = await openStreetMapService.getDirections(start, end, profile);
+    const coordinates = directions.geometry.length > 0 ? directions.geometry : [start, end];
+    return {
+      coordinates,
+      distance: Math.max(0, directions.distance),
+      duration: Math.max(0, directions.duration),
+      usedFallbackRoute: directions.usedFallbackRoute,
+    };
+  } catch {
+    return buildFallbackRouteLeg(mission, start, end);
+  }
+}
+
+function mergeRouteCoordinates(routeLegs: RouteCoordinate[][]): RouteCoordinate[] {
+  const merged: RouteCoordinate[] = [];
+
+  for (const routeLeg of routeLegs) {
+    for (const coordinate of routeLeg) {
+      const lastCoordinate = merged[merged.length - 1];
+      if (lastCoordinate && coordinatesMatch(lastCoordinate, coordinate)) {
+        continue;
+      }
+
+      merged.push(coordinate);
+    }
+  }
+
+  return merged;
+}
+
+function resolveDetourCheckpoint(
+  mission: Mission,
+  origin: RouteCoordinate,
+  returnOrigin: RouteCoordinate,
+  targetDistanceMeters: number,
+): RouteCoordinate {
+  const directDistanceToReturn = openStreetMapService.calculateDistance(origin, returnOrigin);
+  const seedBearing = createDeterministicBearingRadians(mission);
+
+  if (coordinatesMatch(origin, returnOrigin)) {
+    const checkpointDistanceMeters = Math.max(
+      MIN_CHECKPOINT_DISTANCE_METERS,
+      Math.round(targetDistanceMeters / 2),
+    );
+    return destinationFromDistance(origin, checkpointDistanceMeters, seedBearing);
+  }
+
+  const shouldReturnDirectly =
+    targetDistanceMeters <= directDistanceToReturn * RETURN_TO_ORIGIN_DISTANCE_RATIO
+    || (targetDistanceMeters - directDistanceToReturn) <= DIRECT_RETURN_DISTANCE_BUFFER_METERS;
+  if (shouldReturnDirectly) {
+    return returnOrigin;
+  }
+
+  const detourDistanceMeters = Math.max(
+    MIN_CHECKPOINT_DISTANCE_METERS,
+    Math.round((targetDistanceMeters - directDistanceToReturn) / 2),
+  );
+  const bearingToReturn = calculateBearingRadians(origin, returnOrigin);
+  const turnDirection = Math.sin(seedBearing) >= 0 ? 1 : -1;
+  const detourBearing = bearingToReturn + turnDirection * (Math.PI / 2.6);
+
+  return destinationFromDistance(origin, detourDistanceMeters, detourBearing);
+}
+
+export function isRuntimeLocationFresh(
+  location: RuntimeLocation | null,
+  maxAgeMs = START_LOCATION_MAX_AGE_MS,
+): boolean {
+  if (!location) {
+    return false;
+  }
+
+  const timestampMs = Date.parse(location.timestamp);
+  if (!Number.isFinite(timestampMs)) {
+    return false;
+  }
+
+  return Math.max(0, Date.now() - timestampMs) <= maxAgeMs;
+}
+
+export function validateDistanceMissionStartLocation(
+  location: RuntimeLocation | null,
+): string | null {
+  if (!location) {
+    return "Ative a localizacao para iniciar esta missao de distancia.";
+  }
+
+  if (
+    location.precision === "approximate"
+    && location.accuracyMeters > START_LOCATION_MAX_ACCURACY_METERS
+  ) {
+    return "O GPS ainda esta instavel. Aguarde alguns segundos e tente novamente.";
+  }
+
+  return null;
+}
+
+function isPreviewLocationUsable(location: RuntimeLocation | null): location is RuntimeLocation {
+  if (!location) {
+    return false;
+  }
+
+  return isRuntimeLocationFresh(location, PREVIEW_LOCATION_MAX_AGE_MS);
+}
+
+function resolveDistanceMissionPreviewLocation(): RuntimeLocation | null {
+  const runtimeLocation = locationRuntimeService.getState().location;
+  return isPreviewLocationUsable(runtimeLocation) ? runtimeLocation : null;
+}
+
+function toPlanarMeters(
+  coordinate: RouteCoordinate,
+  referenceLatitude: number,
+): { x: number; y: number } {
+  const metersPerDegreeLatitude = 111_320;
+  const metersPerDegreeLongitude = Math.cos((referenceLatitude * Math.PI) / 180) * 111_320;
+
+  return {
+    x: coordinate[0] * metersPerDegreeLongitude,
+    y: coordinate[1] * metersPerDegreeLatitude,
+  };
+}
+
+function calculateDistanceToSegmentMeters(
+  point: RouteCoordinate,
+  segmentStart: RouteCoordinate,
+  segmentEnd: RouteCoordinate,
+): number {
+  const referenceLatitude = (point[1] + segmentStart[1] + segmentEnd[1]) / 3;
+  const pointMeters = toPlanarMeters(point, referenceLatitude);
+  const startMeters = toPlanarMeters(segmentStart, referenceLatitude);
+  const endMeters = toPlanarMeters(segmentEnd, referenceLatitude);
+
+  const segmentVectorX = endMeters.x - startMeters.x;
+  const segmentVectorY = endMeters.y - startMeters.y;
+  const segmentLengthSquared = segmentVectorX ** 2 + segmentVectorY ** 2;
+
+  if (segmentLengthSquared <= 0) {
+    return Math.hypot(pointMeters.x - startMeters.x, pointMeters.y - startMeters.y);
+  }
+
+  const projection = (
+    ((pointMeters.x - startMeters.x) * segmentVectorX)
+    + ((pointMeters.y - startMeters.y) * segmentVectorY)
+  ) / segmentLengthSquared;
+  const clampedProjection = Math.max(0, Math.min(1, projection));
+
+  const projectedX = startMeters.x + segmentVectorX * clampedProjection;
+  const projectedY = startMeters.y + segmentVectorY * clampedProjection;
+
+  return Math.hypot(pointMeters.x - projectedX, pointMeters.y - projectedY);
+}
+
+export function calculateDistanceToRouteMeters(
+  point: RouteCoordinate,
+  coordinates: RouteCoordinate[],
+): number {
+  if (coordinates.length === 0) {
+    return Number.POSITIVE_INFINITY;
+  }
+
+  if (coordinates.length === 1) {
+    const singleCoordinate = coordinates[0];
+    return singleCoordinate
+      ? openStreetMapService.calculateDistance(point, singleCoordinate)
+      : Number.POSITIVE_INFINITY;
+  }
+
+  let smallestDistance = Number.POSITIVE_INFINITY;
+
+  for (let index = 1; index < coordinates.length; index += 1) {
+    const segmentStart = coordinates[index - 1];
+    const segmentEnd = coordinates[index];
+    if (!segmentStart || !segmentEnd) {
+      continue;
+    }
+    const nextDistance = calculateDistanceToSegmentMeters(point, segmentStart, segmentEnd);
+    if (nextDistance < smallestDistance) {
+      smallestDistance = nextDistance;
+    }
+  }
+
+  return smallestDistance;
+}
+
+async function buildDistanceMissionRoutePreview(
+  options: BuildDistanceMissionRoutePreviewOptions,
+): Promise<DistanceMissionRoutePreviewData> {
+  const {
+    mission,
+    origin,
+    returnOrigin = origin,
+    targetDistanceMeters = resolveDistanceMissionTargetMeters(mission),
+    locationPrecision = "precise",
+  } = options;
+
+  await openStreetMapService.initialize();
+
+  const normalizedTargetDistance = Math.max(MIN_TARGET_DISTANCE_METERS, Math.round(targetDistanceMeters));
+  const profile = resolveDistanceMissionDirectionsProfile(mission);
+  const checkpoint = resolveDetourCheckpoint(mission, origin, returnOrigin, normalizedTargetDistance);
+  const shouldReturnDirectly = coordinatesMatch(checkpoint, returnOrigin);
+
+  const [outboundLeg, inboundLeg] = await Promise.all([
+    requestRouteLeg(mission, origin, checkpoint, profile),
+    shouldReturnDirectly
+      ? Promise.resolve<GeneratedRouteLeg>({
+          coordinates: [returnOrigin],
+          distance: 0,
+          duration: 0,
+          usedFallbackRoute: false,
+        })
+      : requestRouteLeg(mission, checkpoint, returnOrigin, profile),
+  ]);
+
+  const coordinates = mergeRouteCoordinates([
+    outboundLeg.coordinates,
+    inboundLeg.coordinates,
+  ]);
+  const viewport = resolveRouteViewport(coordinates.length > 0 ? coordinates : [origin, returnOrigin]);
+  const staticMapMarkers: OSMMarker[] = [
+    {
+      id: "origin",
+      longitude: origin[0],
+      latitude: origin[1],
+      color: "#10b981",
+    },
+    {
+      id: "checkpoint",
+      longitude: checkpoint[0],
+      latitude: checkpoint[1],
+      color: "#22c55e",
+    },
+  ];
+
+  if (!coordinatesMatch(returnOrigin, origin)) {
+    staticMapMarkers.push({
+      id: "return-origin",
+      longitude: returnOrigin[0],
+      latitude: returnOrigin[1],
+      color: "#34d399",
+    });
+  }
+
+  const staticMapUrl = await openStreetMapService.getStaticImage(
+    viewport.center,
+    viewport.zoom,
+    STATIC_MAP_WIDTH,
+    STATIC_MAP_HEIGHT,
+    staticMapMarkers,
+  );
+
+  return {
+    missionId: mission.id,
+    targetDistanceMeters: normalizedTargetDistance,
+    routeDistanceMeters: Math.max(1, Math.round(outboundLeg.distance + inboundLeg.distance)),
+    minimumDurationSeconds: Math.max(60, Math.round(outboundLeg.duration + inboundLeg.duration)),
+    origin,
+    returnOrigin,
+    checkpoint,
+    coordinates,
+    center: viewport.center,
+    zoom: viewport.zoom,
+    staticMapUrl,
+    locationPrecision,
+    generatedAt: new Date().toISOString(),
+    usedFallbackRoute: outboundLeg.usedFallbackRoute || inboundLeg.usedFallbackRoute,
+    profile,
+    routeMode: shouldReturnDirectly ? "return_to_origin" : "round_trip",
+  };
 }
 
 async function generateDistanceMissionRoutePreview(
   mission: Mission,
   location: RuntimeLocation,
 ): Promise<DistanceMissionRoutePreviewData> {
-  await openStreetMapService.initialize();
-
-  const origin: RouteCoordinate = [location.longitude, location.latitude];
-  const targetDistanceMeters = resolveDistanceMissionTargetMeters(mission);
-  const checkpointDistanceMeters = Math.max(
-    MIN_CHECKPOINT_DISTANCE_METERS,
-    Math.round(targetDistanceMeters / 2),
-  );
-  const bearing = createDeterministicBearingRadians(mission);
-  const checkpoint = destinationFromDistance(origin, checkpointDistanceMeters, bearing);
-
-  let outboundCoordinates: RouteCoordinate[] = [];
-  let routeDistanceMeters = targetDistanceMeters;
-  let minimumDurationSeconds = Math.round(targetDistanceMeters / FALLBACK_WALKING_SPEED_METERS_PER_SECOND);
-  let usedFallbackRoute = false;
-
-  try {
-    const directions = await openStreetMapService.getDirections(origin, checkpoint, "foot-walking");
-    outboundCoordinates = directions.geometry;
-    routeDistanceMeters = Math.max(1, Math.round(directions.distance * 2));
-    minimumDurationSeconds = Math.max(60, Math.round(directions.duration * 2));
-  } catch {
-    usedFallbackRoute = true;
-    outboundCoordinates = [origin, checkpoint];
-  }
-
-  const coordinates = buildRoundTripCoordinates(origin, checkpoint, outboundCoordinates);
-  const viewport = resolveRouteViewport(coordinates);
-  const staticMapUrl = await resolveStaticMapUrl(viewport, origin, checkpoint);
-
-  return {
-    missionId: mission.id,
-    targetDistanceMeters,
-    routeDistanceMeters,
-    minimumDurationSeconds,
-    origin,
-    checkpoint,
-    coordinates,
-    center: viewport.center,
-    zoom: viewport.zoom,
-    staticMapUrl,
+  return buildDistanceMissionRoutePreview({
+    mission,
+    origin: toRouteCoordinate(location),
     locationPrecision: location.precision,
-    generatedAt: new Date().toISOString(),
-    usedFallbackRoute,
-  };
+  });
+}
+
+export async function buildDistanceMissionSessionRoutePreview(
+  mission: Mission,
+  options: {
+    origin: RuntimeLocation;
+    returnOrigin?: RouteCoordinate;
+    targetDistanceMeters?: number;
+  },
+): Promise<DistanceMissionRoutePreviewData> {
+  return buildDistanceMissionRoutePreview({
+    mission,
+    origin: toRouteCoordinate(options.origin),
+    ...(options.returnOrigin ? { returnOrigin: options.returnOrigin } : {}),
+    ...(typeof options.targetDistanceMeters === "number"
+      ? { targetDistanceMeters: options.targetDistanceMeters }
+      : {}),
+    locationPrecision: options.origin.precision,
+  });
 }
 
 export function clearDistanceMissionRoutePreviewCache(missionId?: number): void {
@@ -401,18 +718,23 @@ export async function getDistanceMissionRoutePreview(
   }
 
   const previewPromise = (async () => {
-    const location = await locationRuntimeService.getCurrentLocation();
-    if (!location) {
+    const cachedPreviewLocation = resolveDistanceMissionPreviewLocation();
+    const location = cachedPreviewLocation ?? await locationRuntimeService.getCurrentLocation();
+    const usableLocation = isPreviewLocationUsable(location)
+      ? location
+      : resolveDistanceMissionPreviewLocation();
+
+    if (!usableLocation) {
       throw new Error("Ative a localizacao para carregar a rota sugerida.");
     }
 
-    const cacheKey = resolveCacheKey(mission, location);
+    const cacheKey = resolveCacheKey(mission, usableLocation);
     const cachedEntry = previewCache.get(cacheKey);
     if (!options?.forceRefresh && cachedEntry && cachedEntry.expiresAt > Date.now()) {
       return cachedEntry.data;
     }
 
-    const data = await generateDistanceMissionRoutePreview(mission, location);
+    const data = await generateDistanceMissionRoutePreview(mission, usableLocation);
     previewCache.set(cacheKey, {
       data,
       expiresAt: Date.now() + DISTANCE_ROUTE_CACHE_TTL_MS,
@@ -449,15 +771,23 @@ export function projectDistanceMissionRoutePoints(
   width: number,
   height: number,
 ): ProjectedRoutePoint[] {
-  const centerPoint = worldPointAtZoom(preview.center, preview.zoom);
+  return preview.coordinates.map((coordinate) => (
+    projectDistanceMissionRouteCoordinate(preview, width, height, coordinate)
+  ));
+}
 
-  return preview.coordinates.map((coordinate) => {
-    const worldPoint = worldPointAtZoom(coordinate, preview.zoom);
-    return {
-      x: width / 2 + (worldPoint.x - centerPoint.x),
-      y: height / 2 + (worldPoint.y - centerPoint.y),
-    };
-  });
+export function projectDistanceMissionRouteCoordinate(
+  preview: DistanceMissionRoutePreviewData,
+  width: number,
+  height: number,
+  coordinate: RouteCoordinate,
+): ProjectedRoutePoint {
+  const centerPoint = worldPointAtZoom(preview.center, preview.zoom);
+  const worldPoint = worldPointAtZoom(coordinate, preview.zoom);
+  return {
+    x: width / 2 + (worldPoint.x - centerPoint.x),
+    y: height / 2 + (worldPoint.y - centerPoint.y),
+  };
 }
 
 export const distanceMissionRoutePreviewConfig = {

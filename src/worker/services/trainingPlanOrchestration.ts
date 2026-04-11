@@ -1,6 +1,6 @@
 import { MISSION_LIMITS } from "../../constants/missionMetrics";
 import type { ConditioningLevel } from "../../shared/types";
-import { getHuggingFaceApiKey } from "../core/providerConfig";
+import { getOpenRouterApiKey } from "../core/providerConfig";
 import type { Env } from "../core/types";
 import type { StructuredGenerationOptions } from "./missionGeneration";
 import type {
@@ -577,7 +577,7 @@ export function createTrainingPlanOrchestrationService(
       profile,
       generationOptions,
     );
-    const apiKey = getHuggingFaceApiKey(env);
+    const apiKey = getOpenRouterApiKey(env);
     if (apiKey) {
       const aiResult = await requestValidatedStructuredPlanWithRetry({
         buildPrompt: (retryReason?: string) =>
@@ -610,11 +610,10 @@ export function createTrainingPlanOrchestrationService(
     const selectedKeys = new Set<string>();
     const addCandidate = (
       candidate: MissionBlueprint,
-      allowExistingDuplicate = false,
     ) => {
       if (selected.length >= boundedRequestedAmount) return;
       const key = `${candidate.compatibilityKey}:${candidate.metricType}`;
-      if (!allowExistingDuplicate && existingKeys.has(key)) return;
+      if (existingKeys.has(key)) return;
       if (selectedKeys.has(key)) return;
       selected.push(candidate);
       selectedKeys.add(key);
@@ -622,18 +621,6 @@ export function createTrainingPlanOrchestrationService(
 
     for (const candidate of dailyCandidates) {
       addCandidate(candidate);
-    }
-    for (const candidate of dailyCandidates) {
-      addCandidate(candidate, true);
-    }
-    while (
-      selected.length < boundedRequestedAmount &&
-      dailyCandidates.length > 0
-    ) {
-      const fallbackCandidate =
-        dailyCandidates[selected.length % dailyCandidates.length];
-      if (!fallbackCandidate) break;
-      selected.push(fallbackCandidate);
     }
 
     if (selected.length === 0) return;

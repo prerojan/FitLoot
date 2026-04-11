@@ -130,7 +130,7 @@ export const useMapService = (options: UseMapServiceOptions = {}) => {
       const searchResults: SearchResult[] = results.map((result) => ({
         id: result.place_id.toString(),
         placeName: result.display_name,
-        coordinates: [parseFloat(result.lon), parseFloat(result.lat)],
+        coordinates: [result.longitude, result.latitude],
         address: formatAddress(result.address),
       }));
 
@@ -238,7 +238,7 @@ export const useMapService = (options: UseMapServiceOptions = {}) => {
       const searchResults: SearchResult[] = results.map((result) => ({
         id: result.place_id.toString(),
         placeName: result.display_name,
-        coordinates: [parseFloat(result.lon), parseFloat(result.lat)],
+        coordinates: [result.longitude, result.latitude],
         address: formatAddress(result.address),
       }));
 
