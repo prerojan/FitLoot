@@ -15,6 +15,7 @@ import {
 import { upsertRuntimeSession } from "../core/runtimeSessionStore";
 import {
   deleteRuntimeUserAuth,
+  readRuntimeUserAuth,
   readRuntimeUserAuthAvailability,
   type RuntimeUserAvailabilityMatch,
   upsertRuntimeUserAuth,
@@ -562,32 +563,34 @@ export function registerAuthRoutes(
         const runtimeSessionDb = resolveRuntimeSessionDb(c);
         if (runtimeSessionDb) {
           try {
-            const authRecord =
-              (await getUserAuthRecordById(c.env.fitloot_db, userRow.id).catch(
-                (error) => {
-                  if (!isConnectionTimeoutLike(error)) {
-                    throw error;
-                  }
-                  return null;
-                },
-              )) ?? {
-                id: userRow.id,
-                email: normalizedEmail,
-                name: "",
-                avatar_url: null,
-                onboarding_completed: 0,
-                plan_id: "basic" as const,
-                plan_status: "failed" as const,
-                payment_method: "none" as const,
-              };
+            const authRecord = await getUserAuthRecordById(
+              c.env.fitloot_db,
+              userRow.id,
+            ).catch(async (error) => {
+              if (!isConnectionTimeoutLike(error)) {
+                throw error;
+              }
 
-            await Promise.all([
+              console.warn("[login][runtime-auth-primary]", {
+                userId: userRow.id,
+                message:
+                  error instanceof Error ? error.message : String(error),
+              });
+              return readRuntimeUserAuth(runtimeSessionDb, userRow.id, {
+                maxAgeMs: 15 * 60_000,
+              }).catch(() => null);
+            });
+
+            const runtimeSyncTasks: Promise<unknown>[] = [
               upsertRuntimeSession(runtimeSessionDb, {
                 id: sessionId,
                 user_id: userRow.id,
                 expires_at: expiresAt,
               }),
-              (async () => {
+            ];
+
+            if (authRecord) {
+              runtimeSyncTasks.push((async () => {
                 const profileRow = await c.env.fitloot_db
                   .prepare(
                     "SELECT username FROM user_profiles WHERE user_id = ? LIMIT 1",
@@ -598,8 +601,15 @@ export function registerAuthRoutes(
                 await upsertRuntimeUserAuth(runtimeSessionDb, authRecord, {
                   username: profileRow?.username ?? null,
                 });
-              })(),
-            ]);
+              })());
+            } else {
+              console.warn("[login][runtime-auth-sync-skip]", {
+                userId: userRow.id,
+                reason: "auth-record-unavailable",
+              });
+            }
+
+            await Promise.all(runtimeSyncTasks);
           } catch (runtimeSyncError) {
             console.warn("[login][runtime-session-sync]", {
               message:

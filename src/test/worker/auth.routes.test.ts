@@ -297,6 +297,18 @@ describe("auth routes", () => {
 
     const { db: runtimeDb, calls: runtimeCalls } = createMockD1Database([
       {
+        match: "CREATE TABLE IF NOT EXISTS runtime_sessions",
+        run: { success: true, meta: { changes: 0 } },
+      },
+      {
+        match: "CREATE INDEX IF NOT EXISTS idx_runtime_sessions_expires_at",
+        run: { success: true, meta: { changes: 0 } },
+      },
+      {
+        match: "INSERT INTO runtime_sessions (id, user_id, expires_at, updated_at)",
+        run: { success: true, meta: { changes: 1 } },
+      },
+      {
         match: "CREATE TABLE IF NOT EXISTS runtime_user_auth_cache",
         run: { success: true, meta: { changes: 0 } },
       },
@@ -393,6 +405,18 @@ describe("auth routes", () => {
     ]);
 
     const { db: runtimeDb, calls: runtimeCalls } = createMockD1Database([
+      {
+        match: "CREATE TABLE IF NOT EXISTS runtime_sessions",
+        run: { success: true, meta: { changes: 0 } },
+      },
+      {
+        match: "CREATE INDEX IF NOT EXISTS idx_runtime_sessions_expires_at",
+        run: { success: true, meta: { changes: 0 } },
+      },
+      {
+        match: "INSERT INTO runtime_sessions (id, user_id, expires_at, updated_at)",
+        run: { success: true, meta: { changes: 1 } },
+      },
       {
         match: "CREATE TABLE IF NOT EXISTS runtime_user_auth_cache",
         run: { success: true, meta: { changes: 0 } },
@@ -512,6 +536,141 @@ describe("auth routes", () => {
       ),
     ).toBe(true);
     expect(response.headers.get("Set-Cookie")).toBe("session=cookie");
+  });
+
+  it("reuses the last runtime auth snapshot instead of poisoning it with a basic fallback during transient login sync errors", async () => {
+    const { db } = createMockD1Database([
+      {
+        match: "SELECT COUNT(*) as count FROM sqlite_master",
+        first: { count: 2 },
+      },
+      {
+        match: "SELECT id, password_hash, password_salt FROM users WHERE lower(email) = ?",
+        first: {
+          id: "user-123",
+          password_hash: "hash-value",
+          password_salt: "salt-1",
+        },
+      },
+      {
+        match: "INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, ?)",
+        run: { success: true, meta: { changes: 1 } },
+      },
+      {
+        match: "COALESCE(onboarding_completed, 0)",
+        first: () => {
+          throw new Error("query read timeout");
+        },
+      },
+      {
+        match: "SELECT username FROM user_profiles WHERE user_id = ? LIMIT 1",
+        first: { username: "felps" },
+      },
+    ]);
+
+    const { db: runtimeDb, calls: runtimeCalls } = createMockD1Database([
+      {
+        match: "CREATE TABLE IF NOT EXISTS runtime_sessions",
+        run: { success: true, meta: { changes: 0 } },
+      },
+      {
+        match: "CREATE INDEX IF NOT EXISTS idx_runtime_sessions_expires_at",
+        run: { success: true, meta: { changes: 0 } },
+      },
+      {
+        match: "INSERT INTO runtime_sessions (id, user_id, expires_at, updated_at)",
+        run: { success: true, meta: { changes: 1 } },
+      },
+      {
+        match: "CREATE TABLE IF NOT EXISTS runtime_user_auth_cache",
+        run: { success: true, meta: { changes: 0 } },
+      },
+      {
+        match: "PRAGMA table_info('runtime_user_auth_cache')",
+        all: {
+          results: [
+            { name: "user_id" },
+            { name: "email" },
+            { name: "username" },
+            { name: "name" },
+            { name: "avatar_url" },
+            { name: "onboarding_completed" },
+            { name: "plan_id" },
+            { name: "plan_status" },
+            { name: "payment_method" },
+            { name: "updated_at" },
+          ],
+        },
+      },
+      {
+        match: "CREATE INDEX IF NOT EXISTS idx_runtime_user_auth_updated_at",
+        run: { success: true, meta: { changes: 0 } },
+      },
+      {
+        match: "CREATE INDEX IF NOT EXISTS idx_runtime_user_auth_email_lower",
+        run: { success: true, meta: { changes: 0 } },
+      },
+      {
+        match: "CREATE INDEX IF NOT EXISTS idx_runtime_user_auth_username_lower",
+        run: { success: true, meta: { changes: 0 } },
+      },
+      {
+        match: (sql) =>
+          sql.includes("FROM runtime_user_auth_cache") &&
+          sql.includes("WHERE user_id = ?"),
+        first: {
+          user_id: "user-123",
+          email: "legacy@example.com",
+          username: "felps",
+          name: "Felipe Braganttine",
+          avatar_url: null,
+          onboarding_completed: 1,
+          plan_id: "vip",
+          plan_status: "active",
+          payment_method: "card",
+          updated_at: new Date().toISOString(),
+        },
+      },
+      {
+        match: "INSERT INTO runtime_user_auth_cache",
+        run: { success: true, meta: { changes: 1 } },
+      },
+    ]);
+
+    const env = createTestEnv(db, { fitloot_runtime_db: runtimeDb });
+    const deps = createAuthDeps();
+    const app = new Hono<AppContext>();
+    registerAuthRoutes(app, deps);
+    const { executionCtx } = createExecutionContext();
+
+    const response = await app.fetch(
+      createJsonRequest("/api/auth/login", {
+        method: "POST",
+        body: {
+          email: "legacy@example.com",
+          password: "senha-segura-123",
+        },
+      }),
+      env,
+      executionCtx,
+    );
+
+    const runtimeUpsertCall = runtimeCalls.find((call) =>
+      call.sql.includes("INSERT INTO runtime_user_auth_cache"),
+    );
+
+    expect(response.status).toBe(200);
+    expect(runtimeUpsertCall?.params).toEqual([
+      "user-123",
+      "legacy@example.com",
+      "felps",
+      "Felipe Braganttine",
+      null,
+      1,
+      "vip",
+      "active",
+      "card",
+    ]);
   });
 
   it("retries transient login reads and session writes before failing auth", async () => {

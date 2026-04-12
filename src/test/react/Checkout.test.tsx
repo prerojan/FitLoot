@@ -29,6 +29,19 @@ vi.mock("../../react-app/auth/context", () => ({
       plan_status: "cancelled" as const,
       payment_method: "none" as const,
     },
+    checkAuth: vi.fn(async () => ({
+      state: "authenticated" as const,
+      source: "bootstrap" as const,
+      user: {
+        id: "user-1",
+        email: "user@example.com",
+        name: "Teste",
+        onboarding_completed: 0,
+        plan_id: "pro" as const,
+        plan_status: "active" as const,
+        payment_method: "pix" as const,
+      },
+    })),
     logout,
   }),
 }));

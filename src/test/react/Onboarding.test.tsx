@@ -4,7 +4,19 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const checkAuth = vi.fn(async () => undefined);
+const checkAuth = vi.fn(async () => ({
+  state: "authenticated" as const,
+  source: "bootstrap" as const,
+  user: {
+    id: "user-1",
+    email: "user@example.com",
+    name: "Teste",
+    onboarding_completed: 0,
+    plan_id: "basic" as const,
+    plan_status: "pending" as const,
+    payment_method: "none" as const,
+  },
+}));
 const toggleThemeMode = vi.fn();
 
 vi.mock("../../react-app/auth/context", () => ({

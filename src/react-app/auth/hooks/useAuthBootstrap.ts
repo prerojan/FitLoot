@@ -6,11 +6,11 @@ import {
   ROUTE_PATHS,
 } from "../constants";
 import { clearPersistedAuthenticatedUserState } from "../clientStateCleanup";
-import type { User } from "../types";
+import type { AuthCheckResult, User } from "../types";
 import { triggerRouteNotFoundAchievement } from "../../services/achievementService";
 import {
   fetchAuthBootstrap,
-  fetchCurrentUser,
+  fetchCurrentUserState,
   hasPlanAccess,
   prefetchCoreRoutes,
   scheduleAppOpenNotification,
@@ -54,7 +54,7 @@ export function useAuthBootstrap({
   setUser,
   setLoading,
 }: UseAuthBootstrapParams) {
-  const inflightBootstrapRef = useRef<Promise<void> | null>(null);
+  const inflightBootstrapRef = useRef<Promise<AuthCheckResult> | null>(null);
 
   return useCallback(async () => {
     if (inflightBootstrapRef.current) {
@@ -63,16 +63,18 @@ export function useAuthBootstrap({
 
     const bootstrapTask = (async () => {
       let restoredFromCache = false;
+      let cachedUser: User | null = null;
 
       const hydrateCachedSession = (): void => {
         if (typeof window === "undefined") return;
         if (localStorage.getItem(AUTHENTICATED_HINT_KEY) !== "1") return;
 
-        const cachedUser = readCachedJson<User>("/api/users/me", 5 * 60_000);
-        if (!cachedUser?.data?.id) return;
+        const cachedUserEntry = readCachedJson<User>("/api/users/me", 5 * 60_000);
+        if (!cachedUserEntry?.data?.id) return;
 
         restoredFromCache = true;
-        setUser(cachedUser.data);
+        cachedUser = cachedUserEntry.data;
+        setUser(cachedUser);
 
         const cachedProfile = readCachedJson<Record<string, unknown>>(
           "/api/profile",
@@ -92,7 +94,7 @@ export function useAuthBootstrap({
         if (!shouldProbeCurrentSession()) {
           applyProfileTheme(null);
           setUser(null);
-          return;
+          return { state: "unauthorized" } satisfies AuthCheckResult;
         }
 
         // Restaura sessao e bootstrap principal em uma unica ida ao backend.
@@ -100,26 +102,46 @@ export function useAuthBootstrap({
         if (bootstrapResult.state === "unauthorized") {
           clearPersistedAuthenticatedUserState();
           setUser(null);
-          return;
+          applyProfileTheme(null);
+          return { state: "unauthorized" } satisfies AuthCheckResult;
         }
 
         if (bootstrapResult.state !== "ok") {
-          if (restoredFromCache) {
-            return;
+          if (restoredFromCache && cachedUser) {
+            return {
+              state: "authenticated",
+              user: cachedUser,
+              source: "cache",
+            } satisfies AuthCheckResult;
           }
 
-          const fallbackUser = await fetchCurrentUser();
-          if (!fallbackUser) {
-            clearPersistedAuthenticatedUserState();
+          const fallbackUserResult = await fetchCurrentUserState();
+          if (fallbackUserResult.state === "unauthorized") {
             setUser(null);
-            return;
+            applyProfileTheme(null);
+            return { state: "unauthorized" } satisfies AuthCheckResult;
           }
 
+          if (fallbackUserResult.state !== "ok") {
+            setUser(null);
+            applyProfileTheme(null);
+            return { state: "unavailable" } satisfies AuthCheckResult;
+          }
+
+          const fallbackUser = fallbackUserResult.user;
           localStorage.setItem(AUTHENTICATED_HINT_KEY, "1");
           setUser(fallbackUser);
+          writeCachedJson("/api/users/me", fallbackUser);
           applyProfileTheme(null);
+          if (fallbackUser.onboarding_completed === 1 && hasPlanAccess(fallbackUser)) {
+            prefetchCoreRoutes();
+          }
           scheduleAppOpenNotification();
-          return;
+          return {
+            state: "authenticated",
+            user: fallbackUser,
+            source: "current-user",
+          } satisfies AuthCheckResult;
         }
 
         const bootstrap = bootstrapResult.payload;
@@ -158,12 +180,22 @@ export function useAuthBootstrap({
             localStorage.removeItem(PENDING_404_ACHIEVEMENT_KEY);
           });
         }
+        return {
+          state: "authenticated",
+          user,
+          source: "bootstrap",
+        } satisfies AuthCheckResult;
       } catch {
-        if (restoredFromCache) {
-          return;
+        if (restoredFromCache && cachedUser) {
+          return {
+            state: "authenticated",
+            user: cachedUser,
+            source: "cache",
+          } satisfies AuthCheckResult;
         }
-        clearPersistedAuthenticatedUserState();
         setUser(null);
+        applyProfileTheme(null);
+        return { state: "unavailable" } satisfies AuthCheckResult;
       } finally {
         setLoading(false);
       }

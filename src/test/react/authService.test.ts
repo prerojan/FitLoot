@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   fetchAuthBootstrap,
   fetchCurrentUser,
+  fetchCurrentUserState,
   hasPlanAccess,
   notifyAppOpen,
   resolveAuthenticatedStartRoute,
@@ -204,6 +205,22 @@ describe("authService routing", () => {
     expect(result).toBeNull();
     expect(localStorage.getItem("fitloot_authenticated_hint")).toBeNull();
     expect(localStorage.getItem("fitloot_ai_chat_u7")).toBeNull();
+  });
+
+  it("preserves local session hints when current user lookup is temporarily unavailable", async () => {
+    localStorage.setItem("fitloot_authenticated_hint", "1");
+    localStorage.setItem("fitloot_ai_chat_u8", JSON.stringify([{ role: "assistant" }]));
+    global.fetch = vi.fn(async () =>
+      new Response("temporarily unavailable", {
+        status: 503,
+        headers: { "Content-Type": "text/plain" },
+      })) as typeof fetch;
+
+    const result = await fetchCurrentUserState();
+
+    expect(result).toEqual({ state: "unavailable" });
+    expect(localStorage.getItem("fitloot_authenticated_hint")).toBe("1");
+    expect(localStorage.getItem("fitloot_ai_chat_u8")).not.toBeNull();
   });
 
   it("dedupes app-open background notifications while a request is inflight", async () => {

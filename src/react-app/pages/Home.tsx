@@ -15,6 +15,7 @@ import { useAuth } from "@/react-app/auth/context";
 import { useTheme } from "@/react-app/contexts/theme";
 import LoadingBall from "@/react-app/components/LoadingBall";
 import PaymentStatusPopup from "@/react-app/components/PaymentStatusPopup";
+import { resolveAuthenticatedStartRoute } from "@/react-app/services/authService";
 import { api } from "@/react-app/utils/api";
 import {
   consumeActivationNotice,
@@ -96,8 +97,17 @@ const Home: FC = () => {
       }
 
       localStorage.setItem("fitloot_authenticated_hint", "1");
-      await checkAuth();
-      navigate("/app", { replace: true });
+      const authResult = await checkAuth();
+      if (authResult.state !== "authenticated") {
+        setError(
+          authResult.state === "unauthorized"
+            ? "Login concluido, mas a sessao nao foi confirmada. Tente entrar novamente."
+            : "Login concluido, mas nao foi possivel carregar sua sessao agora. Tente novamente em instantes.",
+        );
+        return;
+      }
+
+      navigate(resolveAuthenticatedStartRoute(authResult.user), { replace: true });
     } catch {
       setError("Nao foi possivel conectar ao servidor");
     } finally {

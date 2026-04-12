@@ -21,6 +21,11 @@ export type AuthBootstrapResult =
   | { state: "unauthorized" }
   | { state: "unavailable" };
 
+export type CurrentUserResult =
+  | { state: "ok"; user: User }
+  | { state: "unauthorized" }
+  | { state: "unavailable" };
+
 const APP_OPEN_MIN_INTERVAL_MS = 45_000;
 let lastAppOpenSentAt = 0;
 let scheduledAppOpenTimer: number | null = null;
@@ -86,7 +91,7 @@ export async function fetchAuthBootstrap(): Promise<AuthBootstrapResult> {
   return payload ? { state: "ok", payload } : { state: "unavailable" };
 }
 
-export async function fetchCurrentUser(): Promise<User | null> {
+export async function fetchCurrentUserState(): Promise<CurrentUserResult> {
   // Resolve a sessao atual sem propagar excecoes para os consumidores.
   const response = await api("/api/users/me", {
     orchestrationKey: "auth:current-user",
@@ -99,14 +104,20 @@ export async function fetchCurrentUser(): Promise<User | null> {
     (await isMissingUserResponse(response))
   ) {
     clearPersistedAuthenticatedUserState();
-    return null;
+    return { state: "unauthorized" };
   }
-  if (!response.ok) return null;
+  if (!response.ok) return { state: "unavailable" };
   const contentType = response.headers.get("content-type") ?? "";
   if (!contentType.includes("application/json") && !contentType.includes("+json")) {
-    return null;
+    return { state: "unavailable" };
   }
-  return ((await response.json().catch(() => null)) as User | null) ?? null;
+  const user = ((await response.json().catch(() => null)) as User | null) ?? null;
+  return user ? { state: "ok", user } : { state: "unavailable" };
+}
+
+export async function fetchCurrentUser(): Promise<User | null> {
+  const result = await fetchCurrentUserState();
+  return result.state === "ok" ? result.user : null;
 }
 
 export async function notifyAppOpen(): Promise<void> {

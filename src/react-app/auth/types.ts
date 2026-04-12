@@ -11,10 +11,19 @@ export interface User {
   payment_method: "none" | "card" | "pix";
 }
 
+export type AuthCheckResult =
+  | {
+      state: "authenticated";
+      user: User;
+      source: "bootstrap" | "current-user" | "cache";
+    }
+  | { state: "unauthorized" }
+  | { state: "unavailable" };
+
 export interface AuthContextType {
   user: User | null;
   loading: boolean;
-  checkAuth: () => Promise<void>;
+  checkAuth: () => Promise<AuthCheckResult>;
   logout: () => void;
   setAuthenticatedUser: (user: User | null) => void;
 }

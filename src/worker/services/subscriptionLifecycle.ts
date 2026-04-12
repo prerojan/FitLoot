@@ -17,6 +17,7 @@ import {
   getErrorMessage,
 } from "../core/errors";
 import { purgeIncompleteOnboardingData } from "../core/database";
+import { upsertRuntimeUserAuth } from "../core/runtimeUserAuthStore";
 import type { PromoCodeEffect } from "../../shared/types";
 import type {
   AppContext,
@@ -46,6 +47,40 @@ import {
 } from "./userPlanAccess";
 
 const encoder = new TextEncoder();
+
+function resolveRuntimeUserAuthDb(env: Env): D1Database | null {
+  const runtimeDb = env.fitloot_runtime_db;
+  if (!runtimeDb || runtimeDb === env.fitloot_db) {
+    return null;
+  }
+  return runtimeDb;
+}
+
+async function syncRuntimeUserAuthSnapshot(params: {
+  primaryDb: D1Database;
+  env: Env;
+  userId: string;
+}): Promise<void> {
+  const runtimeDb = resolveRuntimeUserAuthDb(params.env);
+  if (!runtimeDb) {
+    return;
+  }
+
+  const authRecord = await getUserAuthRecordById(params.primaryDb, params.userId);
+  if (!authRecord) {
+    return;
+  }
+
+  const profileRow = await params.primaryDb
+    .prepare("SELECT username FROM user_profiles WHERE user_id = ? LIMIT 1")
+    .bind(params.userId)
+    .first<{ username: string | null }>()
+    .catch(() => null);
+
+  await upsertRuntimeUserAuth(runtimeDb, authRecord, {
+    username: profileRow?.username ?? null,
+  });
+}
 
 // Centralizes the full subscription lifecycle: promo codes, checkout bootstrap, and webhook reconciliation.
 function toHex(buffer: ArrayBuffer): string {
@@ -321,6 +356,16 @@ export async function applyPromoCodeForUser(
       status: "active",
       paymentMethod: "card",
       markOnboardingCompleted: true,
+    });
+    await syncRuntimeUserAuthSnapshot({
+      primaryDb: db,
+      env,
+      userId: params.userId,
+    }).catch((error) => {
+      console.warn("[promo][runtime-auth-sync]", {
+        userId: params.userId,
+        message: getErrorMessage(error),
+      });
     });
 
     return {
@@ -667,6 +712,7 @@ async function syncUserPlanFromSubscription(
     preserveActiveAccess?: boolean;
     keepCurrentState?: boolean;
     markOnboardingCompleted?: boolean;
+    env?: Env;
   },
 ): Promise<void> {
   const preserveActiveAccess = options?.preserveActiveAccess === true;
@@ -688,15 +734,28 @@ async function syncUserPlanFromSubscription(
       paymentMethod: nextPaymentMethod === "none" ? currentUser.payment_method : nextPaymentMethod,
       markOnboardingCompleted: options?.markOnboardingCompleted ?? false,
     });
-    return;
+  } else {
+    await updateUserPlanState(db, subscription.user_id, {
+      planId: nextPlanId,
+      status: nextStatus,
+      paymentMethod: nextPaymentMethod,
+      markOnboardingCompleted: options?.markOnboardingCompleted ?? false,
+    });
   }
 
-  await updateUserPlanState(db, subscription.user_id, {
-    planId: nextPlanId,
-    status: nextStatus,
-    paymentMethod: nextPaymentMethod,
-    markOnboardingCompleted: options?.markOnboardingCompleted ?? false,
-  });
+  if (options?.env) {
+    await syncRuntimeUserAuthSnapshot({
+      primaryDb: db,
+      env: options.env,
+      userId: subscription.user_id,
+    }).catch((error) => {
+      console.warn("[subscription][runtime-auth-sync]", {
+        userId: subscription.user_id,
+        subscriptionId: subscription.id,
+        message: getErrorMessage(error),
+      });
+    });
+  }
 }
 
 export function resolveCheckoutAmount(planId: PublicPlanId): number {
@@ -798,6 +857,17 @@ export async function startCheckoutForUser(
     status: "pending",
     paymentMethod: params.paymentMethod,
     markOnboardingCompleted: false,
+  });
+  await syncRuntimeUserAuthSnapshot({
+    primaryDb: db,
+    env,
+    userId: params.userId,
+  }).catch((error) => {
+    console.warn("[checkout][runtime-auth-sync]", {
+      userId: params.userId,
+      subscriptionId,
+      message: getErrorMessage(error),
+    });
   });
 
   return {
@@ -1056,6 +1126,7 @@ export async function reconcilePendingSubscriptionForUser(
 
   await syncUserPlanFromSubscription(db, subscription, {
     markOnboardingCompleted: syncRule.status === "active",
+    env,
   });
 
   const refreshedUser = await getUserAuthRecordById(db, params.userId);
@@ -1316,6 +1387,7 @@ export async function processCaktoWebhook(
 
     await syncUserPlanFromSubscription(c.env.fitloot_db, subscription, {
       markOnboardingCompleted: syncRule.status === "active",
+      env: c.env,
     });
 
     if (

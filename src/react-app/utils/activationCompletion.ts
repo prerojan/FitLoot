@@ -1,6 +1,7 @@
 import type { NavigateFunction } from "react-router";
 
 import { ROUTE_PATHS } from "@/react-app/auth/constants";
+import type { AuthCheckResult } from "@/react-app/auth/types";
 import { queueActivationNotice, type ActivationNotice } from "@/react-app/utils/activationNotice";
 import { clearOnboardingDraft } from "@/react-app/utils/onboardingDraft";
 
@@ -15,7 +16,7 @@ export type ActivationCompletionCopy = {
 
 type CompleteActivationAndEnterAppParams = {
   navigate: NavigateFunction;
-  refreshAuth?: (() => Promise<void>) | undefined;
+  refreshAuth?: (() => Promise<AuthCheckResult>) | undefined;
   finalizeSessionTransition?: (() => Promise<void>) | undefined;
   onBeforeEnterApp?: (() => void) | undefined;
   preEnterAppDelayMs?: number | undefined;
@@ -92,7 +93,10 @@ export async function completeActivationAndEnterApp(
     if (params.finalizeSessionTransition) {
       await params.finalizeSessionTransition();
     } else if (params.refreshAuth) {
-      await params.refreshAuth();
+      const authResult = await params.refreshAuth();
+      if (authResult.state !== "authenticated") {
+        throw new Error(`ACTIVATION_TRANSITION_${authResult.state.toUpperCase()}`);
+      }
     } else {
       throw new Error("ACTIVATION_TRANSITION_HANDLER_MISSING");
     }

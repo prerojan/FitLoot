@@ -4,9 +4,30 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const checkAuth = vi.fn(async () => undefined);
+const navigate = vi.fn();
+const checkAuth = vi.fn(async () => ({
+  state: "authenticated" as const,
+  source: "bootstrap" as const,
+  user: {
+    id: "user-1",
+    email: "user@example.com",
+    name: "Teste",
+    onboarding_completed: 0,
+    plan_id: "basic" as const,
+    plan_status: "pending" as const,
+    payment_method: "none" as const,
+  },
+}));
 const toggleThemeMode = vi.fn();
 const apiMock = vi.fn();
+
+vi.mock("react-router", async () => {
+  const actual = await vi.importActual<typeof import("react-router")>("react-router");
+  return {
+    ...actual,
+    useNavigate: () => navigate,
+  };
+});
 
 vi.mock("../../react-app/auth/context", () => ({
   useAuth: () => ({
@@ -23,6 +44,10 @@ vi.mock("../../react-app/contexts/theme", () => ({
   }),
 }));
 
+vi.mock("../../react-app/services/authService", () => ({
+  resolveAuthenticatedStartRoute: vi.fn(() => "/checkout"),
+}));
+
 vi.mock("../../react-app/utils/api", () => ({
   api: (...args: Parameters<typeof apiMock>) => apiMock(...args),
 }));
@@ -34,6 +59,7 @@ describe("Home", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     sessionStorage.clear();
+    localStorage.clear();
   });
 
   it("shows the activation notice on the login screen exactly once", async () => {
@@ -69,5 +95,44 @@ describe("Home", () => {
     expect(
       screen.queryByText(/Conta criada e acesso liberado/i),
     ).not.toBeInTheDocument();
+  });
+
+  it("routes only after the authenticated session is actually restored", async () => {
+    const user = userEvent.setup();
+    apiMock.mockResolvedValueOnce(new Response(null, { status: 200 }));
+
+    render(
+      <MemoryRouter>
+        <Home />
+      </MemoryRouter>,
+    );
+
+    await user.type(screen.getByLabelText(/^Email$/i), "user@example.com");
+    await user.type(screen.getByLabelText(/^Senha$/i), "password123");
+    await user.click(screen.getByRole("button", { name: /Inicializar sessao/i }));
+
+    expect(checkAuth).toHaveBeenCalled();
+    expect(navigate).toHaveBeenCalledWith("/checkout", { replace: true });
+  });
+
+  it("does not navigate when login succeeds but session restoration stays unavailable", async () => {
+    const user = userEvent.setup();
+    apiMock.mockResolvedValueOnce(new Response(null, { status: 200 }));
+    checkAuth.mockResolvedValueOnce({ state: "unavailable" as const });
+
+    render(
+      <MemoryRouter>
+        <Home />
+      </MemoryRouter>,
+    );
+
+    await user.type(screen.getByLabelText(/^Email$/i), "user@example.com");
+    await user.type(screen.getByLabelText(/^Senha$/i), "password123");
+    await user.click(screen.getByRole("button", { name: /Inicializar sessao/i }));
+
+    expect(navigate).not.toHaveBeenCalled();
+    expect(
+      screen.getByText(/nao foi possivel carregar sua sessao agora/i),
+    ).toBeInTheDocument();
   });
 });

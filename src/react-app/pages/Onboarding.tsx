@@ -556,6 +556,17 @@ export default function Onboarding() {
   const usernameValidationCacheRef = useRef<StableAvailabilityCacheEntry | null>(null);
   const emailValidationCacheRef = useRef<StableAvailabilityCacheEntry | null>(null);
 
+  const signInWithSubmittedCredentials = useCallback(async () => {
+    return api("/api/auth/login", {
+      method: "POST",
+      timeoutMs: 30_000,
+      body: JSON.stringify({
+        email: credentials.email.trim().toLowerCase(),
+        password: credentials.password,
+      }),
+    });
+  }, [credentials.email, credentials.password]);
+
   // Reaproveita o e-mail retornado do checkout quando o usuario volta ao onboarding.
   useEffect(() => {
     const email = sessionStorage.getItem(ONBOARDING_EMAIL_STORAGE_KEY);
@@ -1070,33 +1081,33 @@ export default function Onboarding() {
       });
 
       if (registerRes.status === 409) {
-        setStepError("Este e-mail ja esta cadastrado.");
-        return;
-      }
-      if (!registerRes.ok) {
-        setStepError("Erro ao criar conta.");
-        return;
-      }
-
-      const registerPayload = (await registerRes.json().catch(() => null)) as
-        | { session_established?: boolean | undefined }
-        | null;
-      const sessionEstablishedFromRegister = registerPayload?.session_established === true;
-
-      if (!sessionEstablishedFromRegister) {
-        const loginRes = await api("/api/auth/login", {
-          method: "POST",
-          timeoutMs: 30_000,
-          body: JSON.stringify({ email: normalizedEmail, password: credentials.password }),
-        });
-
-        if (!loginRes.ok) {
-          localStorage.removeItem("fitloot_authenticated_hint");
-          accountBootstrapRedirectRef.current = false;
-          setStepError(
-            "Conta criada com sucesso, mas nao foi possivel iniciar sua sessao automaticamente. Faca login para continuar no pagamento.",
-          );
+        const resumeLoginRes = await signInWithSubmittedCredentials();
+        if (!resumeLoginRes.ok) {
+          setStepError("Este e-mail ja esta cadastrado.");
           return;
+        }
+      } else {
+        if (!registerRes.ok) {
+          setStepError("Erro ao criar conta.");
+          return;
+        }
+
+        const registerPayload = (await registerRes.json().catch(() => null)) as
+          | { session_established?: boolean | undefined }
+          | null;
+        const sessionEstablishedFromRegister = registerPayload?.session_established === true;
+
+        if (!sessionEstablishedFromRegister) {
+          const loginRes = await signInWithSubmittedCredentials();
+
+          if (!loginRes.ok) {
+            localStorage.removeItem("fitloot_authenticated_hint");
+            accountBootstrapRedirectRef.current = false;
+            setStepError(
+              "Conta criada com sucesso, mas nao foi possivel iniciar sua sessao automaticamente. Faca login para continuar no pagamento.",
+            );
+            return;
+          }
         }
       }
 
@@ -1123,7 +1134,7 @@ export default function Onboarding() {
       localStorage.setItem("fitloot_authenticated_hint", "1");
       accountBootstrapRedirectRef.current = true;
 
-      const [authRefreshResult, profileSeedResult] = await Promise.allSettled([
+      const [authResult, profileSeedResult] = await Promise.all([
         checkAuth(),
         api("/api/onboarding/profile", {
           method: "POST",
@@ -1132,22 +1143,17 @@ export default function Onboarding() {
         }),
       ]);
 
-      if (authRefreshResult.status === "rejected") {
+      if (authResult.state !== "authenticated") {
+        accountBootstrapRedirectRef.current = false;
         setStepError(
-          "Conta criada e sessao iniciada, mas nao foi possivel atualizar a sessao do app agora. Tente novamente em instantes.",
+          authResult.state === "unauthorized"
+            ? "Conta criada, mas a sessao nao foi confirmada. Faca login para continuar no pagamento."
+            : "Conta criada e sessao iniciada, mas nao foi possivel atualizar a sessao do app agora. Tente novamente em instantes.",
         );
         return;
       }
 
-      if (profileSeedResult.status === "rejected") {
-        setStepError(
-          "Conta criada e sessao iniciada, mas nao foi possivel preparar seu onboarding para o checkout. Tente novamente em instantes.",
-        );
-        return;
-      }
-
-      const profileSeedRes = profileSeedResult.value;
-
+      const profileSeedRes = profileSeedResult;
       if (!profileSeedRes.ok) {
         const payload = (await profileSeedRes.json().catch(() => null)) as unknown;
 

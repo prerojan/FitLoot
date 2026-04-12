@@ -19,7 +19,19 @@ describe("activationCompletion", () => {
 
   it("refreshes auth and redirects to the app when activation succeeds", async () => {
     const navigate = vi.fn();
-    const refreshAuth = vi.fn(async () => undefined);
+    const refreshAuth = vi.fn(async () => ({
+      state: "authenticated" as const,
+      source: "bootstrap" as const,
+      user: {
+        id: "user-1",
+        email: "user@example.com",
+        name: "Teste",
+        onboarding_completed: 1,
+        plan_id: "vip" as const,
+        plan_status: "active" as const,
+        payment_method: "card" as const,
+      },
+    }));
     const completionCopy = resolveActivationCompletionCopy({
       origin: "checkout",
       outcome: "vip",
@@ -59,9 +71,39 @@ describe("activationCompletion", () => {
     expect(refreshAuth).toHaveBeenCalled();
   });
 
+  it("keeps the user on the current page when auth refresh finishes without a usable session", async () => {
+    const navigate = vi.fn();
+    const refreshAuth = vi.fn(async () => ({ state: "unavailable" as const }));
+
+    const result = await completeActivationAndEnterApp({
+      navigate,
+      refreshAuth,
+      preEnterAppDelayMs: 0,
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      errorMessage:
+        "A ativacao foi concluida, mas nao foi possivel concluir a transicao da sua sessao agora. Tente novamente em instantes.",
+    });
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
   it("queues the activation notice before redirecting when one is provided", async () => {
     const navigate = vi.fn();
-    const refreshAuth = vi.fn(async () => undefined);
+    const refreshAuth = vi.fn(async () => ({
+      state: "authenticated" as const,
+      source: "bootstrap" as const,
+      user: {
+        id: "user-1",
+        email: "user@example.com",
+        name: "Teste",
+        onboarding_completed: 1,
+        plan_id: "pro" as const,
+        plan_status: "active" as const,
+        payment_method: "card" as const,
+      },
+    }));
 
     const result = await completeActivationAndEnterApp({
       navigate,

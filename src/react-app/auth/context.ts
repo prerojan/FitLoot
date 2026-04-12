@@ -7,7 +7,7 @@ export const AuthContext = createContext<AuthContextType>({
   user: null,
   loading: true,
   checkAuth: async () => {
-    return undefined;
+    return { state: "unauthorized" };
   },
   logout: () => {
     return undefined;
