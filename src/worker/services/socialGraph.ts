@@ -37,6 +37,12 @@ const DEFAULT_SOCIAL_USER_PREFERENCES: SocialUserPreferencesRow = {
   allow_group_invites: true,
 };
 
+function toNonNegativeNumber(value: unknown): number {
+  const parsed = Number(value ?? 0);
+  if (!Number.isFinite(parsed)) return 0;
+  return Math.max(0, parsed);
+}
+
 function coercePresenceBoolean(value: unknown): boolean | null {
   if (typeof value === "boolean") return value;
   if (typeof value === "number") return value > 0;
@@ -82,7 +88,7 @@ export function resolveFriendOnlineState(
 
 function normalizeFriendRow(row: Record<string, unknown>): SocialFriendRow {
   return {
-    id: Math.max(0, Number(row.id ?? 0)),
+    id: toNonNegativeNumber(row.id),
     friend_user_id: String(row.friend_user_id ?? ""),
     friend_username: String(row.friend_username ?? ""),
     friend_full_name: String(row.friend_full_name ?? row.friend_username ?? ""),
@@ -90,9 +96,9 @@ function normalizeFriendRow(row: Record<string, unknown>): SocialFriendRow {
       typeof row.friend_avatar_url === "string" && row.friend_avatar_url.trim().length > 0
         ? row.friend_avatar_url
         : null,
-    friend_level: Math.max(0, Number(row.friend_level ?? 0)),
-    friend_xp: Math.max(0, Number(row.friend_xp ?? 0)),
-    friend_streak: Math.max(0, Number(row.friend_streak ?? 0)),
+    friend_level: toNonNegativeNumber(row.friend_level),
+    friend_xp: toNonNegativeNumber(row.friend_xp),
+    friend_streak: toNonNegativeNumber(row.friend_streak),
     last_heartbeat_at:
       typeof row.last_heartbeat_at === "string" && row.last_heartbeat_at.trim().length > 0
         ? row.last_heartbeat_at
@@ -138,11 +144,11 @@ async function listFriendsViaPresenceView(
         pr.xp as friend_xp,
         pr.current_streak as friend_streak,
         CASE
-          WHEN COALESCE(sup.show_online_status, 1) = 1 THEN fp.last_heartbeat_at
+          WHEN sup.show_online_status IS NULL OR sup.show_online_status = TRUE THEN fp.last_heartbeat_at
           ELSE NULL
         END as last_heartbeat_at,
         CASE
-          WHEN COALESCE(sup.show_online_status, 1) = 1 THEN COALESCE(fp.is_online, FALSE)
+          WHEN sup.show_online_status IS NULL OR sup.show_online_status = TRUE THEN COALESCE(fp.is_online, FALSE)
           ELSE FALSE
         END as is_online
       FROM friendships f
@@ -186,11 +192,11 @@ async function listFriendsViaPresenceTable(
         pr.xp as friend_xp,
         pr.current_streak as friend_streak,
         CASE
-          WHEN COALESCE(sup.show_online_status, 1) = 1 THEN p.presence_status
+          WHEN sup.show_online_status IS NULL OR sup.show_online_status = TRUE THEN p.presence_status
           ELSE 'offline'
         END as presence_status,
         CASE
-          WHEN COALESCE(sup.show_online_status, 1) = 1 THEN p.last_heartbeat_at
+          WHEN sup.show_online_status IS NULL OR sup.show_online_status = TRUE THEN p.last_heartbeat_at
           ELSE NULL
         END as last_heartbeat_at
       FROM friendships f
@@ -314,9 +320,24 @@ export async function listPendingFriendRequests(
       LIMIT ? OFFSET ?`,
     )
     .bind(userId, limit, offset)
-    .all<PendingFriendRequestRow>();
+    .all<Record<string, unknown>>();
 
-  return Array.isArray(requests.results) ? requests.results : [];
+  return Array.isArray(requests.results)
+    ? requests.results.map((request) => ({
+        id: toNonNegativeNumber(request.id),
+        friend_user_id: String(request.friend_user_id ?? ""),
+        friend_username: String(request.friend_username ?? ""),
+        friend_full_name: String(request.friend_full_name ?? request.friend_username ?? ""),
+        friend_avatar_url:
+          typeof request.friend_avatar_url === "string" && request.friend_avatar_url.trim().length > 0
+            ? request.friend_avatar_url
+            : null,
+        friend_level: toNonNegativeNumber(request.friend_level),
+        friend_xp: toNonNegativeNumber(request.friend_xp),
+        friend_streak: toNonNegativeNumber(request.friend_streak),
+        created_at: String(request.created_at ?? ""),
+      }))
+    : [];
 }
 
 export async function areUsersBlocked(

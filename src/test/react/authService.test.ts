@@ -51,7 +51,7 @@ describe("authService routing", () => {
     expect(route).toBe("/checkout");
   });
 
-  it("requires onboarding completion and active/vip status", () => {
+  it("treats active and vip plans as immediate client access", () => {
     expect(
       hasPlanAccess({
         id: "u3",
@@ -73,6 +73,18 @@ describe("authService routing", () => {
         plan_id: "vip",
         plan_status: "active",
         payment_method: "card",
+      }),
+    ).toBe(true);
+
+    expect(
+      hasPlanAccess({
+        id: "u5",
+        email: "u5@example.com",
+        name: "U5",
+        onboarding_completed: 0,
+        plan_id: "basic",
+        plan_status: "pending",
+        payment_method: "none",
       }),
     ).toBe(false);
   });

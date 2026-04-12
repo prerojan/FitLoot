@@ -9,6 +9,7 @@ import {
   type ChangeEvent,
   type Dispatch,
   type FormEvent,
+  type PointerEvent as ReactPointerEvent,
   type SetStateAction,
 } from "react";
 import { useSearchParams } from "react-router";
@@ -17,14 +18,17 @@ import {
   Check,
   ChevronLeft,
   CirclePlus,
+  Copy,
   Image as ImageIcon,
   Loader2,
   LockKeyhole,
   MessageCircle,
   MoreVertical,
+  PencilLine,
   Search,
   SendHorizontal,
   ShieldBan,
+  Trash2,
   UserPlus,
   UserMinus,
   Users,
@@ -50,6 +54,7 @@ import {
   blockSocialUser,
   clearSocialChatCache,
   createSocialGroupConversation,
+  deleteSocialConversationMessage,
   fetchSocialConversationMessages,
   fetchSocialHubBundle,
   listSocialConversationMedia,
@@ -58,6 +63,7 @@ import {
   sendSocialConversationMessage,
   SocialChatApiError,
   startDirectSocialConversation,
+  updateSocialConversationMessage,
   updateSocialPreferences,
   uploadSocialConversationMedia,
 } from "@/react-app/services/socialChatService";
@@ -75,8 +81,11 @@ import type {
 } from "@/shared/types";
 
 const HUB_REFRESH_INTERVAL_MS = 20_000;
-const ACTIVE_CONVERSATION_REFRESH_INTERVAL_MS = 10_000;
+const ACTIVE_CONVERSATION_REFRESH_INTERVAL_MS = 2_500;
+const MAX_ACTIVE_CONVERSATION_REFRESH_INTERVAL_MS = 15_000;
 const SEARCH_DEBOUNCE_MS = 280;
+const MESSAGE_GROUP_WINDOW_MS = 120_000;
+const MESSAGE_LONG_PRESS_DURATION_MS = 420;
 const EMPTY_HUB_BUNDLE: SocialHubBundle = {
   friends: [],
   pending_requests: [],
@@ -123,8 +132,16 @@ type ConversationListItemProps = {
   onClick: () => void;
 };
 
-type ConversationBubbleProps = {
+type MessageActionsTarget = {
   message: SocialConversationMessage;
+  anchorX: number;
+  anchorY: number;
+  align: "start" | "end";
+};
+
+type ConversationBubbleProps = {
+  layout: ConversationBubbleLayout;
+  onOpenActions: (target: MessageActionsTarget) => void;
 };
 
 type ConversationListEntry =
@@ -183,6 +200,19 @@ type PrivacyPreferenceRowProps = {
 
 type ActionsMenuAnchor = "list" | "thread";
 
+type ActiveConversationContext = {
+  conversationId: number | null;
+  friendUserId: string | null;
+  groupConversationId: number | null;
+};
+
+type ConversationBubbleLayout = {
+  message: SocialConversationMessage;
+  groupedWithPrevious: boolean;
+  groupedWithNext: boolean;
+  showTimestamp: boolean;
+};
+
 function getFriendDisplayName(friend: Pick<SocialHubFriendItem, "friend_full_name" | "friend_username">): string {
   return friend.friend_full_name.trim() || friend.friend_username;
 }
@@ -192,6 +222,18 @@ function getGroupDisplayName(conversation: Pick<SocialConversationPreview, "disp
 }
 
 function parseConversationId(value: string | null): number | null {
+  const parsed = Number(value ?? 0);
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return Math.floor(parsed);
+}
+
+function toNonNegativeNumber(value: unknown): number {
+  const parsed = Number(value ?? 0);
+  if (!Number.isFinite(parsed)) return 0;
+  return Math.max(0, parsed);
+}
+
+function toNullablePositiveNumber(value: unknown): number | null {
   const parsed = Number(value ?? 0);
   if (!Number.isFinite(parsed) || parsed <= 0) return null;
   return Math.floor(parsed);
@@ -243,11 +285,58 @@ function formatBubbleTimestamp(value: string): string {
   }
 }
 
+function formatBubbleMeta(message: SocialConversationMessage): string {
+  const timestamp = formatBubbleTimestamp(message.created_at);
+  if (!timestamp) {
+    return message.edited_at ? "Editada" : "";
+  }
+  return message.edited_at ? `${timestamp} • editada` : timestamp;
+}
+
 function describeMessagePreview(message: Pick<SocialConversationMessage, "message_kind" | "message_text">): string {
   if (message.message_kind === "image") {
     return message.message_text.trim() || "Imagem";
   }
   return message.message_text.trim();
+}
+
+function getMessageTime(value: string): number {
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function shouldGroupConversationMessages(
+  previous: SocialConversationMessage | null,
+  current: SocialConversationMessage,
+): boolean {
+  if (!previous) return false;
+  if (previous.is_own_message !== current.is_own_message) return false;
+  if (previous.sender_user_id !== current.sender_user_id) return false;
+
+  const previousTime = getMessageTime(previous.created_at);
+  const currentTime = getMessageTime(current.created_at);
+  if (previousTime === 0 || currentTime === 0) return false;
+
+  const delta = currentTime - previousTime;
+  return delta >= 0 && delta <= MESSAGE_GROUP_WINDOW_MS;
+}
+
+function buildConversationBubbleLayouts(
+  messages: readonly SocialConversationMessage[],
+): ConversationBubbleLayout[] {
+  return messages.map((message, index) => {
+    const previous = index > 0 ? messages[index - 1] ?? null : null;
+    const next = index < messages.length - 1 ? messages[index + 1] ?? null : null;
+    const groupedWithPrevious = shouldGroupConversationMessages(previous, message);
+    const groupedWithNext = next ? shouldGroupConversationMessages(message, next) : false;
+
+    return {
+      message,
+      groupedWithPrevious,
+      groupedWithNext,
+      showTimestamp: !groupedWithNext,
+    };
+  });
 }
 
 function matchesFriendQuery(friend: SocialHubFriendItem, query: string): boolean {
@@ -354,8 +443,9 @@ function applyConversationPreviewToFriend(
 ): SocialHubBundle {
   return updateHubFriend(bundle, friendUserId, (friend) => ({
     ...friend,
-    direct_conversation_id: conversation?.id ?? friend.direct_conversation_id ?? null,
-    unread_count: Math.max(0, Number(conversation?.unread_count ?? 0)),
+    direct_conversation_id:
+      toNullablePositiveNumber(conversation?.id) ?? friend.direct_conversation_id ?? null,
+    unread_count: toNonNegativeNumber(conversation?.unread_count),
     last_message_preview:
       conversation?.last_message_preview ??
       (message ? describeMessagePreview(message) : friend.last_message_preview),
@@ -373,7 +463,7 @@ function applyConversationPreviewToGroup(
   return updateHubGroup(bundle, conversationId, (currentConversation) => ({
     ...currentConversation,
     ...(conversation ?? {}),
-    unread_count: Math.max(0, Number(conversation?.unread_count ?? currentConversation.unread_count)),
+    unread_count: toNonNegativeNumber(conversation?.unread_count ?? currentConversation.unread_count),
     last_message_preview:
       conversation?.last_message_preview ??
       (message ? describeMessagePreview(message) : currentConversation.last_message_preview),
@@ -423,49 +513,59 @@ function areMessagesEquivalent(
   return true;
 }
 
-function useKeyboardInset(enabled: boolean): number {
-  const [keyboardInset, setKeyboardInset] = useState(0);
+type VisualViewportFrame = {
+  height: number;
+  offsetTop: number;
+};
+
+function useVisualViewportFrame(enabled: boolean): VisualViewportFrame | null {
+  const [frame, setFrame] = useState<VisualViewportFrame | null>(null);
 
   useEffect(() => {
     if (!enabled || typeof window === "undefined") {
-      setKeyboardInset(0);
+      setFrame(null);
       return;
     }
 
     const viewport = window.visualViewport;
     if (!viewport) {
-      setKeyboardInset(0);
+      setFrame(null);
       return;
     }
 
     let frameId = 0;
-    const updateInset = () => {
+    const handleOrientationChange = () => {
+      updateFrame();
+    };
+    const updateFrame = () => {
       if (frameId) {
         window.cancelAnimationFrame(frameId);
       }
       frameId = window.requestAnimationFrame(() => {
-        const viewportBottom = viewport.height + viewport.offsetTop;
-        const inset = Math.max(0, Math.round(window.innerHeight - viewportBottom));
-        setKeyboardInset(inset > 12 ? inset : 0);
+        const height = Math.max(0, Math.round(viewport.height));
+        const offsetTop = Math.max(0, Math.round(viewport.offsetTop));
+        setFrame(height > 0 ? { height, offsetTop } : null);
       });
     };
 
-    updateInset();
-    viewport.addEventListener("resize", updateInset);
-    viewport.addEventListener("scroll", updateInset);
-    window.addEventListener("orientationchange", updateInset);
+    updateFrame();
+    viewport.addEventListener("resize", updateFrame);
+    viewport.addEventListener("scroll", updateFrame);
+    window.addEventListener("orientationchange", handleOrientationChange);
+    window.addEventListener("resize", updateFrame);
 
     return () => {
       if (frameId) {
         window.cancelAnimationFrame(frameId);
       }
-      viewport.removeEventListener("resize", updateInset);
-      viewport.removeEventListener("scroll", updateInset);
-      window.removeEventListener("orientationchange", updateInset);
+      viewport.removeEventListener("resize", updateFrame);
+      viewport.removeEventListener("scroll", updateFrame);
+      window.removeEventListener("orientationchange", handleOrientationChange);
+      window.removeEventListener("resize", updateFrame);
     };
   }, [enabled]);
 
-  return keyboardInset;
+  return frame;
 }
 
 function HeaderIconButton({ icon: Icon, label, onClick, badge = 0, disabled = false }: HeaderIconButtonProps) {
@@ -803,51 +903,227 @@ function PrivacyPreferenceRow({
   );
 }
 
-function ConversationBubble({ message }: ConversationBubbleProps) {
+function MessageActionsMenu({
+  target,
+  busy,
+  onClose,
+  onCopy,
+  onEdit,
+  onDelete,
+}: {
+  target: MessageActionsTarget | null;
+  busy: boolean;
+  onClose: () => void;
+  onCopy: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  if (!target) return null;
+
+  const { message } = target;
+
+  const canCopy = message.message_text.trim().length > 0;
+  const canEdit = message.is_own_message && message.message_kind === "text";
+  const canDelete = message.is_own_message;
+  const actionCount = [canCopy, canEdit, canDelete].filter(Boolean).length;
+  const viewportWidth = typeof window === "undefined" ? 360 : window.innerWidth;
+  const viewportHeight = typeof window === "undefined" ? 640 : window.innerHeight;
+  const horizontalMargin = 12;
+  const verticalMargin = 12;
+  const menuWidth = Math.min(248, Math.max(196, viewportWidth - horizontalMargin * 2));
+  const estimatedHeight = 34 + actionCount * 52;
+  const left =
+    target.align === "end"
+      ? Math.max(horizontalMargin, Math.min(target.anchorX - menuWidth, viewportWidth - menuWidth - horizontalMargin))
+      : Math.max(horizontalMargin, Math.min(target.anchorX, viewportWidth - menuWidth - horizontalMargin));
+  const spaceBelow = viewportHeight - target.anchorY - verticalMargin;
+  const top =
+    spaceBelow >= estimatedHeight
+      ? Math.max(verticalMargin, target.anchorY + 8)
+      : Math.max(verticalMargin, target.anchorY - estimatedHeight - 8);
+
   return (
-    <div className={cn("flex w-full", message.is_own_message ? "justify-end" : "justify-start")}>
-      <div className="max-w-[82%]">
-        {message.media?.public_url ? (
-          <div
-            className={cn(
-              "overflow-hidden rounded-[1.8rem] border",
-              message.is_own_message
-                ? "border-transparent fl-social-hub-bubble-own"
-                : "border-[color:var(--fl-social-hub-muted-border)] fl-social-hub-bubble-other",
-            )}
-          >
-            <img
-              src={message.media.public_url}
-              alt="Midia compartilhada"
-              className="max-h-[18rem] w-full object-cover"
-              loading="lazy"
-            />
-            {message.message_text.trim() ? (
-              <p className="px-4 pb-4 pt-3 text-sm leading-relaxed">{message.message_text}</p>
-            ) : null}
-          </div>
-        ) : (
-          <div
-            className={cn(
-              "rounded-[1.6rem] px-4 py-3 text-[0.95rem] leading-relaxed",
-              message.is_own_message
-                ? "fl-social-hub-bubble-own"
-                : "fl-social-hub-bubble-other",
-            )}
-          >
-            {message.message_text}
-          </div>
-        )}
-        <div
-          className={cn(
-            "mt-1 px-1 text-[0.68rem] font-medium",
-            message.is_own_message
-              ? "text-right text-[color:var(--fl-color-text-muted)]"
-              : "text-left text-[color:var(--fl-color-text-muted)]",
-          )}
-        >
-          {formatBubbleTimestamp(message.created_at)}
+    <div className="fixed inset-0 z-[95] bg-black/22">
+      <button
+        type="button"
+        className="absolute inset-0 cursor-default"
+        aria-label="Fechar acoes da mensagem"
+        onClick={onClose}
+      />
+      <div
+        className="fl-social-hub-menu absolute z-[96] rounded-[1.6rem] p-2.5 shadow-[0_24px_80px_rgba(0,0,0,0.24)]"
+        style={{
+          left: `${left}px`,
+          top: `${top}px`,
+          width: `${menuWidth}px`,
+        }}
+        data-social-hub-message-actions-root
+      >
+        <p className="truncate px-3 pb-2 pt-1 text-sm font-medium text-[color:var(--fl-color-text-muted)]">
+          @{message.sender_username}
+        </p>
+        <div className="h-px bg-[color:var(--fl-social-hub-muted-border)]" />
+        <div className="mt-2 space-y-1">
+          {canCopy ? (
+            <button
+              type="button"
+              onClick={onCopy}
+              disabled={busy}
+              className="flex w-full items-center gap-3 rounded-[1rem] px-3 py-3 text-left text-sm font-medium text-[color:var(--fl-color-text)] transition-colors hover:bg-black/[0.04] disabled:opacity-50"
+            >
+              <Copy className="h-4 w-4" />
+              Copiar
+            </button>
+          ) : null}
+          {canEdit ? (
+            <button
+              type="button"
+              onClick={onEdit}
+              disabled={busy}
+              className="flex w-full items-center gap-3 rounded-[1rem] px-3 py-3 text-left text-sm font-medium text-[color:var(--fl-color-text)] transition-colors hover:bg-black/[0.04] disabled:opacity-50"
+            >
+              <PencilLine className="h-4 w-4" />
+              Editar
+            </button>
+          ) : null}
+          {canDelete ? (
+            <button
+              type="button"
+              onClick={onDelete}
+              disabled={busy}
+              className="flex w-full items-center gap-3 rounded-[1rem] px-3 py-3 text-left text-sm font-medium text-[#b42318] transition-colors hover:bg-[#b42318]/[0.06] disabled:opacity-50"
+            >
+              <Trash2 className="h-4 w-4" />
+              Excluir
+            </button>
+          ) : null}
         </div>
+      </div>
+    </div>
+  );
+}
+
+function ConversationBubble({ layout, onOpenActions }: ConversationBubbleProps) {
+  const { message, groupedWithNext, groupedWithPrevious, showTimestamp } = layout;
+  const longPressTimerRef = useRef<number | null>(null);
+  const bubbleButtonRef = useRef<HTMLButtonElement | null>(null);
+
+  const clearLongPress = useCallback(() => {
+    if (longPressTimerRef.current) {
+      window.clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => clearLongPress, [clearLongPress]);
+
+  const handleOpenActions = useCallback(() => {
+    clearLongPress();
+    const rect = bubbleButtonRef.current?.getBoundingClientRect();
+    const viewportWidth = typeof window === "undefined" ? 360 : window.innerWidth;
+    const viewportHeight = typeof window === "undefined" ? 640 : window.innerHeight;
+    onOpenActions({
+      message,
+      anchorX: rect
+        ? (message.is_own_message ? rect.right : rect.left)
+        : (message.is_own_message ? viewportWidth - 24 : 24),
+      anchorY: rect ? rect.bottom : viewportHeight / 2,
+      align: message.is_own_message ? "end" : "start",
+    });
+  }, [clearLongPress, message, onOpenActions]);
+
+  const handlePointerDown = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (event.pointerType === "mouse" && event.button !== 0) {
+      return;
+    }
+
+    clearLongPress();
+    longPressTimerRef.current = window.setTimeout(() => {
+      handleOpenActions();
+    }, MESSAGE_LONG_PRESS_DURATION_MS);
+  }, [clearLongPress, handleOpenActions]);
+
+  const bubbleRadiusClassName = message.is_own_message
+    ? cn(
+        groupedWithPrevious ? "rounded-tr-[0.65rem]" : "rounded-tr-[1.6rem]",
+        groupedWithNext ? "rounded-br-[0.65rem]" : "rounded-br-[1.6rem]",
+        "rounded-tl-[1.6rem] rounded-bl-[1.6rem]",
+      )
+    : cn(
+        groupedWithPrevious ? "rounded-tl-[0.65rem]" : "rounded-tl-[1.6rem]",
+        groupedWithNext ? "rounded-bl-[0.65rem]" : "rounded-bl-[1.6rem]",
+        "rounded-tr-[1.6rem] rounded-br-[1.6rem]",
+      );
+
+  return (
+    <div
+      className={cn(
+        "flex w-full",
+        message.is_own_message ? "justify-end" : "justify-start",
+        groupedWithPrevious ? "mt-1" : "mt-4 first:mt-0",
+      )}
+    >
+      <div className="max-w-[82%]">
+        <button
+          ref={bubbleButtonRef}
+          type="button"
+          onPointerDown={handlePointerDown}
+          onPointerUp={clearLongPress}
+          onPointerCancel={clearLongPress}
+          onPointerLeave={clearLongPress}
+          onContextMenu={(event) => {
+            event.preventDefault();
+            handleOpenActions();
+          }}
+          className="block w-full cursor-default text-left"
+          aria-label="Abrir acoes da mensagem"
+        >
+          {message.media?.public_url ? (
+            <div
+              className={cn(
+                "overflow-hidden border",
+                bubbleRadiusClassName,
+                message.is_own_message
+                  ? "border-transparent fl-social-hub-bubble-own"
+                  : "border-[color:var(--fl-social-hub-muted-border)] fl-social-hub-bubble-other",
+              )}
+            >
+              <img
+                src={message.media.public_url}
+                alt="Midia compartilhada"
+                className="max-h-[18rem] w-full object-cover"
+                loading="lazy"
+              />
+              {message.message_text.trim() ? (
+                <p className="px-4 pb-4 pt-3 text-sm leading-relaxed">{message.message_text}</p>
+              ) : null}
+            </div>
+          ) : (
+            <div
+              className={cn(
+                "px-4 py-3 text-[0.95rem] leading-relaxed",
+                bubbleRadiusClassName,
+                message.is_own_message
+                  ? "fl-social-hub-bubble-own"
+                  : "fl-social-hub-bubble-other",
+              )}
+            >
+              {message.message_text}
+            </div>
+          )}
+        </button>
+        {showTimestamp ? (
+          <div
+            className={cn(
+              "mt-1 px-1 text-[0.68rem] font-medium",
+              message.is_own_message
+                ? "text-right text-[color:var(--fl-color-text-muted)]"
+                : "text-left text-[color:var(--fl-color-text-muted)]",
+            )}
+          >
+            {formatBubbleMeta(message)}
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -855,7 +1131,7 @@ function ConversationBubble({ message }: ConversationBubbleProps) {
 
 export default function Friends() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const { refreshSocialChatNotifications } = useSocialChatNotifications();
+  const { pendingByConversationId, refreshSocialChatNotifications } = useSocialChatNotifications();
   const androidHost = isAndroidHost();
   const requestedConversationId = parseConversationId(searchParams.get("conversationId"));
 
@@ -867,11 +1143,13 @@ export default function Friends() {
   const deferredSearchQuery = useDeferredValue(searchQuery.trim());
   const [remoteResults, setRemoteResults] = useState<FriendSearchResult[]>([]);
   const [remoteSearchLoading, setRemoteSearchLoading] = useState(false);
+  const [remoteSearchSettled, setRemoteSearchSettled] = useState(false);
   const [selectedFriendUserId, setSelectedFriendUserId] = useState<string | null>(null);
   const [selectedGroupConversationId, setSelectedGroupConversationId] = useState<number | null>(null);
   const [messages, setMessages] = useState<SocialConversationMessage[]>([]);
   const [messagesLoading, setMessagesLoading] = useState(false);
   const [messageInput, setMessageInput] = useState("");
+  const [editingMessageId, setEditingMessageId] = useState<number | null>(null);
   const [sendingMessage, setSendingMessage] = useState(false);
   const [uploadingMedia, setUploadingMedia] = useState(false);
   const [openingConversationUserId, setOpeningConversationUserId] = useState<string | null>(null);
@@ -893,11 +1171,23 @@ export default function Friends() {
   const [groupActionError, setGroupActionError] = useState<string | null>(null);
   const [privacyActionLoadingKey, setPrivacyActionLoadingKey] = useState<keyof SocialUserPreferences | null>(null);
   const [privacyActionError, setPrivacyActionError] = useState<string | null>(null);
+  const [messageActionsTarget, setMessageActionsTarget] = useState<MessageActionsTarget | null>(null);
+  const [conversationRefreshIntervalMs, setConversationRefreshIntervalMs] = useState(
+    ACTIVE_CONVERSATION_REFRESH_INTERVAL_MS,
+  );
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const messageInputRef = useRef<HTMLInputElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const messagesViewportRef = useRef<HTMLDivElement | null>(null);
   const lastReadMarkerRef = useRef<string>("");
   const pendingScrollBehaviorRef = useRef<ScrollBehavior | null>(null);
+  const activeConversationContextRef = useRef<ActiveConversationContext>({
+    conversationId: null,
+    friendUserId: null,
+    groupConversationId: null,
+  });
+  const conversationRefreshInFlightRef = useRef<Map<number, Promise<void>>>(new Map());
+  const pendingConversationSignatureRef = useRef("");
 
   const sortedFriends = useMemo(() => sortHubFriends(hub.friends), [hub.friends]);
   const sortedGroups = useMemo(() => sortHubGroups(hub.groups), [hub.groups]);
@@ -918,13 +1208,15 @@ export default function Friends() {
     () => hub.groups.find((conversation) => conversation.id === selectedGroupConversationId) ?? null,
     [hub.groups, selectedGroupConversationId],
   );
+  const activeFriendUserId = activeFriend?.friend_user_id ?? null;
+  const activeGroupConversationId = activeGroup?.id ?? null;
   const activeConversationId = activeGroup?.id ?? activeFriend?.direct_conversation_id ?? null;
   const activeConversationMuted =
     activeGroup?.notifications_muted === true || activeFriend?.notifications_muted === true;
   const activeFriendDisplayName = activeFriend ? getFriendDisplayName(activeFriend) : "";
   const activeGroupDisplayName = activeGroup ? getGroupDisplayName(activeGroup) : "";
   const isConversationOpen = activeFriend !== null || activeGroup !== null;
-  const keyboardInset = useKeyboardInset(androidHost && isConversationOpen);
+  const conversationViewportFrame = useVisualViewportFrame(androidHost && isConversationOpen);
 
   const friendUserIds = useMemo(
     () => new Set(hub.friends.map((friend) => friend.friend_user_id)),
@@ -943,39 +1235,63 @@ export default function Friends() {
       ),
     [friendUserIds, pendingRequestUserIds, remoteResults],
   );
+  const hasExactFriendMatch = useMemo(() => {
+    if (!deferredSearchQuery) return false;
+    const normalizedQuery = deferredSearchQuery.toLowerCase();
+    return filteredFriends.some((friend) => {
+      const username = friend.friend_username.trim().toLowerCase();
+      const fullName = friend.friend_full_name.trim().toLowerCase();
+      return username === normalizedQuery || fullName === normalizedQuery;
+    });
+  }, [deferredSearchQuery, filteredFriends]);
+  const shouldSearchRemoteUsers = deferredSearchQuery.length >= 3 && !hasExactFriendMatch;
+  const showRemoteSearchPanel =
+    shouldSearchRemoteUsers &&
+    (visibleRemoteResults.length > 0 || remoteSearchLoading || remoteSearchSettled);
 
   const conversationEntries = useMemo<ConversationListEntry[]>(() => {
-    const directEntries: ConversationListEntry[] = filteredFriends.map((friend) => ({
-      kind: "direct",
-      key: `direct:${friend.friend_user_id}`,
-      title: getFriendDisplayName(friend),
-      subtitle: friend.last_message_preview?.trim() || `@${friend.friend_username}`,
-      timestamp: friend.last_message_at,
-      unreadCount: friend.unread_count,
-      active: friend.friend_user_id === activeFriend?.friend_user_id,
-      busy: openingConversationUserId === friend.friend_user_id,
-      avatarSrc: friend.friend_avatar_url,
-      avatarName: getFriendDisplayName(friend),
-      showPresence: true,
-      isOnline: friend.is_online === true,
-      friend,
-    }));
+    const directEntries: ConversationListEntry[] = filteredFriends.map((friend) => {
+      const pendingUnreadCount =
+        typeof friend.direct_conversation_id === "number"
+          ? Math.max(0, pendingByConversationId[friend.direct_conversation_id] ?? 0)
+          : 0;
 
-    const groupEntries: ConversationListEntry[] = filteredGroups.map((conversation) => ({
-      kind: "group",
-      key: `group:${conversation.id}`,
-      title: getGroupDisplayName(conversation),
-      subtitle: conversation.last_message_preview?.trim() || `${conversation.member_count} membros`,
-      timestamp: conversation.last_message_at,
-      unreadCount: conversation.unread_count,
-      active: conversation.id === activeGroup?.id,
-      busy: false,
-      avatarSrc: conversation.avatar_url,
-      avatarName: getGroupDisplayName(conversation),
-      showPresence: false,
-      isOnline: false,
-      conversation,
-    }));
+      return {
+        kind: "direct",
+        key: `direct:${friend.friend_user_id}`,
+        title: getFriendDisplayName(friend),
+        subtitle: friend.last_message_preview?.trim() || `@${friend.friend_username}`,
+        timestamp: friend.last_message_at,
+        unreadCount: Math.max(friend.unread_count, pendingUnreadCount),
+        active: friend.friend_user_id === activeFriend?.friend_user_id,
+        busy: openingConversationUserId === friend.friend_user_id,
+        avatarSrc: friend.friend_avatar_url,
+        avatarName: getFriendDisplayName(friend),
+        showPresence: true,
+        isOnline: friend.is_online === true,
+        friend,
+      };
+    });
+
+    const groupEntries: ConversationListEntry[] = filteredGroups.map((conversation) => {
+      const pendingUnreadCount = Math.max(0, pendingByConversationId[conversation.id] ?? 0);
+
+      return {
+        kind: "group",
+        key: `group:${conversation.id}`,
+        title: getGroupDisplayName(conversation),
+        subtitle: conversation.last_message_preview?.trim() || `${conversation.member_count} membros`,
+        timestamp: conversation.last_message_at,
+        unreadCount: Math.max(conversation.unread_count, pendingUnreadCount),
+        active: conversation.id === activeGroup?.id,
+        busy: false,
+        avatarSrc: conversation.avatar_url,
+        avatarName: getGroupDisplayName(conversation),
+        showPresence: false,
+        isOnline: false,
+        conversation,
+      };
+    });
 
     return [...directEntries, ...groupEntries].sort((left, right) => {
       const activityDelta = getConversationSortTimestamp(right.timestamp) - getConversationSortTimestamp(left.timestamp);
@@ -983,7 +1299,24 @@ export default function Friends() {
       if (left.unreadCount !== right.unreadCount) return right.unreadCount - left.unreadCount;
       return left.title.localeCompare(right.title, "pt-BR", { sensitivity: "base" });
     });
-  }, [activeFriend, activeGroup, filteredFriends, filteredGroups, openingConversationUserId]);
+  }, [activeFriend, activeGroup, filteredFriends, filteredGroups, openingConversationUserId, pendingByConversationId]);
+  const messageBubbleLayouts = useMemo(
+    () => buildConversationBubbleLayouts(messages),
+    [messages],
+  );
+  const pendingConversationSignature = useMemo(
+    () =>
+      Object.entries(pendingByConversationId)
+        .sort(([left], [right]) => Number(left) - Number(right))
+        .map(([conversationId, count]) => `${conversationId}:${count}`)
+        .join("|"),
+    [pendingByConversationId],
+  );
+  const editingMessage = useMemo(
+    () => messages.find((message) => message.id === editingMessageId) ?? null,
+    [editingMessageId, messages],
+  );
+  const lastVisibleMessageId = messages[messages.length - 1]?.id ?? null;
 
   const setConversationParam = useCallback((conversationId: number | null) => {
     const nextParams = new URLSearchParams(searchParams);
@@ -1011,10 +1344,20 @@ export default function Friends() {
   }, []);
 
   const closeConversation = useCallback(() => {
+    activeConversationContextRef.current = {
+      conversationId: null,
+      friendUserId: null,
+      groupConversationId: null,
+    };
+    setEditingMessageId(null);
+    setMessageActionsTarget(null);
+    setMessageInput("");
     setSelectedFriendUserId(null);
     setSelectedGroupConversationId(null);
     setMessages([]);
+    setMessagesLoading(false);
     setThreadConversationId(null);
+    setThreadError(null);
     setActionsMenuAnchor(null);
     setMediaModalOpen(false);
     setConversationParam(null);
@@ -1057,79 +1400,171 @@ export default function Friends() {
     }
   }, [applyServiceError]);
 
-  const refreshActiveConversation = useCallback(async (options?: { quiet?: boolean }) => {
-    if (!activeConversationId || (!activeFriend && !activeGroup)) {
+  const recoverUnavailableConversation = useCallback((message: string) => {
+    setThreadError(null);
+    closeConversation();
+    clearSocialChatCache();
+    setHubError(message);
+    void loadHub(true);
+    void refreshSocialChatNotifications({ force: true });
+  }, [closeConversation, loadHub, refreshSocialChatNotifications]);
+
+  const isCurrentConversationContext = useCallback((context: ActiveConversationContext): boolean => {
+    const current = activeConversationContextRef.current;
+    return (
+      current.conversationId === context.conversationId &&
+      current.friendUserId === context.friendUserId &&
+      current.groupConversationId === context.groupConversationId
+    );
+  }, []);
+
+  const refreshActiveConversation = useCallback(async (
+    context: ActiveConversationContext & { quiet?: boolean },
+  ) => {
+    const { conversationId, friendUserId, groupConversationId } = context;
+    if (!conversationId || (!friendUserId && !groupConversationId)) {
       setMessages([]);
       setThreadConversationId(null);
       return;
     }
 
-    if (!options?.quiet) {
-      setMessagesLoading(true);
-    }
-
-    try {
-      setThreadError(null);
-      const payload = await fetchSocialConversationMessages(activeConversationId, { limit: 60 });
-      setMessages((current) => (areMessagesEquivalent(current, payload.messages) ? current : payload.messages));
-      setThreadConversationId(activeConversationId);
-      setHub((current) => {
-        if (activeFriend) {
-          return applyConversationPreviewToFriend(
-            current,
-            activeFriend.friend_user_id,
-            payload.conversation,
-            payload.messages[payload.messages.length - 1] ?? null,
-          );
-        }
-        if (activeGroup) {
-          return applyConversationPreviewToGroup(
-            current,
-            activeGroup.id,
-            payload.conversation,
-            payload.messages[payload.messages.length - 1] ?? null,
-          );
-        }
-        return current;
-      });
-
-      const lastMessage = payload.messages[payload.messages.length - 1] ?? null;
-      if (lastMessage && !lastMessage.is_own_message) {
-        const marker = `${activeConversationId}:${lastMessage.id}`;
-        if (lastReadMarkerRef.current !== marker) {
-          lastReadMarkerRef.current = marker;
-          void markSocialConversationRead(activeConversationId, {
-            last_read_message_id: lastMessage.id,
-          })
-            .then(() => {
-              setHub((current) => {
-                if (activeFriend) {
-                  return updateHubFriend(current, activeFriend.friend_user_id, (friend) => ({
-                    ...friend,
-                    unread_count: 0,
-                  }));
-                }
-                if (activeGroup) {
-                  return updateHubGroup(current, activeGroup.id, (conversation) => ({
-                    ...conversation,
-                    unread_count: 0,
-                  }));
-                }
-                return current;
-              });
-              void refreshSocialChatNotifications({ force: true });
-            })
-            .catch(() => {
-              lastReadMarkerRef.current = "";
-            });
+    const quietRefresh = context.quiet === true;
+    const existingRequest = conversationRefreshInFlightRef.current.get(conversationId);
+    if (existingRequest) {
+      if (!quietRefresh && isCurrentConversationContext(context)) {
+        setMessagesLoading(true);
+        setThreadError(null);
+      }
+      try {
+        await existingRequest;
+      } finally {
+        if (!quietRefresh && activeConversationContextRef.current.conversationId === conversationId) {
+          setMessagesLoading(false);
         }
       }
-    } catch (error) {
-      applyServiceError(setThreadError, error, "Nao foi possivel carregar esta conversa agora.");
-    } finally {
-      setMessagesLoading(false);
+      return;
     }
-  }, [activeConversationId, activeFriend, activeGroup, applyServiceError, refreshSocialChatNotifications]);
+
+    if (!quietRefresh) {
+      setMessagesLoading(true);
+      setThreadError(null);
+    }
+
+    let trackedRequest: Promise<void> | null = null;
+    const refreshTask = (async () => {
+      try {
+        const payload = await fetchSocialConversationMessages(conversationId, { limit: 60 });
+        if (!isCurrentConversationContext(context)) {
+          return;
+        }
+
+        setThreadError(null);
+        setConversationRefreshIntervalMs(ACTIVE_CONVERSATION_REFRESH_INTERVAL_MS);
+        setMessages((current) => (areMessagesEquivalent(current, payload.messages) ? current : payload.messages));
+        setThreadConversationId(conversationId);
+        setHub((current) => {
+          if (friendUserId) {
+            return applyConversationPreviewToFriend(
+              current,
+              friendUserId,
+              payload.conversation,
+              payload.messages[payload.messages.length - 1] ?? null,
+            );
+          }
+          if (groupConversationId) {
+            return applyConversationPreviewToGroup(
+              current,
+              groupConversationId,
+              payload.conversation,
+              payload.messages[payload.messages.length - 1] ?? null,
+            );
+          }
+          return current;
+        });
+
+        const lastMessage = payload.messages[payload.messages.length - 1] ?? null;
+        if (lastMessage && !lastMessage.is_own_message) {
+          const marker = `${conversationId}:${lastMessage.id}`;
+          if (lastReadMarkerRef.current !== marker) {
+            lastReadMarkerRef.current = marker;
+            void markSocialConversationRead(conversationId, {
+              last_read_message_id: lastMessage.id,
+            })
+              .then(() => {
+                if (!isCurrentConversationContext(context)) {
+                  return;
+                }
+
+                setHub((current) => {
+                  if (friendUserId) {
+                    return updateHubFriend(current, friendUserId, (friend) => ({
+                      ...friend,
+                      unread_count: 0,
+                    }));
+                  }
+                  if (groupConversationId) {
+                    return updateHubGroup(current, groupConversationId, (conversation) => ({
+                      ...conversation,
+                      unread_count: 0,
+                    }));
+                  }
+                  return current;
+                });
+                void refreshSocialChatNotifications({ force: true });
+              })
+              .catch(() => {
+                lastReadMarkerRef.current = "";
+              });
+          }
+        }
+      } catch (error) {
+        if (!isCurrentConversationContext(context)) {
+          return;
+        }
+
+        if (error instanceof SocialChatApiError && (error.status === 403 || error.status === 404)) {
+          const message = handleServiceError(error, "Esta conversa nao esta mais disponivel.");
+          if (message) {
+            recoverUnavailableConversation(message);
+          }
+          return;
+        }
+
+        if (quietRefresh) {
+          const message = handleServiceError(error, "Nao foi possivel sincronizar esta conversa agora.");
+          if (message) {
+            console.warn("[social-hub][conversation-refresh]", {
+              conversationId,
+              message,
+            });
+            setConversationRefreshIntervalMs((current) =>
+              Math.min(current * 2, MAX_ACTIVE_CONVERSATION_REFRESH_INTERVAL_MS),
+            );
+          }
+        } else {
+          applyServiceError(setThreadError, error, "Nao foi possivel carregar esta conversa agora.");
+        }
+      } finally {
+        const currentRequest = conversationRefreshInFlightRef.current.get(conversationId);
+        if (currentRequest === trackedRequest) {
+          conversationRefreshInFlightRef.current.delete(conversationId);
+        }
+        if (!quietRefresh && activeConversationContextRef.current.conversationId === conversationId) {
+          setMessagesLoading(false);
+        }
+      }
+    })();
+
+    trackedRequest = refreshTask;
+    conversationRefreshInFlightRef.current.set(conversationId, refreshTask);
+    await refreshTask;
+  }, [
+    applyServiceError,
+    handleServiceError,
+    isCurrentConversationContext,
+    refreshSocialChatNotifications,
+    recoverUnavailableConversation,
+  ]);
 
   const openFriendConversation = useCallback(async (friend: SocialHubFriendItem) => {
     if (friend.direct_conversation_id) {
@@ -1222,6 +1657,21 @@ export default function Friends() {
   }, [activeConversationId, loadHub]);
 
   useEffect(() => {
+    if (activeConversationId) {
+      pendingConversationSignatureRef.current = pendingConversationSignature;
+      return;
+    }
+
+    const previousSignature = pendingConversationSignatureRef.current;
+    pendingConversationSignatureRef.current = pendingConversationSignature;
+
+    if (previousSignature === pendingConversationSignature) return;
+    if (document.visibilityState !== "visible") return;
+
+    void loadHub(true);
+  }, [activeConversationId, loadHub, pendingConversationSignature]);
+
+  useEffect(() => {
     if (requestedConversationId === null) {
       return;
     }
@@ -1265,6 +1715,14 @@ export default function Friends() {
   ]);
 
   useEffect(() => {
+    activeConversationContextRef.current = {
+      conversationId: activeConversationId,
+      friendUserId: activeFriendUserId,
+      groupConversationId: activeGroupConversationId,
+    };
+  }, [activeConversationId, activeFriendUserId, activeGroupConversationId]);
+
+  useEffect(() => {
     if (!selectedFriendUserId) return;
     const stillExists = hub.friends.some((friend) => friend.friend_user_id === selectedFriendUserId);
     if (stillExists) return;
@@ -1283,27 +1741,61 @@ export default function Friends() {
   useEffect(() => {
     if (!activeConversationId) {
       setMessages([]);
+      setMessagesLoading(false);
       setThreadConversationId(null);
+      setConversationRefreshIntervalMs(ACTIVE_CONVERSATION_REFRESH_INTERVAL_MS);
       return;
     }
 
+    const context = {
+      conversationId: activeConversationId,
+      friendUserId: activeFriendUserId,
+      groupConversationId: activeGroupConversationId,
+    };
     lastReadMarkerRef.current = "";
-    void refreshActiveConversation();
+    setConversationRefreshIntervalMs(ACTIVE_CONVERSATION_REFRESH_INTERVAL_MS);
+    void refreshActiveConversation(context);
     scrollMessagesToBottom();
-  }, [activeConversationId, refreshActiveConversation, scrollMessagesToBottom]);
+  }, [
+    activeConversationId,
+    activeFriendUserId,
+    activeGroupConversationId,
+    refreshActiveConversation,
+    scrollMessagesToBottom,
+  ]);
+
+  useEffect(() => {
+    if (!activeConversationId || threadConversationId !== activeConversationId) return;
+    if (!lastVisibleMessageId) return;
+    scrollMessagesToBottom();
+  }, [activeConversationId, lastVisibleMessageId, scrollMessagesToBottom, threadConversationId]);
 
   useEffect(() => {
     if (!activeConversationId) return;
 
     const intervalId = window.setInterval(() => {
       if (document.visibilityState !== "visible") return;
-      void refreshActiveConversation({ quiet: true });
-    }, ACTIVE_CONVERSATION_REFRESH_INTERVAL_MS);
+      if (sendingMessage || uploadingMedia) return;
+      void refreshActiveConversation({
+        conversationId: activeConversationId,
+        friendUserId: activeFriendUserId,
+        groupConversationId: activeGroupConversationId,
+        quiet: true,
+      });
+    }, conversationRefreshIntervalMs);
 
     return () => {
       window.clearInterval(intervalId);
     };
-  }, [activeConversationId, refreshActiveConversation]);
+  }, [
+    activeConversationId,
+    activeFriendUserId,
+    activeGroupConversationId,
+    conversationRefreshIntervalMs,
+    refreshActiveConversation,
+    sendingMessage,
+    uploadingMedia,
+  ]);
 
   useEffect(() => {
     if (!mediaModalOpen) return;
@@ -1311,31 +1803,27 @@ export default function Friends() {
   }, [loadConversationMedia, mediaModalOpen]);
 
   useEffect(() => {
-    const normalizedQuery = deferredSearchQuery;
-    const hasExactFriendMatch = filteredFriends.some((friend) => {
-      const username = friend.friend_username.trim().toLowerCase();
-      const fullName = friend.friend_full_name.trim().toLowerCase();
-      const normalized = normalizedQuery.toLowerCase();
-      return username === normalized || fullName === normalized;
-    });
-
-    if (normalizedQuery.length < 3 || hasExactFriendMatch) {
+    if (!shouldSearchRemoteUsers) {
       setRemoteResults([]);
       setRemoteSearchLoading(false);
+      setRemoteSearchSettled(false);
       return;
     }
 
     let cancelled = false;
     const timeoutId = window.setTimeout(() => {
       setRemoteSearchLoading(true);
-      searchUsersByUsername(normalizedQuery)
+      setRemoteSearchSettled(false);
+      searchUsersByUsername(deferredSearchQuery)
         .then((payload) => {
           if (cancelled) return;
           setRemoteResults(payload);
+          setRemoteSearchSettled(true);
         })
         .catch(() => {
           if (cancelled) return;
           setRemoteResults([]);
+          setRemoteSearchSettled(true);
         })
         .finally(() => {
           if (cancelled) return;
@@ -1347,12 +1835,27 @@ export default function Friends() {
       cancelled = true;
       window.clearTimeout(timeoutId);
     };
-  }, [deferredSearchQuery, filteredFriends]);
+  }, [deferredSearchQuery, shouldSearchRemoteUsers]);
 
   useEffect(() => {
     setMessageInput("");
+    setEditingMessageId(null);
+    setMessageActionsTarget(null);
     setThreadError(null);
   }, [activeConversationId]);
+
+  useEffect(() => {
+    if (!editingMessageId) return;
+    if (editingMessage) return;
+    setEditingMessageId(null);
+  }, [editingMessage, editingMessageId]);
+
+  useEffect(() => {
+    if (!messageActionsTarget) return;
+    const stillExists = messages.some((message) => message.id === messageActionsTarget.message.id);
+    if (stillExists) return;
+    setMessageActionsTarget(null);
+  }, [messageActionsTarget, messages]);
 
   useEffect(() => {
     if (groupModalOpen) return;
@@ -1425,6 +1928,120 @@ export default function Friends() {
     }
   }, [applyServiceError, loadHub]);
 
+  const handleOpenMessageActions = useCallback((target: MessageActionsTarget) => {
+    setActionsMenuAnchor(null);
+    setMessageActionsTarget(target);
+  }, []);
+
+  const handleCloseMessageActions = useCallback(() => {
+    setMessageActionsTarget(null);
+  }, []);
+
+  const handleCopyMessage = useCallback(async () => {
+    const message = messageActionsTarget?.message;
+    if (!message) return;
+
+    const text = message.message_text.trim();
+    if (!text) {
+      setThreadError("Nao ha texto para copiar nesta mensagem.");
+      setMessageActionsTarget(null);
+      return;
+    }
+
+    try {
+      if (!navigator.clipboard?.writeText) {
+        throw new Error("CLIPBOARD_UNAVAILABLE");
+      }
+      await navigator.clipboard.writeText(text);
+      setMessageActionsTarget(null);
+    } catch (error) {
+      applyServiceError(setThreadError, error, "Nao foi possivel copiar esta mensagem.");
+    }
+  }, [applyServiceError, messageActionsTarget]);
+
+  const handleStartEditingMessage = useCallback(() => {
+    const message = messageActionsTarget?.message;
+    if (!message || !message.is_own_message || message.message_kind !== "text") {
+      return;
+    }
+
+    setEditingMessageId(message.id);
+    setMessageInput(message.message_text);
+    setMessageActionsTarget(null);
+    window.requestAnimationFrame(() => {
+      messageInputRef.current?.focus();
+      messageInputRef.current?.setSelectionRange(
+        message.message_text.length,
+        message.message_text.length,
+      );
+      scrollMessagesToBottom();
+    });
+  }, [messageActionsTarget, scrollMessagesToBottom]);
+
+  const handleCancelEditingMessage = useCallback(() => {
+    setEditingMessageId(null);
+    setMessageInput("");
+  }, []);
+
+  const handleDeleteMessage = useCallback(async () => {
+    const message = messageActionsTarget?.message;
+    if (!message || !message.is_own_message || !activeConversationId) {
+      return;
+    }
+
+    setSendingMessage(true);
+    setThreadError(null);
+
+    try {
+      const payload = await deleteSocialConversationMessage(activeConversationId, message.id);
+      setMessages((current) => current.filter((message) => message.id !== payload.deletedMessageId));
+      if (editingMessageId === payload.deletedMessageId) {
+        setEditingMessageId(null);
+        setMessageInput("");
+      }
+      setHub((current) => {
+        if (activeFriend) {
+          return applyConversationPreviewToFriend(
+            current,
+            activeFriend.friend_user_id,
+            payload.conversation,
+          );
+        }
+        if (activeGroup) {
+          return applyConversationPreviewToGroup(
+            current,
+            activeGroup.id,
+            payload.conversation,
+          );
+        }
+        return current;
+      });
+      setMessageActionsTarget(null);
+      void refreshSocialChatNotifications({ force: true });
+    } catch (error) {
+      if (error instanceof SocialChatApiError && (error.status === 403 || error.status === 404)) {
+        const message = handleServiceError(error, "Esta conversa nao esta mais disponivel.");
+        if (message) {
+          recoverUnavailableConversation(message);
+        }
+        return;
+      }
+      applyServiceError(setThreadError, error, "Nao foi possivel excluir esta mensagem.");
+    } finally {
+      setSendingMessage(false);
+    }
+  }, [
+    activeConversationId,
+    activeFriend,
+    activeGroup,
+    applyServiceError,
+    editingMessageId,
+    handleServiceError,
+    messageActionsTarget,
+    recoverUnavailableConversation,
+    refreshSocialChatNotifications,
+  ]);
+
   const handleSubmitMessage = useCallback(async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!activeConversationId || (!activeFriend && !activeGroup)) return;
@@ -1436,34 +2053,82 @@ export default function Friends() {
     setThreadError(null);
 
     try {
-      const payload = await sendSocialConversationMessage(activeConversationId, {
-        message_text: normalized,
-      });
-      setMessageInput("");
-      setMessages((current) => upsertConversationMessage(current, payload.message));
-      setHub((current) => {
-        if (activeFriend) {
-          return applyConversationPreviewToFriend(
-            current,
-            activeFriend.friend_user_id,
-            payload.conversation,
-            payload.message,
-          );
+      if (editingMessage) {
+        if (normalized === editingMessage.message_text.trim()) {
+          setEditingMessageId(null);
+          setMessageInput("");
+          return;
         }
-        if (activeGroup) {
-          return applyConversationPreviewToGroup(
-            current,
-            activeGroup.id,
-            payload.conversation,
-            payload.message,
-          );
-        }
-        return current;
-      });
+
+        const payload = await updateSocialConversationMessage(activeConversationId, editingMessage.id, {
+          message_text: normalized,
+        });
+        setEditingMessageId(null);
+        setMessageInput("");
+        setMessages((current) => upsertConversationMessage(current, payload.message));
+        setHub((current) => {
+          if (activeFriend) {
+            return applyConversationPreviewToFriend(
+              current,
+              activeFriend.friend_user_id,
+              payload.conversation,
+              payload.message,
+            );
+          }
+          if (activeGroup) {
+            return applyConversationPreviewToGroup(
+              current,
+              activeGroup.id,
+              payload.conversation,
+              payload.message,
+            );
+          }
+          return current;
+        });
+      } else {
+        const payload = await sendSocialConversationMessage(activeConversationId, {
+          message_text: normalized,
+        });
+        setMessageInput("");
+        setMessages((current) => upsertConversationMessage(current, payload.message));
+        setHub((current) => {
+          if (activeFriend) {
+            return applyConversationPreviewToFriend(
+              current,
+              activeFriend.friend_user_id,
+              payload.conversation,
+              payload.message,
+            );
+          }
+          if (activeGroup) {
+            return applyConversationPreviewToGroup(
+              current,
+              activeGroup.id,
+              payload.conversation,
+              payload.message,
+            );
+          }
+          return current;
+        });
+        void refreshSocialChatNotifications({ force: true });
+      }
+
+      setConversationRefreshIntervalMs(ACTIVE_CONVERSATION_REFRESH_INTERVAL_MS);
+      setMessageActionsTarget(null);
       scrollMessagesToBottom("smooth");
-      void refreshSocialChatNotifications({ force: true });
     } catch (error) {
-      applyServiceError(setThreadError, error, "Nao foi possivel enviar a mensagem.");
+      if (error instanceof SocialChatApiError && (error.status === 403 || error.status === 404)) {
+        const message = handleServiceError(error, "Esta conversa nao esta mais disponivel.");
+        if (message) {
+          recoverUnavailableConversation(message);
+        }
+        return;
+      }
+      applyServiceError(
+        setThreadError,
+        error,
+        editingMessage ? "Nao foi possivel editar a mensagem." : "Nao foi possivel enviar a mensagem.",
+      );
     } finally {
       setSendingMessage(false);
     }
@@ -1472,7 +2137,10 @@ export default function Friends() {
     activeFriend,
     activeGroup,
     applyServiceError,
+    editingMessage,
+    handleServiceError,
     messageInput,
+    recoverUnavailableConversation,
     refreshSocialChatNotifications,
     scrollMessagesToBottom,
   ]);
@@ -1485,6 +2153,7 @@ export default function Friends() {
 
     setUploadingMedia(true);
     setThreadError(null);
+    setEditingMessageId(null);
 
     try {
       const payload = await uploadSocialConversationMedia(activeConversationId, {
@@ -1510,14 +2179,31 @@ export default function Friends() {
         }
         return current;
       });
+      setConversationRefreshIntervalMs(ACTIVE_CONVERSATION_REFRESH_INTERVAL_MS);
       scrollMessagesToBottom("smooth");
       void refreshSocialChatNotifications({ force: true });
     } catch (error) {
+      if (error instanceof SocialChatApiError && (error.status === 403 || error.status === 404)) {
+        const message = handleServiceError(error, "Esta conversa nao esta mais disponivel.");
+        if (message) {
+          recoverUnavailableConversation(message);
+        }
+        return;
+      }
       applyServiceError(setThreadError, error, "Nao foi possivel enviar a imagem.");
     } finally {
       setUploadingMedia(false);
     }
-  }, [activeConversationId, activeFriend, activeGroup, applyServiceError, refreshSocialChatNotifications, scrollMessagesToBottom]);
+  }, [
+    activeConversationId,
+    activeFriend,
+    activeGroup,
+    applyServiceError,
+    handleServiceError,
+    recoverUnavailableConversation,
+    refreshSocialChatNotifications,
+    scrollMessagesToBottom,
+  ]);
 
   const handleToggleMute = useCallback(async () => {
     if (!activeConversationId || (!activeFriend && !activeGroup)) return;
@@ -1713,18 +2399,21 @@ export default function Friends() {
     <AppPageShell
       bottomNavActive="arena"
       className="fl-theme-page fl-social-hub-page"
+      contentClassName={isConversationOpen ? "h-[100dvh] max-h-[100dvh] overflow-hidden" : undefined}
       hideNavigation={isConversationOpen}
     >
       <div
         className={cn(
           "flex min-h-0 flex-1 flex-col",
-          isConversationOpen ? "overflow-hidden" : "p-4 pb-[98px] md:px-8 md:pb-8",
+          isConversationOpen
+            ? "h-[100dvh] max-h-[100dvh] overflow-hidden"
+            : "p-4 pb-[98px] md:px-8 md:pb-8",
         )}
       >
         <div
           className={cn(
             "flex min-h-0 w-full flex-1",
-            isConversationOpen ? "" : "mx-auto max-w-[78rem] gap-4 md:gap-6",
+            isConversationOpen ? "h-full" : "mx-auto max-w-[78rem] gap-4 md:gap-6",
           )}
         >
           <section
@@ -1737,7 +2426,7 @@ export default function Friends() {
             <div className="flex items-center justify-between gap-3">
               <div>
                 <h1 className="text-[1.7rem] font-semibold tracking-[-0.04em] text-[color:var(--fl-color-text)]">
-                  Messages
+                  Mensagens
                 </h1>
                 <p className="mt-1 text-[0.8rem] text-[color:var(--fl-color-text-muted)]">Social Hub</p>
               </div>
@@ -1786,9 +2475,63 @@ export default function Friends() {
                 onChange={(event) => {
                   setSearchQuery(event.target.value);
                 }}
-                placeholder="Search chats"
+                placeholder="Buscar conversas ou pessoas"
                 className="fl-social-hub-search h-12 w-full rounded-full pl-11 pr-4 text-sm outline-none transition-colors"
               />
+
+              {showRemoteSearchPanel ? (
+                <div className="absolute inset-x-0 top-[calc(100%+0.85rem)] z-20 overflow-hidden rounded-[1.9rem] border border-[color:var(--fl-social-hub-muted-border)] bg-[color:var(--fl-social-hub-card-bg)] shadow-[0_22px_64px_rgba(15,23,42,0.16)]">
+                  <div className="flex items-center justify-between gap-3 border-b border-[color:var(--fl-social-hub-muted-border)] px-4 py-3">
+                    <div className="min-w-0">
+                      <p className="text-[0.72rem] font-black uppercase tracking-[0.18em] text-[color:var(--fl-color-text-muted)]">
+                        Encontrar pessoas
+                      </p>
+                      <p className="mt-1 truncate text-sm text-[color:var(--fl-color-text-muted)]">
+                        Envie o pedido de amizade direto daqui.
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {remoteSearchLoading ? (
+                        <Loader2 className="h-4 w-4 animate-spin text-[color:var(--fl-color-text-muted)]" />
+                      ) : null}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSearchQuery("");
+                        }}
+                        className="fl-social-hub-icon-button flex h-9 w-9 items-center justify-center rounded-full"
+                        aria-label="Fechar busca"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="max-h-[18.5rem] space-y-3 overflow-y-auto px-4 py-4">
+                    {visibleRemoteResults.length > 0 ? (
+                      visibleRemoteResults.map((result) => (
+                        <SearchResultRow
+                          key={result.user_id}
+                          result={result}
+                          busy={sendingRequestUserId === result.user_id}
+                          sent={sentRequestUserIds.has(result.user_id)}
+                          onSend={() => {
+                            void handleSendFriendRequest(result);
+                          }}
+                        />
+                      ))
+                    ) : remoteSearchLoading ? (
+                      <div className="flex h-24 items-center justify-center">
+                        <LoadingBall size="sm" />
+                      </div>
+                    ) : (
+                      <div className="fl-social-hub-soft-card rounded-[1.6rem] px-4 py-4 text-sm text-[color:var(--fl-color-text-muted)]">
+                        Nenhum usuario visivel encontrado para essa busca.
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : null}
             </div>
 
             {hubError ? (
@@ -1840,36 +2583,25 @@ export default function Friends() {
                 </div>
               )}
 
-              {(visibleRemoteResults.length > 0 || remoteSearchLoading) && deferredSearchQuery.length >= 3 ? (
-                <div className="mt-6 space-y-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <p className="text-[0.72rem] font-black uppercase tracking-[0.18em] text-[color:var(--fl-color-text-muted)]">
-                      Encontrar pessoas
-                    </p>
-                    {remoteSearchLoading ? <Loader2 className="h-4 w-4 animate-spin text-[color:var(--fl-color-text-muted)]" /> : null}
-                  </div>
-                  {visibleRemoteResults.map((result) => (
-                    <SearchResultRow
-                      key={result.user_id}
-                      result={result}
-                      busy={sendingRequestUserId === result.user_id}
-                      sent={sentRequestUserIds.has(result.user_id)}
-                      onSend={() => {
-                        void handleSendFriendRequest(result);
-                      }}
-                    />
-                  ))}
-                </div>
-              ) : null}
             </div>
           </section>
 
           <section
             className={cn(
               "fl-social-hub-thread-panel min-h-0 flex-1 overflow-hidden",
-              isConversationOpen ? "flex rounded-none border-0 shadow-none" : "hidden rounded-[2.25rem] md:flex",
+              isConversationOpen
+                ? "fixed inset-x-0 top-0 z-[80] flex h-[100dvh] w-full rounded-none border-0 shadow-none"
+                : "hidden rounded-[2.25rem] md:flex",
               "flex-col overflow-hidden",
             )}
+            style={
+              isConversationOpen && conversationViewportFrame
+                ? {
+                    top: `${conversationViewportFrame.offsetTop}px`,
+                    height: `${conversationViewportFrame.height}px`,
+                  }
+                : undefined
+            }
           >
             {activeFriend || activeGroup ? (
               <>
@@ -1878,6 +2610,11 @@ export default function Friends() {
                     "fl-social-hub-thread-header flex shrink-0 items-center gap-3 border-b px-4 py-4",
                     isConversationOpen ? "md:px-8" : "md:px-6",
                   )}
+                  style={
+                    isConversationOpen
+                      ? { paddingTop: "calc(env(safe-area-inset-top, 0px) + 1rem)" }
+                      : undefined
+                  }
                 >
                   <button
                     type="button"
@@ -1912,7 +2649,7 @@ export default function Friends() {
                     <p className="truncate text-[0.78rem] text-[color:var(--fl-color-text-muted)]">
                       {activeFriend
                         ? `@${activeFriend.friend_username}`
-                        : `${Math.max(0, Number(activeGroup?.member_count ?? 0))} membros`}
+                        : `${toNonNegativeNumber(activeGroup?.member_count)} membros`}
                     </p>
                   </div>
 
@@ -1941,40 +2678,43 @@ export default function Friends() {
                   </div>
                 </header>
 
-                <div className="min-h-0 flex-1 overflow-hidden">
-                  <div
-                    ref={messagesViewportRef}
-                    className={cn(
-                      "h-full overflow-y-auto px-4 py-5 overscroll-contain",
-                      isConversationOpen ? "md:px-8 md:py-7" : "md:px-6 md:py-6",
-                    )}
-                  >
-                    {threadError ? (
-                      <div className="mb-4 rounded-[1.4rem] border border-[#ef4444]/20 bg-[#ef4444]/[0.08] px-4 py-3 text-sm text-[#b42318]">
-                        {threadError}
-                      </div>
-                    ) : null}
+                <div
+                  ref={messagesViewportRef}
+                  className={cn(
+                    "min-h-0 flex-1 overflow-y-auto px-4 py-5 overscroll-contain",
+                    isConversationOpen ? "md:px-8 md:py-7" : "md:px-6 md:py-6",
+                  )}
+                  style={{ scrollPaddingBottom: "6rem" }}
+                >
+                  {threadError ? (
+                    <div className="mb-4 rounded-[1.4rem] border border-[#ef4444]/20 bg-[#ef4444]/[0.08] px-4 py-3 text-sm text-[#b42318]">
+                      {threadError}
+                    </div>
+                  ) : null}
 
-                    {messagesLoading && threadConversationId !== activeConversationId ? (
-                      <div className="flex h-full items-center justify-center">
-                        <LoadingBall size="sm" />
-                      </div>
-                    ) : messages.length > 0 ? (
-                      <div className="space-y-4">
-                        {messages.map((message) => (
-                          <ConversationBubble key={message.id} message={message} />
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="flex h-full flex-col items-center justify-center px-6 text-center">
-                        <MessageCircle className="h-10 w-10 text-[color:var(--fl-color-text-muted)] opacity-40" />
-                        <p className="mt-4 text-base font-semibold text-[color:var(--fl-color-text)]">Conversa pronta</p>
-                        <p className="mt-2 max-w-[19rem] text-sm leading-relaxed text-[color:var(--fl-color-text-muted)]">
-                          Escreva a primeira mensagem para abrir esse chat com {activeFriend ? activeFriendDisplayName : activeGroupDisplayName}.
-                        </p>
-                      </div>
-                    )}
-                  </div>
+                  {messagesLoading && threadConversationId !== activeConversationId ? (
+                    <div className="flex min-h-full items-center justify-center">
+                      <LoadingBall size="sm" />
+                    </div>
+                  ) : messages.length > 0 ? (
+                    <div className="flex flex-col">
+                      {messageBubbleLayouts.map((layout) => (
+                        <ConversationBubble
+                          key={layout.message.id}
+                          layout={layout}
+                          onOpenActions={handleOpenMessageActions}
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="flex min-h-full flex-col items-center justify-center px-6 text-center">
+                      <MessageCircle className="h-10 w-10 text-[color:var(--fl-color-text-muted)] opacity-40" />
+                      <p className="mt-4 text-base font-semibold text-[color:var(--fl-color-text)]">Conversa pronta</p>
+                      <p className="mt-2 max-w-[19rem] text-sm leading-relaxed text-[color:var(--fl-color-text-muted)]">
+                        Escreva a primeira mensagem para abrir esse chat com {activeFriend ? activeFriendDisplayName : activeGroupDisplayName}.
+                      </p>
+                    </div>
+                  )}
                 </div>
 
                 <div
@@ -1984,11 +2724,31 @@ export default function Friends() {
                   )}
                   style={{
                     paddingBottom:
-                      keyboardInset > 0
-                        ? `calc(${Math.max(16, keyboardInset)}px + env(safe-area-inset-bottom, 0px))`
+                      isConversationOpen
+                        ? "calc(env(safe-area-inset-bottom, 0px) + 0.75rem)"
                         : undefined,
                   }}
                 >
+                  {editingMessage ? (
+                    <div className="mb-3 flex items-center justify-between gap-3 rounded-[1.2rem] border border-[color:var(--fl-social-hub-muted-border)] bg-black/[0.03] px-4 py-3">
+                      <div className="min-w-0">
+                        <p className="text-[0.72rem] font-black uppercase tracking-[0.16em] text-[color:var(--fl-color-text-muted)]">
+                          Editando mensagem
+                        </p>
+                        <p className="truncate text-sm text-[color:var(--fl-color-text)]">
+                          {editingMessage.message_text}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleCancelEditingMessage}
+                        className="fl-social-hub-icon-button flex h-9 w-9 shrink-0 items-center justify-center rounded-full"
+                        aria-label="Cancelar edicao"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+                  ) : null}
                   <form onSubmit={handleSubmitMessage} className="flex items-center gap-3">
                     <button
                       type="button"
@@ -2011,17 +2771,18 @@ export default function Friends() {
 
                     <div className="flex min-w-0 flex-1 items-center rounded-full border border-[color:var(--fl-social-hub-input-border)] bg-[color:var(--fl-social-hub-input-bg)] px-4">
                       <input
+                        ref={messageInputRef}
                         type="text"
                         value={messageInput}
                         onChange={(event) => {
                           setMessageInput(event.target.value);
                         }}
                         onFocus={() => {
-                          window.setTimeout(() => {
+                          window.requestAnimationFrame(() => {
                             scrollMessagesToBottom();
-                          }, 180);
+                          });
                         }}
-                        placeholder="Message"
+                        placeholder="Mensagem"
                         className="fl-social-hub-composer-input h-12 min-w-0 flex-1 border-none bg-transparent text-sm outline-none"
                       />
                     </div>
@@ -2030,9 +2791,15 @@ export default function Friends() {
                       type="submit"
                       disabled={!activeConversationId || sendingMessage || messageInput.trim().length === 0}
                       className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[color:var(--fl-color-text)] text-[color:var(--app-bg-color)] transition-transform hover:scale-[1.02] disabled:opacity-45"
-                      aria-label="Enviar mensagem"
+                      aria-label={editingMessage ? "Salvar edicao da mensagem" : "Enviar mensagem"}
                     >
-                      {sendingMessage ? <Loader2 className="h-4 w-4 animate-spin" /> : <SendHorizontal className="h-4 w-4" />}
+                      {sendingMessage ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : editingMessage ? (
+                        <Check className="h-4 w-4" />
+                      ) : (
+                        <SendHorizontal className="h-4 w-4" />
+                      )}
                     </button>
                   </form>
                 </div>
@@ -2381,6 +3148,19 @@ export default function Friends() {
           </div>
         </div>
       ) : null}
+
+      <MessageActionsMenu
+        target={messageActionsTarget}
+        busy={sendingMessage}
+        onClose={handleCloseMessageActions}
+        onCopy={() => {
+          void handleCopyMessage();
+        }}
+        onEdit={handleStartEditingMessage}
+        onDelete={() => {
+          void handleDeleteMessage();
+        }}
+      />
     </AppPageShell>
   );
 }

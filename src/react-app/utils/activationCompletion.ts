@@ -50,7 +50,7 @@ export function resolveActivationCompletionCopy(params: {
     return {
       localTitle: "Conta criada e VIP ativado",
       localMessage:
-        "Sua conta foi criada e o VIP foi ativado com sucesso. Faca login para entrar no app.",
+        "Sua conta foi criada e o VIP foi ativado com sucesso. Preparando sua entrada no app.",
       badge: "VIP ativo",
     };
   }
@@ -68,7 +68,7 @@ export function resolveActivationCompletionCopy(params: {
     return {
       localTitle: "Conta criada e acesso liberado",
       localMessage:
-        "Sua conta foi criada e o pagamento foi aprovado. Faca login para entrar no app.",
+        "Sua conta foi criada e o pagamento foi aprovado. Preparando sua entrada no app.",
       badge: "Acesso liberado",
     };
   }

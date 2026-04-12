@@ -225,11 +225,11 @@ export default function DesktopAppNavbar({
                     boxShadow: "0 0 22px color-mix(in srgb, var(--app-primary-color) 34%, transparent)",
                   } : { color: "var(--fl-nav-item-muted)" }}
                 >
-                  <span className="relative flex shrink-0">
+                  <span className="relative flex h-5 w-5 shrink-0 items-center justify-center">
                     <MaterialIcon name={item.icon} filled={isActive} className="text-xl" />
                     {item.path === ROUTE_PATHS.minigames && hasPending ? (
                       <span
-                        className="absolute -right-1.5 -top-1.5 h-3.5 w-3.5 rounded-full"
+                        className="absolute right-[1px] top-[1px] h-2.5 w-2.5 rounded-full"
                         style={{
                           backgroundColor: isActive ? "var(--fl-nav-item-active-text)" : "var(--app-primary-color)",
                           boxShadow: "0 0 16px color-mix(in srgb, var(--app-primary-color) 34%, transparent)",

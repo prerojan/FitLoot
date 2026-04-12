@@ -75,6 +75,9 @@ type CreateAuthMiddlewareDeps = {
   ) => Promise<void>;
 };
 
+const DEFAULT_SESSION_CACHE_TTL_MS = 30_000;
+const DEFAULT_USER_RECORD_CACHE_TTL_MS = 30_000;
+
 function isTransientAuthDatabaseError(error: unknown): boolean {
   const message = (error instanceof Error ? error.message : String(error))
     .toLowerCase()
@@ -233,8 +236,8 @@ export async function hashPassword(
 
 export function createAuthMiddleware({
   catalogCacheTtlMs = 60_000,
-  sessionCacheTtlMs = 5_000,
-  userRecordCacheTtlMs = 10_000,
+  sessionCacheTtlMs = DEFAULT_SESSION_CACHE_TTL_MS,
+  userRecordCacheTtlMs = DEFAULT_USER_RECORD_CACHE_TTL_MS,
   onboardingReconcileTtlMs = 120_000,
   authCacheMaxEntries = 5_000,
   cleanupSettledMissionsWithGuard,
@@ -261,6 +264,45 @@ export function createAuthMiddleware({
   const inflightSessionLoads = new Map<string, Promise<SessionCookieRecord | null>>();
   const inflightUserLoads = new Map<string, Promise<UserAuthRecord | null>>();
   const onboardingReconcileAttempts = new Map<string, number>();
+
+  function shouldPreferRuntimeUserRecord(
+    current: UserAuthRecord,
+    runtime: UserAuthRecord,
+  ): boolean {
+    const currentHasAccess = hasPlanAccess(current.plan_id, current.plan_status);
+    const runtimeHasAccess = hasPlanAccess(runtime.plan_id, runtime.plan_status);
+
+    if (runtimeHasAccess && !currentHasAccess) {
+      return true;
+    }
+
+    if (
+      Number(runtime.onboarding_completed) >
+      Number(current.onboarding_completed)
+    ) {
+      return true;
+    }
+
+    if (
+      current.plan_status === "pending" &&
+      runtime.plan_status !== current.plan_status
+    ) {
+      return true;
+    }
+
+    if (current.plan_id === "basic" && runtime.plan_id !== current.plan_id) {
+      return true;
+    }
+
+    if (
+      current.payment_method === "none" &&
+      runtime.payment_method !== current.payment_method
+    ) {
+      return true;
+    }
+
+    return false;
+  }
 
   function readCache<T>(
     cache: Map<string, CacheEntry<T>>,
@@ -532,6 +574,8 @@ export function createAuthMiddleware({
       writeCache(sessionCache, sessionId, session, sessionCacheTtlMs, now);
 
       let userRecord = readCache(userRecordCache, session.user_id, now);
+      let userRecordSource: "cache" | "primary" | "stale-cache" | "runtime" =
+        userRecord ? "cache" : "primary";
       const staleUserRecord = readStaleCache(userRecordCache, session.user_id, now);
       let runtimeUserRecord: UserAuthRecord | null = null;
       let shouldSyncRuntimeUserRecord = false;
@@ -547,6 +591,7 @@ export function createAuthMiddleware({
                 session.user_id,
               ),
           );
+          userRecordSource = "primary";
           shouldSyncRuntimeUserRecord = Boolean(userRecord);
         } catch (userRecordError) {
           if (!isTransientAuthDatabaseError(userRecordError)) {
@@ -566,9 +611,36 @@ export function createAuthMiddleware({
           }
 
           userRecord = staleUserRecord ?? runtimeUserRecord;
+          userRecordSource = staleUserRecord ? "stale-cache" : "runtime";
           if (!userRecord) {
             throw userRecordError;
           }
+        }
+      }
+
+      if (
+        runtimeFallbackDb &&
+        userRecord &&
+        userRecordSource !== "primary" &&
+        (Number(userRecord.onboarding_completed) !== 1 ||
+          !hasPlanAccess(userRecord.plan_id, userRecord.plan_status))
+      ) {
+        try {
+          const freshRuntimeUserRecord =
+            runtimeUserRecord ??
+            (await readRuntimeUserAuth(runtimeFallbackDb, session.user_id, {
+              maxAgeMs: 15 * 60_000,
+            }));
+
+          if (
+            freshRuntimeUserRecord &&
+            shouldPreferRuntimeUserRecord(userRecord, freshRuntimeUserRecord)
+          ) {
+            userRecord = freshRuntimeUserRecord;
+            userRecordSource = "runtime";
+          }
+        } catch {
+          // Runtime auth cache is only a consistency accelerator.
         }
       }
 

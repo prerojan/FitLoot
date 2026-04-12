@@ -24,13 +24,42 @@ import type { SocialChatNotification } from "@/shared/types";
 import { SocialChatNotificationsContext } from "@/react-app/contexts/socialChatNotificationsContext";
 
 const TOAST_DURATION_MS = 5_000;
-const INITIAL_REFRESH_DELAY_MS = 1_800;
-const MIN_REFRESH_INTERVAL_MS = 15_000;
-const POLL_INTERVAL_MS = 20_000;
+const INITIAL_REFRESH_DELAY_MS = 700;
+const MIN_REFRESH_INTERVAL_MS = 6_000;
+const POLL_INTERVAL_MS = 8_000;
 const MAX_PENDING_NOTIFICATIONS = 10;
 
 function buildNotificationKey(notification: Pick<SocialChatNotification, "conversation_id" | "message_id">): string {
   return `${notification.conversation_id}:${notification.message_id}`;
+}
+
+function countVisiblePendingNotifications(
+  notifications: readonly SocialChatNotification[],
+  activeConversationId: number | null,
+): number {
+  if (activeConversationId === null) {
+    return notifications.length;
+  }
+
+  return notifications.reduce((count, notification) => (
+    notification.conversation_id === activeConversationId ? count : count + 1
+  ), 0);
+}
+
+function buildVisiblePendingConversationMap(
+  notifications: readonly SocialChatNotification[],
+  activeConversationId: number | null,
+): Record<number, number> {
+  const conversationMap: Record<number, number> = {};
+
+  for (const notification of notifications) {
+    if (activeConversationId !== null && notification.conversation_id === activeConversationId) {
+      continue;
+    }
+    conversationMap[notification.conversation_id] = (conversationMap[notification.conversation_id] ?? 0) + 1;
+  }
+
+  return conversationMap;
 }
 
 function resolveActiveConversationId(pathname: string, search: string): number | null {
@@ -62,10 +91,13 @@ export function SocialChatNotificationsProvider({
   const location = useLocation();
   const [queue, setQueue] = useState<SocialChatNotification[]>([]);
   const [pendingCount, setPendingCount] = useState(0);
+  const [pendingByConversationId, setPendingByConversationId] = useState<Record<number, number>>({});
   const processedKeysRef = useRef<Set<string>>(new Set());
   const refreshInFlightRef = useRef<Promise<void> | null>(null);
   const lastRefreshAtRef = useRef(0);
   const activeConversationId = resolveActiveConversationId(location.pathname, location.search);
+  const isSocialHubRoute = location.pathname === ROUTE_PATHS.friends;
+  const previousIsSocialHubRouteRef = useRef(isSocialHubRoute);
 
   const consumeNotifications = useCallback(async (notifications: readonly SocialChatNotification[]) => {
     if (notifications.length === 0) return;
@@ -113,21 +145,21 @@ export function SocialChatNotificationsProvider({
         void consumeNotifications(activeItems);
       }
 
-      if (freshQueue.length === 0) return;
+      if (freshQueue.length === 0 || isSocialHubRoute) return;
       if (!androidHost) {
         setQueue((current) => [...current, ...freshQueue]);
       }
     },
-    [activeConversationId, androidHost, consumeNotifications],
+    [activeConversationId, androidHost, consumeNotifications, isSocialHubRoute],
   );
 
   const refreshSocialChatNotifications = useCallback(async (options?: { force?: boolean }) => {
     if (!user) return;
+    const forceRefresh = options?.force === true;
     if (refreshInFlightRef.current) {
       return refreshInFlightRef.current;
     }
 
-    const forceRefresh = options?.force === true;
     const now = Date.now();
     if (!forceRefresh && now - lastRefreshAtRef.current < MIN_REFRESH_INTERVAL_MS) {
       return;
@@ -137,7 +169,8 @@ export function SocialChatNotificationsProvider({
       try {
         const notifications = await fetchPendingSocialChatNotifications(MAX_PENDING_NOTIFICATIONS);
         lastRefreshAtRef.current = Date.now();
-        setPendingCount(notifications.length);
+        setPendingCount(countVisiblePendingNotifications(notifications, activeConversationId));
+        setPendingByConversationId(buildVisiblePendingConversationMap(notifications, activeConversationId));
         pushSocialChatNotifications(notifications);
       } catch (error) {
         if (isExpectedApiCancellation(error)) {
@@ -146,6 +179,7 @@ export function SocialChatNotificationsProvider({
         if (error instanceof SocialChatApiError && error.code === "UNAUTHORIZED") {
           setQueue([]);
           setPendingCount(0);
+          setPendingByConversationId({});
           return;
         }
         console.error("Error loading social chat notifications:", error);
@@ -156,16 +190,20 @@ export function SocialChatNotificationsProvider({
 
     refreshInFlightRef.current = refreshTask;
     await refreshTask;
-  }, [pushSocialChatNotifications, user]);
+  }, [activeConversationId, isSocialHubRoute, pushSocialChatNotifications, user]);
 
   useEffect(() => {
     if (!user) {
       setQueue([]);
       setPendingCount(0);
+      setPendingByConversationId({});
       processedKeysRef.current = new Set();
       refreshInFlightRef.current = null;
       lastRefreshAtRef.current = 0;
       return;
+    }
+    if (isSocialHubRoute) {
+      setQueue([]);
     }
 
     const timeoutId = window.setTimeout(() => {
@@ -191,7 +229,16 @@ export function SocialChatNotificationsProvider({
       window.removeEventListener("focus", handleVisibilityRefresh);
       document.removeEventListener("visibilitychange", handleVisibilityRefresh);
     };
-  }, [refreshSocialChatNotifications, user]);
+  }, [isSocialHubRoute, refreshSocialChatNotifications, user]);
+
+  useEffect(() => {
+    if (!user) return;
+    const wasSocialHubRoute = previousIsSocialHubRouteRef.current;
+    previousIsSocialHubRouteRef.current = isSocialHubRoute;
+
+    if (!wasSocialHubRoute || isSocialHubRoute) return;
+    void refreshSocialChatNotifications({ force: true });
+  }, [isSocialHubRoute, refreshSocialChatNotifications, user]);
 
   useEffect(() => {
     if (activeConversationId === null || !user) return;
@@ -231,10 +278,11 @@ export function SocialChatNotificationsProvider({
   const contextValue = useMemo(
     () => ({
       pendingCount,
+      pendingByConversationId,
       pushSocialChatNotifications,
       refreshSocialChatNotifications,
     }),
-    [pendingCount, pushSocialChatNotifications, refreshSocialChatNotifications],
+    [pendingByConversationId, pendingCount, pushSocialChatNotifications, refreshSocialChatNotifications],
   );
 
   return (

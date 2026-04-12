@@ -67,7 +67,7 @@ describe("Home", () => {
 
     queueActivationNotice({
       title: "Conta criada e acesso liberado",
-      message: "Sua conta foi criada e o pagamento foi aprovado. Faca login para entrar no app.",
+      message: "Sua conta foi criada e o pagamento foi aprovado. Preparando sua entrada no app.",
       badge: "Acesso liberado",
       tone: "success",
       downloadLabel: "Baixar app Android",
@@ -83,7 +83,7 @@ describe("Home", () => {
 
     expect(screen.getByText(/Conta criada e acesso liberado/i)).toBeInTheDocument();
     expect(
-      screen.getByText(/Faca login para entrar no app/i),
+      screen.getByText(/Preparando sua entrada no app/i),
     ).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Baixar app Android/i })).toHaveAttribute(
       "href",

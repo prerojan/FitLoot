@@ -76,7 +76,7 @@ vi.mock("../../react-app/utils/activationCompletion", () => ({
   ) => completeActivationAndEnterApp(...args),
   resolveActivationCompletionCopy: () => ({
     localTitle: "Conta criada e acesso liberado",
-    localMessage: "Sua conta foi criada e o pagamento foi aprovado. Faca login para entrar no app.",
+    localMessage: "Sua conta foi criada e o pagamento foi aprovado. Preparando sua entrada no app.",
     badge: "Acesso liberado",
   }),
 }));
@@ -145,7 +145,7 @@ describe("Checkout", () => {
     ).toBeInTheDocument();
   });
 
-  it("returns onboarding activations to login with the queued success notice flow", async () => {
+  it("keeps the session active after onboarding activation", async () => {
     const user = userEvent.setup();
 
     apiMock.mockResolvedValueOnce(
@@ -172,8 +172,7 @@ describe("Checkout", () => {
     await waitFor(() => {
       expect(completeActivationAndEnterApp).toHaveBeenCalledWith(
         expect.objectContaining({
-          destinationPath: "/login",
-          finalizeSessionTransition: expect.any(Function),
+          refreshAuth: expect.any(Function),
         }),
       );
     });

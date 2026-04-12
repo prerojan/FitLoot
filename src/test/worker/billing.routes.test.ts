@@ -200,6 +200,46 @@ describe("billing routes", () => {
     });
   });
 
+  it("reports active access even when onboarding completion is still lagging behind", async () => {
+    const { db } = createMockD1Database([]);
+    const env = createTestEnv(db);
+    const deps = createBillingDeps({
+      getLatestSubscriptionByUser: vi.fn(async () => null),
+      getUserAuthRecordById: vi.fn(async () => ({
+        ...TEST_USER,
+        avatar_url: null,
+        onboarding_completed: 0,
+        plan_id: "vip",
+        plan_status: "active",
+        payment_method: "card",
+      })),
+      hasPlanAccess: vi.fn((planId: string, planStatus: string) => planId === "vip" || planStatus === "active"),
+      resolveCheckoutAmount: vi.fn(() => 0),
+      resolveCheckoutUrl: vi.fn(() => "https://checkout.example/vip"),
+      resolveCheckoutProductId: vi.fn(() => "product-vip"),
+    });
+    const app = new Hono<AppContext>();
+    registerBillingRoutes(app, deps);
+    const { executionCtx } = createExecutionContext();
+
+    const response = await app.fetch(
+      new Request("http://localhost/api/subscription/status"),
+      env,
+      executionCtx,
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload).toMatchObject({
+      plan_id: "vip",
+      plan_status: "active",
+      payment_method: "card",
+      has_access: true,
+      checkout_url: null,
+      product_id: null,
+    });
+  });
+
   it("reconciles pending checkout against Cakto when status polling runs", async () => {
     const { db } = createMockD1Database([]);
     const env = createTestEnv(db);

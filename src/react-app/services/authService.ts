@@ -272,8 +272,8 @@ export function prefetchCoreRoutes(): void {
 }
 
 export function hasPlanAccess(user: User): boolean {
-  // Centraliza a regra minima de acesso ao fluxo completo da app.
-  return user.onboarding_completed === 1 && (user.plan_id === "vip" || user.plan_status === "active");
+  // No cliente, o estado do plano e a fonte imediata de acesso; o backend reconcilia onboarding quando preciso.
+  return user.plan_id === "vip" || user.plan_status === "active";
 }
 
 export function resolveAuthenticatedStartRoute(user: User): string {

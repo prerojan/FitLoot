@@ -5,6 +5,7 @@ import {
   ConsumeSocialChatNotificationsRequestSchema,
   SocialConversationMuteRequestSchema,
   SocialConversationMessageRequestSchema,
+  SocialConversationMessageUpdateRequestSchema,
   SocialConversationReadRequestSchema,
   SocialDirectConversationRequestSchema,
   SocialGroupConversationRequestSchema,
@@ -90,6 +91,28 @@ type ConversationMessageMediaRow = {
   created_at: string;
 };
 
+type ConversationMessageMutationRow = {
+  id: number;
+  conversation_id: number;
+  sender_user_id: string;
+  message_text: string | null;
+  message_kind: string | null;
+  created_at: string;
+  edited_at: string | null;
+  deleted_at: string | null;
+};
+
+type ConversationMessageStorageRow = {
+  storage_path: string | null;
+};
+
+type ConversationLatestMessageRow = {
+  id: number | null;
+  message_text: string | null;
+  message_kind: string | null;
+  created_at: string | null;
+};
+
 type DirectConversationPeerRow = {
   user_id: string;
 };
@@ -113,6 +136,7 @@ const DEFAULT_MESSAGE_LIMIT = 40;
 const MAX_LIST_LIMIT = 100;
 const MAX_MESSAGE_LIMIT = 80;
 const MAX_NOTIFICATION_LIMIT = 10;
+
 function toPositiveInteger(value: string | undefined, fallback: number, maximum: number): number {
   const parsed = Number(value ?? fallback);
   if (!Number.isFinite(parsed)) return fallback;
@@ -142,11 +166,29 @@ function coerceBoolean(value: unknown): boolean {
   return false;
 }
 
+function toNonNegativeNumber(value: unknown): number {
+  const parsed = Number(value ?? 0);
+  if (!Number.isFinite(parsed)) return 0;
+  return Math.max(0, parsed);
+}
+
+function toNullablePositiveNumber(value: unknown): number | null {
+  const parsed = Number(value ?? 0);
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return Math.floor(parsed);
+}
+
 function sanitizePreviewText(value: string | null | undefined, maxLength = 140): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim().replace(/\s+/gu, " ");
   if (!trimmed) return null;
   return trimmed.length > maxLength ? `${trimmed.slice(0, maxLength - 3)}...` : trimmed;
+}
+
+function sanitizeDisplayText(value: unknown, fallback = ""): string {
+  if (typeof value !== "string") return fallback;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : fallback;
 }
 
 function normalizeParticipant(row: ConversationParticipantRow): SocialConversationParticipant {
@@ -220,6 +262,17 @@ function buildMediaConversationPreviewLabel(mediaKind: string | null | undefined
 
 function normalizeMessageKind(value: string | null | undefined): "text" | "image" {
   return value === "image" ? "image" : "text";
+}
+
+function buildConversationPreviewFromMessageRow(
+  row: Pick<ConversationLatestMessageRow, "message_kind" | "message_text"> | null,
+): string | null {
+  if (!row) return null;
+  if (normalizeMessageKind(row.message_kind) === "image") {
+    return buildMediaConversationPreviewLabel(row.message_kind);
+  }
+
+  return sanitizePreviewText(row.message_text, 160);
 }
 
 async function resolveDirectConversationPeerUserId(
@@ -380,10 +433,10 @@ async function assertGroupInvitesAllowed(
          LEFT JOIN social_user_preferences sup
            ON sup.user_id = up.user_id
         WHERE up.user_id IN (${placeholders})
-          AND COALESCE(sup.allow_group_invites, 1) = 1`,
-    )
-    .bind(...memberUserIds)
-    .first<{ allowed_count: number }>();
+          AND (sup.allow_group_invites IS NULL OR sup.allow_group_invites = TRUE)`,
+      )
+      .bind(...memberUserIds)
+      .first<{ allowed_count: number }>();
 
   if (Number(result?.allowed_count ?? 0) !== memberUserIds.length) {
     const error = new Error("GROUP_INVITES_DISABLED");
@@ -531,9 +584,10 @@ async function listConversationParticipants(
   }
 
   for (const row of rows) {
-    const current = participantMap.get(row.conversation_id) ?? [];
+    const conversationId = toNonNegativeNumber(row.conversation_id);
+    const current = participantMap.get(conversationId) ?? [];
     current.push(normalizeParticipant(row));
-    participantMap.set(row.conversation_id, current);
+    participantMap.set(conversationId, current);
   }
 
   return participantMap;
@@ -551,14 +605,14 @@ async function hydrateConversationPreviews(
     const participants = participantsByConversation.get(row.id) ?? [];
     const display = resolveConversationDisplay(row, participants, userId);
     return {
-      id: row.id,
+      id: toNonNegativeNumber(row.id),
       conversation_kind: normalizeConversationKind(row.conversation_kind),
       title: row.title ?? null,
       display_title: display.displayTitle,
       avatar_url: display.avatarUrl,
-      member_count: Math.max(0, Number(row.member_count ?? participants.length)),
-      unread_count: Math.max(0, Number(row.unread_count ?? 0)),
-      last_message_id: row.last_message_id ?? null,
+      member_count: toNonNegativeNumber(row.member_count ?? participants.length),
+      unread_count: toNonNegativeNumber(row.unread_count),
+      last_message_id: toNullablePositiveNumber(row.last_message_id),
       last_message_preview: sanitizePreviewText(row.last_message_preview),
       last_message_at: row.last_message_at ?? null,
       created_at: row.created_at,
@@ -585,26 +639,6 @@ async function getConversationPreviewById(
   return previews[0] ?? null;
 }
 
-async function getConversationPreviewMap(
-  db: D1Database,
-  userId: string,
-  conversationIds: readonly number[],
-): Promise<Map<number, SocialConversationPreview>> {
-  const map = new Map<number, SocialConversationPreview>();
-  if (conversationIds.length === 0) return map;
-
-  const rows = await listConversationRows(db, userId, {
-    conversationIds,
-    limit: Math.max(conversationIds.length, 1),
-    offset: 0,
-  });
-  const previews = await hydrateConversationPreviews(db, userId, rows);
-  for (const preview of previews) {
-    map.set(preview.id, preview);
-  }
-  return map;
-}
-
 async function listSocialHubBundle(
   db: D1Database,
   userId: string,
@@ -615,7 +649,7 @@ async function listSocialHubBundle(
     requestOffset: number;
   },
 ): Promise<SocialHubBundle> {
-  const [friends, pendingRequests, directRows, groupRows, preferences] = await Promise.all([
+  const [friends, pendingRequests, conversationRows, preferences] = await Promise.all([
     listAcceptedFriendsWithPresence(
       db,
       userId,
@@ -629,25 +663,22 @@ async function listSocialHubBundle(
       options.requestOffset,
     ),
     listConversationRows(db, userId, {
-      kind: "direct",
-      limit: Math.max(options.friendLimit + options.friendOffset + 60, 160),
-      offset: 0,
-    }),
-    listConversationRows(db, userId, {
-      kind: "group",
-      limit: 60,
+      limit: Math.max(options.friendLimit + options.friendOffset + 120, 220),
       offset: 0,
     }),
     readSocialUserPreferences(db, userId),
   ]);
 
-  const [directPreviews, groupPreviews] = await Promise.all([
-    hydrateConversationPreviews(db, userId, directRows),
-    hydrateConversationPreviews(db, userId, groupRows),
-  ]);
+  const allPreviews = await hydrateConversationPreviews(db, userId, conversationRows);
   const previewsByPeerUserId = new Map<string, SocialConversationPreview>();
+  const groupPreviews: SocialConversationPreview[] = [];
 
-  for (const preview of directPreviews) {
+  for (const preview of allPreviews) {
+    if (preview.conversation_kind === "group") {
+      groupPreviews.push(preview);
+      continue;
+    }
+
     const peer = preview.participants.find((participant) => participant.user_id !== userId);
     if (!peer?.user_id) continue;
     previewsByPeerUserId.set(peer.user_id, preview);
@@ -657,8 +688,8 @@ async function listSocialHubBundle(
     const conversation = previewsByPeerUserId.get(friend.friend_user_id) ?? null;
     return {
       ...friend,
-      direct_conversation_id: conversation?.id ?? null,
-      unread_count: Math.max(0, Number(conversation?.unread_count ?? 0)),
+      direct_conversation_id: toNullablePositiveNumber(conversation?.id),
+      unread_count: toNonNegativeNumber(conversation?.unread_count),
       last_message_preview: conversation?.last_message_preview ?? null,
       last_message_at: conversation?.last_message_at ?? null,
       notifications_muted: conversation?.notifications_muted === true,
@@ -671,6 +702,17 @@ async function listSocialHubBundle(
     groups: groupPreviews,
     preferences,
   };
+}
+
+function resolveNotificationConversationTitle(row: ConversationNotificationRow): string {
+  if (row.conversation_kind === "group") {
+    return sanitizeDisplayText(row.title, "Grupo");
+  }
+
+  return (
+    sanitizeDisplayText(row.sender_full_name) ||
+    sanitizeDisplayText(row.sender_username, "Nova mensagem")
+  );
 }
 
 async function upsertSocialUserPreferences(
@@ -696,9 +738,9 @@ async function upsertSocialUserPreferences(
     )
     .bind(
       userId,
-      preferences.show_online_status ? 1 : 0,
-      preferences.allow_friend_requests ? 1 : 0,
-      preferences.allow_group_invites ? 1 : 0,
+      preferences.show_online_status,
+      preferences.allow_friend_requests,
+      preferences.allow_group_invites,
     )
     .run();
 
@@ -712,6 +754,7 @@ async function listConversationMedia(
   limit: number,
 ): Promise<SocialConversationMessageMedia[]> {
   await assertConversationMember(db, conversationId, userId);
+  await assertConversationWriteAllowed(db, conversationId, userId);
 
   try {
     const rows = await db
@@ -730,7 +773,7 @@ async function listConversationMedia(
       .all<ConversationMessageMediaRow>();
 
     return (rows.results ?? []).map((row) => ({
-      id: Number(row.id),
+      id: toNonNegativeNumber(row.id),
       media_kind: row.media_kind === "image" ? "image" : "image",
       public_url: row.public_url,
       created_at: row.created_at,
@@ -795,7 +838,7 @@ async function listConversationMessages(
 
   const results = Array.isArray(rows.results) ? rows.results : [];
   const messageIds = results
-    .map((row) => Number(row.id))
+    .map((row) => toNonNegativeNumber(row.id))
     .filter((value) => Number.isFinite(value) && value > 0);
   const mediaByMessageId = new Map<number, SocialConversationMessageMedia>();
 
@@ -817,8 +860,8 @@ async function listConversationMessages(
         .all<ConversationMessageMediaRow>();
 
       for (const row of mediaRows.results ?? []) {
-        mediaByMessageId.set(Number(row.message_id), {
-          id: Number(row.id),
+        mediaByMessageId.set(toNonNegativeNumber(row.message_id), {
+          id: toNonNegativeNumber(row.id),
           media_kind: row.media_kind === "image" ? "image" : "image",
           public_url: row.public_url,
           created_at: row.created_at,
@@ -835,15 +878,15 @@ async function listConversationMessages(
   return results
     .reverse()
     .map((row) => ({
-      id: row.id,
-      conversation_id: row.conversation_id,
+      id: toNonNegativeNumber(row.id),
+      conversation_id: toNonNegativeNumber(row.conversation_id),
       sender_user_id: row.sender_user_id,
       sender_username: row.sender_username,
       sender_full_name: row.sender_full_name,
       sender_avatar_url: row.sender_avatar_url ?? null,
       message_text: row.message_text ?? "",
       message_kind: normalizeMessageKind(row.message_kind),
-      media: mediaByMessageId.get(Number(row.id)) ?? null,
+      media: mediaByMessageId.get(toNonNegativeNumber(row.id)) ?? null,
       created_at: row.created_at,
       edited_at: row.edited_at ?? null,
       is_own_message: row.sender_user_id === userId,
@@ -1086,6 +1129,296 @@ async function updateConversationAfterMessage(
     )
     .bind(messageId, messageId, conversationId, senderUserId)
     .run();
+}
+
+async function syncConversationSummaryAfterMutation(
+  db: D1Database,
+  conversationId: number,
+): Promise<void> {
+  const latestMessage = await db
+    .prepare(
+      `SELECT
+         id,
+         message_text,
+         message_kind,
+         created_at
+       FROM conversation_messages
+      WHERE conversation_id = ?
+        AND deleted_at IS NULL
+      ORDER BY id DESC
+      LIMIT 1`,
+    )
+    .bind(conversationId)
+    .first<ConversationLatestMessageRow>();
+
+  if (latestMessage?.id) {
+    await db
+      .prepare(
+        `UPDATE conversations
+            SET last_message_id = ?,
+                last_message_preview = ?,
+                last_message_at = ?,
+                updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?`,
+      )
+      .bind(
+        Number(latestMessage.id),
+        buildConversationPreviewFromMessageRow(latestMessage),
+        latestMessage.created_at,
+        conversationId,
+      )
+      .run();
+    return;
+  }
+
+  await db
+    .prepare(
+      `UPDATE conversations
+          SET last_message_id = NULL,
+              last_message_preview = NULL,
+              last_message_at = NULL,
+              updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?`,
+    )
+    .bind(conversationId)
+    .run();
+}
+
+async function readConversationMessageForMutation(
+  db: D1Database,
+  conversationId: number,
+  messageId: number,
+  userId: string,
+): Promise<ConversationMessageMutationRow> {
+  const message = await db
+    .prepare(
+      `SELECT
+         id,
+         conversation_id,
+         sender_user_id,
+         message_text,
+         message_kind,
+         created_at,
+         edited_at,
+         deleted_at
+       FROM conversation_messages
+      WHERE id = ?
+        AND conversation_id = ?
+      LIMIT 1`,
+    )
+    .bind(messageId, conversationId)
+    .first<ConversationMessageMutationRow>();
+
+  if (!message || message.deleted_at) {
+    const error = new Error("CONVERSATION_MESSAGE_NOT_FOUND");
+    error.name = "ConversationMessageNotFoundError";
+    throw error;
+  }
+
+  if (message.sender_user_id !== userId) {
+    const error = new Error("CONVERSATION_MESSAGE_NOT_OWNED");
+    error.name = "ConversationMessageOwnershipError";
+    throw error;
+  }
+
+  return message;
+}
+
+async function readConversationMessageById(
+  db: D1Database,
+  userId: string,
+  conversationId: number,
+  messageId: number,
+): Promise<SocialConversationMessage | null> {
+  const row = await db
+    .prepare(
+      `SELECT
+         m.id,
+         m.conversation_id,
+         m.sender_user_id,
+         up.username as sender_username,
+         up.full_name as sender_full_name,
+         u.avatar_url as sender_avatar_url,
+         m.message_text,
+         m.message_kind,
+         m.created_at,
+         m.edited_at
+       FROM conversation_messages m
+       INNER JOIN conversation_members cm
+         ON cm.conversation_id = m.conversation_id
+        AND cm.user_id = ?
+       INNER JOIN user_profiles up
+         ON up.user_id = m.sender_user_id
+       LEFT JOIN users u
+         ON u.id = m.sender_user_id
+      WHERE m.id = ?
+        AND m.conversation_id = ?
+        AND m.deleted_at IS NULL
+      LIMIT 1`,
+    )
+    .bind(userId, messageId, conversationId)
+    .first<ConversationMessageRow>();
+
+  if (!row) return null;
+
+  const media = await db
+    .prepare(
+      `SELECT
+         id,
+         message_id,
+         media_kind,
+         public_url,
+         created_at
+       FROM conversation_message_media
+      WHERE message_id = ?
+      ORDER BY id ASC
+      LIMIT 1`,
+    )
+    .bind(messageId)
+    .first<ConversationMessageMediaRow>();
+
+  return {
+    id: toNonNegativeNumber(row.id),
+    conversation_id: toNonNegativeNumber(row.conversation_id),
+    sender_user_id: row.sender_user_id,
+    sender_username: row.sender_username,
+    sender_full_name: row.sender_full_name,
+    sender_avatar_url: row.sender_avatar_url,
+    message_text: row.message_text ?? "",
+    message_kind: normalizeMessageKind(row.message_kind),
+    media: media
+      ? {
+          id: toNonNegativeNumber(media.id),
+          media_kind: "image",
+          public_url: media.public_url,
+          created_at: media.created_at,
+        }
+      : null,
+    created_at: row.created_at,
+    edited_at: row.edited_at ?? null,
+    is_own_message: row.sender_user_id === userId,
+  };
+}
+
+async function updateConversationMessageText(
+  db: D1Database,
+  withTransaction: WithTransaction,
+  conversationId: number,
+  messageId: number,
+  userId: string,
+  messageText: string,
+  env?: Pick<AppContext["Bindings"], "DB_BACKEND">,
+): Promise<SocialConversationMessage> {
+  return withTransaction(
+    db,
+    async () => {
+      await readConversationMessageForMutation(db, conversationId, messageId, userId);
+
+      await db
+        .prepare(
+          `UPDATE conversation_messages
+              SET message_text = ?,
+                  edited_at = CURRENT_TIMESTAMP,
+                  updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+              AND conversation_id = ?
+              AND sender_user_id = ?
+              AND deleted_at IS NULL`,
+        )
+        .bind(messageText, messageId, conversationId, userId)
+        .run();
+
+      const conversation = await db
+        .prepare(
+          `SELECT last_message_id
+             FROM conversations
+            WHERE id = ?
+            LIMIT 1`,
+        )
+        .bind(conversationId)
+        .first<{ last_message_id?: number | null }>();
+
+      if (Number(conversation?.last_message_id ?? 0) === messageId) {
+        await db
+          .prepare(
+            `UPDATE conversations
+                SET last_message_preview = ?,
+                    updated_at = CURRENT_TIMESTAMP
+              WHERE id = ?`,
+          )
+          .bind(sanitizePreviewText(messageText, 160), conversationId)
+          .run();
+      }
+
+      const updatedMessage = await readConversationMessageById(
+        db,
+        userId,
+        conversationId,
+        messageId,
+      );
+      if (!updatedMessage) {
+        throw new Error("CONVERSATION_MESSAGE_UPDATE_FAILED");
+      }
+
+      return updatedMessage;
+    },
+    env,
+  );
+}
+
+async function deleteConversationMessage(
+  db: D1Database,
+  withTransaction: WithTransaction,
+  conversationId: number,
+  messageId: number,
+  userId: string,
+  env?: Pick<AppContext["Bindings"], "DB_BACKEND">,
+): Promise<{ storagePaths: string[] }> {
+  return withTransaction(
+    db,
+    async () => {
+      await readConversationMessageForMutation(db, conversationId, messageId, userId);
+
+      const mediaRows = await db
+        .prepare(
+          `SELECT storage_path
+             FROM conversation_message_media
+            WHERE message_id = ?`,
+        )
+        .bind(messageId)
+        .all<ConversationMessageStorageRow>();
+
+      const storagePaths = (mediaRows.results ?? [])
+        .map((row) => row.storage_path?.trim() ?? "")
+        .filter((value) => value.length > 0);
+
+      await db
+        .prepare(
+          `DELETE FROM conversation_message_media
+            WHERE message_id = ?`,
+        )
+        .bind(messageId)
+        .run();
+
+      await db
+        .prepare(
+          `UPDATE conversation_messages
+              SET deleted_at = CURRENT_TIMESTAMP,
+                  updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+              AND conversation_id = ?
+              AND sender_user_id = ?
+              AND deleted_at IS NULL`,
+        )
+        .bind(messageId, conversationId, userId)
+        .run();
+
+      await syncConversationSummaryAfterMutation(db, conversationId);
+
+      return { storagePaths };
+    },
+    env,
+  );
 }
 
 async function insertConversationMessage(
@@ -1421,6 +1754,8 @@ export function registerSocialChatRoutes(
     }
 
     try {
+      await assertConversationMember(c.env.fitloot_db, conversationId, user.id);
+      await assertConversationWriteAllowed(c.env.fitloot_db, conversationId, user.id);
       const conversation = await getConversationPreviewById(c.env.fitloot_db, user.id, conversationId);
       if (!conversation) {
         return c.json({ error: "Conversa nao encontrada." }, 404);
@@ -1439,6 +1774,16 @@ export function registerSocialChatRoutes(
         messages,
       });
     } catch (error) {
+      if (error instanceof Error && error.name === "ConversationNotFoundError") {
+        return c.json({ error: "Conversa nao encontrada." }, 404);
+      }
+      if (error instanceof Error && error.name === "FriendshipRequiredError") {
+        return c.json({ error: "Esta conversa nao aceita novas mensagens." }, 403);
+      }
+      if (error instanceof Error && error.name === "UserBlockedError") {
+        return c.json({ error: "Esta conversa nao esta disponivel agora." }, 403);
+      }
+
       console.error("[/api/social/conversations/:id/messages]", {
         message: getErrorMessage(error),
         userId: user.id,
@@ -1474,6 +1819,12 @@ export function registerSocialChatRoutes(
     } catch (error) {
       if (error instanceof Error && error.name === "ConversationNotFoundError") {
         return c.json({ error: "Conversa nao encontrada." }, 404);
+      }
+      if (error instanceof Error && error.name === "FriendshipRequiredError") {
+        return c.json({ error: "Esta conversa nao aceita novas mensagens." }, 403);
+      }
+      if (error instanceof Error && error.name === "UserBlockedError") {
+        return c.json({ error: "Esta conversa nao esta disponivel agora." }, 403);
       }
 
       console.error("[/api/social/conversations/:id/media]", {
@@ -1657,6 +2008,12 @@ export function registerSocialChatRoutes(
         if (error instanceof Error && error.name === "ConversationNotFoundError") {
           return c.json({ error: "Conversa nao encontrada." }, 404);
         }
+        if (error instanceof Error && error.name === "FriendshipRequiredError") {
+          return c.json({ error: "Esta conversa nao aceita novas mensagens." }, 403);
+        }
+        if (error instanceof Error && error.name === "UserBlockedError") {
+          return c.json({ error: "Esta conversa nao esta disponivel agora." }, 403);
+        }
 
         console.error("[/api/social/conversations/:id/messages]", {
           message: getErrorMessage(error),
@@ -1670,6 +2027,152 @@ export function registerSocialChatRoutes(
       }
     },
   );
+
+  app.patch(
+    "/api/social/conversations/:id/messages/:messageId",
+    authMiddleware,
+    zValidator("json", SocialConversationMessageUpdateRequestSchema),
+    async (c) => {
+      const user = c.get("user");
+      if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+      const conversationId = Number(c.req.param("id"));
+      const messageId = Number(c.req.param("messageId"));
+      if (!Number.isFinite(conversationId) || conversationId <= 0) {
+        return c.json({ error: "Conversa invalida." }, 400);
+      }
+      if (!Number.isFinite(messageId) || messageId <= 0) {
+        return c.json({ error: "Mensagem invalida." }, 400);
+      }
+
+      const data = c.req.valid("json");
+
+      try {
+        await assertConversationMember(c.env.fitloot_db, conversationId, user.id);
+        await assertConversationWriteAllowed(c.env.fitloot_db, conversationId, user.id);
+        const message = await updateConversationMessageText(
+          c.env.fitloot_db,
+          withTransaction,
+          conversationId,
+          messageId,
+          user.id,
+          data.message_text.trim(),
+          c.env,
+        );
+        const conversation = await getConversationPreviewById(
+          c.env.fitloot_db,
+          user.id,
+          conversationId,
+        );
+
+        return c.json({
+          conversation,
+          message,
+        });
+      } catch (error) {
+        if (error instanceof Error && error.name === "ConversationNotFoundError") {
+          return c.json({ error: "Conversa nao encontrada." }, 404);
+        }
+        if (error instanceof Error && error.name === "ConversationMessageNotFoundError") {
+          return c.json({ error: "Mensagem nao encontrada." }, 404);
+        }
+        if (error instanceof Error && error.name === "ConversationMessageOwnershipError") {
+          return c.json({ error: "Voce so pode editar mensagens enviadas por voce." }, 403);
+        }
+        if (error instanceof Error && error.name === "FriendshipRequiredError") {
+          return c.json({ error: "Esta conversa nao aceita novas mensagens." }, 403);
+        }
+        if (error instanceof Error && error.name === "UserBlockedError") {
+          return c.json({ error: "Esta conversa nao esta disponivel agora." }, 403);
+        }
+
+        console.error("[/api/social/conversations/:id/messages/:messageId][patch]", {
+          message: getErrorMessage(error),
+          userId: user.id,
+          conversationId,
+          messageId,
+        });
+        if (isMissingSchemaError(error)) {
+          return schemaMismatchResponse(c);
+        }
+        return internalErrorResponse(c);
+      }
+    },
+  );
+
+  app.delete("/api/social/conversations/:id/messages/:messageId", authMiddleware, async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const conversationId = Number(c.req.param("id"));
+    const messageId = Number(c.req.param("messageId"));
+    if (!Number.isFinite(conversationId) || conversationId <= 0) {
+      return c.json({ error: "Conversa invalida." }, 400);
+    }
+    if (!Number.isFinite(messageId) || messageId <= 0) {
+      return c.json({ error: "Mensagem invalida." }, 400);
+    }
+
+    try {
+      await assertConversationMember(c.env.fitloot_db, conversationId, user.id);
+      await assertConversationWriteAllowed(c.env.fitloot_db, conversationId, user.id);
+      const result = await deleteConversationMessage(
+        c.env.fitloot_db,
+        withTransaction,
+        conversationId,
+        messageId,
+        user.id,
+        c.env,
+      );
+      const conversation = await getConversationPreviewById(
+        c.env.fitloot_db,
+        user.id,
+        conversationId,
+      );
+
+      if (result.storagePaths.length > 0) {
+        c.executionCtx.waitUntil(
+          Promise.allSettled(
+            result.storagePaths.map((storagePath) =>
+              removeStoredSocialChatMedia(c.env, storagePath),
+            ),
+          ).then(() => undefined),
+        );
+      }
+
+      return c.json({
+        conversation,
+        deleted_message_id: messageId,
+      });
+    } catch (error) {
+      if (error instanceof Error && error.name === "ConversationNotFoundError") {
+        return c.json({ error: "Conversa nao encontrada." }, 404);
+      }
+      if (error instanceof Error && error.name === "ConversationMessageNotFoundError") {
+        return c.json({ error: "Mensagem nao encontrada." }, 404);
+      }
+      if (error instanceof Error && error.name === "ConversationMessageOwnershipError") {
+        return c.json({ error: "Voce so pode excluir mensagens enviadas por voce." }, 403);
+      }
+      if (error instanceof Error && error.name === "FriendshipRequiredError") {
+        return c.json({ error: "Esta conversa nao aceita novas mensagens." }, 403);
+      }
+      if (error instanceof Error && error.name === "UserBlockedError") {
+        return c.json({ error: "Esta conversa nao esta disponivel agora." }, 403);
+      }
+
+      console.error("[/api/social/conversations/:id/messages/:messageId][delete]", {
+        message: getErrorMessage(error),
+        userId: user.id,
+        conversationId,
+        messageId,
+      });
+      if (isMissingSchemaError(error)) {
+        return schemaMismatchResponse(c);
+      }
+      return internalErrorResponse(c);
+    }
+  });
 
   app.post("/api/social/conversations/:id/media", authMiddleware, async (c) => {
     const user = c.get("user");
@@ -1870,7 +2373,7 @@ export function registerSocialChatRoutes(
               WHERE conversation_id = ?
                 AND user_id = ?`,
           )
-          .bind(body.muted ? 1 : 0, conversationId, user.id)
+          .bind(body.muted === true, conversationId, user.id)
           .run();
 
         return c.json({ success: true, muted: body.muted });
@@ -1929,10 +2432,10 @@ export function registerSocialChatRoutes(
              )
            INNER JOIN user_profiles up
              ON up.user_id = latest.sender_user_id
-           LEFT JOIN users u
-             ON u.id = latest.sender_user_id
+          LEFT JOIN users u
+          ON u.id = latest.sender_user_id
           WHERE cm.user_id = ?
-            AND cm.notifications_muted = 0
+            AND (cm.notifications_muted IS NULL OR cm.notifications_muted = FALSE)
             AND (
               c.conversation_kind <> 'direct'
               OR EXISTS (
@@ -1962,23 +2465,19 @@ export function registerSocialChatRoutes(
         .all<ConversationNotificationRow>();
 
       const notificationsSource = Array.isArray(rows.results) ? rows.results : [];
-      const previewMap = await getConversationPreviewMap(
-        c.env.fitloot_db,
-        user.id,
-        notificationsSource.map((row) => row.conversation_id),
-      );
-
       const notifications: SocialChatNotification[] = notificationsSource.map((row) => {
-        const preview = previewMap.get(row.conversation_id);
         return {
-          conversation_id: row.conversation_id,
+          conversation_id: toNonNegativeNumber(row.conversation_id),
           conversation_kind: normalizeConversationKind(row.conversation_kind),
-          conversation_title: preview?.display_title ?? row.title?.trim() ?? "Nova mensagem",
-          message_id: row.message_id,
-          message_text: row.message_text?.trim() || buildMediaConversationPreviewLabel(row.message_kind),
+          conversation_title: resolveNotificationConversationTitle(row),
+          message_id: toNonNegativeNumber(row.message_id),
+          message_text:
+            sanitizeDisplayText(row.message_text) || buildMediaConversationPreviewLabel(row.message_kind),
           sender_user_id: row.sender_user_id,
-          sender_username: row.sender_username,
-          sender_full_name: row.sender_full_name,
+          sender_username: sanitizeDisplayText(row.sender_username, "usuario"),
+          sender_full_name:
+            sanitizeDisplayText(row.sender_full_name) ||
+            sanitizeDisplayText(row.sender_username, "Usuario"),
           sender_avatar_url: row.sender_avatar_url ?? null,
           created_at: row.created_at,
         };

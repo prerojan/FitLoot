@@ -146,4 +146,18 @@ describe("activationCompletion", () => {
     expect(sessionStorage.getItem("fitloot_activation_notice")).toContain("Baixar app Android");
     expect(navigate).toHaveBeenCalledWith("/login", { replace: true });
   });
+
+  it("uses onboarding activation copy that keeps the current session flowing into the app", () => {
+    expect(
+      resolveActivationCompletionCopy({
+        origin: "onboarding",
+        outcome: "paid",
+      }),
+    ).toEqual({
+      localTitle: "Conta criada e acesso liberado",
+      localMessage:
+        "Sua conta foi criada e o pagamento foi aprovado. Preparando sua entrada no app.",
+      badge: "Acesso liberado",
+    });
+  });
 });

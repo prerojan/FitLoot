@@ -454,25 +454,9 @@ export default function Checkout() {
       ...downloadPayload,
     });
 
-    const shouldReturnToLogin = requiresOnboardingCheckout;
     const completionResult = await completeActivationAndEnterApp({
       navigate,
-      ...(shouldReturnToLogin
-        ? {
-            destinationPath: ROUTE_PATHS.login,
-            finalizeSessionTransition: async () => {
-              try {
-                await api("/api/logout");
-              } catch {
-                // A notificacao precisa sobreviver mesmo se o logout remoto falhar.
-              } finally {
-                logout();
-              }
-            },
-          }
-        : {
-            refreshAuth: checkAuth,
-          }),
+      refreshAuth: checkAuth,
       preEnterAppDelayMs: options?.skipDelay ? 0 : undefined,
       activationNotice: {
         title: completionCopy.localTitle,

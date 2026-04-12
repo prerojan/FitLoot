@@ -138,8 +138,7 @@ describe("PaymentPending", () => {
 
     expect(completeActivationAndEnterApp).toHaveBeenCalledWith(
       expect.objectContaining({
-        destinationPath: "/login",
-        finalizeSessionTransition: expect.any(Function),
+        refreshAuth: expect.any(Function),
       }),
     );
 

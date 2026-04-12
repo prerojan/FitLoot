@@ -119,7 +119,7 @@ export default function PaymentPending() {
   const finalizeActivatedAccess = useCallback(
     async (options?: { skipDelay?: boolean }) => {
       const completionCopy = resolveActivationCompletionCopy({
-        origin: user?.onboarding_completed === 1 ? "checkout" : "onboarding",
+        origin: "checkout",
         outcome: "paid",
       });
       const successMessage = androidDownloadInfo
@@ -143,25 +143,9 @@ export default function PaymentPending() {
         ...downloadPayload,
       });
 
-      const shouldReturnToLogin = user?.onboarding_completed !== 1;
       const completionResult = await completeActivationAndEnterApp({
         navigate,
-        ...(shouldReturnToLogin
-          ? {
-              destinationPath: ROUTE_PATHS.login,
-              finalizeSessionTransition: async () => {
-                try {
-                  await api("/api/logout");
-                } catch {
-                  // A navegacao local ainda precisa concluir mesmo sem logout remoto.
-                } finally {
-                  logout();
-                }
-              },
-            }
-          : {
-              refreshAuth: checkAuth,
-            }),
+        refreshAuth: checkAuth,
         onBeforeEnterApp: clearScheduledPoll,
         preEnterAppDelayMs: options?.skipDelay ? 0 : undefined,
         activationNotice: {
@@ -189,7 +173,7 @@ export default function PaymentPending() {
         ...(completionCopy.badge ? { badge: completionCopy.badge } : {}),
       });
     },
-    [androidDownloadInfo, checkAuth, clearScheduledPoll, logout, navigate, user?.onboarding_completed],
+    [androidDownloadInfo, checkAuth, clearScheduledPoll, navigate],
   );
 
   const verifyStatus = useCallback(async (options: VerifyStatusOptions = {}) => {
@@ -232,7 +216,7 @@ export default function PaymentPending() {
       setLastAmount(Number.isFinite(payload.amount) ? payload.amount : null);
       setCheckoutUrl(typeof payload.checkout_url === "string" ? payload.checkout_url : null);
 
-      if (payload.has_access) {
+      if (payload.has_access || payload.plan_status === "active" || payload.plan_id === "vip") {
         await finalizeActivatedAccess({ skipDelay: silent });
         return;
       }

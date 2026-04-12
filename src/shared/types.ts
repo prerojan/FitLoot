@@ -467,6 +467,14 @@ export type SocialConversationMessageRequest = z.infer<
   typeof SocialConversationMessageRequestSchema
 >;
 
+export const SocialConversationMessageUpdateRequestSchema = z.object({
+  message_text: z.string().trim().min(1).max(2000),
+});
+
+export type SocialConversationMessageUpdateRequest = z.infer<
+  typeof SocialConversationMessageUpdateRequestSchema
+>;
+
 export const SocialConversationReadRequestSchema = z.object({
   last_read_message_id: z.number().int().positive().optional(),
 });
@@ -546,6 +554,16 @@ export const SocialHubBundleSchema = z.object({
 });
 
 export type SocialHubBundle = z.infer<typeof SocialHubBundleSchema>;
+
+export const SocialConversationMessageMutationResponseSchema = z.object({
+  conversation: SocialConversationPreviewSchema.nullable().optional(),
+  message: SocialConversationMessageSchema.optional(),
+  deleted_message_id: z.number().int().positive().optional(),
+});
+
+export type SocialConversationMessageMutationResponse = z.infer<
+  typeof SocialConversationMessageMutationResponseSchema
+>;
 
 export const SocialChatNotificationSchema = z.object({
   conversation_id: z.number().int().positive(),

@@ -11,6 +11,8 @@ import type {
   SocialConversationMessage,
   SocialConversationMessageMedia,
   SocialConversationMessageRequest,
+  SocialConversationMessageUpdateRequest,
+  SocialConversationMessageMutationResponse,
   SocialConversationMessagesResponse,
   SocialConversationMuteRequest,
   SocialConversationPreview,
@@ -63,9 +65,22 @@ function toTrimmedString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
+function toNonNegativeNumber(value: unknown): number {
+  const parsed = Number(value ?? 0);
+  if (!Number.isFinite(parsed)) return 0;
+  return Math.max(0, parsed);
+}
+
+function toNullablePositiveNumber(value: unknown): number | null {
+  const parsed = Number(value ?? 0);
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return Math.floor(parsed);
+}
+
 function normalizeMedia(media: SocialConversationMessageMedia): SocialConversationMessageMedia {
   return {
     ...media,
+    id: toNonNegativeNumber(media.id),
     public_url: media.public_url,
   };
 }
@@ -73,6 +88,8 @@ function normalizeMedia(media: SocialConversationMessageMedia): SocialConversati
 function normalizeMessage(message: SocialConversationMessage): SocialConversationMessage {
   return {
     ...message,
+    id: toNonNegativeNumber(message.id),
+    conversation_id: toNonNegativeNumber(message.conversation_id),
     sender_avatar_url: toTrimmedString(message.sender_avatar_url) ?? null,
     message_text: typeof message.message_text === "string" ? message.message_text : "",
     message_kind: message.message_kind === "image" ? "image" : "text",
@@ -85,8 +102,12 @@ function normalizeMessage(message: SocialConversationMessage): SocialConversatio
 function normalizeConversation(conversation: SocialConversationPreview): SocialConversationPreview {
   return {
     ...conversation,
+    id: toNonNegativeNumber(conversation.id),
     avatar_url: toTrimmedString(conversation.avatar_url) ?? null,
     title: toTrimmedString(conversation.title) ?? null,
+    member_count: toNonNegativeNumber(conversation.member_count),
+    unread_count: toNonNegativeNumber(conversation.unread_count),
+    last_message_id: toNullablePositiveNumber(conversation.last_message_id),
     last_message_preview: toTrimmedString(conversation.last_message_preview) ?? null,
     last_message_at: toTrimmedString(conversation.last_message_at) ?? null,
     notifications_muted: conversation.notifications_muted === true,
@@ -103,13 +124,11 @@ function normalizeConversation(conversation: SocialConversationPreview): SocialC
 function normalizeHubFriendItem(friend: SocialHubFriendItem): SocialHubFriendItem {
   return {
     ...friend,
+    id: toNonNegativeNumber(friend.id),
     friend_avatar_url: toTrimmedString(friend.friend_avatar_url) ?? null,
     last_heartbeat_at: toTrimmedString(friend.last_heartbeat_at) ?? null,
-    direct_conversation_id:
-      typeof friend.direct_conversation_id === "number" && friend.direct_conversation_id > 0
-        ? friend.direct_conversation_id
-        : null,
-    unread_count: Math.max(0, Number(friend.unread_count ?? 0)),
+    direct_conversation_id: toNullablePositiveNumber(friend.direct_conversation_id),
+    unread_count: toNonNegativeNumber(friend.unread_count),
     last_message_preview: toTrimmedString(friend.last_message_preview) ?? null,
     last_message_at: toTrimmedString(friend.last_message_at) ?? null,
     notifications_muted: friend.notifications_muted === true,
@@ -120,6 +139,7 @@ function normalizeHubFriendItem(friend: SocialHubFriendItem): SocialHubFriendIte
 function normalizeHubFriendRequest(request: SocialHubFriendRequest): SocialHubFriendRequest {
   return {
     ...request,
+    id: toNonNegativeNumber(request.id),
     friend_avatar_url: toTrimmedString(request.friend_avatar_url) ?? null,
   };
 }
@@ -148,6 +168,8 @@ function normalizeSocialHubBundle(bundle: SocialHubBundle): SocialHubBundle {
 function normalizeNotification(notification: SocialChatNotification): SocialChatNotification {
   return {
     ...notification,
+    conversation_id: toNonNegativeNumber(notification.conversation_id),
+    message_id: toNonNegativeNumber(notification.message_id),
     sender_avatar_url: toTrimmedString(notification.sender_avatar_url) ?? null,
     message_text: typeof notification.message_text === "string" ? notification.message_text : "",
   };
@@ -320,7 +342,7 @@ export async function fetchSocialConversationMessages(
       `/api/social/conversations/${conversationId}/messages${search.size > 0 ? `?${search}` : ""}`,
       {
         orchestrationKey: `social-chat:messages:${conversationId}`,
-        orchestrationPolicy: "replace",
+        orchestrationPolicy: "join",
         requestClass: "background",
       },
     );
@@ -416,6 +438,64 @@ export async function sendSocialConversationMessage(
     return {
       conversation: payload.conversation ? normalizeConversation(payload.conversation) : null,
       message: normalizeMessage(payload.message),
+    };
+  } catch (error) {
+    parseSocialChatApiError(error);
+  }
+}
+
+export async function updateSocialConversationMessage(
+  conversationId: number,
+  messageId: number,
+  request: SocialConversationMessageUpdateRequest,
+): Promise<{
+  conversation: SocialConversationPreview | null;
+  message: SocialConversationMessage;
+}> {
+  try {
+    const payload = await fetchJson<SocialConversationMessageMutationResponse>(
+      `/api/social/conversations/${conversationId}/messages/${messageId}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(request),
+        requestClass: "foreground",
+      },
+    );
+
+    clearSocialChatCache();
+    if (!payload.message) {
+      throw new SocialChatApiError("REQUEST_FAILED", 502, "Resposta invalida ao editar mensagem.");
+    }
+
+    return {
+      conversation: payload.conversation ? normalizeConversation(payload.conversation) : null,
+      message: normalizeMessage(payload.message),
+    };
+  } catch (error) {
+    parseSocialChatApiError(error);
+  }
+}
+
+export async function deleteSocialConversationMessage(
+  conversationId: number,
+  messageId: number,
+): Promise<{
+  conversation: SocialConversationPreview | null;
+  deletedMessageId: number;
+}> {
+  try {
+    const payload = await fetchJson<SocialConversationMessageMutationResponse>(
+      `/api/social/conversations/${conversationId}/messages/${messageId}`,
+      {
+        method: "DELETE",
+        requestClass: "foreground",
+      },
+    );
+
+    clearSocialChatCache();
+    return {
+      conversation: payload.conversation ? normalizeConversation(payload.conversation) : null,
+      deletedMessageId: toNonNegativeNumber(payload.deleted_message_id),
     };
   } catch (error) {
     parseSocialChatApiError(error);

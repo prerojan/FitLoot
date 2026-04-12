@@ -38,11 +38,11 @@ export default function BottomNav({ active }: BottomNavProps) {
                 className={`fl-bottom-nav-item ${isActive ? "fl-bottom-nav-item-active" : ""}`}
                 aria-label={label}
               >
-                <span className="relative flex shrink-0">
+                <span className="relative flex h-5 w-5 shrink-0 items-center justify-center">
                   <Icon className="h-5 w-5 shrink-0" />
                   {id === "arena" && hasPending ? (
                     <span
-                      className="absolute -right-1.5 -top-1.5 h-3.5 w-3.5 rounded-full"
+                      className="absolute right-[1px] top-[1px] h-2.5 w-2.5 rounded-full"
                       style={{
                         backgroundColor: "var(--app-primary-color)",
                         boxShadow: "0 0 16px color-mix(in srgb, var(--app-primary-color) 36%, transparent)",

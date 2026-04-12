@@ -1,5 +1,11 @@
 import { Hono, type MiddlewareHandler } from "hono";
 
+import {
+  getErrorMessage,
+  internalErrorResponse,
+  isMissingSchemaError,
+  schemaMismatchResponse,
+} from "../core/errors";
 import type { AppContext } from "../core/types";
 import {
   areUsersBlocked,
@@ -137,6 +143,49 @@ function normalizeSearchQuery(value: string | null | undefined): string {
   return String(value ?? "").trim();
 }
 
+async function searchVisibleUsers(
+  db: D1Database,
+  currentUserId: string,
+  query: string,
+): Promise<Record<string, unknown>[]> {
+  const normalizedQuery = `%${query.trim().toLowerCase()}%`;
+  const users = await db
+    .prepare(
+      `SELECT
+         up.user_id,
+         up.username,
+         up.full_name,
+         u.avatar_url,
+         pr.level,
+         pr.xp
+       FROM user_profiles up
+       LEFT JOIN users u
+         ON up.user_id = u.id
+       INNER JOIN user_progression pr
+         ON up.user_id = pr.user_id
+       LEFT JOIN social_user_preferences sup
+         ON sup.user_id = up.user_id
+      WHERE up.user_id <> ?
+        AND (
+          LOWER(up.username) LIKE ?
+          OR LOWER(COALESCE(up.full_name, '')) LIKE ?
+        )
+        AND (sup.allow_friend_requests IS NULL OR sup.allow_friend_requests = TRUE)
+        AND NOT EXISTS (
+          SELECT 1
+            FROM user_blocks ub
+           WHERE (ub.blocker_user_id = ? AND ub.blocked_user_id = up.user_id)
+              OR (ub.blocker_user_id = up.user_id AND ub.blocked_user_id = ?)
+        )
+      ORDER BY up.username ASC
+      LIMIT 20`,
+    )
+    .bind(currentUserId, normalizedQuery, normalizedQuery, currentUserId, currentUserId)
+    .all();
+
+  return Array.isArray(users.results) ? users.results : [];
+}
+
 async function resolveTargetUserId(
   db: D1Database,
   currentUserId: string,
@@ -178,38 +227,19 @@ export function registerFriendsRoutes(
     const username = normalizeSearchQuery(c.req.query("username"));
     if (username.length < 3) return c.json([]);
 
-    const users = await c.env.fitloot_db
-      .prepare(
-        `SELECT
-           up.user_id,
-           up.username,
-           up.full_name,
-           u.avatar_url,
-           pr.level,
-           pr.xp
-         FROM user_profiles up
-         LEFT JOIN users u
-           ON up.user_id = u.id
-         INNER JOIN user_progression pr
-           ON up.user_id = pr.user_id
-         LEFT JOIN social_user_preferences sup
-           ON sup.user_id = up.user_id
-        WHERE up.user_id <> ?
-          AND up.username LIKE ?
-          AND COALESCE(sup.allow_friend_requests, 1) = 1
-          AND NOT EXISTS (
-            SELECT 1
-              FROM user_blocks ub
-             WHERE (ub.blocker_user_id = ? AND ub.blocked_user_id = up.user_id)
-                OR (ub.blocker_user_id = up.user_id AND ub.blocked_user_id = ?)
-          )
-        ORDER BY up.username ASC
-        LIMIT 20`,
-      )
-      .bind(user.id, `%${username}%`, user.id, user.id)
-      .all();
-
-    return c.json(Array.isArray(users.results) ? users.results : []);
+    try {
+      const users = await searchVisibleUsers(c.env.fitloot_db, user.id, username);
+      return c.json(users);
+    } catch (error) {
+      console.error("[/api/friends/search]", {
+        message: getErrorMessage(error),
+        userId: user.id,
+      });
+      if (isMissingSchemaError(error)) {
+        return schemaMismatchResponse(c);
+      }
+      return internalErrorResponse(c);
+    }
   });
 
   app.get("/api/users/search", authMiddleware, async (c) => {
@@ -219,38 +249,19 @@ export function registerFriendsRoutes(
     const query = normalizeSearchQuery(c.req.query("q"));
     if (query.length < 3) return c.json([]);
 
-    const users = await c.env.fitloot_db
-      .prepare(
-        `SELECT
-           up.user_id,
-           up.username,
-           up.full_name,
-           u.avatar_url,
-           pr.level,
-           pr.xp
-         FROM user_profiles up
-         LEFT JOIN users u
-           ON up.user_id = u.id
-         INNER JOIN user_progression pr
-           ON up.user_id = pr.user_id
-         LEFT JOIN social_user_preferences sup
-           ON sup.user_id = up.user_id
-        WHERE up.user_id <> ?
-          AND up.username LIKE ?
-          AND COALESCE(sup.allow_friend_requests, 1) = 1
-          AND NOT EXISTS (
-            SELECT 1
-              FROM user_blocks ub
-             WHERE (ub.blocker_user_id = ? AND ub.blocked_user_id = up.user_id)
-                OR (ub.blocker_user_id = up.user_id AND ub.blocked_user_id = ?)
-          )
-        ORDER BY up.username ASC
-        LIMIT 20`,
-      )
-      .bind(user.id, `%${query}%`, user.id, user.id)
-      .all();
-
-    return c.json(Array.isArray(users.results) ? users.results : []);
+    try {
+      const users = await searchVisibleUsers(c.env.fitloot_db, user.id, query);
+      return c.json(users);
+    } catch (error) {
+      console.error("[/api/users/search]", {
+        message: getErrorMessage(error),
+        userId: user.id,
+      });
+      if (isMissingSchemaError(error)) {
+        return schemaMismatchResponse(c);
+      }
+      return internalErrorResponse(c);
+    }
   });
 
   app.post("/api/friends/request", authMiddleware, async (c) => {

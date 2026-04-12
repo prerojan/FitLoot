@@ -529,9 +529,7 @@ export function registerBillingRoutes(
       plan_id: refreshedUser.plan_id,
       plan_status: refreshedUser.plan_status,
       payment_method: refreshedUser.payment_method,
-      has_access:
-        Number(refreshedUser.onboarding_completed) === 1 &&
-        hasPlanAccess(refreshedUser.plan_id, refreshedUser.plan_status),
+      has_access: hasPlanAccess(refreshedUser.plan_id, refreshedUser.plan_status),
       amount: latestSubscription
         ? Number(latestSubscription.amount)
         : currentPlanAmount,

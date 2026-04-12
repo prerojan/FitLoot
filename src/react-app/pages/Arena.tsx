@@ -9,7 +9,8 @@ import { navigateProtectedRoute } from "@/react-app/services/appNavigation";
 
 export default function Arena() {
   const navigate = useNavigate();
-  const { hasPending } = useArenaNotificationBadge();
+  const { hasPending, totalCount } = useArenaNotificationBadge();
+  const arenaBadgeLabel = totalCount > 9 ? "9+" : String(totalCount);
 
   return (
     <AppPageShell bottomNavActive="arena">
@@ -102,13 +103,16 @@ export default function Arena() {
           <MessageCircle className="h-6 w-6" />
           {hasPending ? (
             <span
-              className="absolute -right-1 -top-1 h-3.5 w-3.5 rounded-full"
+              className="absolute -right-1.5 -top-1.5 flex min-h-6 min-w-6 items-center justify-center rounded-full px-1 text-[0.7rem] font-black"
               style={{
-                backgroundColor: "var(--app-primary-color)",
-                boxShadow: "0 0 16px color-mix(in srgb, var(--app-primary-color) 36%, transparent)",
+                backgroundColor: "var(--fl-color-text)",
+                color: "var(--app-bg-color)",
+                boxShadow: "0 0 16px color-mix(in srgb, var(--app-primary-color) 24%, transparent)",
               }}
-              aria-hidden="true"
-            />
+              aria-label={`${totalCount} pendencia${totalCount === 1 ? "" : "s"} na Arena`}
+            >
+              {arenaBadgeLabel}
+            </span>
           ) : null}
         </button>
       </div>
