@@ -1,6 +1,7 @@
 import { Outlet, Route, Routes } from "react-router";
 
 import { ROUTE_PATHS } from "../auth/constants";
+import AndroidNotificationBridge from "../components/AndroidNotificationBridge";
 import { RewardNotificationsProvider } from "../contexts/rewardNotifications";
 import { SocialChatNotificationsProvider } from "../contexts/socialChatNotifications";
 import { AppEntryRoute, ProtectedRoute, PublicAuthRoute } from "./guards";
@@ -29,6 +30,7 @@ function ProtectedAppArea() {
     <ProtectedRoute>
       <RewardNotificationsProvider>
         <SocialChatNotificationsProvider>
+          <AndroidNotificationBridge />
           <Outlet />
         </SocialChatNotificationsProvider>
       </RewardNotificationsProvider>

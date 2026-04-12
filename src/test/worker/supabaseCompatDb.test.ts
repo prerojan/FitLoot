@@ -74,4 +74,16 @@ describe("supabaseCompatDb table qualification", () => {
     expect(rewritten).toContain("FROM social.friendships f");
     expect(rewritten).toContain("LEFT JOIN social.friend_online_presence fp");
   });
+
+  it("qualifies the social user preferences table", () => {
+    const sql = `
+      SELECT allow_group_invites
+      FROM social_user_preferences
+      WHERE user_id = ?
+    `;
+
+    const rewritten = qualifyUnqualifiedTablesForTests(sql);
+
+    expect(rewritten).toContain("FROM social.social_user_preferences");
+  });
 });

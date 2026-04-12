@@ -31,6 +31,8 @@ import com.fitloot.bridge.NativeBridgeContract
 import com.fitloot.health.HealthConnectPermissionCoordinator
 import com.fitloot.location.ForegroundLocationTracker
 import com.fitloot.media.NativeMediaPayloadFactory
+import com.fitloot.notification.BackgroundNotificationPoller
+import com.fitloot.notification.HostNotificationManager
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 import java.time.Instant
@@ -45,6 +47,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
     private lateinit var webAppInterface: WebAppInterface
     private lateinit var locationTracker: ForegroundLocationTracker
+    private lateinit var hostNotificationManager: HostNotificationManager
+    private lateinit var backgroundNotificationPoller: BackgroundNotificationPoller
     private var webView: WebView? = null
     private var fileChooserCallback: ValueCallback<Array<Uri>>? = null
     private var pendingWebPermissionRequest: PermissionRequest? = null
@@ -54,6 +58,8 @@ class MainActivity : AppCompatActivity() {
     private var hasMainFrameLoadFailed = false
     private var hasRetriedWithProductionHost = false
     private var activeWebAppUrl: String = FitLootWebAppConfig.webAppUrl
+    private var pendingNotificationOpenPayload: JSONObject? = null
+    private var suppressBackgroundNotificationPolling = false
 
     private val connectivityManager by lazy {
         getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager
@@ -70,6 +76,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private val cameraResultLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        suppressBackgroundNotificationPolling = false
         if (result.resultCode == Activity.RESULT_OK) {
             val imagePath = result.data?.getStringExtra("image_path")
             if (imagePath != null) {
@@ -94,6 +101,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private val galleryResultLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        suppressBackgroundNotificationPolling = false
         if (result.resultCode == Activity.RESULT_OK) {
             val imageUri: Uri? = result.data?.data
             if (imageUri != null) {
@@ -106,6 +114,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private val fileChooserLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        suppressBackgroundNotificationPolling = false
         val callback = fileChooserCallback
         fileChooserCallback = null
 
@@ -123,10 +132,22 @@ class MainActivity : AppCompatActivity() {
         PermissionController.createRequestPermissionResultContract()
     ) { _ -> }
 
+    private val notificationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { _ ->
+        dispatchNotificationPermissionChanged()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        hostNotificationManager = HostNotificationManager(this)
+        backgroundNotificationPoller = BackgroundNotificationPoller(
+            readWebAppUrl = { activeWebAppUrl },
+            notificationManager = hostNotificationManager,
+        )
+        captureNotificationIntent(intent)
         binding.webViewRetryButton.setOnClickListener {
             setupWebView()
         }
@@ -181,8 +202,14 @@ class MainActivity : AppCompatActivity() {
         webAppInterface = WebAppInterface(
             this,
             createdWebView,
-            onCameraRequest = { intent -> cameraResultLauncher.launch(intent) },
-            onGalleryRequest = { intent -> galleryResultLauncher.launch(intent) },
+            onCameraRequest = { intent ->
+                suppressBackgroundNotificationPolling = true
+                cameraResultLauncher.launch(intent)
+            },
+            onGalleryRequest = { intent ->
+                suppressBackgroundNotificationPolling = true
+                galleryResultLauncher.launch(intent)
+            },
             onDevicePermissionsRequest = { requestAppPermissions() },
             onLocationPermissionsRequest = {
                 requestRuntimePermissions(
@@ -220,6 +247,12 @@ class MainActivity : AppCompatActivity() {
             onReadLocationPermissionStatus = {
                 locationTracker.buildPermissionStatusJson()
             },
+            onNotificationPermissionRequest = {
+                requestNotificationPermissionIfNeeded()
+            },
+            onReadNotificationPermissionStatus = {
+                hostNotificationManager.buildPermissionStatusJson()
+            },
         )
 
         FitLootWebViewConfigurator.configure(
@@ -239,6 +272,7 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 runCatching {
+                    suppressBackgroundNotificationPolling = true
                     fileChooserLauncher.launch(chooserIntent)
                 }.isSuccess
             },
@@ -255,6 +289,8 @@ class MainActivity : AppCompatActivity() {
                 Log.i(TAG, "WebView finished loading $url")
                 if (!hasMainFrameLoadFailed) {
                     showWebViewReady()
+                    dispatchNotificationPermissionChanged()
+                    deliverPendingNotificationOpenIfNeeded()
                 }
             },
             onPageLoadFailed = { failingUrl, reason ->
@@ -451,6 +487,10 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun requestNotificationPermissionIfNeeded() {
+        hostNotificationManager.requestPermissionIfNeeded(this, notificationPermissionLauncher)
+    }
+
     private fun registerNetworkCallback() {
         if (isNetworkCallbackRegistered) {
             return
@@ -520,6 +560,34 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
+    private fun dispatchNotificationPermissionChanged() {
+        if (!::webAppInterface.isInitialized) {
+            return
+        }
+
+        webAppInterface.sendEventToWebApp(
+            NativeBridgeContract.EVENT_NOTIFICATION_PERMISSION_CHANGED,
+            hostNotificationManager.buildPermissionStatusJson(),
+        )
+    }
+
+    private fun captureNotificationIntent(intent: Intent?) {
+        pendingNotificationOpenPayload = HostNotificationManager.extractNotificationOpenPayload(intent)
+    }
+
+    private fun deliverPendingNotificationOpenIfNeeded() {
+        val payload = pendingNotificationOpenPayload ?: return
+        if (!::webAppInterface.isInitialized) {
+            return
+        }
+
+        pendingNotificationOpenPayload = null
+        webAppInterface.sendEventToWebApp(
+            NativeBridgeContract.EVENT_NOTIFICATION_OPENED,
+            payload,
+        )
+    }
+
     private fun resolvePendingGeolocationPermissionRequest() {
         val origin = pendingGeolocationOrigin ?: return
         val callback = pendingGeolocationCallback ?: return
@@ -562,10 +630,12 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        suppressBackgroundNotificationPolling = false
         if (::webAppInterface.isInitialized) {
             webAppInterface.onRuntimePermissionsChanged()
             dispatchNetworkStatusChanged()
             dispatchAppLifecycleChanged("foreground")
+            deliverPendingNotificationOpenIfNeeded()
         }
     }
 
@@ -574,6 +644,27 @@ class MainActivity : AppCompatActivity() {
             dispatchAppLifecycleChanged("background")
         }
         super.onPause()
+    }
+
+    override fun onStart() {
+        super.onStart()
+        if (::backgroundNotificationPoller.isInitialized) {
+            backgroundNotificationPoller.stop()
+        }
+    }
+
+    override fun onStop() {
+        if (::backgroundNotificationPoller.isInitialized && !suppressBackgroundNotificationPolling) {
+            backgroundNotificationPoller.start()
+        }
+        super.onStop()
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        captureNotificationIntent(intent)
+        deliverPendingNotificationOpenIfNeeded()
     }
 
     override fun onBackPressed() {
@@ -589,6 +680,9 @@ class MainActivity : AppCompatActivity() {
         unregisterNetworkCallback()
         if (::locationTracker.isInitialized) {
             locationTracker.stopTracking()
+        }
+        if (::backgroundNotificationPoller.isInitialized) {
+            backgroundNotificationPoller.destroy()
         }
         webView?.destroy()
         webView = null

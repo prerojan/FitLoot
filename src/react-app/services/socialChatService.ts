@@ -20,6 +20,8 @@ import type {
   SocialHubBundle,
   SocialHubFriendItem,
   SocialHubFriendRequest,
+  SocialUserPreferences,
+  SocialUserPreferencesUpdateRequest,
 } from "@/shared/types";
 
 const SOCIAL_CONVERSATIONS_CACHE_TTL_MS = 10_000;
@@ -122,12 +124,24 @@ function normalizeHubFriendRequest(request: SocialHubFriendRequest): SocialHubFr
   };
 }
 
+function normalizeSocialUserPreferences(
+  preferences: SocialUserPreferences | null | undefined,
+): SocialUserPreferences {
+  return {
+    show_online_status: preferences?.show_online_status !== false,
+    allow_friend_requests: preferences?.allow_friend_requests !== false,
+    allow_group_invites: preferences?.allow_group_invites !== false,
+  };
+}
+
 function normalizeSocialHubBundle(bundle: SocialHubBundle): SocialHubBundle {
   return {
     friends: Array.isArray(bundle.friends) ? bundle.friends.map(normalizeHubFriendItem) : [],
     pending_requests: Array.isArray(bundle.pending_requests)
       ? bundle.pending_requests.map(normalizeHubFriendRequest)
       : [],
+    groups: Array.isArray(bundle.groups) ? bundle.groups.map(normalizeConversation) : [],
+    preferences: normalizeSocialUserPreferences(bundle.preferences),
   };
 }
 
@@ -191,6 +205,8 @@ function cloneSocialHubBundle(bundle: SocialHubBundle): SocialHubBundle {
   return {
     friends: [...bundle.friends],
     pending_requests: [...bundle.pending_requests],
+    groups: [...bundle.groups],
+    preferences: { ...bundle.preferences },
   };
 }
 
@@ -463,6 +479,30 @@ export async function muteSocialConversation(
     return {
       muted: payload.muted === true,
     };
+  } catch (error) {
+    parseSocialChatApiError(error);
+  }
+}
+
+export async function updateSocialPreferences(
+  request: SocialUserPreferencesUpdateRequest,
+): Promise<SocialUserPreferences> {
+  try {
+    const payload = await fetchJson<SocialUserPreferences>("/api/social/preferences", {
+      method: "POST",
+      body: JSON.stringify(request),
+    });
+    const normalized = normalizeSocialUserPreferences(payload);
+    if (socialHubCache) {
+      socialHubCache = {
+        ...socialHubCache,
+        data: {
+          ...socialHubCache.data,
+          preferences: normalized,
+        },
+      };
+    }
+    return normalized;
   } catch (error) {
     parseSocialChatApiError(error);
   }

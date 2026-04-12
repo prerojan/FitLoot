@@ -5,6 +5,7 @@ import {
   areUsersBlocked,
   listAcceptedFriendsWithPresence,
   listPendingFriendRequests,
+  readSocialUserPreferences,
   type SocialFriendRow,
 } from "../services/socialGraph";
 import type { WithTransaction } from "./contracts";
@@ -191,8 +192,11 @@ export function registerFriendsRoutes(
            ON up.user_id = u.id
          INNER JOIN user_progression pr
            ON up.user_id = pr.user_id
+         LEFT JOIN social_user_preferences sup
+           ON sup.user_id = up.user_id
         WHERE up.user_id <> ?
           AND up.username LIKE ?
+          AND COALESCE(sup.allow_friend_requests, 1) = 1
           AND NOT EXISTS (
             SELECT 1
               FROM user_blocks ub
@@ -229,8 +233,11 @@ export function registerFriendsRoutes(
            ON up.user_id = u.id
          INNER JOIN user_progression pr
            ON up.user_id = pr.user_id
+         LEFT JOIN social_user_preferences sup
+           ON sup.user_id = up.user_id
         WHERE up.user_id <> ?
           AND up.username LIKE ?
+          AND COALESCE(sup.allow_friend_requests, 1) = 1
           AND NOT EXISTS (
             SELECT 1
               FROM user_blocks ub
@@ -272,6 +279,11 @@ export function registerFriendsRoutes(
     const blocked = await areUsersBlocked(c.env.fitloot_db, user.id, targetUserId);
     if (blocked) {
       return c.json({ error: "Este usuario nao esta disponivel para solicitacoes." }, 403);
+    }
+
+    const targetPreferences = await readSocialUserPreferences(c.env.fitloot_db, targetUserId);
+    if (!targetPreferences.allow_friend_requests) {
+      return c.json({ error: "Este usuario nao aceita novas solicitacoes de amizade." }, 403);
     }
 
     const existingFriend = await c.env.fitloot_db

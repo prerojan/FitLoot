@@ -9,6 +9,7 @@ import {
 import { Award, Crown, Sparkles, X, Zap } from "lucide-react";
 import { useAuth } from "@/react-app/auth/context";
 import { hasPlanAccess } from "@/react-app/services/authService";
+import { isAndroidHost } from "@/react-app/services/runtime/hostRuntime";
 import LevelUpModal from "@/react-app/components/LevelUpModal";
 import {
   api,
@@ -69,10 +70,12 @@ export function RewardNotificationsProvider({
 }: PropsWithChildren) {
   const { user } = useAuth();
   const [queue, setQueue] = useState<RewardNotification[]>([]);
+  const [pendingCount, setPendingCount] = useState(0);
   const processedIdsRef = useRef<Set<number>>(new Set());
   const refreshInFlightRef = useRef<Promise<void> | null>(null);
   const lastRefreshAtRef = useRef(0);
   const hasUnlockedAccess = user ? hasPlanAccess(user) : false;
+  const androidHost = isAndroidHost();
 
   const acknowledgeNotifications = useCallback(async (ids: number[]) => {
     if (ids.length === 0) return;
@@ -113,12 +116,14 @@ export function RewardNotificationsProvider({
       clearJsonCache("/api/titles");
       clearJsonCache("/api/skills");
 
-      setQueue((current) => [...current, ...freshNotifications]);
-      void acknowledgeNotifications(
-        freshNotifications.map((notification) => Number(notification.id)),
-      );
+      if (!androidHost) {
+        setQueue((current) => [...current, ...freshNotifications]);
+        void acknowledgeNotifications(
+          freshNotifications.map((notification) => Number(notification.id)),
+        );
+      }
     },
-    [acknowledgeNotifications],
+    [acknowledgeNotifications, androidHost],
   );
 
   const refreshRewardNotifications = useCallback(async (options?: { force?: boolean }) => {
@@ -151,6 +156,7 @@ export function RewardNotificationsProvider({
 
         const payload = (await response.json()) as RewardNotification[];
         lastRefreshAtRef.current = Date.now();
+        setPendingCount(Array.isArray(payload) ? payload.length : 0);
         pushRewardNotifications(payload);
       } catch (error) {
         if (isExpectedApiCancellation(error)) {
@@ -169,6 +175,7 @@ export function RewardNotificationsProvider({
   useEffect(() => {
     if (!user || !hasUnlockedAccess) {
       setQueue([]);
+      setPendingCount(0);
       processedIdsRef.current = new Set();
       refreshInFlightRef.current = null;
       lastRefreshAtRef.current = 0;
@@ -218,6 +225,10 @@ export function RewardNotificationsProvider({
     setQueue((current) => current.slice(1));
   }, []);
 
+  const clearPendingCount = useCallback(() => {
+    setPendingCount(0);
+  }, []);
+
   const currentNotification = queue[0] ?? null;
 
   useEffect(() => {
@@ -236,10 +247,12 @@ export function RewardNotificationsProvider({
 
   const contextValue = useMemo(
     () => ({
+      pendingCount,
+      clearPendingCount,
       pushRewardNotifications,
       refreshRewardNotifications,
     }),
-    [pushRewardNotifications, refreshRewardNotifications],
+    [clearPendingCount, pendingCount, pushRewardNotifications, refreshRewardNotifications],
   );
 
   const CurrentIcon = currentNotification

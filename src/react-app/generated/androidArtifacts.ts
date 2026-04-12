@@ -19,7 +19,7 @@ export type AndroidArtifactManifest = {
 };
 
 export const ANDROID_ARTIFACTS: AndroidArtifactManifest = {
-  "generatedAt": "2026-04-12T14:13:34.946Z",
+  "generatedAt": "2026-04-12T15:11:57.385Z",
   "byChannel": {
     "dev": {
       "channel": "dev",
@@ -27,10 +27,10 @@ export const ANDROID_ARTIFACTS: AndroidArtifactManifest = {
       "publicPath": "/FitLoot-Dev.apk",
       "fileName": "FitLoot-Dev.apk",
       "available": true,
-      "sizeBytes": 9273443,
-      "updatedAt": "2026-04-05T02:30:42.584Z",
-      "cacheBust": "1775356242584-9273443",
-      "sourceFingerprint": "b139f05936c7d62e7df5af49f9dde0a5b682f053366740da9df188dfee9f1d4f"
+      "sizeBytes": 9305247,
+      "updatedAt": "2026-04-12T15:10:09.304Z",
+      "cacheBust": "1776006609304-9305247",
+      "sourceFingerprint": "1660d3375bdb5ada209d5048dbe1b12c49fb02bdcb8b67ea49c2f3e9cc0b3e5b"
     },
     "internal": {
       "channel": "internal",
@@ -38,10 +38,10 @@ export const ANDROID_ARTIFACTS: AndroidArtifactManifest = {
       "publicPath": "/FitLoot-Internal.apk",
       "fileName": "FitLoot-Internal.apk",
       "available": true,
-      "sizeBytes": 10398803,
-      "updatedAt": "2026-04-05T02:31:06.893Z",
-      "cacheBust": "1775356266892-10398803",
-      "sourceFingerprint": "b139f05936c7d62e7df5af49f9dde0a5b682f053366740da9df188dfee9f1d4f"
+      "sizeBytes": 10398862,
+      "updatedAt": "2026-04-12T15:10:09.304Z",
+      "cacheBust": "1776006609304-10398862",
+      "sourceFingerprint": "1660d3375bdb5ada209d5048dbe1b12c49fb02bdcb8b67ea49c2f3e9cc0b3e5b"
     },
     "release": {
       "channel": "release",
@@ -49,10 +49,10 @@ export const ANDROID_ARTIFACTS: AndroidArtifactManifest = {
       "publicPath": "/FitLoot.apk",
       "fileName": "FitLoot.apk",
       "available": true,
-      "sizeBytes": 2019794,
-      "updatedAt": "2026-04-05T02:32:25.109Z",
-      "cacheBust": "1775356345109-2019794",
-      "sourceFingerprint": "b139f05936c7d62e7df5af49f9dde0a5b682f053366740da9df188dfee9f1d4f"
+      "sizeBytes": 2036234,
+      "updatedAt": "2026-04-12T15:11:15.376Z",
+      "cacheBust": "1776006675375-2036234",
+      "sourceFingerprint": "1660d3375bdb5ada209d5048dbe1b12c49fb02bdcb8b67ea49c2f3e9cc0b3e5b"
     }
   }
 };

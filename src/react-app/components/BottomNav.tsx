@@ -1,7 +1,7 @@
 import { useNavigate } from "react-router";
 import { ShoppingBag, Swords, Target, TrendingUp, User } from "lucide-react";
 import { ROUTE_PATHS } from "@/react-app/auth/constants";
-import { useSocialChatNotifications } from "@/react-app/contexts/useSocialChatNotifications";
+import { useArenaNotificationBadge } from "@/react-app/contexts/useArenaNotificationBadge";
 import { navigateProtectedRoute } from "@/react-app/services/appNavigation";
 
 interface BottomNavProps {
@@ -18,7 +18,7 @@ const NAV_ITEMS = [
 
 export default function BottomNav({ active }: BottomNavProps) {
   const navigate = useNavigate();
-  const { pendingCount } = useSocialChatNotifications();
+  const { hasPending } = useArenaNotificationBadge();
 
   return (
     <div className="fl-z-nav fixed bottom-4 left-1/2 -translate-x-1/2">
@@ -40,17 +40,14 @@ export default function BottomNav({ active }: BottomNavProps) {
               >
                 <span className="relative flex shrink-0">
                   <Icon className="h-5 w-5 shrink-0" />
-                  {id === "arena" && pendingCount > 0 ? (
+                  {id === "arena" && hasPending ? (
                     <span
-                      className="absolute -right-2 -top-1 flex min-h-4 min-w-4 items-center justify-center rounded-full px-1 text-[9px] font-black"
+                      className="absolute -right-1.5 -top-1.5 h-3.5 w-3.5 rounded-full"
                       style={{
                         backgroundColor: "var(--app-primary-color)",
-                        color: "var(--fl-nav-item-active-text)",
-                        boxShadow: "0 0 16px color-mix(in srgb, var(--app-primary-color) 32%, transparent)",
+                        boxShadow: "0 0 16px color-mix(in srgb, var(--app-primary-color) 36%, transparent)",
                       }}
-                    >
-                      {pendingCount > 9 ? "9+" : pendingCount}
-                    </span>
+                    />
                   ) : null}
                 </span>
                 <span className="fl-bottom-nav-label truncate">{label}</span>

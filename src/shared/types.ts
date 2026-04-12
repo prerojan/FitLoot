@@ -483,6 +483,23 @@ export type SocialConversationMuteRequest = z.infer<
   typeof SocialConversationMuteRequestSchema
 >;
 
+export const SocialUserPreferencesSchema = z.object({
+  show_online_status: z.boolean(),
+  allow_friend_requests: z.boolean(),
+  allow_group_invites: z.boolean(),
+});
+
+export type SocialUserPreferences = z.infer<
+  typeof SocialUserPreferencesSchema
+>;
+
+export const SocialUserPreferencesUpdateRequestSchema =
+  SocialUserPreferencesSchema;
+
+export type SocialUserPreferencesUpdateRequest = z.infer<
+  typeof SocialUserPreferencesUpdateRequestSchema
+>;
+
 export const SocialHubFriendItemSchema = z.object({
   id: z.number().int().positive(),
   friend_user_id: z.string(),
@@ -524,6 +541,8 @@ export type SocialHubFriendRequest = z.infer<
 export const SocialHubBundleSchema = z.object({
   friends: z.array(SocialHubFriendItemSchema),
   pending_requests: z.array(SocialHubFriendRequestSchema),
+  groups: z.array(SocialConversationPreviewSchema),
+  preferences: SocialUserPreferencesSchema,
 });
 
 export type SocialHubBundle = z.infer<typeof SocialHubBundleSchema>;

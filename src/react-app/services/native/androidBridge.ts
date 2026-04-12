@@ -16,6 +16,8 @@ export type AndroidBridgeApi = {
   stopLocationTracking?: () => void;
   requestLocationPermission?: () => void;
   getLocationPermissionStatus?: () => string;
+  requestNotificationPermission?: () => void;
+  getNotificationPermissionStatus?: () => string;
 };
 
 export type AndroidHostCapabilities = {
@@ -96,6 +98,19 @@ export type AndroidLocationPermissionDetail = {
   timestamp?: string;
 };
 
+export type AndroidNotificationPermissionDetail = {
+  granted?: boolean;
+  permission?: "granted" | "denied" | "prompt";
+  timestamp?: string;
+};
+
+export type AndroidNotificationOpenedDetail = {
+  route?: string;
+  conversation_id?: number;
+  notification_type?: "social" | "reward";
+  timestamp?: string;
+};
+
 declare global {
   interface Window {
     AndroidBridge?: AndroidBridgeApi;
@@ -110,6 +125,8 @@ declare global {
     app_lifecycle_changed: CustomEvent<AndroidAppLifecycleDetail>;
     location_updated: CustomEvent<AndroidLocationDetail>;
     location_permission_changed: CustomEvent<AndroidLocationPermissionDetail>;
+    notification_permission_changed: CustomEvent<AndroidNotificationPermissionDetail>;
+    native_notification_opened: CustomEvent<AndroidNotificationOpenedDetail>;
   }
 }
 

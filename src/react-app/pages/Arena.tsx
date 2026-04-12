@@ -3,11 +3,13 @@ import { MessageCircle, Swords, Trophy, Users, Zap } from "lucide-react";
 
 import { ROUTE_PATHS } from "@/react-app/auth/constants";
 import AppPageShell from "@/react-app/components/AppPageShell";
+import { useArenaNotificationBadge } from "@/react-app/contexts/useArenaNotificationBadge";
 import { PRIMARY_GLOW_STYLE } from "@/react-app/pages/dashboardUtils";
 import { navigateProtectedRoute } from "@/react-app/services/appNavigation";
 
 export default function Arena() {
   const navigate = useNavigate();
+  const { hasPending } = useArenaNotificationBadge();
 
   return (
     <AppPageShell bottomNavActive="arena">
@@ -92,12 +94,22 @@ export default function Arena() {
           onClick={() => {
             void navigateProtectedRoute(navigate, ROUTE_PATHS.friends);
           }}
-          className="pointer-events-auto flex h-14 w-14 items-center justify-center rounded-full transition-transform duration-200 hover:scale-[1.03]"
+          className="pointer-events-auto relative flex h-14 w-14 items-center justify-center rounded-full transition-transform duration-200 hover:scale-[1.03]"
           style={PRIMARY_GLOW_STYLE}
           aria-label="Abrir Social Hub"
           title="Abrir Social Hub"
         >
           <MessageCircle className="h-6 w-6" />
+          {hasPending ? (
+            <span
+              className="absolute -right-1 -top-1 h-3.5 w-3.5 rounded-full"
+              style={{
+                backgroundColor: "var(--app-primary-color)",
+                boxShadow: "0 0 16px color-mix(in srgb, var(--app-primary-color) 36%, transparent)",
+              }}
+              aria-hidden="true"
+            />
+          ) : null}
         </button>
       </div>
     </AppPageShell>

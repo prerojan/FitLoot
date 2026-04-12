@@ -61,6 +61,7 @@ const TABLE_SCHEMA_MAP: Readonly<Record<string, string>> = {
   friendships: "social",
   friend_requests: "social",
   user_blocks: "social",
+  social_user_preferences: "social",
   user_presence: "social",
   friend_activity_events: "social",
   friend_online_presence: "social",

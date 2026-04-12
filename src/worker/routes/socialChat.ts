@@ -8,6 +8,7 @@ import {
   SocialConversationReadRequestSchema,
   SocialDirectConversationRequestSchema,
   SocialGroupConversationRequestSchema,
+  SocialUserPreferencesUpdateRequestSchema,
   type SocialChatNotification,
   type SocialHubBundle,
   type SocialHubFriendItem,
@@ -16,6 +17,7 @@ import {
   type SocialConversationMessageMedia,
   type SocialConversationParticipant,
   type SocialConversationPreview,
+  type SocialUserPreferences,
 } from "../../shared/types";
 import {
   getErrorMessage,
@@ -35,6 +37,7 @@ import {
   isPresenceRelationError as isSocialPresenceLookupError,
   listAcceptedFriendsWithPresence,
   listPendingFriendRequests,
+  readSocialUserPreferences,
 } from "../services/socialGraph";
 import type { WithTransaction } from "./contracts";
 
@@ -363,6 +366,32 @@ async function assertAcceptedFriendships(
   }
 }
 
+async function assertGroupInvitesAllowed(
+  db: D1Database,
+  memberUserIds: readonly string[],
+): Promise<void> {
+  if (memberUserIds.length === 0) return;
+
+  const placeholders = buildInClausePlaceholders(memberUserIds.length);
+  const result = await db
+    .prepare(
+      `SELECT COUNT(*) as allowed_count
+         FROM user_profiles up
+         LEFT JOIN social_user_preferences sup
+           ON sup.user_id = up.user_id
+        WHERE up.user_id IN (${placeholders})
+          AND COALESCE(sup.allow_group_invites, 1) = 1`,
+    )
+    .bind(...memberUserIds)
+    .first<{ allowed_count: number }>();
+
+  if (Number(result?.allowed_count ?? 0) !== memberUserIds.length) {
+    const error = new Error("GROUP_INVITES_DISABLED");
+    error.name = "GroupInvitesDisabledError";
+    throw error;
+  }
+}
+
 async function listConversationRows(
   db: D1Database,
   userId: string,
@@ -586,7 +615,7 @@ async function listSocialHubBundle(
     requestOffset: number;
   },
 ): Promise<SocialHubBundle> {
-  const [friends, pendingRequests, directRows] = await Promise.all([
+  const [friends, pendingRequests, directRows, groupRows, preferences] = await Promise.all([
     listAcceptedFriendsWithPresence(
       db,
       userId,
@@ -604,9 +633,18 @@ async function listSocialHubBundle(
       limit: Math.max(options.friendLimit + options.friendOffset + 60, 160),
       offset: 0,
     }),
+    listConversationRows(db, userId, {
+      kind: "group",
+      limit: 60,
+      offset: 0,
+    }),
+    readSocialUserPreferences(db, userId),
   ]);
 
-  const directPreviews = await hydrateConversationPreviews(db, userId, directRows);
+  const [directPreviews, groupPreviews] = await Promise.all([
+    hydrateConversationPreviews(db, userId, directRows),
+    hydrateConversationPreviews(db, userId, groupRows),
+  ]);
   const previewsByPeerUserId = new Map<string, SocialConversationPreview>();
 
   for (const preview of directPreviews) {
@@ -630,7 +668,41 @@ async function listSocialHubBundle(
   return {
     friends: mappedFriends,
     pending_requests: pendingRequests,
+    groups: groupPreviews,
+    preferences,
   };
+}
+
+async function upsertSocialUserPreferences(
+  db: D1Database,
+  userId: string,
+  preferences: SocialUserPreferences,
+): Promise<SocialUserPreferences> {
+  await db
+    .prepare(
+      `INSERT INTO social_user_preferences (
+         user_id,
+         show_online_status,
+         allow_friend_requests,
+         allow_group_invites,
+         created_at,
+         updated_at
+       ) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+       ON CONFLICT(user_id) DO UPDATE SET
+         show_online_status = excluded.show_online_status,
+         allow_friend_requests = excluded.allow_friend_requests,
+         allow_group_invites = excluded.allow_group_invites,
+         updated_at = CURRENT_TIMESTAMP`,
+    )
+    .bind(
+      userId,
+      preferences.show_online_status ? 1 : 0,
+      preferences.allow_friend_requests ? 1 : 0,
+      preferences.allow_group_invites ? 1 : 0,
+    )
+    .run();
+
+  return readSocialUserPreferences(db, userId);
 }
 
 async function listConversationMedia(
@@ -1215,6 +1287,31 @@ export function registerSocialChatRoutes(
     }
   });
 
+  app.post(
+    "/api/social/preferences",
+    authMiddleware,
+    zValidator("json", SocialUserPreferencesUpdateRequestSchema),
+    async (c) => {
+      const user = c.get("user");
+      if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+      try {
+        const body = c.req.valid("json");
+        const preferences = await upsertSocialUserPreferences(c.env.fitloot_db, user.id, body);
+        return c.json(preferences);
+      } catch (error) {
+        console.error("[/api/social/preferences]", {
+          message: getErrorMessage(error),
+          userId: user.id,
+        });
+        if (isMissingSchemaError(error)) {
+          return schemaMismatchResponse(c);
+        }
+        return internalErrorResponse(c);
+      }
+    },
+  );
+
   app.post("/api/social/users/:userId/block", authMiddleware, async (c) => {
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
@@ -1475,6 +1572,7 @@ export function registerSocialChatRoutes(
           await assertNoUserBlock(c.env.fitloot_db, user.id, memberUserId);
         }
         await assertAcceptedFriendships(c.env.fitloot_db, user.id, memberUserIds);
+        await assertGroupInvitesAllowed(c.env.fitloot_db, memberUserIds);
         const conversationId = await createGroupConversation(
           c.env.fitloot_db,
           withTransaction,
@@ -1502,6 +1600,9 @@ export function registerSocialChatRoutes(
 
         if (error instanceof Error && error.name === "FriendshipRequiredError") {
           return c.json({ error: "Os grupos so podem incluir amigos aceitos." }, 403);
+        }
+        if (error instanceof Error && error.name === "GroupInvitesDisabledError") {
+          return c.json({ error: "Um dos amigos selecionados nao aceita convites para grupos." }, 403);
         }
 
         console.error("[/api/social/groups]", {

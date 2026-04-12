@@ -24,6 +24,8 @@ class WebAppInterface(
     private val onStartLocationTracking: (() -> Unit)? = null,
     private val onStopLocationTracking: (() -> Unit)? = null,
     private val onReadLocationPermissionStatus: (() -> JSONObject)? = null,
+    private val onNotificationPermissionRequest: (() -> Unit)? = null,
+    private val onReadNotificationPermissionStatus: (() -> JSONObject)? = null,
 ) {
 
     private val stepCounter = StepCounter(context)
@@ -82,6 +84,16 @@ class WebAppInterface(
     }
 
     @JavascriptInterface
+    fun requestNotificationPermission() {
+        onNotificationPermissionRequest?.invoke()
+    }
+
+    @JavascriptInterface
+    fun getNotificationPermissionStatus(): String {
+        return onReadNotificationPermissionStatus?.invoke()?.toString() ?: JSONObject().toString()
+    }
+
+    @JavascriptInterface
     fun startStepTracking() {
         if (!stepCounter.hasActivityRecognitionPermission()) {
             pendingStepTrackingStart = true
@@ -132,6 +144,9 @@ class WebAppInterface(
 
         onReadLocationPermissionStatus?.invoke()?.let { status ->
             sendEventToWebApp(NativeBridgeContract.EVENT_LOCATION_PERMISSION_CHANGED, status)
+        }
+        onReadNotificationPermissionStatus?.invoke()?.let { status ->
+            sendEventToWebApp(NativeBridgeContract.EVENT_NOTIFICATION_PERMISSION_CHANGED, status)
         }
     }
 

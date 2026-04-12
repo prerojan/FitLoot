@@ -25,6 +25,18 @@ export type PendingFriendRequestRow = {
   created_at: string;
 };
 
+export type SocialUserPreferencesRow = {
+  show_online_status: boolean;
+  allow_friend_requests: boolean;
+  allow_group_invites: boolean;
+};
+
+const DEFAULT_SOCIAL_USER_PREFERENCES: SocialUserPreferencesRow = {
+  show_online_status: true,
+  allow_friend_requests: true,
+  allow_group_invites: true,
+};
+
 function coercePresenceBoolean(value: unknown): boolean | null {
   if (typeof value === "boolean") return value;
   if (typeof value === "number") return value > 0;
@@ -89,6 +101,16 @@ function normalizeFriendRow(row: Record<string, unknown>): SocialFriendRow {
   };
 }
 
+function normalizeSocialUserPreferencesRow(
+  row: Record<string, unknown> | null | undefined,
+): SocialUserPreferencesRow {
+  return {
+    show_online_status: coercePresenceBoolean(row?.show_online_status) ?? true,
+    allow_friend_requests: coercePresenceBoolean(row?.allow_friend_requests) ?? true,
+    allow_group_invites: coercePresenceBoolean(row?.allow_group_invites) ?? true,
+  };
+}
+
 export function isPresenceRelationError(message: string): boolean {
   return (
     message.includes("friend_online_presence") ||
@@ -115,8 +137,14 @@ async function listFriendsViaPresenceView(
         pr.level as friend_level,
         pr.xp as friend_xp,
         pr.current_streak as friend_streak,
-        fp.last_heartbeat_at,
-        COALESCE(fp.is_online, FALSE) as is_online
+        CASE
+          WHEN COALESCE(sup.show_online_status, 1) = 1 THEN fp.last_heartbeat_at
+          ELSE NULL
+        END as last_heartbeat_at,
+        CASE
+          WHEN COALESCE(sup.show_online_status, 1) = 1 THEN COALESCE(fp.is_online, FALSE)
+          ELSE FALSE
+        END as is_online
       FROM friendships f
       INNER JOIN user_profiles up
         ON COALESCE(f.friend_id, f.friend_user_id) = up.user_id
@@ -124,6 +152,8 @@ async function listFriendsViaPresenceView(
         ON u.id = up.user_id
       INNER JOIN user_progression pr
         ON COALESCE(f.friend_id, f.friend_user_id) = pr.user_id
+      LEFT JOIN social_user_preferences sup
+        ON sup.user_id = up.user_id
       LEFT JOIN friend_online_presence fp
         ON fp.user_id = f.user_id
        AND fp.friend_user_id = COALESCE(f.friend_id, f.friend_user_id)
@@ -155,8 +185,14 @@ async function listFriendsViaPresenceTable(
         pr.level as friend_level,
         pr.xp as friend_xp,
         pr.current_streak as friend_streak,
-        p.presence_status,
-        p.last_heartbeat_at
+        CASE
+          WHEN COALESCE(sup.show_online_status, 1) = 1 THEN p.presence_status
+          ELSE 'offline'
+        END as presence_status,
+        CASE
+          WHEN COALESCE(sup.show_online_status, 1) = 1 THEN p.last_heartbeat_at
+          ELSE NULL
+        END as last_heartbeat_at
       FROM friendships f
       INNER JOIN user_profiles up
         ON COALESCE(f.friend_id, f.friend_user_id) = up.user_id
@@ -164,6 +200,8 @@ async function listFriendsViaPresenceTable(
         ON u.id = up.user_id
       INNER JOIN user_progression pr
         ON COALESCE(f.friend_id, f.friend_user_id) = pr.user_id
+      LEFT JOIN social_user_preferences sup
+        ON sup.user_id = up.user_id
       LEFT JOIN user_presence p
         ON p.user_id = COALESCE(f.friend_id, f.friend_user_id)
       WHERE f.user_id = ?
@@ -317,4 +355,25 @@ export async function hasUserBlocked(
     .first<{ 1: number }>();
 
   return Boolean(row);
+}
+
+export async function readSocialUserPreferences(
+  db: D1Database,
+  userId: string,
+): Promise<SocialUserPreferencesRow> {
+  const row = await db
+    .prepare(
+      `SELECT show_online_status, allow_friend_requests, allow_group_invites
+         FROM social_user_preferences
+        WHERE user_id = ?
+        LIMIT 1`,
+    )
+    .bind(userId)
+    .first<Record<string, unknown>>();
+
+  if (!row) {
+    return { ...DEFAULT_SOCIAL_USER_PREFERENCES };
+  }
+
+  return normalizeSocialUserPreferencesRow(row);
 }

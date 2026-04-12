@@ -12,6 +12,7 @@ import { useLocation, useNavigate } from "react-router";
 import { ROUTE_PATHS } from "@/react-app/auth/constants";
 import { useAuth } from "@/react-app/auth/context";
 import { Avatar } from "@/react-app/components/ui/avatar";
+import { isAndroidHost } from "@/react-app/services/runtime/hostRuntime";
 import {
   consumePendingSocialChatNotifications,
   fetchPendingSocialChatNotifications,
@@ -56,6 +57,7 @@ export function SocialChatNotificationsProvider({
   children,
 }: PropsWithChildren) {
   const { user } = useAuth();
+  const androidHost = isAndroidHost();
   const navigate = useNavigate();
   const location = useLocation();
   const [queue, setQueue] = useState<SocialChatNotification[]>([]);
@@ -112,9 +114,11 @@ export function SocialChatNotificationsProvider({
       }
 
       if (freshQueue.length === 0) return;
-      setQueue((current) => [...current, ...freshQueue]);
+      if (!androidHost) {
+        setQueue((current) => [...current, ...freshQueue]);
+      }
     },
-    [activeConversationId, consumeNotifications],
+    [activeConversationId, androidHost, consumeNotifications],
   );
 
   const refreshSocialChatNotifications = useCallback(async (options?: { force?: boolean }) => {

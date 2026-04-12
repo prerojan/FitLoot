@@ -10,4 +10,6 @@ object NativeBridgeContract {
     const val EVENT_APP_LIFECYCLE_CHANGED = "app_lifecycle_changed"
     const val EVENT_LOCATION_UPDATED = "location_updated"
     const val EVENT_LOCATION_PERMISSION_CHANGED = "location_permission_changed"
+    const val EVENT_NOTIFICATION_PERMISSION_CHANGED = "notification_permission_changed"
+    const val EVENT_NOTIFICATION_OPENED = "native_notification_opened"
 }
