@@ -1,4 +1,9 @@
-import type { TrainingRankProfile, TrainingRank, TrainingRankSnapshot } from './types';
+import {
+  TRAINING_RANK_SNAPSHOT_VERSION,
+  type TrainingRankProfile,
+  type TrainingRank,
+  type TrainingRankSnapshot,
+} from './types';
 
 export type TrainingLevel = 'iniciante' | 'intermediario' | 'avancado';
 export type ThresholdType = 'reps' | 'time';
@@ -291,13 +296,170 @@ export function buildTrainingRankSnapshot(profile: UserTrainingProfile) {
 
 // ===== NOVO SISTEMA DE RANK DERIVADO =====
 
+export type TrainingRankTier = 'bronze' | 'ferro' | 'ouro' | 'diamante' | 'elite';
+
+export type TrainingRankMeta = {
+  rank: TrainingRank;
+  label: string;
+  tier: TrainingRankTier;
+  minScore: number;
+  maxScore: number;
+  description: string;
+  iconPath: string;
+};
+
+export const TRAINING_RANKS: readonly TrainingRankMeta[] = [
+  {
+    rank: 'bronze_1',
+    label: 'Bronze I',
+    tier: 'bronze',
+    minScore: 0,
+    maxScore: 7,
+    description: 'Base da progressao de treino',
+    iconPath: '/ranks/bronze-1.png',
+  },
+  {
+    rank: 'bronze_2',
+    label: 'Bronze II',
+    tier: 'bronze',
+    minScore: 8,
+    maxScore: 15,
+    description: 'Primeiros sinais de consistencia',
+    iconPath: '/ranks/bronze-2.png',
+  },
+  {
+    rank: 'bronze_3',
+    label: 'Bronze III',
+    tier: 'bronze',
+    minScore: 16,
+    maxScore: 23,
+    description: 'Fundacao fisica em consolidacao',
+    iconPath: '/ranks/bronze-3.png',
+  },
+  {
+    rank: 'ferro_1',
+    label: 'Ferro I',
+    tier: 'ferro',
+    minScore: 24,
+    maxScore: 31,
+    description: 'Resistencia e rotina ganhando forma',
+    iconPath: '/ranks/ferro-1.png',
+  },
+  {
+    rank: 'ferro_2',
+    label: 'Ferro II',
+    tier: 'ferro',
+    minScore: 32,
+    maxScore: 39,
+    description: 'Maior carga, melhor controle',
+    iconPath: '/ranks/ferro-2.png',
+  },
+  {
+    rank: 'ferro_3',
+    label: 'Ferro III',
+    tier: 'ferro',
+    minScore: 40,
+    maxScore: 47,
+    description: 'Performance estavel e confiavel',
+    iconPath: '/ranks/ferro-3.png',
+  },
+  {
+    rank: 'ouro_1',
+    label: 'Ouro I',
+    tier: 'ouro',
+    minScore: 48,
+    maxScore: 55,
+    description: 'Treino acima da media da base',
+    iconPath: '/ranks/ouro-1.png',
+  },
+  {
+    rank: 'ouro_2',
+    label: 'Ouro II',
+    tier: 'ouro',
+    minScore: 56,
+    maxScore: 63,
+    description: 'Boa combinacao entre volume e execucao',
+    iconPath: '/ranks/ouro-2.png',
+  },
+  {
+    rank: 'ouro_3',
+    label: 'Ouro III',
+    tier: 'ouro',
+    minScore: 64,
+    maxScore: 71,
+    description: 'Atleta forte e consistente',
+    iconPath: '/ranks/ouro-3.png',
+  },
+  {
+    rank: 'diamante_1',
+    label: 'Diamante I',
+    tier: 'diamante',
+    minScore: 72,
+    maxScore: 79,
+    description: 'Alta capacidade fisica e tecnica',
+    iconPath: '/ranks/diamante-1.png',
+  },
+  {
+    rank: 'diamante_2',
+    label: 'Diamante II',
+    tier: 'diamante',
+    minScore: 80,
+    maxScore: 87,
+    description: 'Dominio avancado dos pilares do treino',
+    iconPath: '/ranks/diamante-2.png',
+  },
+  {
+    rank: 'diamante_3',
+    label: 'Diamante III',
+    tier: 'diamante',
+    minScore: 88,
+    maxScore: 95,
+    description: 'Elite competitiva da progressao',
+    iconPath: '/ranks/diamante-3.png',
+  },
+  {
+    rank: 'elite',
+    label: 'Elite',
+    tier: 'elite',
+    minScore: 96,
+    maxScore: 100,
+    description: 'Topo absoluto do rank de treinamento',
+    iconPath: '/ranks/elite.png',
+  },
+] as const;
+
+const TRAINING_RANK_META_BY_KEY = Object.fromEntries(
+  TRAINING_RANKS.map((meta) => [meta.rank, meta]),
+) as Record<TrainingRank, TrainingRankMeta>;
+
+export function isTrainingRank(value: unknown): value is TrainingRank {
+  return typeof value === 'string' && value in TRAINING_RANK_META_BY_KEY;
+}
+
+export function getLowestTrainingRank(): TrainingRank {
+  return TRAINING_RANKS[0]?.rank ?? 'bronze_1';
+}
+
+export function getTrainingRankMeta(rank: TrainingRank): TrainingRankMeta {
+  return TRAINING_RANK_META_BY_KEY[rank];
+}
+
+export function formatTrainingRankLabel(rank: TrainingRank): string {
+  return getTrainingRankMeta(rank).label;
+}
+
 /**
  * Converte score 0-100 para rank de treinamento
  */
 export function scoreToTrainingRank(score: number): TrainingRank {
-  if (score >= 70) return 'avancado';
-  if (score >= 40) return 'intermediario';
-  return 'iniciante';
+  const normalizedScore = clamp(Math.round(score), 0, 100);
+
+  return (
+    TRAINING_RANKS.find(
+      ({ minScore, maxScore }) =>
+        normalizedScore >= minScore && normalizedScore <= maxScore,
+    )?.rank ?? getLowestTrainingRank()
+  );
 }
 
 /**
@@ -417,6 +579,7 @@ export function calculateTrainingRankSnapshot(profile: TrainingRankProfile): Tra
   const fallbackUsed = !hasSkillData; // Remove verificação de benchmarks pois agora sempre temos estimativas
 
   const snapshot: TrainingRankSnapshot = {
+    schemaVersion: TRAINING_RANK_SNAPSHOT_VERSION,
     globalRank: scoreToTrainingRank(totalScore),
     globalScore: totalScore,
     lastCalculatedAt: new Date().toISOString(),
@@ -492,9 +655,50 @@ export function serializeRankSnapshot(snapshot: TrainingRankSnapshot): string {
  */
 export function deserializeRankSnapshot(jsonString: string | null): TrainingRankSnapshot | null {
   if (!jsonString) return null;
-  
+
   try {
-    return JSON.parse(jsonString) as TrainingRankSnapshot;
+    const parsed = JSON.parse(jsonString) as Partial<TrainingRankSnapshot> & {
+      factors?: Partial<TrainingRankSnapshot['factors']>;
+    };
+
+    if (
+      parsed.schemaVersion !== TRAINING_RANK_SNAPSHOT_VERSION ||
+      !isTrainingRank(parsed.globalRank) ||
+      !Number.isFinite(parsed.globalScore) ||
+      typeof parsed.lastCalculatedAt !== 'string' ||
+      typeof parsed.hasBenchmarkData !== 'boolean' ||
+      typeof parsed.hasSkillData !== 'boolean' ||
+      typeof parsed.fallbackUsed !== 'boolean' ||
+      !parsed.factors ||
+      !Number.isFinite(parsed.factors.volumeScore) ||
+      !Number.isFinite(parsed.factors.consistencyScore) ||
+      !Number.isFinite(parsed.factors.benchmarkScore) ||
+      !Number.isFinite(parsed.factors.skillMasteryScore)
+    ) {
+      return null;
+    }
+
+    const globalScore = Number(parsed.globalScore);
+    const volumeScore = Number(parsed.factors.volumeScore);
+    const consistencyScore = Number(parsed.factors.consistencyScore);
+    const benchmarkScore = Number(parsed.factors.benchmarkScore);
+    const skillMasteryScore = Number(parsed.factors.skillMasteryScore);
+
+    return {
+      schemaVersion: parsed.schemaVersion,
+      globalRank: parsed.globalRank,
+      globalScore,
+      lastCalculatedAt: parsed.lastCalculatedAt,
+      factors: {
+        volumeScore,
+        consistencyScore,
+        benchmarkScore,
+        skillMasteryScore,
+      },
+      hasBenchmarkData: parsed.hasBenchmarkData,
+      hasSkillData: parsed.hasSkillData,
+      fallbackUsed: parsed.fallbackUsed,
+    };
   } catch (error) {
     console.warn('Failed to deserialize rank snapshot:', error);
     return null;

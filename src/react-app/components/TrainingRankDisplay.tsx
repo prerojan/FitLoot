@@ -1,5 +1,6 @@
 import { Shield, TrendingUp, Target, Activity, AlertTriangle } from "lucide-react";
 import type { TrainingRankSnapshot } from "@/shared/types";
+import { getTrainingRankMeta } from "@/shared/trainingLevels";
 
 interface TrainingRankDisplayProps {
   snapshot: TrainingRankSnapshot | null;
@@ -9,30 +10,36 @@ interface TrainingRankDisplayProps {
   compact?: boolean;
 }
 
-const rankConfig = {
-  iniciante: {
-    accent: "var(--fl-color-text-muted)",
-    surface: "color-mix(in srgb, var(--fl-surface-muted) 82%, var(--fl-surface-strong) 18%)",
-    border: "var(--fl-border-soft)",
-    accentSoft: "color-mix(in srgb, var(--fl-color-text-muted) 18%, transparent)",
-    label: "Iniciante",
-    description: "Começando sua jornada fitness",
+const rankTierConfig = {
+  bronze: {
+    accent: "#b87333",
+    surface: "color-mix(in srgb, #b87333 12%, var(--fl-surface-strong) 88%)",
+    border: "color-mix(in srgb, #b87333 24%, var(--fl-border-soft))",
+    accentSoft: "color-mix(in srgb, #b87333 16%, transparent)",
   },
-  intermediario: {
-    accent: "var(--app-secondary-color)",
-    surface: "color-mix(in srgb, var(--app-secondary-color) 14%, var(--fl-surface-strong) 86%)",
-    border: "color-mix(in srgb, var(--app-secondary-color) 24%, var(--fl-border-soft))",
-    accentSoft: "color-mix(in srgb, var(--app-secondary-color) 16%, transparent)",
-    label: "Intermediário",
-    description: "Em pleno desenvolvimento",
+  ferro: {
+    accent: "#94a3b8",
+    surface: "color-mix(in srgb, #94a3b8 12%, var(--fl-surface-strong) 88%)",
+    border: "color-mix(in srgb, #94a3b8 24%, var(--fl-border-soft))",
+    accentSoft: "color-mix(in srgb, #94a3b8 16%, transparent)",
   },
-  avancado: {
+  ouro: {
+    accent: "#eab308",
+    surface: "color-mix(in srgb, #eab308 12%, var(--fl-surface-strong) 88%)",
+    border: "color-mix(in srgb, #eab308 24%, var(--fl-border-soft))",
+    accentSoft: "color-mix(in srgb, #eab308 16%, transparent)",
+  },
+  diamante: {
+    accent: "#22d3ee",
+    surface: "color-mix(in srgb, #22d3ee 12%, var(--fl-surface-strong) 88%)",
+    border: "color-mix(in srgb, #22d3ee 24%, var(--fl-border-soft))",
+    accentSoft: "color-mix(in srgb, #22d3ee 16%, transparent)",
+  },
+  elite: {
     accent: "var(--app-primary-color)",
     surface: "color-mix(in srgb, var(--app-primary-color) 14%, var(--fl-surface-strong) 86%)",
     border: "color-mix(in srgb, var(--app-primary-color) 24%, var(--fl-border-soft))",
     accentSoft: "color-mix(in srgb, var(--app-primary-color) 16%, transparent)",
-    label: "Avançado",
-    description: "Atleta experiente",
   },
 } as const;
 
@@ -72,7 +79,7 @@ export function TrainingRankDisplay({
         }}
       >
         <div className="flex items-center gap-2">
-          <AlertTriangle className="w-4 h-4" />
+          <AlertTriangle className="h-4 w-4" />
           <span className="text-sm">Erro ao carregar rank</span>
         </div>
       </div>
@@ -90,31 +97,38 @@ export function TrainingRankDisplay({
         }}
       >
         <div className="flex items-center gap-2">
-          <Activity className="w-4 h-4" />
-          <span className="text-sm">Rank não disponível</span>
+          <Activity className="h-4 w-4" />
+          <span className="text-sm">Rank nao disponivel</span>
         </div>
       </div>
     );
   }
 
-  const config = rankConfig[snapshot.globalRank];
+  const rankMeta = getTrainingRankMeta(snapshot.globalRank);
+  const config = rankTierConfig[rankMeta.tier];
   const shouldShowFallbackWarning = snapshot.fallbackUsed && snapshot.hasSkillData;
 
   if (compact) {
     return (
       <div
-        className="inline-flex items-center gap-2 rounded-full border px-3 py-1"
+        className="inline-flex max-w-full flex-wrap items-center gap-2 rounded-full border px-3 py-1"
         style={{
           backgroundColor: config.surface,
           borderColor: config.border,
           color: config.accent,
         }}
       >
-        <Shield className="w-3 h-3" />
-        <span className="text-xs font-medium">{config.label}</span>
+        <img
+          src={rankMeta.iconPath}
+          alt={rankMeta.label}
+          className="h-5 w-5 object-contain"
+          loading="lazy"
+          decoding="async"
+        />
+        <span className="text-xs font-medium">{rankMeta.label}</span>
         {shouldShowFallbackWarning ? (
           <div className="flex items-center gap-1">
-            <AlertTriangle className="w-3 h-3 opacity-60" />
+            <AlertTriangle className="h-3 w-3 opacity-60" />
             <span className="text-xs" style={{ color: "var(--fl-color-text-muted)" }}>
               Dados incompletos
             </span>
@@ -132,17 +146,21 @@ export function TrainingRankDisplay({
         borderColor: config.border,
       }}
     >
-      <div className="mb-3 flex items-center justify-between">
+      <div className="mb-3 flex items-center justify-between gap-3">
         <div className="flex items-center gap-3">
-          <div className="rounded-full p-2" style={{ backgroundColor: config.accentSoft }}>
-            <Shield className="w-5 h-5" style={{ color: config.accent }} />
-          </div>
+          <img
+            src={rankMeta.iconPath}
+            alt={rankMeta.label}
+            className="h-12 w-12 shrink-0 object-contain sm:h-14 sm:w-14"
+            loading="lazy"
+            decoding="async"
+          />
           <div>
             <h3 className="font-semibold" style={{ color: config.accent }}>
-              {config.label}
+              {rankMeta.label}
             </h3>
             <p className="text-xs" style={{ color: "var(--fl-color-text-muted)" }}>
-              {config.description}
+              {rankMeta.description}
             </p>
           </div>
         </div>
@@ -168,10 +186,10 @@ export function TrainingRankDisplay({
           }}
         >
           <div className="flex items-center gap-2 text-xs">
-            <AlertTriangle className="w-3 h-3" />
+            <AlertTriangle className="h-3 w-3" />
             <span>
               {snapshot.hasBenchmarkData && snapshot.hasSkillData
-                ? "Rank calculado com dados estimados - complete benchmarks para maior precisão"
+                ? "Rank calculado com dados estimados - complete benchmarks para maior precisao"
                 : "Continue treinando para desbloquear ranking completo"}
             </span>
           </div>
@@ -182,12 +200,12 @@ export function TrainingRankDisplay({
       {showDetails ? (
         <div className="space-y-2">
           <h4 className="text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--fl-color-text)" }}>
-            Fatores de Avaliação
+            Fatores de Avaliacao
           </h4>
 
           <div className="grid grid-cols-2 gap-3">
             <div className="flex items-center gap-2">
-              <TrendingUp className="w-4 h-4" style={{ color: "var(--app-primary-color)" }} />
+              <TrendingUp className="h-4 w-4" style={{ color: "var(--app-primary-color)" }} />
               <div className="flex-1">
                 <div className="text-xs" style={{ color: "var(--fl-color-text-muted)" }}>
                   Volume
@@ -199,10 +217,10 @@ export function TrainingRankDisplay({
             </div>
 
             <div className="flex items-center gap-2">
-              <Activity className="w-4 h-4" style={{ color: "var(--app-secondary-color)" }} />
+              <Activity className="h-4 w-4" style={{ color: "var(--app-secondary-color)" }} />
               <div className="flex-1">
                 <div className="text-xs" style={{ color: "var(--fl-color-text-muted)" }}>
-                  Consistência
+                  Consistencia
                 </div>
                 <div className="text-sm font-medium" style={{ color: "var(--fl-color-text)" }}>
                   {snapshot.factors.consistencyScore}/25
@@ -211,7 +229,7 @@ export function TrainingRankDisplay({
             </div>
 
             <div className="flex items-center gap-2">
-              <Target className="w-4 h-4" style={{ color: config.accent }} />
+              <Target className="h-4 w-4" style={{ color: config.accent }} />
               <div className="flex-1">
                 <div className="text-xs" style={{ color: "var(--fl-color-text-muted)" }}>
                   Benchmarks
@@ -224,7 +242,7 @@ export function TrainingRankDisplay({
 
             <div className="flex items-center gap-2">
               <Shield
-                className="w-4 h-4"
+                className="h-4 w-4"
                 style={{ color: "color-mix(in srgb, var(--app-primary-color) 78%, #f59e0b)" }}
               />
               <div className="flex-1">

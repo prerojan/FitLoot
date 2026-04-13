@@ -73,9 +73,28 @@ export const UserProgressionSchema = z.object({
 export type UserProgression = z.infer<typeof UserProgressionSchema>;
 
 // Training Rank System (camada paralela derivada)
-export type TrainingRank = 'iniciante' | 'intermediario' | 'avancado';
+export const TRAINING_RANK_VALUES = [
+  "bronze_1",
+  "bronze_2",
+  "bronze_3",
+  "ferro_1",
+  "ferro_2",
+  "ferro_3",
+  "ouro_1",
+  "ouro_2",
+  "ouro_3",
+  "diamante_1",
+  "diamante_2",
+  "diamante_3",
+  "elite",
+] as const;
+
+export type TrainingRank = (typeof TRAINING_RANK_VALUES)[number];
+export const TRAINING_RANK_SNAPSHOT_VERSION = 2 as const;
 
 export interface TrainingRankSnapshot {
+  /** Versao do schema para invalidar snapshots legados quando o rank muda. */
+  schemaVersion: number;
   /** Rank global calculado com base em todos os fatores */
   globalRank: TrainingRank;
   /** Score total usado para calcular o rank (0-100) */

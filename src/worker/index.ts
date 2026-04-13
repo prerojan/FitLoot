@@ -6,6 +6,7 @@ import {
   ConditioningLevel,
   MissionMetricType,
   CircuitTask,
+  type TrainingRank,
 } from "../shared/types";
 import {
   resolveExerciseDisplayNamePt,
@@ -3054,7 +3055,7 @@ type RankingRow = {
   xp: number;
   current_streak: number;
   points: number;
-  training_rank: "iniciante" | "intermediario" | "avancado";
+  training_rank: TrainingRank;
   training_rank_score: number;
 };
 

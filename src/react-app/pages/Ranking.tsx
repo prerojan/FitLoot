@@ -12,6 +12,7 @@ import {
   shouldRefreshCachedResource,
 } from "@/react-app/utils/cachedResourceLoader";
 import type { RankingPlayer, TrainingRank, UserProfile } from "@/shared/types";
+import { formatTrainingRankLabel, getLowestTrainingRank } from "@/shared/trainingLevels";
 
 type RankingMode = "global" | "friends";
 
@@ -37,7 +38,7 @@ function normalizeRankingEntry(player: RankingPlayer): RankingEntry {
     level: player.level,
     xp: player.xp,
     current_streak: player.current_streak,
-    training_rank: player.training_rank ?? "iniciante",
+    training_rank: player.training_rank ?? getLowestTrainingRank(),
     training_rank_score: Number(player.training_rank_score ?? 0),
   };
 }
@@ -57,17 +58,6 @@ function sortRankingEntries(entries: RankingEntry[]): RankingEntry[] {
       sensitivity: "base",
     });
   });
-}
-
-function formatTrainingRankLabel(rank: TrainingRank): string {
-  switch (rank) {
-    case "avancado":
-      return "Avancado";
-    case "intermediario":
-      return "Intermediario";
-    default:
-      return "Iniciante";
-  }
 }
 
 export default function Ranking() {
@@ -338,7 +328,7 @@ export default function Ranking() {
                   </p>
                 </div>
                 <div className="min-w-0 shrink-0 text-right">
-                  <p className="truncate text-xs font-bold sm:text-base">
+                  <p className="max-w-[116px] text-right text-[11px] font-bold leading-tight sm:max-w-[168px] sm:text-sm">
                     {formatTrainingRankLabel(player.training_rank).toUpperCase()}
                   </p>
                   <p
@@ -406,7 +396,10 @@ function PodiumCard({
         }}
       >
         <p className="truncate text-sm font-bold sm:text-base">{entry.username}</p>
-        <p className="mt-1 text-[10px] font-bold uppercase tracking-widest" style={{ color: "var(--app-primary-color)" }}>
+        <p
+          className="mt-1 text-[9px] font-bold uppercase leading-tight tracking-[0.14em] sm:text-[10px]"
+          style={{ color: "var(--app-primary-color)" }}
+        >
           {formatTrainingRankLabel(entry.training_rank)}
         </p>
         <div className="mt-2 space-y-1 text-center">
