@@ -9,6 +9,7 @@ type RuntimeSessionRecord = {
 type RuntimeSessionLookup = {
   id: string;
   user_id: string;
+  updated_at?: string | null;
 };
 
 const RUNTIME_SESSION_SCHEMA_KEY = "runtime_session";
@@ -48,15 +49,31 @@ async function ensureRuntimeSessionSchema(db: D1Database): Promise<void> {
 export async function readRuntimeSession(
   db: D1Database,
   sessionId: string,
+  options: {
+    maxAgeMs?: number;
+  } = {},
 ): Promise<RuntimeSessionLookup | null> {
   await ensureRuntimeSessionSchema(db);
   const readSession = resolvePrimaryReadSession(db);
-  return readSession
+  const row = await readSession
     .prepare(
-      "SELECT id, user_id FROM runtime_sessions WHERE id = ? AND expires_at > datetime('now')",
+      "SELECT id, user_id, updated_at FROM runtime_sessions WHERE id = ? AND expires_at > datetime('now')",
     )
     .bind(sessionId)
     .first<RuntimeSessionLookup>();
+
+  if (!row) return null;
+  if (typeof options.maxAgeMs === "number" && Number.isFinite(options.maxAgeMs)) {
+    const ageMs = Date.now() - Date.parse(row.updated_at ?? "");
+    if (Number.isFinite(ageMs) && ageMs > options.maxAgeMs) {
+      return null;
+    }
+  }
+
+  return {
+    id: row.id,
+    user_id: row.user_id,
+  };
 }
 
 export async function upsertRuntimeSession(

@@ -18,6 +18,7 @@ import {
   type SocialConversationMessageMedia,
   type SocialConversationParticipant,
   type SocialConversationPreview,
+  type SocialUnreadSummary,
   type SocialUserPreferences,
 } from "../../shared/types";
 import {
@@ -26,6 +27,14 @@ import {
   isMissingSchemaError,
   schemaMismatchResponse,
 } from "../core/errors";
+import {
+  isTransientDatabaseError,
+  runWithTransientDatabaseRetry,
+} from "../core/database";
+import {
+  readRuntimeDashboardProjection,
+  upsertRuntimeDashboardProjection,
+} from "../core/runtimeUserProjectionStore";
 import type { AppContext } from "../core/types";
 import {
   isSocialChatMediaStorageConfigured,
@@ -131,16 +140,35 @@ type ConversationNotificationRow = {
   created_at: string;
 };
 
+type ConversationUnreadSummaryRow = {
+  conversation_id: number;
+  unread_count: number;
+  last_unread_message_id: number | null;
+  direct_peer_user_id: string | null;
+};
+
 const DEFAULT_LIST_LIMIT = 60;
 const DEFAULT_MESSAGE_LIMIT = 40;
 const MAX_LIST_LIMIT = 100;
 const MAX_MESSAGE_LIMIT = 80;
 const MAX_NOTIFICATION_LIMIT = 10;
+const RUNTIME_SOCIAL_HUB_PROJECTION_KEY = "social-hub";
+const RUNTIME_SOCIAL_HUB_PROJECTION_TTL_MS = 15_000;
+const RUNTIME_SOCIAL_HUB_STALE_TTL_MS = 120_000;
 
 function toPositiveInteger(value: string | undefined, fallback: number, maximum: number): number {
   const parsed = Number(value ?? fallback);
   if (!Number.isFinite(parsed)) return fallback;
   return Math.min(Math.max(Math.floor(parsed), 1), maximum);
+}
+
+function resolveRuntimeProjectionDb(
+  c: import("hono").Context<AppContext>,
+): D1Database | null {
+  const runtimeDb = c.env.fitloot_runtime_db;
+  if (!runtimeDb) return null;
+  if (runtimeDb === c.env.fitloot_db) return null;
+  return runtimeDb;
 }
 
 function toOffset(value: string | undefined): number {
@@ -283,7 +311,7 @@ async function resolveDirectConversationPeerUserId(
   const peer = await db
     .prepare(
       `SELECT user_id
-         FROM conversation_members
+         FROM social.conversation_members
         WHERE conversation_id = ?
           AND user_id <> ?
         ORDER BY joined_at ASC, user_id ASC
@@ -318,7 +346,7 @@ async function assertConversationWriteAllowed(
   const conversation = await db
     .prepare(
       `SELECT conversation_kind
-         FROM conversations
+         FROM social.conversations
         WHERE id = ?
         LIMIT 1`,
     )
@@ -354,7 +382,7 @@ async function assertConversationMember(
   const membership = await db
     .prepare(
       `SELECT 1
-         FROM conversation_members
+         FROM social.conversation_members
         WHERE conversation_id = ?
           AND user_id = ?
         LIMIT 1`,
@@ -377,7 +405,7 @@ async function assertAcceptedFriendship(
   const friendship = await db
     .prepare(
       `SELECT 1
-         FROM friendships
+         FROM social.friendships
         WHERE user_id = ?
           AND COALESCE(friend_id, friend_user_id) = ?
           AND status = 'accepted'
@@ -404,7 +432,7 @@ async function assertAcceptedFriendships(
   const result = await db
     .prepare(
       `SELECT COUNT(*) as accepted_count
-         FROM friendships
+         FROM social.friendships
         WHERE user_id = ?
           AND status = 'accepted'
           AND COALESCE(friend_id, friend_user_id) IN (${placeholders})`,
@@ -429,7 +457,7 @@ async function assertGroupInvitesAllowed(
   const result = await db
     .prepare(
       `SELECT COUNT(*) as allowed_count
-         FROM user_profiles up
+         FROM core.user_profiles up
          LEFT JOIN social_user_preferences sup
            ON sup.user_id = up.user_id
         WHERE up.user_id IN (${placeholders})
@@ -489,20 +517,20 @@ async function listConversationRows(
          c.updated_at,
          cm.notifications_muted,
          (
-           SELECT COUNT(*)
-             FROM conversation_members cm_count
+            SELECT COUNT(*)
+              FROM social.conversation_members cm_count
             WHERE cm_count.conversation_id = c.id
          ) as member_count,
          (
            SELECT COUNT(*)
-             FROM conversation_messages unread
+             FROM social.conversation_messages unread
             WHERE unread.conversation_id = c.id
               AND unread.deleted_at IS NULL
               AND unread.sender_user_id <> ?
               AND unread.id > COALESCE(cm.last_read_message_id, 0)
          ) as unread_count
-       FROM conversation_members cm
-       INNER JOIN conversations c
+        FROM social.conversation_members cm
+        INNER JOIN social.conversations c
          ON c.id = cm.conversation_id
       WHERE ${conditions.join(" AND ")}
       ORDER BY COALESCE(c.last_message_at, c.created_at) DESC, c.id DESC
@@ -540,12 +568,12 @@ async function listConversationParticipants(
              THEN 1
              ELSE 0
            END as is_online
-         FROM conversation_members cm
-         INNER JOIN user_profiles up
+          FROM social.conversation_members cm
+         INNER JOIN core.user_profiles up
            ON up.user_id = cm.user_id
-         LEFT JOIN users u
+         LEFT JOIN core.users u
            ON u.id = cm.user_id
-         LEFT JOIN user_presence p
+          LEFT JOIN social.user_presence p
            ON p.user_id = cm.user_id
         WHERE cm.conversation_id IN (${placeholders})
         ORDER BY cm.joined_at ASC, cm.user_id ASC`,
@@ -562,17 +590,17 @@ async function listConversationParticipants(
 
     const fallback = await db
       .prepare(
-        `SELECT
-           cm.conversation_id,
-           cm.user_id,
-           up.username,
-           up.full_name,
-           u.avatar_url,
-           0 as is_online
-         FROM conversation_members cm
-         INNER JOIN user_profiles up
+         `SELECT
+            cm.conversation_id,
+            cm.user_id,
+            up.username,
+            up.full_name,
+            u.avatar_url,
+            0 as is_online
+          FROM social.conversation_members cm
+         INNER JOIN core.user_profiles up
            ON up.user_id = cm.user_id
-         LEFT JOIN users u
+         LEFT JOIN core.users u
            ON u.id = cm.user_id
         WHERE cm.conversation_id IN (${placeholders})
         ORDER BY cm.joined_at ASC, cm.user_id ASC`,
@@ -715,6 +743,98 @@ function resolveNotificationConversationTitle(row: ConversationNotificationRow):
   );
 }
 
+async function listSocialUnreadSummary(
+  db: D1Database,
+  userId: string,
+): Promise<SocialUnreadSummary> {
+  const rows = await db
+    .prepare(
+      `SELECT
+         c.id as conversation_id,
+         COUNT(unread.id) as unread_count,
+         MAX(unread.id) as last_unread_message_id,
+         CASE
+           WHEN c.conversation_kind = 'direct' THEN (
+             SELECT direct_peer.user_id
+               FROM social.conversation_members direct_peer
+              WHERE direct_peer.conversation_id = c.id
+                AND direct_peer.user_id <> ?
+              ORDER BY direct_peer.joined_at ASC, direct_peer.user_id ASC
+              LIMIT 1
+           )
+           ELSE NULL
+         END as direct_peer_user_id
+        FROM social.conversation_members cm
+        INNER JOIN social.conversations c
+          ON c.id = cm.conversation_id
+        INNER JOIN social.conversation_messages unread
+         ON unread.conversation_id = c.id
+        AND unread.deleted_at IS NULL
+        AND unread.sender_user_id <> ?
+        AND unread.id > COALESCE(cm.last_read_message_id, 0)
+      WHERE cm.user_id = ?
+        AND (
+          c.conversation_kind <> 'direct'
+          OR EXISTS (
+            SELECT 1
+              FROM social.conversation_members direct_peer
+             WHERE direct_peer.conversation_id = c.id
+               AND direct_peer.user_id <> ?
+               AND EXISTS (
+                  SELECT 1
+                    FROM social.friendships f
+                  WHERE f.user_id = ?
+                    AND COALESCE(f.friend_id, f.friend_user_id) = direct_peer.user_id
+                    AND f.status = 'accepted'
+               )
+               AND NOT EXISTS (
+                  SELECT 1
+                    FROM social.user_blocks ub
+                  WHERE (ub.blocker_user_id = ? AND ub.blocked_user_id = direct_peer.user_id)
+                     OR (ub.blocker_user_id = direct_peer.user_id AND ub.blocked_user_id = ?)
+               )
+          )
+        )
+      GROUP BY c.id
+      ORDER BY MAX(unread.id) DESC, c.id DESC`,
+    )
+    .bind(userId, userId, userId, userId, userId, userId, userId)
+    .all<ConversationUnreadSummaryRow>();
+
+  const conversations = (Array.isArray(rows.results) ? rows.results : [])
+    .map((row) => ({
+      conversation_id: toNonNegativeNumber(row.conversation_id),
+      unread_count: toNonNegativeNumber(row.unread_count),
+      last_unread_message_id: toNullablePositiveNumber(row.last_unread_message_id),
+      direct_peer_user_id:
+        typeof row.direct_peer_user_id === "string" && row.direct_peer_user_id.trim().length > 0
+          ? row.direct_peer_user_id.trim()
+          : null,
+    }))
+    .filter((row) => row.conversation_id > 0 && row.unread_count > 0)
+    .sort((left, right) => {
+      const activityDelta =
+        toNonNegativeNumber(right.last_unread_message_id) - toNonNegativeNumber(left.last_unread_message_id);
+      if (activityDelta !== 0) {
+        return activityDelta;
+      }
+      return right.unread_count - left.unread_count;
+    })
+    .map((row) => ({
+      conversation_id: row.conversation_id,
+      unread_count: row.unread_count,
+      direct_peer_user_id: row.direct_peer_user_id,
+    }));
+
+  return {
+    total_unread_count: conversations.reduce(
+      (total, conversation) => total + conversation.unread_count,
+      0,
+    ),
+    conversations,
+  };
+}
+
 async function upsertSocialUserPreferences(
   db: D1Database,
   userId: string,
@@ -764,7 +884,7 @@ async function listConversationMedia(
            media.media_kind,
            media.public_url,
            media.created_at
-         FROM conversation_message_media media
+         FROM social.conversation_message_media media
         WHERE media.conversation_id = ?
         ORDER BY media.created_at DESC, media.id DESC
         LIMIT ?`,
@@ -821,13 +941,13 @@ async function listConversationMessages(
          m.message_kind,
          m.created_at,
          m.edited_at
-       FROM conversation_messages m
-       INNER JOIN conversation_members cm
+       FROM social.conversation_messages m
+        INNER JOIN social.conversation_members cm
          ON cm.conversation_id = m.conversation_id
         AND cm.user_id = ?
-       INNER JOIN user_profiles up
+       INNER JOIN core.user_profiles up
          ON up.user_id = m.sender_user_id
-       LEFT JOIN users u
+       LEFT JOIN core.users u
          ON u.id = m.sender_user_id
       WHERE ${conditions.join(" AND ")}
       ORDER BY m.id DESC
@@ -852,7 +972,7 @@ async function listConversationMessages(
              media_kind,
              public_url,
              created_at
-           FROM conversation_message_media
+           FROM social.conversation_message_media
           WHERE message_id IN (${buildInClausePlaceholders(messageIds.length)})
           ORDER BY id ASC`,
         )
@@ -904,8 +1024,8 @@ async function createDirectConversation(
 
   const existing = await db
     .prepare(
-      `SELECT id
-         FROM conversations
+         `SELECT id
+            FROM social.conversations
         WHERE direct_key = ?
           AND conversation_kind = 'direct'
         LIMIT 1`,
@@ -923,7 +1043,7 @@ async function createDirectConversation(
       async () => {
         const inserted = await db
           .prepare(
-            `INSERT INTO conversations (
+            `INSERT INTO social.conversations (
                conversation_kind,
                direct_key,
                created_by_user_id,
@@ -942,7 +1062,7 @@ async function createDirectConversation(
 
         await db
           .prepare(
-            `INSERT INTO conversation_members (
+            `INSERT INTO social.conversation_members (
                conversation_id,
                user_id,
                member_role,
@@ -956,7 +1076,7 @@ async function createDirectConversation(
 
         await db
           .prepare(
-            `INSERT INTO conversation_members (
+            `INSERT INTO social.conversation_members (
                conversation_id,
                user_id,
                member_role,
@@ -980,8 +1100,8 @@ async function createDirectConversation(
 
     const insertedAfterRace = await db
       .prepare(
-        `SELECT id
-           FROM conversations
+           `SELECT id
+              FROM social.conversations
           WHERE direct_key = ?
             AND conversation_kind = 'direct'
           LIMIT 1`,
@@ -1010,7 +1130,7 @@ async function createGroupConversation(
     async () => {
       const inserted = await db
         .prepare(
-          `INSERT INTO conversations (
+          `INSERT INTO social.conversations (
              conversation_kind,
              title,
              created_by_user_id,
@@ -1029,7 +1149,7 @@ async function createGroupConversation(
 
       await db
         .prepare(
-          `INSERT INTO conversation_members (
+          `INSERT INTO social.conversation_members (
              conversation_id,
              user_id,
              member_role,
@@ -1044,7 +1164,7 @@ async function createGroupConversation(
       for (const memberUserId of memberUserIds) {
         await db
           .prepare(
-            `INSERT INTO conversation_members (
+            `INSERT INTO social.conversation_members (
                conversation_id,
                user_id,
                member_role,
@@ -1077,8 +1197,8 @@ async function readConversationAuthor(
          up.username as sender_username,
          up.full_name as sender_full_name,
          u.avatar_url as sender_avatar_url
-       FROM user_profiles up
-       LEFT JOIN users u
+         FROM core.user_profiles up
+         LEFT JOIN core.users u
          ON u.id = up.user_id
       WHERE up.user_id = ?
       LIMIT 1`,
@@ -1106,7 +1226,7 @@ async function updateConversationAfterMessage(
 ): Promise<void> {
   await db
     .prepare(
-      `UPDATE conversations
+      `UPDATE social.conversations
           SET last_message_id = ?,
               last_message_preview = ?,
               last_message_at = CURRENT_TIMESTAMP,
@@ -1142,7 +1262,7 @@ async function syncConversationSummaryAfterMutation(
          message_text,
          message_kind,
          created_at
-       FROM conversation_messages
+       FROM social.conversation_messages
       WHERE conversation_id = ?
         AND deleted_at IS NULL
       ORDER BY id DESC
@@ -1154,7 +1274,7 @@ async function syncConversationSummaryAfterMutation(
   if (latestMessage?.id) {
     await db
       .prepare(
-        `UPDATE conversations
+        `UPDATE social.conversations
             SET last_message_id = ?,
                 last_message_preview = ?,
                 last_message_at = ?,
@@ -1173,7 +1293,7 @@ async function syncConversationSummaryAfterMutation(
 
   await db
     .prepare(
-      `UPDATE conversations
+      `UPDATE social.conversations
           SET last_message_id = NULL,
               last_message_preview = NULL,
               last_message_at = NULL,
@@ -1201,7 +1321,7 @@ async function readConversationMessageForMutation(
          created_at,
          edited_at,
          deleted_at
-       FROM conversation_messages
+       FROM social.conversation_messages
       WHERE id = ?
         AND conversation_id = ?
       LIMIT 1`,
@@ -1243,13 +1363,13 @@ async function readConversationMessageById(
          m.message_kind,
          m.created_at,
          m.edited_at
-       FROM conversation_messages m
-       INNER JOIN conversation_members cm
+       FROM social.conversation_messages m
+        INNER JOIN social.conversation_members cm
          ON cm.conversation_id = m.conversation_id
         AND cm.user_id = ?
-       INNER JOIN user_profiles up
+       INNER JOIN core.user_profiles up
          ON up.user_id = m.sender_user_id
-       LEFT JOIN users u
+       LEFT JOIN core.users u
          ON u.id = m.sender_user_id
       WHERE m.id = ?
         AND m.conversation_id = ?
@@ -1269,7 +1389,7 @@ async function readConversationMessageById(
          media_kind,
          public_url,
          created_at
-       FROM conversation_message_media
+       FROM social.conversation_message_media
       WHERE message_id = ?
       ORDER BY id ASC
       LIMIT 1`,
@@ -1330,8 +1450,8 @@ async function updateConversationMessageText(
 
       const conversation = await db
         .prepare(
-          `SELECT last_message_id
-             FROM conversations
+           `SELECT last_message_id
+              FROM social.conversations
             WHERE id = ?
             LIMIT 1`,
         )
@@ -1341,7 +1461,7 @@ async function updateConversationMessageText(
       if (Number(conversation?.last_message_id ?? 0) === messageId) {
         await db
           .prepare(
-            `UPDATE conversations
+            `UPDATE social.conversations
                 SET last_message_preview = ?,
                     updated_at = CURRENT_TIMESTAMP
               WHERE id = ?`,
@@ -1382,7 +1502,7 @@ async function deleteConversationMessage(
       const mediaRows = await db
         .prepare(
           `SELECT storage_path
-             FROM conversation_message_media
+             FROM social.conversation_message_media
             WHERE message_id = ?`,
         )
         .bind(messageId)
@@ -1394,7 +1514,7 @@ async function deleteConversationMessage(
 
       await db
         .prepare(
-          `DELETE FROM conversation_message_media
+          `DELETE FROM social.conversation_message_media
             WHERE message_id = ?`,
         )
         .bind(messageId)
@@ -1434,7 +1554,7 @@ async function insertConversationMessage(
     async () => {
       const inserted = await db
         .prepare(
-          `INSERT INTO conversation_messages (
+          `INSERT INTO social.conversation_messages (
              conversation_id,
              sender_user_id,
              message_text,
@@ -1499,7 +1619,7 @@ async function insertConversationMediaMessage(
     async () => {
       const inserted = await db
         .prepare(
-          `INSERT INTO conversation_messages (
+          `INSERT INTO social.conversation_messages (
              conversation_id,
              sender_user_id,
              message_text,
@@ -1519,7 +1639,7 @@ async function insertConversationMediaMessage(
 
       const insertedMedia = await db
         .prepare(
-          `INSERT INTO conversation_message_media (
+          `INSERT INTO social.conversation_message_media (
              message_id,
              conversation_id,
              uploaded_by_user_id,
@@ -1593,6 +1713,7 @@ export function registerSocialChatRoutes(
   app.get("/api/social/hub", authMiddleware, async (c) => {
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
+    const runtimeProjectionDb = resolveRuntimeProjectionDb(c);
 
     const friendLimit = toPositiveInteger(c.req.query("friend_limit"), DEFAULT_LIST_LIMIT, MAX_LIST_LIMIT);
     const friendOffset = toOffset(c.req.query("friend_offset"));
@@ -1601,15 +1722,98 @@ export function registerSocialChatRoutes(
     c.header("Cache-Control", "no-store");
 
     try {
-      const hub = await listSocialHubBundle(c.env.fitloot_db, user.id, {
-        friendLimit,
-        friendOffset,
-        requestLimit,
-        requestOffset,
-      });
+      if (runtimeProjectionDb) {
+        try {
+          const cachedHub = await readRuntimeDashboardProjection<SocialHubBundle>(
+            runtimeProjectionDb,
+            user.id,
+            RUNTIME_SOCIAL_HUB_PROJECTION_KEY,
+            RUNTIME_SOCIAL_HUB_PROJECTION_TTL_MS,
+          );
+          if (cachedHub) {
+            return c.json(cachedHub);
+          }
+        } catch (runtimeProjectionError) {
+          console.warn("[/api/social/hub][runtime-read]", {
+            userId: user.id,
+            message: getErrorMessage(runtimeProjectionError),
+          });
+        }
+      }
+
+      const hub = await runWithTransientDatabaseRetry(() =>
+        listSocialHubBundle(c.env.fitloot_db, user.id, {
+          friendLimit,
+          friendOffset,
+          requestLimit,
+          requestOffset,
+        }),
+      );
+
+      if (runtimeProjectionDb) {
+        c.executionCtx.waitUntil(
+          upsertRuntimeDashboardProjection(
+            runtimeProjectionDb,
+            user.id,
+            RUNTIME_SOCIAL_HUB_PROJECTION_KEY,
+            hub,
+          ).catch((runtimeProjectionError) => {
+            console.warn("[/api/social/hub][runtime-write]", {
+              userId: user.id,
+              message: getErrorMessage(runtimeProjectionError),
+            });
+          }),
+        );
+      }
+
       return c.json(hub);
     } catch (error) {
+      if (runtimeProjectionDb && isTransientDatabaseError(error)) {
+        try {
+          const staleHub = await readRuntimeDashboardProjection<SocialHubBundle>(
+            runtimeProjectionDb,
+            user.id,
+            RUNTIME_SOCIAL_HUB_PROJECTION_KEY,
+            RUNTIME_SOCIAL_HUB_STALE_TTL_MS,
+          );
+          if (staleHub) {
+            console.warn("[/api/social/hub][runtime-stale-fallback]", {
+              userId: user.id,
+              message: getErrorMessage(error),
+            });
+            return c.json(staleHub);
+          }
+        } catch (runtimeProjectionError) {
+          console.warn("[/api/social/hub][runtime-stale-read]", {
+            userId: user.id,
+            message: getErrorMessage(runtimeProjectionError),
+          });
+        }
+      }
+
       console.error("[/api/social/hub]", {
+        message: getErrorMessage(error),
+        userId: user.id,
+      });
+      if (isMissingSchemaError(error)) {
+        return schemaMismatchResponse(c);
+      }
+      return internalErrorResponse(c);
+    }
+  });
+
+  app.get("/api/social/unread-summary", authMiddleware, async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+    c.header("Cache-Control", "no-store");
+
+    try {
+      const summary = await runWithTransientDatabaseRetry(() =>
+        listSocialUnreadSummary(c.env.fitloot_db, user.id),
+      );
+      return c.json(summary);
+    } catch (error) {
+      console.error("[/api/social/unread-summary]", {
         message: getErrorMessage(error),
         userId: user.id,
       });
@@ -1676,7 +1880,7 @@ export function registerSocialChatRoutes(
 
           await c.env.fitloot_db
             .prepare(
-              `DELETE FROM friendships
+              `DELETE FROM social.friendships
                 WHERE (user_id = ? AND COALESCE(friend_id, friend_user_id) = ?)
                    OR (user_id = ? AND COALESCE(friend_id, friend_user_id) = ?)`,
             )
@@ -1685,7 +1889,7 @@ export function registerSocialChatRoutes(
 
           await c.env.fitloot_db
             .prepare(
-              `UPDATE friend_requests
+              `UPDATE social.friend_requests
                   SET status = 'rejected',
                       updated_at = CURRENT_TIMESTAMP
                 WHERE ((from_user_id = ? AND to_user_id = ?) OR (from_user_id = ? AND to_user_id = ?))
@@ -2417,22 +2621,22 @@ export function registerSocialChatRoutes(
              up.full_name as sender_full_name,
              u.avatar_url as sender_avatar_url,
              latest.created_at
-           FROM conversation_members cm
-           INNER JOIN conversations c
-             ON c.id = cm.conversation_id
-           INNER JOIN conversation_messages latest
+            FROM social.conversation_members cm
+            INNER JOIN social.conversations c
+              ON c.id = cm.conversation_id
+            INNER JOIN social.conversation_messages latest
              ON latest.id = (
                SELECT MAX(m2.id)
-                 FROM conversation_messages m2
+           FROM social.conversation_messages m2
                 WHERE m2.conversation_id = c.id
                   AND m2.deleted_at IS NULL
                   AND m2.sender_user_id <> ?
                   AND m2.id > COALESCE(cm.last_notified_message_id, 0)
                   AND m2.id > COALESCE(cm.last_read_message_id, 0)
              )
-           INNER JOIN user_profiles up
+         INNER JOIN core.user_profiles up
              ON up.user_id = latest.sender_user_id
-          LEFT JOIN users u
+         LEFT JOIN core.users u
           ON u.id = latest.sender_user_id
           WHERE cm.user_id = ?
             AND (cm.notifications_muted IS NULL OR cm.notifications_muted = FALSE)
@@ -2440,19 +2644,19 @@ export function registerSocialChatRoutes(
               c.conversation_kind <> 'direct'
               OR EXISTS (
                 SELECT 1
-                  FROM conversation_members direct_peer
+                  FROM social.conversation_members direct_peer
                  WHERE direct_peer.conversation_id = c.id
                    AND direct_peer.user_id <> cm.user_id
                    AND EXISTS (
-                     SELECT 1
-                       FROM friendships f
+                      SELECT 1
+                        FROM social.friendships f
                       WHERE f.user_id = cm.user_id
                         AND COALESCE(f.friend_id, f.friend_user_id) = direct_peer.user_id
                         AND f.status = 'accepted'
                    )
                    AND NOT EXISTS (
-                     SELECT 1
-                       FROM user_blocks ub
+                      SELECT 1
+                        FROM social.user_blocks ub
                       WHERE (ub.blocker_user_id = cm.user_id AND ub.blocked_user_id = direct_peer.user_id)
                          OR (ub.blocker_user_id = direct_peer.user_id AND ub.blocked_user_id = cm.user_id)
                    )

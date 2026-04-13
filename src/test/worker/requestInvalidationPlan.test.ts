@@ -55,47 +55,96 @@ describe("resolveRequestInvalidationPlan", () => {
     });
   });
 
-  it("keeps social chat mutations route-local without broad cache invalidation", () => {
+  it("invalidates only the cached social hub projection for social mutations", () => {
     expect(
       resolveRequestInvalidationPlan("POST", "/api/social/conversations/direct"),
     ).toEqual({
       hotCachePaths: [],
-      runtimeProjectionScopes: [],
+      runtimeProjectionScopes: ["dashboard:social-hub"],
     });
 
     expect(
       resolveRequestInvalidationPlan("POST", "/api/social/groups"),
     ).toEqual({
       hotCachePaths: [],
-      runtimeProjectionScopes: [],
+      runtimeProjectionScopes: ["dashboard:social-hub"],
     });
 
     expect(
       resolveRequestInvalidationPlan("POST", "/api/social/conversations/18/messages"),
     ).toEqual({
       hotCachePaths: [],
-      runtimeProjectionScopes: [],
+      runtimeProjectionScopes: ["dashboard:social-hub"],
+    });
+
+    expect(
+      resolveRequestInvalidationPlan("PATCH", "/api/social/conversations/18/messages/44"),
+    ).toEqual({
+      hotCachePaths: [],
+      runtimeProjectionScopes: ["dashboard:social-hub"],
+    });
+
+    expect(
+      resolveRequestInvalidationPlan("DELETE", "/api/social/conversations/18/messages/44"),
+    ).toEqual({
+      hotCachePaths: [],
+      runtimeProjectionScopes: ["dashboard:social-hub"],
     });
 
     expect(
       resolveRequestInvalidationPlan("POST", "/api/social/conversations/18/media"),
     ).toEqual({
       hotCachePaths: [],
-      runtimeProjectionScopes: [],
+      runtimeProjectionScopes: ["dashboard:social-hub"],
     });
 
     expect(
       resolveRequestInvalidationPlan("POST", "/api/social/conversations/18/mute"),
     ).toEqual({
       hotCachePaths: [],
-      runtimeProjectionScopes: [],
+      runtimeProjectionScopes: ["dashboard:social-hub"],
+    });
+
+    expect(
+      resolveRequestInvalidationPlan("POST", "/api/social/conversations/18/read"),
+    ).toEqual({
+      hotCachePaths: [],
+      runtimeProjectionScopes: ["dashboard:social-hub"],
+    });
+
+    expect(
+      resolveRequestInvalidationPlan("POST", "/api/social/preferences"),
+    ).toEqual({
+      hotCachePaths: [],
+      runtimeProjectionScopes: ["dashboard:social-hub"],
     });
 
     expect(
       resolveRequestInvalidationPlan("POST", "/api/social/users/friend-9/block"),
     ).toEqual({
       hotCachePaths: [],
-      runtimeProjectionScopes: [],
+      runtimeProjectionScopes: ["dashboard:social-hub"],
+    });
+
+    expect(
+      resolveRequestInvalidationPlan("POST", "/api/social/notifications/consume"),
+    ).toEqual({
+      hotCachePaths: [],
+      runtimeProjectionScopes: ["dashboard:social-hub"],
+    });
+
+    expect(
+      resolveRequestInvalidationPlan("POST", "/api/friends/request"),
+    ).toEqual({
+      hotCachePaths: [],
+      runtimeProjectionScopes: ["dashboard:social-hub"],
+    });
+
+    expect(
+      resolveRequestInvalidationPlan("POST", "/api/friends/reject"),
+    ).toEqual({
+      hotCachePaths: [],
+      runtimeProjectionScopes: ["dashboard:social-hub"],
     });
   });
 
@@ -134,6 +183,18 @@ describe("resolveRequestInvalidationPlan", () => {
     expect(resolveRequestInvalidationPlan("POST", "/api/shop/purchase/7")).toEqual({
       hotCachePaths: "all",
       runtimeProjectionScopes: "all",
+    });
+  });
+
+  it("keeps ranking invalidation for friendship mutations while also invalidating social hub projection", () => {
+    expect(resolveRequestInvalidationPlan("POST", "/api/friends/accept")).toEqual({
+      hotCachePaths: ["/api/ranking/friends"],
+      runtimeProjectionScopes: ["dashboard:social-hub"],
+    });
+
+    expect(resolveRequestInvalidationPlan("DELETE", "/api/friends/friend-12")).toEqual({
+      hotCachePaths: ["/api/ranking/friends"],
+      runtimeProjectionScopes: ["dashboard:social-hub"],
     });
   });
 });

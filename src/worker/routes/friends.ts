@@ -158,12 +158,12 @@ async function searchVisibleUsers(
          u.avatar_url,
          pr.level,
          pr.xp
-       FROM user_profiles up
-       LEFT JOIN users u
+        FROM core.user_profiles up
+        LEFT JOIN core.users u
          ON up.user_id = u.id
-       INNER JOIN user_progression pr
+        INNER JOIN core.user_progression pr
          ON up.user_id = pr.user_id
-       LEFT JOIN social_user_preferences sup
+        LEFT JOIN social.social_user_preferences sup
          ON sup.user_id = up.user_id
       WHERE up.user_id <> ?
         AND (
@@ -173,7 +173,7 @@ async function searchVisibleUsers(
         AND (sup.allow_friend_requests IS NULL OR sup.allow_friend_requests = TRUE)
         AND NOT EXISTS (
           SELECT 1
-            FROM user_blocks ub
+             FROM social.user_blocks ub
            WHERE (ub.blocker_user_id = ? AND ub.blocked_user_id = up.user_id)
               OR (ub.blocker_user_id = up.user_id AND ub.blocked_user_id = ?)
         )
@@ -205,7 +205,7 @@ async function resolveTargetUserId(
   const target = await db
     .prepare(
       `SELECT user_id
-         FROM user_profiles
+         FROM core.user_profiles
         WHERE username = ?
           AND user_id <> ?
         LIMIT 1`,
@@ -299,8 +299,8 @@ export function registerFriendsRoutes(
 
     const existingFriend = await c.env.fitloot_db
       .prepare(
-        `SELECT id
-           FROM friendships
+         `SELECT id
+            FROM social.friendships
           WHERE (user_id = ? AND COALESCE(friend_id, friend_user_id) = ?)
              OR (user_id = ? AND COALESCE(friend_id, friend_user_id) = ?)
           LIMIT 1`,
@@ -313,8 +313,8 @@ export function registerFriendsRoutes(
 
     const existingRequest = await c.env.fitloot_db
       .prepare(
-        `SELECT id
-           FROM friend_requests
+         `SELECT id
+            FROM social.friend_requests
           WHERE ((from_user_id = ? AND to_user_id = ?) OR (from_user_id = ? AND to_user_id = ?))
             AND status = 'pending'
           LIMIT 1`,
@@ -327,7 +327,7 @@ export function registerFriendsRoutes(
 
     await c.env.fitloot_db
       .prepare(
-        `INSERT INTO friend_requests (
+        `INSERT INTO social.friend_requests (
            from_user_id,
            to_user_id,
            status,
@@ -355,8 +355,8 @@ export function registerFriendsRoutes(
 
     const request = await c.env.fitloot_db
       .prepare(
-        `SELECT id, from_user_id, to_user_id
-           FROM friend_requests
+         `SELECT id, from_user_id, to_user_id
+            FROM social.friend_requests
           WHERE id = ?
             AND to_user_id = ?
             AND status = 'pending'
@@ -383,7 +383,7 @@ export function registerFriendsRoutes(
       async () => {
         await c.env.fitloot_db
           .prepare(
-            `UPDATE friend_requests
+            `UPDATE social.friend_requests
                 SET status = 'accepted',
                     updated_at = CURRENT_TIMESTAMP
               WHERE id = ?`,
@@ -452,7 +452,7 @@ export function registerFriendsRoutes(
 
     await c.env.fitloot_db
       .prepare(
-        `UPDATE friend_requests
+        `UPDATE social.friend_requests
             SET status = 'rejected',
                 updated_at = CURRENT_TIMESTAMP
           WHERE id = ?
@@ -475,7 +475,7 @@ export function registerFriendsRoutes(
 
     await c.env.fitloot_db
       .prepare(
-        `DELETE FROM friendships
+        `DELETE FROM social.friendships
           WHERE (user_id = ? AND COALESCE(friend_id, friend_user_id) = ?)
              OR (user_id = ? AND COALESCE(friend_id, friend_user_id) = ?)`,
       )

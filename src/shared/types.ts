@@ -582,6 +582,23 @@ export type SocialChatNotification = z.infer<
   typeof SocialChatNotificationSchema
 >;
 
+export const SocialUnreadConversationSummarySchema = z.object({
+  conversation_id: z.number().int().positive(),
+  unread_count: z.number().int().nonnegative(),
+  direct_peer_user_id: z.string().nullable().optional(),
+});
+
+export type SocialUnreadConversationSummary = z.infer<
+  typeof SocialUnreadConversationSummarySchema
+>;
+
+export const SocialUnreadSummarySchema = z.object({
+  total_unread_count: z.number().int().nonnegative(),
+  conversations: z.array(SocialUnreadConversationSummarySchema),
+});
+
+export type SocialUnreadSummary = z.infer<typeof SocialUnreadSummarySchema>;
+
 export const ConsumeSocialChatNotificationsRequestSchema = z.object({
   items: z.array(
     z.object({

@@ -22,6 +22,7 @@ import type {
   SocialHubBundle,
   SocialHubFriendItem,
   SocialHubFriendRequest,
+  SocialUnreadSummary,
   SocialUserPreferences,
   SocialUserPreferencesUpdateRequest,
 } from "@/shared/types";
@@ -56,6 +57,7 @@ const conversationsCache = new Map<string, ConversationCacheEntry>();
 const inflightConversationRequests = new Map<string, Promise<SocialConversationPreview[]>>();
 let socialHubCache: HubCacheEntry | null = null;
 let inflightSocialHubRequest: Promise<SocialHubBundle> | null = null;
+let inflightSocialUnreadSummaryRequest: Promise<SocialUnreadSummary> | null = null;
 
 function isUnauthorized(status: number): boolean {
   return status === 401 || status === 403;
@@ -172,6 +174,28 @@ function normalizeNotification(notification: SocialChatNotification): SocialChat
     message_id: toNonNegativeNumber(notification.message_id),
     sender_avatar_url: toTrimmedString(notification.sender_avatar_url) ?? null,
     message_text: typeof notification.message_text === "string" ? notification.message_text : "",
+  };
+}
+
+function normalizeUnreadSummary(summary: SocialUnreadSummary): SocialUnreadSummary {
+  const conversations = Array.isArray(summary.conversations)
+    ? summary.conversations
+        .map((conversation) => ({
+          conversation_id: toNonNegativeNumber(conversation.conversation_id),
+          unread_count: toNonNegativeNumber(conversation.unread_count),
+          direct_peer_user_id: toTrimmedString(conversation.direct_peer_user_id) ?? null,
+        }))
+        .filter((conversation) => conversation.conversation_id > 0 && conversation.unread_count > 0)
+    : [];
+
+  const totalUnreadCount = conversations.reduce(
+    (total, conversation) => total + conversation.unread_count,
+    0,
+  );
+
+  return {
+    total_unread_count: totalUnreadCount,
+    conversations,
   };
 }
 
@@ -639,6 +663,25 @@ export async function fetchPendingSocialChatNotifications(
   } catch (error) {
     parseSocialChatApiError(error);
   }
+}
+
+export async function fetchSocialUnreadSummary(): Promise<SocialUnreadSummary> {
+  if (inflightSocialUnreadSummaryRequest) {
+    return inflightSocialUnreadSummaryRequest;
+  }
+
+  inflightSocialUnreadSummaryRequest = fetchJson<SocialUnreadSummary>("/api/social/unread-summary", {
+    orchestrationKey: "social-chat:unread-summary",
+    orchestrationPolicy: "join",
+    requestClass: "background",
+  })
+    .then((payload) => normalizeUnreadSummary(payload))
+    .catch((error) => parseSocialChatApiError(error))
+    .finally(() => {
+      inflightSocialUnreadSummaryRequest = null;
+    });
+
+  return inflightSocialUnreadSummaryRequest;
 }
 
 export async function consumePendingSocialChatNotifications(

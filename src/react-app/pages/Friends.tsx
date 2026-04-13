@@ -80,7 +80,7 @@ import type {
   SocialUserPreferences,
 } from "@/shared/types";
 
-const HUB_REFRESH_INTERVAL_MS = 20_000;
+const HUB_REFRESH_INTERVAL_MS = 30_000;
 const ACTIVE_CONVERSATION_REFRESH_INTERVAL_MS = 2_500;
 const MAX_ACTIVE_CONVERSATION_REFRESH_INTERVAL_MS = 15_000;
 const SEARCH_DEBOUNCE_MS = 280;
@@ -107,6 +107,7 @@ type HeaderIconButtonProps = {
 
 type FriendRowProps = {
   friend: SocialHubFriendItem;
+  unreadCount: number;
   active: boolean;
   busy: boolean;
   onClick: () => void;
@@ -114,6 +115,7 @@ type FriendRowProps = {
 
 type GroupConversationRowProps = {
   conversation: SocialConversationPreview;
+  unreadCount: number;
   active: boolean;
   onClick: () => void;
 };
@@ -674,7 +676,7 @@ function ConversationListItem({
   );
 }
 
-function FriendRow({ friend, active, busy, onClick }: FriendRowProps) {
+function FriendRow({ friend, unreadCount, active, busy, onClick }: FriendRowProps) {
   return (
     <ConversationListItem
       avatarSrc={friend.friend_avatar_url}
@@ -682,7 +684,7 @@ function FriendRow({ friend, active, busy, onClick }: FriendRowProps) {
       title={getFriendDisplayName(friend)}
       subtitle={friend.last_message_preview?.trim() || `@${friend.friend_username}`}
       timestamp={friend.last_message_at}
-      unreadCount={friend.unread_count}
+      unreadCount={unreadCount}
       active={active}
       busy={busy}
       showPresence
@@ -692,7 +694,7 @@ function FriendRow({ friend, active, busy, onClick }: FriendRowProps) {
   );
 }
 
-function GroupConversationRow({ conversation, active, onClick }: GroupConversationRowProps) {
+function GroupConversationRow({ conversation, unreadCount, active, onClick }: GroupConversationRowProps) {
   return (
     <ConversationListItem
       avatarSrc={conversation.avatar_url}
@@ -700,7 +702,7 @@ function GroupConversationRow({ conversation, active, onClick }: GroupConversati
       title={getGroupDisplayName(conversation)}
       subtitle={conversation.last_message_preview?.trim() || `${conversation.member_count} membros`}
       timestamp={conversation.last_message_at}
-      unreadCount={conversation.unread_count}
+      unreadCount={unreadCount}
       active={active}
       onClick={onClick}
     />
@@ -1131,7 +1133,13 @@ function ConversationBubble({ layout, onOpenActions }: ConversationBubbleProps) 
 
 export default function Friends() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const { pendingByConversationId, refreshSocialChatNotifications } = useSocialChatNotifications();
+  const {
+    unreadByConversationId,
+    unreadByDirectPeerUserId,
+    hasLoadedUnreadState,
+    clearConversationUnread,
+    refreshSocialChatNotifications,
+  } = useSocialChatNotifications();
   const androidHost = isAndroidHost();
   const requestedConversationId = parseConversationId(searchParams.get("conversationId"));
 
@@ -1187,7 +1195,6 @@ export default function Friends() {
     groupConversationId: null,
   });
   const conversationRefreshInFlightRef = useRef<Map<number, Promise<void>>>(new Map());
-  const pendingConversationSignatureRef = useRef("");
 
   const sortedFriends = useMemo(() => sortHubFriends(hub.friends), [hub.friends]);
   const sortedGroups = useMemo(() => sortHubGroups(hub.groups), [hub.groups]);
@@ -1251,10 +1258,17 @@ export default function Friends() {
 
   const conversationEntries = useMemo<ConversationListEntry[]>(() => {
     const directEntries: ConversationListEntry[] = filteredFriends.map((friend) => {
-      const pendingUnreadCount =
+      const unreadCountFromState =
         typeof friend.direct_conversation_id === "number"
-          ? Math.max(0, pendingByConversationId[friend.direct_conversation_id] ?? 0)
+          ? Math.max(0, unreadByConversationId[friend.direct_conversation_id] ?? 0)
           : 0;
+      const unreadCountFromPeerState = Math.max(
+        0,
+        unreadByDirectPeerUserId[friend.friend_user_id] ?? 0,
+      );
+      const unreadCount = hasLoadedUnreadState
+        ? Math.max(unreadCountFromState, unreadCountFromPeerState)
+        : Math.max(0, friend.unread_count);
 
       return {
         kind: "direct",
@@ -1262,7 +1276,7 @@ export default function Friends() {
         title: getFriendDisplayName(friend),
         subtitle: friend.last_message_preview?.trim() || `@${friend.friend_username}`,
         timestamp: friend.last_message_at,
-        unreadCount: Math.max(friend.unread_count, pendingUnreadCount),
+        unreadCount,
         active: friend.friend_user_id === activeFriend?.friend_user_id,
         busy: openingConversationUserId === friend.friend_user_id,
         avatarSrc: friend.friend_avatar_url,
@@ -1274,7 +1288,10 @@ export default function Friends() {
     });
 
     const groupEntries: ConversationListEntry[] = filteredGroups.map((conversation) => {
-      const pendingUnreadCount = Math.max(0, pendingByConversationId[conversation.id] ?? 0);
+      const unreadCountFromState = Math.max(0, unreadByConversationId[conversation.id] ?? 0);
+      const unreadCount = hasLoadedUnreadState
+        ? unreadCountFromState
+        : Math.max(0, conversation.unread_count);
 
       return {
         kind: "group",
@@ -1282,7 +1299,7 @@ export default function Friends() {
         title: getGroupDisplayName(conversation),
         subtitle: conversation.last_message_preview?.trim() || `${conversation.member_count} membros`,
         timestamp: conversation.last_message_at,
-        unreadCount: Math.max(conversation.unread_count, pendingUnreadCount),
+        unreadCount,
         active: conversation.id === activeGroup?.id,
         busy: false,
         avatarSrc: conversation.avatar_url,
@@ -1299,18 +1316,19 @@ export default function Friends() {
       if (left.unreadCount !== right.unreadCount) return right.unreadCount - left.unreadCount;
       return left.title.localeCompare(right.title, "pt-BR", { sensitivity: "base" });
     });
-  }, [activeFriend, activeGroup, filteredFriends, filteredGroups, openingConversationUserId, pendingByConversationId]);
+  }, [
+    activeFriend,
+    activeGroup,
+    filteredFriends,
+    filteredGroups,
+    hasLoadedUnreadState,
+    openingConversationUserId,
+    unreadByConversationId,
+    unreadByDirectPeerUserId,
+  ]);
   const messageBubbleLayouts = useMemo(
     () => buildConversationBubbleLayouts(messages),
     [messages],
-  );
-  const pendingConversationSignature = useMemo(
-    () =>
-      Object.entries(pendingByConversationId)
-        .sort(([left], [right]) => Number(left) - Number(right))
-        .map(([conversationId, count]) => `${conversationId}:${count}`)
-        .join("|"),
-    [pendingByConversationId],
   );
   const editingMessage = useMemo(
     () => messages.find((message) => message.id === editingMessageId) ?? null,
@@ -1361,7 +1379,8 @@ export default function Friends() {
     setActionsMenuAnchor(null);
     setMediaModalOpen(false);
     setConversationParam(null);
-  }, [setConversationParam]);
+    void refreshSocialChatNotifications({ force: true });
+  }, [refreshSocialChatNotifications, setConversationParam]);
 
   const toggleActionsMenu = useCallback((anchor: ActionsMenuAnchor) => {
     setActionsMenuAnchor((current) => (current === anchor ? null : anchor));
@@ -1495,6 +1514,7 @@ export default function Friends() {
                   return;
                 }
 
+                clearConversationUnread(conversationId);
                 setHub((current) => {
                   if (friendUserId) {
                     return updateHubFriend(current, friendUserId, (friend) => ({
@@ -1560,6 +1580,7 @@ export default function Friends() {
     await refreshTask;
   }, [
     applyServiceError,
+    clearConversationUnread,
     handleServiceError,
     isCurrentConversationContext,
     refreshSocialChatNotifications,
@@ -1568,6 +1589,7 @@ export default function Friends() {
 
   const openFriendConversation = useCallback(async (friend: SocialHubFriendItem) => {
     if (friend.direct_conversation_id) {
+      clearConversationUnread(friend.direct_conversation_id);
       startTransition(() => {
         setSelectedFriendUserId(friend.friend_user_id);
         setSelectedGroupConversationId(null);
@@ -1585,6 +1607,7 @@ export default function Friends() {
       const conversation = await startDirectSocialConversation({
         friend_user_id: friend.friend_user_id,
       });
+      clearConversationUnread(conversation.id);
 
       setHub((current) =>
         applyConversationPreviewToFriend(current, friend.friend_user_id, conversation),
@@ -1603,9 +1626,10 @@ export default function Friends() {
         current === friend.friend_user_id ? null : current,
       );
     }
-  }, [applyServiceError, scrollMessagesToBottom, setConversationParam]);
+  }, [applyServiceError, clearConversationUnread, scrollMessagesToBottom, setConversationParam]);
 
   const openGroupConversation = useCallback((conversation: SocialConversationPreview) => {
+    clearConversationUnread(conversation.id);
     startTransition(() => {
       setSelectedFriendUserId(null);
       setSelectedGroupConversationId(conversation.id);
@@ -1613,7 +1637,7 @@ export default function Friends() {
     setConversationParam(conversation.id);
     setActionsMenuAnchor(null);
     scrollMessagesToBottom();
-  }, [scrollMessagesToBottom, setConversationParam]);
+  }, [clearConversationUnread, scrollMessagesToBottom, setConversationParam]);
 
   const loadConversationMedia = useCallback(async () => {
     if (!activeConversationId) return;
@@ -1632,14 +1656,14 @@ export default function Friends() {
   }, [activeConversationId, applyServiceError]);
 
   useEffect(() => {
-    void loadHub(true);
+    void loadHub();
   }, [loadHub]);
 
   useEffect(() => {
     const refreshVisibleHub = () => {
       if (document.visibilityState !== "visible") return;
       if (activeConversationId) return;
-      void loadHub(true);
+      void loadHub();
     };
 
     const intervalId = window.setInterval(() => {
@@ -1655,21 +1679,6 @@ export default function Friends() {
       document.removeEventListener("visibilitychange", refreshVisibleHub);
     };
   }, [activeConversationId, loadHub]);
-
-  useEffect(() => {
-    if (activeConversationId) {
-      pendingConversationSignatureRef.current = pendingConversationSignature;
-      return;
-    }
-
-    const previousSignature = pendingConversationSignatureRef.current;
-    pendingConversationSignatureRef.current = pendingConversationSignature;
-
-    if (previousSignature === pendingConversationSignature) return;
-    if (document.visibilityState !== "visible") return;
-
-    void loadHub(true);
-  }, [activeConversationId, loadHub, pendingConversationSignature]);
 
   useEffect(() => {
     if (requestedConversationId === null) {
@@ -2548,6 +2557,7 @@ export default function Friends() {
                       <FriendRow
                         key={entry.key}
                         friend={entry.friend}
+                        unreadCount={entry.unreadCount}
                         active={entry.active}
                         busy={entry.busy}
                         onClick={() => {
@@ -2558,6 +2568,7 @@ export default function Friends() {
                       <GroupConversationRow
                         key={entry.key}
                         conversation={entry.conversation}
+                        unreadCount={entry.unreadCount}
                         active={entry.active}
                         onClick={() => {
                           openGroupConversation(entry.conversation);

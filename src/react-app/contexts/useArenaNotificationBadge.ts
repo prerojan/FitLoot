@@ -5,15 +5,15 @@ import { useSocialChatNotifications } from "@/react-app/contexts/useSocialChatNo
 
 export function useArenaNotificationBadge() {
   const { pendingCount: rewardPendingCount } = useRewardNotifications();
-  const { pendingCount: socialPendingCount } = useSocialChatNotifications();
+  const { unreadCount: socialUnreadCount } = useSocialChatNotifications();
 
   return useMemo(() => {
-    const totalCount = Math.max(0, rewardPendingCount) + Math.max(0, socialPendingCount);
+    const totalCount = Math.max(0, rewardPendingCount) + Math.max(0, socialUnreadCount);
     return {
       totalCount,
       hasPending: totalCount > 0,
     };
-  }, [rewardPendingCount, socialPendingCount]);
+  }, [rewardPendingCount, socialUnreadCount]);
 }
 
 export default useArenaNotificationBadge;

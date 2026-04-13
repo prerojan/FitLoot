@@ -218,25 +218,25 @@ export default function DesktopAppNavbar({
                   onClick={() => {
                     void navigateProtectedRoute(navigate, item.path);
                   }}
-                  className="flex items-center gap-2 rounded-2xl px-3 py-3 text-sm font-bold transition-colors hover:opacity-85 lg:px-4"
+                  className="relative flex items-center gap-2 rounded-2xl px-3 py-3 text-sm font-bold transition-colors hover:opacity-85 lg:px-4"
                   style={isActive ? {
                     background: "var(--app-primary-color)",
                     color: "var(--fl-nav-item-active-text)",
                     boxShadow: "0 0 22px color-mix(in srgb, var(--app-primary-color) 34%, transparent)",
                   } : { color: "var(--fl-nav-item-muted)" }}
                 >
-                  <span className="relative flex h-5 w-5 shrink-0 items-center justify-center">
+                  <span className="flex h-5 w-5 shrink-0 items-center justify-center">
                     <MaterialIcon name={item.icon} filled={isActive} className="text-xl" />
-                    {item.path === ROUTE_PATHS.minigames && hasPending ? (
-                      <span
-                        className="absolute right-[1px] top-[1px] h-2.5 w-2.5 rounded-full"
-                        style={{
-                          backgroundColor: isActive ? "var(--fl-nav-item-active-text)" : "var(--app-primary-color)",
-                          boxShadow: "0 0 16px color-mix(in srgb, var(--app-primary-color) 34%, transparent)",
-                        }}
-                      />
-                    ) : null}
                   </span>
+                  {item.path === ROUTE_PATHS.minigames && hasPending ? (
+                    <span
+                      className="absolute right-2.5 top-2.5 h-2.5 w-2.5 rounded-full lg:right-3 lg:top-3"
+                      style={{
+                        backgroundColor: isActive ? "var(--fl-nav-item-active-text)" : "var(--app-primary-color)",
+                        boxShadow: "0 0 16px color-mix(in srgb, var(--app-primary-color) 34%, transparent)",
+                      }}
+                    />
+                  ) : null}
                   <span className="hidden lg:inline">{item.label}</span>
                 </button>
               );

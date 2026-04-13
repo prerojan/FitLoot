@@ -35,21 +35,21 @@ export default function BottomNav({ active }: BottomNavProps) {
                 onClick={() => {
                   void navigateProtectedRoute(navigate, path);
                 }}
-                className={`fl-bottom-nav-item ${isActive ? "fl-bottom-nav-item-active" : ""}`}
+                className={`relative fl-bottom-nav-item ${isActive ? "fl-bottom-nav-item-active" : ""}`}
                 aria-label={label}
               >
-                <span className="relative flex h-5 w-5 shrink-0 items-center justify-center">
+                <span className="flex h-5 w-5 shrink-0 items-center justify-center">
                   <Icon className="h-5 w-5 shrink-0" />
-                  {id === "arena" && hasPending ? (
-                    <span
-                      className="absolute right-[1px] top-[1px] h-2.5 w-2.5 rounded-full"
-                      style={{
-                        backgroundColor: "var(--app-primary-color)",
-                        boxShadow: "0 0 16px color-mix(in srgb, var(--app-primary-color) 36%, transparent)",
-                      }}
-                    />
-                  ) : null}
                 </span>
+                {id === "arena" && hasPending ? (
+                  <span
+                    className="absolute right-2 top-2 h-2.5 w-2.5 rounded-full"
+                    style={{
+                      backgroundColor: "var(--app-primary-color)",
+                      boxShadow: "0 0 16px color-mix(in srgb, var(--app-primary-color) 36%, transparent)",
+                    }}
+                  />
+                ) : null}
                 <span className="fl-bottom-nav-label truncate">{label}</span>
               </button>
             );

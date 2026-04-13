@@ -16,50 +16,119 @@ import { isAndroidHost } from "@/react-app/services/runtime/hostRuntime";
 import {
   consumePendingSocialChatNotifications,
   fetchPendingSocialChatNotifications,
+  fetchSocialUnreadSummary,
   SocialChatApiError,
 } from "@/react-app/services/socialChatService";
 import { navigateProtectedRoute } from "@/react-app/services/appNavigation";
 import { isExpectedApiCancellation } from "@/react-app/utils/api";
-import type { SocialChatNotification } from "@/shared/types";
+import type { SocialChatNotification, SocialUnreadSummary } from "@/shared/types";
 import { SocialChatNotificationsContext } from "@/react-app/contexts/socialChatNotificationsContext";
 
 const TOAST_DURATION_MS = 5_000;
-const INITIAL_REFRESH_DELAY_MS = 700;
-const MIN_REFRESH_INTERVAL_MS = 6_000;
-const POLL_INTERVAL_MS = 8_000;
+const INITIAL_REFRESH_DELAY_MS = 350;
+const MIN_REFRESH_INTERVAL_MS = 2_500;
+const POLL_INTERVAL_MS = 4_000;
+const MAX_POLL_INTERVAL_MS = 16_000;
 const MAX_PENDING_NOTIFICATIONS = 10;
+const EMPTY_UNREAD_SUMMARY: SocialUnreadSummary = {
+  total_unread_count: 0,
+  conversations: [],
+};
 
 function buildNotificationKey(notification: Pick<SocialChatNotification, "conversation_id" | "message_id">): string {
   return `${notification.conversation_id}:${notification.message_id}`;
 }
 
-function countVisiblePendingNotifications(
-  notifications: readonly SocialChatNotification[],
+function countVisibleUnreadMessages(
+  summary: SocialUnreadSummary,
   activeConversationId: number | null,
 ): number {
   if (activeConversationId === null) {
-    return notifications.length;
+    return summary.total_unread_count;
   }
 
-  return notifications.reduce((count, notification) => (
-    notification.conversation_id === activeConversationId ? count : count + 1
-  ), 0);
+  return summary.conversations.reduce(
+    (count, conversation) => (
+      conversation.conversation_id === activeConversationId
+        ? count
+        : count + conversation.unread_count
+    ),
+    0,
+  );
 }
 
-function buildVisiblePendingConversationMap(
-  notifications: readonly SocialChatNotification[],
+function buildVisibleUnreadConversationMap(
+  summary: SocialUnreadSummary,
   activeConversationId: number | null,
 ): Record<number, number> {
   const conversationMap: Record<number, number> = {};
 
-  for (const notification of notifications) {
-    if (activeConversationId !== null && notification.conversation_id === activeConversationId) {
+  for (const conversation of summary.conversations) {
+    if (activeConversationId !== null && conversation.conversation_id === activeConversationId) {
       continue;
     }
-    conversationMap[notification.conversation_id] = (conversationMap[notification.conversation_id] ?? 0) + 1;
+    conversationMap[conversation.conversation_id] = Math.max(0, conversation.unread_count);
   }
 
   return conversationMap;
+}
+
+function buildVisibleUnreadDirectPeerMap(
+  summary: SocialUnreadSummary,
+  activeConversationId: number | null,
+): Record<string, number> {
+  const peerMap: Record<string, number> = {};
+
+  for (const conversation of summary.conversations) {
+    if (activeConversationId !== null && conversation.conversation_id === activeConversationId) {
+      continue;
+    }
+
+    const peerUserId =
+      typeof conversation.direct_peer_user_id === "string" && conversation.direct_peer_user_id.trim().length > 0
+        ? conversation.direct_peer_user_id.trim()
+        : null;
+    if (!peerUserId) {
+      continue;
+    }
+
+    peerMap[peerUserId] = Math.max(0, conversation.unread_count);
+  }
+
+  return peerMap;
+}
+
+function clearConversationUnreadFromSummary(
+  summary: SocialUnreadSummary,
+  conversationId: number,
+): SocialUnreadSummary {
+  if (!Number.isFinite(conversationId) || conversationId <= 0) {
+    return summary;
+  }
+
+  let totalUnreadCount = summary.total_unread_count;
+  let changed = false;
+  const conversations = summary.conversations.flatMap((conversation) => {
+    if (conversation.conversation_id !== conversationId) {
+      return [conversation];
+    }
+    if (conversation.unread_count <= 0) {
+      return [conversation];
+    }
+
+    totalUnreadCount = Math.max(0, totalUnreadCount - conversation.unread_count);
+    changed = true;
+    return [];
+  });
+
+  if (!changed) {
+    return summary;
+  }
+
+  return {
+    total_unread_count: totalUnreadCount,
+    conversations,
+  };
 }
 
 function resolveActiveConversationId(pathname: string, search: string): number | null {
@@ -90,14 +159,27 @@ export function SocialChatNotificationsProvider({
   const navigate = useNavigate();
   const location = useLocation();
   const [queue, setQueue] = useState<SocialChatNotification[]>([]);
-  const [pendingCount, setPendingCount] = useState(0);
-  const [pendingByConversationId, setPendingByConversationId] = useState<Record<number, number>>({});
+  const [unreadSummary, setUnreadSummary] = useState<SocialUnreadSummary | null>(null);
+  const [pollIntervalMs, setPollIntervalMs] = useState(POLL_INTERVAL_MS);
   const processedKeysRef = useRef<Set<string>>(new Set());
   const refreshInFlightRef = useRef<Promise<void> | null>(null);
   const lastRefreshAtRef = useRef(0);
   const activeConversationId = resolveActiveConversationId(location.pathname, location.search);
   const isSocialHubRoute = location.pathname === ROUTE_PATHS.friends;
   const previousIsSocialHubRouteRef = useRef(isSocialHubRoute);
+  const unreadCount = useMemo(
+    () => countVisibleUnreadMessages(unreadSummary ?? EMPTY_UNREAD_SUMMARY, activeConversationId),
+    [activeConversationId, unreadSummary],
+  );
+  const unreadByConversationId = useMemo(
+    () => buildVisibleUnreadConversationMap(unreadSummary ?? EMPTY_UNREAD_SUMMARY, activeConversationId),
+    [activeConversationId, unreadSummary],
+  );
+  const unreadByDirectPeerUserId = useMemo(
+    () => buildVisibleUnreadDirectPeerMap(unreadSummary ?? EMPTY_UNREAD_SUMMARY, activeConversationId),
+    [activeConversationId, unreadSummary],
+  );
+  const hasLoadedUnreadState = unreadSummary !== null;
 
   const consumeNotifications = useCallback(async (notifications: readonly SocialChatNotification[]) => {
     if (notifications.length === 0) return;
@@ -167,22 +249,37 @@ export function SocialChatNotificationsProvider({
 
     const refreshTask = (async () => {
       try {
-        const notifications = await fetchPendingSocialChatNotifications(MAX_PENDING_NOTIFICATIONS);
+        const nextUnreadSummary = await fetchSocialUnreadSummary();
         lastRefreshAtRef.current = Date.now();
-        setPendingCount(countVisiblePendingNotifications(notifications, activeConversationId));
-        setPendingByConversationId(buildVisiblePendingConversationMap(notifications, activeConversationId));
-        pushSocialChatNotifications(notifications);
+        setUnreadSummary(nextUnreadSummary);
+        setPollIntervalMs(POLL_INTERVAL_MS);
+
+        if (!androidHost && !isSocialHubRoute) {
+          try {
+            const notifications = await fetchPendingSocialChatNotifications(MAX_PENDING_NOTIFICATIONS);
+            pushSocialChatNotifications(notifications);
+          } catch (error) {
+            if (isExpectedApiCancellation(error)) {
+              return;
+            }
+            if (error instanceof SocialChatApiError && error.code === "UNAUTHORIZED") {
+              return;
+            }
+            console.error("Error loading social chat notifications:", error);
+          }
+        }
       } catch (error) {
         if (isExpectedApiCancellation(error)) {
           return;
         }
         if (error instanceof SocialChatApiError && error.code === "UNAUTHORIZED") {
           setQueue([]);
-          setPendingCount(0);
-          setPendingByConversationId({});
+          setUnreadSummary(EMPTY_UNREAD_SUMMARY);
+          setPollIntervalMs(POLL_INTERVAL_MS);
           return;
         }
-        console.error("Error loading social chat notifications:", error);
+        setPollIntervalMs((current) => Math.min(current * 2, MAX_POLL_INTERVAL_MS));
+        console.error("Error loading social unread summary:", error);
       } finally {
         refreshInFlightRef.current = null;
       }
@@ -190,13 +287,19 @@ export function SocialChatNotificationsProvider({
 
     refreshInFlightRef.current = refreshTask;
     await refreshTask;
-  }, [activeConversationId, isSocialHubRoute, pushSocialChatNotifications, user]);
+  }, [androidHost, isSocialHubRoute, pushSocialChatNotifications, user]);
+
+  const clearConversationUnread = useCallback((conversationId: number) => {
+    setUnreadSummary((current) => (
+      current ? clearConversationUnreadFromSummary(current, conversationId) : current
+    ));
+  }, []);
 
   useEffect(() => {
     if (!user) {
       setQueue([]);
-      setPendingCount(0);
-      setPendingByConversationId({});
+      setUnreadSummary(null);
+      setPollIntervalMs(POLL_INTERVAL_MS);
       processedKeysRef.current = new Set();
       refreshInFlightRef.current = null;
       lastRefreshAtRef.current = 0;
@@ -213,7 +316,7 @@ export function SocialChatNotificationsProvider({
     const intervalId = window.setInterval(() => {
       if (document.visibilityState !== "visible") return;
       void refreshSocialChatNotifications();
-    }, POLL_INTERVAL_MS);
+    }, pollIntervalMs);
 
     const handleVisibilityRefresh = () => {
       if (document.visibilityState !== "visible") return;
@@ -229,7 +332,7 @@ export function SocialChatNotificationsProvider({
       window.removeEventListener("focus", handleVisibilityRefresh);
       document.removeEventListener("visibilitychange", handleVisibilityRefresh);
     };
-  }, [isSocialHubRoute, refreshSocialChatNotifications, user]);
+  }, [isSocialHubRoute, pollIntervalMs, refreshSocialChatNotifications, user]);
 
   useEffect(() => {
     if (!user) return;
@@ -277,12 +380,23 @@ export function SocialChatNotificationsProvider({
 
   const contextValue = useMemo(
     () => ({
-      pendingCount,
-      pendingByConversationId,
+      unreadCount,
+      unreadByConversationId,
+      unreadByDirectPeerUserId,
+      hasLoadedUnreadState,
       pushSocialChatNotifications,
+      clearConversationUnread,
       refreshSocialChatNotifications,
     }),
-    [pendingByConversationId, pendingCount, pushSocialChatNotifications, refreshSocialChatNotifications],
+    [
+      clearConversationUnread,
+      hasLoadedUnreadState,
+      pushSocialChatNotifications,
+      refreshSocialChatNotifications,
+      unreadByConversationId,
+      unreadByDirectPeerUserId,
+      unreadCount,
+    ],
   );
 
   return (

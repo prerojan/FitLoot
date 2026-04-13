@@ -248,7 +248,7 @@ describe("sessionAuth", () => {
       executionCtx,
     );
     expect(bootstrapResponse.status).toBe(200);
-    expect(getUserAuthRecordById).toHaveBeenCalledTimes(1);
+    expect(getUserAuthRecordById).toHaveBeenCalledTimes(0);
 
     const protectedResponse = await app.fetch(
       new Request("http://localhost/api/protected", {
@@ -270,7 +270,7 @@ describe("sessionAuth", () => {
         payment_method: "card",
       },
     });
-    expect(getUserAuthRecordById).toHaveBeenCalledTimes(1);
+    expect(getUserAuthRecordById).toHaveBeenCalledTimes(0);
     expect(
       runtimeCalls.some(
         (call) =>
@@ -361,6 +361,189 @@ describe("sessionAuth", () => {
       expect(getUserAuthRecordById).toHaveBeenCalledTimes(1);
 
       await flush();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("reuses fresh runtime auth snapshots across middleware instances before hitting primary auth queries again", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-12T12:00:00.000Z"));
+
+    try {
+      const { db, calls } = createMockD1Database([
+        {
+          match:
+            "SELECT id, user_id, expires_at FROM sessions WHERE id = ? AND expires_at > CURRENT_TIMESTAMP",
+          first: {
+            id: "session-1",
+            user_id: TEST_USER.id,
+            expires_at: "2099-01-01T00:00:00.000Z",
+          },
+        },
+      ]);
+      (db as D1Database & { __backend?: string }).__backend = "supabase";
+
+      const runtimeSessions = new Map<
+        string,
+        { id: string; user_id: string; updated_at: string; expires_at: string }
+      >();
+      const runtimeUsers = new Map<
+        string,
+        {
+          user_id: string;
+          email: string;
+          username: string | null;
+          name: string;
+          avatar_url: string | null;
+          onboarding_completed: number;
+          plan_id: string;
+          plan_status: string;
+          payment_method: string;
+          updated_at: string;
+        }
+      >();
+
+      const { db: runtimeDb } = createMockD1Database([
+        {
+          match: "CREATE TABLE IF NOT EXISTS runtime_sessions",
+          run: { success: true, meta: {} },
+        },
+        {
+          match: "CREATE INDEX IF NOT EXISTS idx_runtime_sessions_expires_at ON runtime_sessions(expires_at)",
+          run: { success: true, meta: {} },
+        },
+        {
+          match: "SELECT id, user_id, updated_at FROM runtime_sessions WHERE id = ? AND expires_at > datetime('now')",
+          first: ([sessionId]) => runtimeSessions.get(String(sessionId)) ?? null,
+        },
+        {
+          match: "INSERT INTO runtime_sessions (id, user_id, expires_at, updated_at)",
+          run: ([id, userId, expiresAt]) => {
+            runtimeSessions.set(String(id), {
+              id: String(id),
+              user_id: String(userId),
+              expires_at: String(expiresAt),
+              updated_at: new Date().toISOString(),
+            });
+            return { success: true, meta: { changes: 1 } };
+          },
+        },
+        {
+          match: "CREATE TABLE IF NOT EXISTS runtime_user_auth_cache",
+          run: { success: true, meta: {} },
+        },
+        {
+          match: "PRAGMA table_info('runtime_user_auth_cache')",
+          all: [{ name: "user_id" }, { name: "email" }, { name: "username" }],
+        },
+        {
+          match:
+            "CREATE INDEX IF NOT EXISTS idx_runtime_user_auth_updated_at ON runtime_user_auth_cache(updated_at)",
+          run: { success: true, meta: {} },
+        },
+        {
+          match:
+            "CREATE INDEX IF NOT EXISTS idx_runtime_user_auth_email_lower ON runtime_user_auth_cache(lower(email))",
+          run: { success: true, meta: {} },
+        },
+        {
+          match:
+            "CREATE INDEX IF NOT EXISTS idx_runtime_user_auth_username_lower ON runtime_user_auth_cache(lower(username))",
+          run: { success: true, meta: {} },
+        },
+        {
+          match: /FROM runtime_user_auth_cache\s+WHERE user_id = \?/i,
+          first: ([userId]) => runtimeUsers.get(String(userId)) ?? null,
+        },
+        {
+          match: "INSERT INTO runtime_user_auth_cache (",
+          run: ([userId, email, username, name, avatarUrl, onboardingCompleted, planId, planStatus, paymentMethod]) => {
+            runtimeUsers.set(String(userId), {
+              user_id: String(userId),
+              email: String(email),
+              username: typeof username === "string" ? username : null,
+              name: String(name),
+              avatar_url: typeof avatarUrl === "string" ? avatarUrl : null,
+              onboarding_completed: Number(onboardingCompleted) === 1 ? 1 : 0,
+              plan_id: String(planId),
+              plan_status: String(planStatus),
+              payment_method: String(paymentMethod),
+              updated_at: new Date().toISOString(),
+            });
+            return { success: true, meta: { changes: 1 } };
+          },
+        },
+      ]);
+
+      const env = createTestEnv(db, {
+        fitloot_runtime_db: runtimeDb,
+      });
+      const getUserAuthRecordById = vi.fn(async () => ({
+        ...TEST_USER,
+        avatar_url: null,
+        onboarding_completed: 1 as const,
+        plan_id: "pro" as const,
+        plan_status: "active" as const,
+        payment_method: "pix" as const,
+      }));
+
+      const buildApp = () => {
+        const authMiddleware = createAuthMiddleware({
+          cleanupSettledMissionsWithGuard: vi.fn(async () => undefined),
+          ensureCaminhadaLeveUserSkill: vi.fn(async () => undefined),
+          ensureCatalogReady: vi.fn(async () => undefined),
+          getUserAuthRecordById,
+          hasPlanAccess: vi.fn(
+            (planId: string, planStatus: string) =>
+              planId === "vip" || planStatus === "active",
+          ),
+          refreshMissionExpiryWithGuard: vi.fn(async () => undefined),
+          repairActivatedProfileState: vi.fn(async () => null),
+          resolvePlanRedirectPath: vi.fn(() => "/checkout"),
+          shouldBypassPlanGuard: vi.fn(() => false),
+          tryUnlockSkillsFromPerformance: vi.fn(async () => undefined),
+        });
+
+        const app = new Hono<AppContext>();
+        app.get("/api/protected", authMiddleware, async (c) =>
+          c.json({ ok: true, user: c.get("user") }),
+        );
+        return app;
+      };
+
+      const { executionCtx, flush } = createExecutionContext();
+      const request = (app: Hono<AppContext>) =>
+        app.fetch(
+          new Request("http://localhost/api/protected", {
+            headers: {
+              Cookie: "session_id=session-1",
+            },
+          }),
+          env,
+          executionCtx,
+        );
+
+      const firstApp = buildApp();
+      const firstResponse = await request(firstApp);
+      expect(firstResponse.status).toBe(200);
+
+      await flush();
+
+      vi.setSystemTime(new Date("2026-04-12T12:00:05.000Z"));
+
+      const secondApp = buildApp();
+      const secondResponse = await request(secondApp);
+      expect(secondResponse.status).toBe(200);
+
+      const sessionQueryCalls = calls.filter(
+        (call) =>
+          call.method === "first" &&
+          call.sql.includes("SELECT id, user_id, expires_at FROM sessions"),
+      );
+
+      expect(sessionQueryCalls).toHaveLength(1);
+      expect(getUserAuthRecordById).toHaveBeenCalledTimes(1);
     } finally {
       vi.useRealTimers();
     }

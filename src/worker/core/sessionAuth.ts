@@ -75,8 +75,10 @@ type CreateAuthMiddlewareDeps = {
   ) => Promise<void>;
 };
 
-const DEFAULT_SESSION_CACHE_TTL_MS = 30_000;
-const DEFAULT_USER_RECORD_CACHE_TTL_MS = 30_000;
+const DEFAULT_SESSION_CACHE_TTL_MS = 60_000;
+const DEFAULT_USER_RECORD_CACHE_TTL_MS = 45_000;
+const RUNTIME_SESSION_FAST_PATH_MAX_AGE_MS = 60_000;
+const RUNTIME_USER_AUTH_FAST_PATH_MAX_AGE_MS = 15_000;
 
 function isTransientAuthDatabaseError(error: unknown): boolean {
   const message = (error instanceof Error ? error.message : String(error))
@@ -511,6 +513,18 @@ export function createAuthMiddleware({
         c.env.fitloot_db,
         c.env.fitloot_runtime_db,
       );
+      if (!session && runtimeFallbackDb) {
+        try {
+          session = await readRuntimeSession(runtimeFallbackDb, sessionId, {
+            maxAgeMs: Math.min(
+              sessionCacheTtlMs,
+              RUNTIME_SESSION_FAST_PATH_MAX_AGE_MS,
+            ),
+          });
+        } catch {
+          // Runtime auth cache is best-effort and must not block primary auth.
+        }
+      }
       if (!session) {
         try {
           const sessionRecord = await loadWithDedupe(
@@ -580,6 +594,38 @@ export function createAuthMiddleware({
       let runtimeUserRecord: UserAuthRecord | null = null;
       let shouldSyncRuntimeUserRecord = false;
 
+      if (!userRecord && runtimeFallbackDb) {
+        try {
+          runtimeUserRecord = await readRuntimeUserAuth(
+            runtimeFallbackDb,
+            session.user_id,
+            {
+              maxAgeMs: Math.min(
+                userRecordCacheTtlMs,
+                RUNTIME_USER_AUTH_FAST_PATH_MAX_AGE_MS,
+              ),
+            },
+          );
+        } catch {
+          // Runtime auth cache is best-effort and must not block primary auth.
+        }
+      }
+
+      const shouldTrustRuntimeUserRecord = Boolean(
+        runtimeUserRecord &&
+          (shouldBypassPlanGuard(c.req.path) ||
+            (Number(runtimeUserRecord.onboarding_completed) === 1 &&
+              hasPlanAccess(
+                runtimeUserRecord.plan_id,
+                runtimeUserRecord.plan_status,
+              ))),
+      );
+
+      if (!userRecord && shouldTrustRuntimeUserRecord && runtimeUserRecord) {
+        userRecord = runtimeUserRecord;
+        userRecordSource = "runtime";
+      }
+
       if (!userRecord) {
         try {
           userRecord = await loadWithDedupe(
@@ -598,7 +644,7 @@ export function createAuthMiddleware({
             throw userRecordError;
           }
 
-          if (runtimeFallbackDb) {
+          if (runtimeFallbackDb && !runtimeUserRecord) {
             try {
               runtimeUserRecord = await readRuntimeUserAuth(
                 runtimeFallbackDb,

@@ -86,4 +86,28 @@ describe("supabaseCompatDb table qualification", () => {
 
     expect(rewritten).toContain("FROM social.social_user_preferences");
   });
+
+  it("qualifies social message queries to the canonical social/core schemas", () => {
+    const sql = `
+      SELECT
+        m.id,
+        up.username,
+        u.avatar_url
+      FROM conversation_messages m
+      INNER JOIN conversation_members cm
+        ON cm.conversation_id = m.conversation_id
+      INNER JOIN user_profiles up
+        ON up.user_id = m.sender_user_id
+      LEFT JOIN users u
+        ON u.id = m.sender_user_id
+      WHERE m.conversation_id = ?
+    `;
+
+    const rewritten = qualifyUnqualifiedTablesForTests(sql);
+
+    expect(rewritten).toContain("FROM social.conversation_messages m");
+    expect(rewritten).toContain("INNER JOIN social.conversation_members cm");
+    expect(rewritten).toContain("INNER JOIN core.user_profiles up");
+    expect(rewritten).toContain("LEFT JOIN core.users u");
+  });
 });

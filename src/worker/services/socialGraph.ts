@@ -151,16 +151,16 @@ async function listFriendsViaPresenceView(
           WHEN sup.show_online_status IS NULL OR sup.show_online_status = TRUE THEN COALESCE(fp.is_online, FALSE)
           ELSE FALSE
         END as is_online
-      FROM friendships f
-      INNER JOIN user_profiles up
+      FROM social.friendships f
+      INNER JOIN core.user_profiles up
         ON COALESCE(f.friend_id, f.friend_user_id) = up.user_id
-      LEFT JOIN users u
+      LEFT JOIN core.users u
         ON u.id = up.user_id
-      INNER JOIN user_progression pr
+      INNER JOIN core.user_progression pr
         ON COALESCE(f.friend_id, f.friend_user_id) = pr.user_id
-      LEFT JOIN social_user_preferences sup
+      LEFT JOIN social.social_user_preferences sup
         ON sup.user_id = up.user_id
-      LEFT JOIN friend_online_presence fp
+      LEFT JOIN social.friend_online_presence fp
         ON fp.user_id = f.user_id
        AND fp.friend_user_id = COALESCE(f.friend_id, f.friend_user_id)
       WHERE f.user_id = ?
@@ -199,16 +199,16 @@ async function listFriendsViaPresenceTable(
           WHEN sup.show_online_status IS NULL OR sup.show_online_status = TRUE THEN p.last_heartbeat_at
           ELSE NULL
         END as last_heartbeat_at
-      FROM friendships f
-      INNER JOIN user_profiles up
+      FROM social.friendships f
+      INNER JOIN core.user_profiles up
         ON COALESCE(f.friend_id, f.friend_user_id) = up.user_id
-      LEFT JOIN users u
+      LEFT JOIN core.users u
         ON u.id = up.user_id
-      INNER JOIN user_progression pr
+      INNER JOIN core.user_progression pr
         ON COALESCE(f.friend_id, f.friend_user_id) = pr.user_id
-      LEFT JOIN social_user_preferences sup
+      LEFT JOIN social.social_user_preferences sup
         ON sup.user_id = up.user_id
-      LEFT JOIN user_presence p
+      LEFT JOIN social.user_presence p
         ON p.user_id = COALESCE(f.friend_id, f.friend_user_id)
       WHERE f.user_id = ?
         AND f.status = 'accepted'
@@ -238,12 +238,12 @@ async function listFriendsWithoutPresence(
         pr.level as friend_level,
         pr.xp as friend_xp,
         pr.current_streak as friend_streak
-      FROM friendships f
-      INNER JOIN user_profiles up
+      FROM social.friendships f
+      INNER JOIN core.user_profiles up
         ON COALESCE(f.friend_id, f.friend_user_id) = up.user_id
-      LEFT JOIN users u
+      LEFT JOIN core.users u
         ON u.id = up.user_id
-      INNER JOIN user_progression pr
+      INNER JOIN core.user_progression pr
         ON COALESCE(f.friend_id, f.friend_user_id) = pr.user_id
       WHERE f.user_id = ?
         AND f.status = 'accepted'
@@ -307,12 +307,12 @@ export async function listPendingFriendRequests(
          u.avatar_url as friend_avatar_url,
          pr.current_streak as friend_streak,
          fr.created_at
-       FROM friend_requests fr
-       INNER JOIN user_profiles up
+      FROM social.friend_requests fr
+      INNER JOIN core.user_profiles up
          ON fr.from_user_id = up.user_id
-       LEFT JOIN users u
+      LEFT JOIN core.users u
          ON u.id = up.user_id
-       INNER JOIN user_progression pr
+      INNER JOIN core.user_progression pr
          ON fr.from_user_id = pr.user_id
       WHERE fr.to_user_id = ?
         AND fr.status = 'pending'
@@ -348,7 +348,7 @@ export async function areUsersBlocked(
   const row = await db
     .prepare(
       `SELECT 1
-         FROM user_blocks
+      FROM social.user_blocks
         WHERE (blocker_user_id = ? AND blocked_user_id = ?)
            OR (blocker_user_id = ? AND blocked_user_id = ?)
         LIMIT 1`,
@@ -367,7 +367,7 @@ export async function hasUserBlocked(
   const row = await db
     .prepare(
       `SELECT 1
-         FROM user_blocks
+      FROM social.user_blocks
         WHERE blocker_user_id = ?
           AND blocked_user_id = ?
         LIMIT 1`,
@@ -385,7 +385,7 @@ export async function readSocialUserPreferences(
   const row = await db
     .prepare(
       `SELECT show_online_status, allow_friend_requests, allow_group_invites
-         FROM social_user_preferences
+      FROM social.social_user_preferences
         WHERE user_id = ?
         LIMIT 1`,
     )

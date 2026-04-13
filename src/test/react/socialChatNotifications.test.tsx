@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes, useNavigate } from "react-router";
 
 const fetchPendingSocialChatNotificationsMock = vi.fn();
+const fetchSocialUnreadSummaryMock = vi.fn();
 const consumePendingSocialChatNotificationsMock = vi.fn();
 const navigateProtectedRouteMock = vi.fn();
 
@@ -54,6 +55,9 @@ vi.mock("../../react-app/services/socialChatService", () => {
     fetchPendingSocialChatNotifications: (
       ...args: Parameters<typeof fetchPendingSocialChatNotificationsMock>
     ) => fetchPendingSocialChatNotificationsMock(...args),
+    fetchSocialUnreadSummary: (
+      ...args: Parameters<typeof fetchSocialUnreadSummaryMock>
+    ) => fetchSocialUnreadSummaryMock(...args),
     consumePendingSocialChatNotifications: (
       ...args: Parameters<typeof consumePendingSocialChatNotificationsMock>
     ) => consumePendingSocialChatNotificationsMock(...args),
@@ -66,11 +70,15 @@ import { useSocialChatNotifications } from "../../react-app/contexts/useSocialCh
 
 function NotificationsProbe() {
   const navigate = useNavigate();
-  const { pendingCount, refreshSocialChatNotifications } = useSocialChatNotifications();
+  const {
+    unreadCount,
+    clearConversationUnread,
+    refreshSocialChatNotifications,
+  } = useSocialChatNotifications();
 
   return (
     <div>
-      <span data-testid="pending-count">{pendingCount}</span>
+      <span data-testid="unread-count">{unreadCount}</span>
       <button
         type="button"
         onClick={() => {
@@ -78,6 +86,14 @@ function NotificationsProbe() {
         }}
       >
         refresh
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          clearConversationUnread(10);
+        }}
+      >
+        limpar ativa
       </button>
       <button
         type="button"
@@ -143,10 +159,42 @@ describe("SocialChatNotificationsProvider", () => {
         created_at: "2026-04-12T18:11:00.000Z",
       },
     ];
+    const unreadSummary = {
+      total_unread_count: 3,
+      conversations: [
+        {
+          conversation_id: 10,
+          unread_count: 2,
+        },
+        {
+          conversation_id: 22,
+          unread_count: 1,
+        },
+      ],
+    };
 
     fetchPendingSocialChatNotificationsMock
-      .mockResolvedValueOnce(notifications)
       .mockResolvedValueOnce(notifications);
+    fetchSocialUnreadSummaryMock
+      .mockResolvedValueOnce(unreadSummary)
+      .mockResolvedValueOnce({
+        total_unread_count: 1,
+        conversations: [
+          {
+            conversation_id: 22,
+            unread_count: 1,
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        total_unread_count: 1,
+        conversations: [
+          {
+            conversation_id: 22,
+            unread_count: 1,
+          },
+        ],
+      });
     consumePendingSocialChatNotificationsMock.mockResolvedValue(undefined);
 
     renderProvider("/friends?conversationId=10");
@@ -154,21 +202,21 @@ describe("SocialChatNotificationsProvider", () => {
     fireEvent.click(screen.getByRole("button", { name: "refresh" }));
 
     await waitFor(() => {
-      expect(screen.getByTestId("pending-count").textContent).toBe("1");
+      expect(screen.getByTestId("unread-count").textContent).toBe("1");
     });
 
-    expect(consumePendingSocialChatNotificationsMock).toHaveBeenCalledWith({
-      items: [{ conversation_id: 10, message_id: 101 }],
-    });
+    expect(consumePendingSocialChatNotificationsMock).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "limpar ativa" }));
 
     fireEvent.click(screen.getByRole("button", { name: "sair" }));
 
     await waitFor(() => {
-      expect(fetchPendingSocialChatNotificationsMock).toHaveBeenCalledTimes(2);
+      expect(fetchSocialUnreadSummaryMock).toHaveBeenCalledTimes(2);
     });
 
     await waitFor(() => {
-      expect(screen.getByTestId("pending-count").textContent).toBe("2");
+      expect(screen.getByTestId("unread-count").textContent).toBe("1");
     });
   });
 });
