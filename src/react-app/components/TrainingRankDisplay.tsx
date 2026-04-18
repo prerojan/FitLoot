@@ -1,6 +1,6 @@
 import { Shield, TrendingUp, Target, Activity, AlertTriangle } from "lucide-react";
 import type { TrainingRankSnapshot } from "@/shared/types";
-import { getTrainingRankMeta } from "@/shared/trainingLevels";
+import { getNextTrainingRankMeta, getTrainingRankMeta } from "@/shared/trainingLevels";
 
 interface TrainingRankDisplayProps {
   snapshot: TrainingRankSnapshot | null;
@@ -105,8 +105,17 @@ export function TrainingRankDisplay({
   }
 
   const rankMeta = getTrainingRankMeta(snapshot.globalRank);
+  const nextRankMeta = getNextTrainingRankMeta(snapshot.globalRank);
   const config = rankTierConfig[rankMeta.tier];
   const shouldShowFallbackWarning = snapshot.fallbackUsed && snapshot.hasSkillData;
+  const rankBandSpan = Math.max(1, rankMeta.maxScore - rankMeta.minScore);
+  const rankBandProgress = Math.max(
+    0,
+    Math.min(100, ((snapshot.globalScore - rankMeta.minScore) / rankBandSpan) * 100),
+  );
+  const scoreToNextRank = nextRankMeta
+    ? Math.max(0, nextRankMeta.minScore - snapshot.globalScore)
+    : 0;
 
   if (compact) {
     return (
@@ -170,8 +179,28 @@ export function TrainingRankDisplay({
             {snapshot.globalScore}
           </div>
           <div className="text-xs" style={{ color: "var(--fl-color-text-muted)" }}>
-            pontos
+            rating
           </div>
+        </div>
+      </div>
+
+      <div className="mb-3">
+        <div
+          className="h-2 overflow-hidden rounded-full"
+          style={{ backgroundColor: "color-mix(in srgb, var(--fl-surface-muted) 78%, transparent)" }}
+        >
+          <div
+            className="h-full rounded-full transition-[width]"
+            style={{
+              width: `${rankBandProgress}%`,
+              background: `linear-gradient(90deg, ${config.accent}, color-mix(in srgb, ${config.accent} 60%, white))`,
+            }}
+          />
+        </div>
+        <div className="mt-2 text-xs" style={{ color: "var(--fl-color-text-muted)" }}>
+          {nextRankMeta
+            ? `Faltam ${scoreToNextRank} pontos para ${nextRankMeta.label}`
+            : "Patente maxima atingida"}
         </div>
       </div>
 
@@ -211,7 +240,7 @@ export function TrainingRankDisplay({
                   Volume
                 </div>
                 <div className="text-sm font-medium" style={{ color: "var(--fl-color-text)" }}>
-                  {snapshot.factors.volumeScore}/25
+                  {snapshot.factors.volumeScore}/260
                 </div>
               </div>
             </div>
@@ -223,7 +252,7 @@ export function TrainingRankDisplay({
                   Consistencia
                 </div>
                 <div className="text-sm font-medium" style={{ color: "var(--fl-color-text)" }}>
-                  {snapshot.factors.consistencyScore}/25
+                  {snapshot.factors.consistencyScore}/240
                 </div>
               </div>
             </div>
@@ -235,7 +264,7 @@ export function TrainingRankDisplay({
                   Benchmarks
                 </div>
                 <div className="text-sm font-medium" style={{ color: "var(--fl-color-text)" }}>
-                  {snapshot.factors.benchmarkScore}/30
+                  {snapshot.factors.benchmarkScore}/420
                 </div>
               </div>
             </div>
@@ -250,7 +279,19 @@ export function TrainingRankDisplay({
                   Skills
                 </div>
                 <div className="text-sm font-medium" style={{ color: "var(--fl-color-text)" }}>
-                  {snapshot.factors.skillMasteryScore}/20
+                  {snapshot.factors.skillMasteryScore}/220
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <TrendingUp className="h-4 w-4" style={{ color: config.accent }} />
+              <div className="flex-1">
+                <div className="text-xs" style={{ color: "var(--fl-color-text-muted)" }}>
+                  Momento
+                </div>
+                <div className="text-sm font-medium" style={{ color: "var(--fl-color-text)" }}>
+                  {snapshot.factors.momentumScore}/160
                 </div>
               </div>
             </div>

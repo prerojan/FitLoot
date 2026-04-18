@@ -48,8 +48,25 @@ const MISSIONS_GENERATION_INVALIDATION_PLAN: RequestInvalidationPlan = {
 };
 
 const BENCHMARKS_INVALIDATION_PLAN: RequestInvalidationPlan = {
-  hotCachePaths: ["/api/benchmarks"],
-  runtimeProjectionScopes: [],
+  hotCachePaths: [
+    "/api/benchmarks",
+    "/api/progression",
+    "/api/app/bootstrap",
+    "/api/ranking/global",
+    "/api/ranking/friends",
+  ],
+  runtimeProjectionScopes: ["bootstrap", "dashboard:progression", "dashboard:benchmarks"],
+};
+
+const TRAINING_PROGRESS_INVALIDATION_PLAN: RequestInvalidationPlan = {
+  hotCachePaths: [
+    "/api/progression",
+    "/api/app/bootstrap",
+    "/api/ranking/global",
+    "/api/ranking/friends",
+    "/api/missions",
+  ],
+  runtimeProjectionScopes: ["bootstrap", "dashboard:progression"],
 };
 
 const TITLE_ACTIVATION_INVALIDATION_PLAN: RequestInvalidationPlan = {
@@ -172,6 +189,16 @@ const ROUTE_INVALIDATION_POLICIES: readonly RouteInvalidationPolicy[] = [
     method: "POST",
     pattern: "/api/benchmarks",
     plan: BENCHMARKS_INVALIDATION_PLAN,
+  },
+  {
+    method: "POST",
+    pattern: "/api/missions/complete",
+    plan: TRAINING_PROGRESS_INVALIDATION_PLAN,
+  },
+  {
+    method: "POST",
+    pattern: "/api/mini-games/:id/complete",
+    plan: TRAINING_PROGRESS_INVALIDATION_PLAN,
   },
   {
     method: "POST",

@@ -65,6 +65,10 @@ type AccountRouteDeps = {
     customizations: Record<string, unknown>,
   ) => Promise<void>;
   invalidateRankingCache: () => void;
+  syncTrainingRankState: (
+    db: D1Database,
+    userId: string,
+  ) => Promise<unknown>;
   shouldPurgeUserOnLogout: (user: UserAuthRecord) => boolean;
   unlockAchievementIfNeeded: (
     db: D1Database,
@@ -182,6 +186,7 @@ export function registerAccountRoutes(
     onAppOpen,
     onProfileCustomization,
     invalidateRankingCache,
+    syncTrainingRankState,
     shouldPurgeUserOnLogout,
     unlockAchievementIfNeeded,
   }: AccountRouteDeps,
@@ -333,6 +338,24 @@ export function registerAccountRoutes(
           message: getErrorMessage(progressionError),
           userId: user.id,
         });
+      }
+
+      const hasPersistedTrainingRankState =
+        progression &&
+        progression.training_rank != null &&
+        progression.training_rank_score != null &&
+        progression.training_rank_snapshot != null;
+      if (progression && !hasPersistedTrainingRankState) {
+        await syncTrainingRankState(c.env.fitloot_db, user.id);
+        progression = await c.env.fitloot_db
+          .prepare(
+            `SELECT *
+              FROM user_progression
+              WHERE user_id = ?`,
+          )
+          .bind(user.id)
+          .first<Record<string, unknown>>();
+        invalidateRankingCache();
       }
 
       try {

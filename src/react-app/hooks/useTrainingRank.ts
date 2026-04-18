@@ -10,7 +10,9 @@ type BenchmarkResults = {
   squatMaxReps?: number;
   plankMaxSeconds?: number;
   sitUpMaxReps?: number;
-  skillStageScore?: number;
+  pullUpMaxReps?: number;
+  runDistanceKm?: number;
+  runTimeSeconds?: number;
 };
 
 export function useTrainingRank(
@@ -29,7 +31,15 @@ export function useTrainingRank(
         setIsLoading(true);
         setError(null);
 
-        const { getOrCalculateRankSnapshot } = await import("@/shared/trainingLevels");
+        const { deserializeRankSnapshot, getOrCalculateRankSnapshot } = await import("@/shared/trainingLevels");
+
+        const existingSnapshot = deserializeRankSnapshot(
+          userProgression?.training_rank_snapshot || null,
+        );
+        if (existingSnapshot) {
+          setSnapshot(existingSnapshot);
+          return;
+        }
 
         const rankSnapshot = getOrCalculateRankSnapshot(
           userProgression
@@ -38,6 +48,7 @@ export function useTrainingRank(
                 level: userProgression.level,
                 current_streak: userProgression.current_streak,
                 best_streak: userProgression.best_streak,
+                last_activity_date: userProgression.last_activity_date,
                 training_rank_snapshot: userProgression.training_rank_snapshot || null,
               }
             : {
@@ -45,6 +56,7 @@ export function useTrainingRank(
                 level: 1,
                 current_streak: 0,
                 best_streak: 0,
+                last_activity_date: null,
                 training_rank_snapshot: null,
               },
           userSkills,

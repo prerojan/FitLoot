@@ -19,12 +19,9 @@ import {
   localizeMissionText,
 } from "../shared/missionLocalization";
 import {
-  calculateRankBenchmarkScore,
-  calculateRankConsistencyScore,
-  calculateSkillMasteryScore,
-  calculateVolumeScore,
-  clamp as clampTrainingRankScore,
-  scoreToTrainingRank,
+  deserializeRankSnapshot,
+  getLowestTrainingRank,
+  isTrainingRank,
 } from "../shared/trainingLevels";
 import {
   getMissionMetricType,
@@ -111,6 +108,11 @@ import {
 } from "./services/missionGeneration";
 import { createBackgroundProcessingService } from "./services/backgroundProcessing";
 import { createMissionMaterializationService } from "./services/missionMaterialization";
+import {
+  needsTrainingRankSync,
+  syncTrainingRankStateForUser,
+  syncTrainingRankStatesForUsers,
+} from "./services/trainingRank";
 import {
   applyMissionMetricContext,
   buildCircuitTasks,
@@ -343,6 +345,7 @@ function scheduleLegacyDailyMetadataRepairWithGuard(
 // Reúne a camada de gamificação em aliases estáveis para o restante do worker.
 const gamificationLifecycleService = createGamificationLifecycleService({
   invalidateRankingCache,
+  syncTrainingRankState: (db, userId) => syncTrainingRankStateForUser(db, userId),
 });
 
 const {
@@ -1839,6 +1842,7 @@ registerAccountRoutes(app, {
   logUserEvent: logUserEventService,
   onAppOpen: onAppOpenService,
   onProfileCustomization: onProfileCustomizationService,
+  syncTrainingRankState: (db, userId) => syncTrainingRankStateForUser(db, userId),
   shouldPurgeUserOnLogout,
   unlockAchievementIfNeeded: unlockAchievementIfNeededService,
 });
@@ -1910,8 +1914,10 @@ registerProgressionRoutes(app, {
   applyXpPointsAndResolveLevels,
   consumeRewardNotifications,
   computeXpAndLevelAfterGain,
+  invalidateRankingCache,
   listRewardNotifications,
   parseProgressionXpLevel,
+  syncTrainingRankState: (db, userId) => syncTrainingRankStateForUser(db, userId),
   unlockAchievementIfNeeded,
   unlockTitleIfNeeded,
 });
@@ -3010,6 +3016,7 @@ registerMissionRoutes(
         mode,
       ),
     schedulePeriodicProgressRecomputeWithGuard,
+    syncTrainingRankState: (db, userId) => syncTrainingRankStateForUser(db, userId),
     streamJsonArrayResponse,
     totalSkillTableAttributeGain,
     translateExerciseInstructionsToPt:
@@ -3067,11 +3074,10 @@ type TrainingRankingSourceRow = {
   level: number | string | null;
   xp: number | string | null;
   current_streak: number | string | null;
-  best_streak: number | string | null;
   points: number | string | null;
-  unlocked_skills: number | string | null;
-  unlocked_skill_stages: number | string | null;
-  skill_stage_score: number | string | null;
+  training_rank: string | null;
+  training_rank_score: number | string | null;
+  training_rank_snapshot: string | null;
 };
 
 const RANKING_CACHE_TTL_MS = 15_000;
@@ -3106,44 +3112,21 @@ function normalizeNonNegativeNumber(value: unknown, fallback = 0): number {
   return Math.max(0, parsed);
 }
 
-function estimateTrainingBenchmarks(level: number, skillStageScore: number) {
-  return {
-    pushUpMaxReps: Math.min(Math.max(Math.floor(level * 2.5), 5), 50),
-    squatMaxReps: Math.min(Math.max(Math.floor(level * 4), 8), 80),
-    plankMaxSeconds: Math.min(Math.max(Math.floor(level * 15), 20), 180),
-    sitUpMaxReps: Math.min(Math.max(Math.floor(level * 3), 6), 60),
-    skillStageScore,
-  };
-}
-
-function normalizeTrainingRankingRow(row: TrainingRankingSourceRow): RankingRow {
+function normalizeTrainingRankingRow(
+  row: TrainingRankingSourceRow,
+  syncedSnapshots: ReadonlyMap<string, { globalRank: TrainingRank; globalScore: number }> = new Map(),
+): RankingRow {
   const level = Math.max(1, normalizeNonNegativeNumber(row.level, 1));
   const xp = normalizeNonNegativeNumber(row.xp);
   const currentStreak = normalizeNonNegativeNumber(row.current_streak);
-  const bestStreak = Math.max(
-    currentStreak,
-    normalizeNonNegativeNumber(row.best_streak, currentStreak),
-  );
-  const unlockedSkills = normalizeNonNegativeNumber(row.unlocked_skills);
-  const unlockedSkillStages = normalizeNonNegativeNumber(row.unlocked_skill_stages);
-  const skillStageScore = normalizeNonNegativeNumber(row.skill_stage_score);
-  const totalSessions = Math.max(0, Math.floor(xp / 50));
-  const activeWeeks = Math.min(Math.floor(totalSessions / 3), 52);
-
-  const volumeScore = calculateVolumeScore(totalSessions);
-  const consistencyScore = calculateRankConsistencyScore(activeWeeks, bestStreak);
-  const skillMasteryScore = calculateSkillMasteryScore({
-    unlockedSkills,
-    unlockedSkillStages,
-  });
-  const benchmarkScore = calculateRankBenchmarkScore(
-    estimateTrainingBenchmarks(level, skillStageScore),
-  );
-  const trainingRankScore = clampTrainingRankScore(
-    volumeScore + consistencyScore + benchmarkScore + skillMasteryScore,
-    0,
-    100,
-  );
+  const syncedSnapshot = syncedSnapshots.get(row.user_id);
+  const storedSnapshot = deserializeRankSnapshot(row.training_rank_snapshot);
+  const resolvedSnapshot = syncedSnapshot ?? storedSnapshot;
+  const storedRank = isTrainingRank(row.training_rank) ? row.training_rank : null;
+  const storedScoreRaw = Number(row.training_rank_score);
+  const storedScore = Number.isFinite(storedScoreRaw) ? Math.max(0, storedScoreRaw) : null;
+  const trainingRank = storedRank ?? resolvedSnapshot?.globalRank ?? getLowestTrainingRank();
+  const trainingRankScore = storedScore ?? resolvedSnapshot?.globalScore ?? 0;
 
   return {
     user_id: row.user_id,
@@ -3154,7 +3137,7 @@ function normalizeTrainingRankingRow(row: TrainingRankingSourceRow): RankingRow 
     xp,
     current_streak: currentStreak,
     points: normalizeNonNegativeNumber(row.points),
-    training_rank: scoreToTrainingRank(trainingRankScore),
+    training_rank: trainingRank,
     training_rank_score: trainingRankScore,
   };
 }
@@ -3190,38 +3173,36 @@ async function loadTrainingRankingRows(
       pr.level,
       pr.xp,
       pr.current_streak,
-      pr.best_streak,
       pr.points,
-      COALESCE(skill_stats.unlocked_skills, 0) as unlocked_skills,
-      COALESCE(skill_stats.unlocked_skill_stages, 0) as unlocked_skill_stages,
-      COALESCE(skill_stats.skill_stage_score, 0) as skill_stage_score
+      pr.training_rank,
+      pr.training_rank_score,
+      pr.training_rank_snapshot
     FROM user_profiles up
     LEFT JOIN users u
       ON u.id = up.user_id
     INNER JOIN user_progression pr
       ON up.user_id = pr.user_id
-    LEFT JOIN (
-      SELECT
-        user_id,
-        COUNT(*) as unlocked_skills,
-        SUM(CASE WHEN total_reps >= 100 THEN 1 ELSE 0 END) as unlocked_skill_stages,
-        SUM(
-          CASE
-            WHEN total_reps >= 100 THEN 2.0
-            WHEN total_reps >= 50 THEN 1.0
-            WHEN total_reps >= 10 THEN 0.5
-            ELSE 0
-          END
-        ) as skill_stage_score
-      FROM user_skills
-      GROUP BY user_id
-    ) skill_stats
-      ON skill_stats.user_id = up.user_id
     ${whereClause ? `WHERE ${whereClause}` : ""}`,
   ).bind(...bindings).all<TrainingRankingSourceRow>();
 
   const sourceRows = Array.isArray(ranking.results) ? ranking.results : [];
-  return sortTrainingRankingRows(sourceRows.map(normalizeTrainingRankingRow));
+  const missingStateUserIds = sourceRows
+    .filter((row) =>
+      needsTrainingRankSync({
+        training_rank: row.training_rank,
+        training_rank_score: row.training_rank_score,
+        training_rank_snapshot: row.training_rank_snapshot,
+      }),
+    )
+    .map((row) => row.user_id);
+
+  const syncedSnapshots = missingStateUserIds.length > 0
+    ? await syncTrainingRankStatesForUsers(db, missingStateUserIds)
+    : new Map();
+
+  return sortTrainingRankingRows(
+    sourceRows.map((row) => normalizeTrainingRankingRow(row, syncedSnapshots)),
+  );
 }
 
 app.get("/api/ranking/global", authMiddleware, async (c) => {

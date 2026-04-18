@@ -142,30 +142,26 @@ export default function Profile() {
     const latest = benchmarks[0];
     if (!latest) return undefined;
     
-    // Converte o progresso das habilidades em score auxiliar.
-    const skillStageScore = skills.reduce((score, skill) => {
-      if (skill.total_reps >= 100) score += 2;
-      else if (skill.total_reps >= 50) score += 1;
-      else if (skill.total_reps >= 10) score += 0.5;
-      return score;
-    }, 0);
-    
     const result: {
       pushUpMaxReps?: number;
       squatMaxReps?: number;
       plankMaxSeconds?: number;
       sitUpMaxReps?: number;
-      skillStageScore?: number;
+      pullUpMaxReps?: number;
+      runDistanceKm?: number;
+      runTimeSeconds?: number;
     } = {};
     
     if (latest.pushups_max) result.pushUpMaxReps = Number(latest.pushups_max);
     if (latest.squats_max) result.squatMaxReps = Number(latest.squats_max);
     if (latest.plank_seconds) result.plankMaxSeconds = Number(latest.plank_seconds);
     if (latest.situps_max) result.sitUpMaxReps = Number(latest.situps_max);
-    if (skillStageScore > 0) result.skillStageScore = skillStageScore;
+    if (latest.pullups_max) result.pullUpMaxReps = Number(latest.pullups_max);
+    if (latest.run_distance_km) result.runDistanceKm = Number(latest.run_distance_km);
+    if (latest.run_time_seconds) result.runTimeSeconds = Number(latest.run_time_seconds);
     
     return result;
-  }, [benchmarks, skills]);
+  }, [benchmarks]);
 
   // Mescla habilidades desbloqueadas e bloqueadas para exibicao.
   const getAllSkillsWithProgress = useCallback(() => {

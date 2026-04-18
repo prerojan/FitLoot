@@ -90,23 +90,24 @@ export const TRAINING_RANK_VALUES = [
 ] as const;
 
 export type TrainingRank = (typeof TRAINING_RANK_VALUES)[number];
-export const TRAINING_RANK_SNAPSHOT_VERSION = 2 as const;
+export const TRAINING_RANK_SNAPSHOT_VERSION = 3 as const;
 
 export interface TrainingRankSnapshot {
   /** Versao do schema para invalidar snapshots legados quando o rank muda. */
   schemaVersion: number;
   /** Rank global calculado com base em todos os fatores */
   globalRank: TrainingRank;
-  /** Score total usado para calcular o rank (0-100) */
+  /** Score total usado para calcular o rank (0-1300) */
   globalScore: number;
   /** Data do último cálculo do rank */
   lastCalculatedAt: string;
   /** Fatores individuais usados no cálculo */
   factors: {
-    volumeScore: number;      // Baseado em totalSessions
-    consistencyScore: number; // Baseado em activeWeeks e streak
-    benchmarkScore: number;   // Baseado em benchmarks
-    skillMasteryScore: number; // Baseado em skills e stages
+    volumeScore: number;      // Baseado em volume total de sessoes
+    consistencyScore: number; // Baseado em semanas ativas e melhor streak
+    benchmarkScore: number;   // Baseado em benchmarks fisicos
+    skillMasteryScore: number; // Baseado em skills, estagios e repeticoes
+    momentumScore: number;    // Baseado em streak atual e frescor da atividade
   };
   /** Metadados para fallback */
   hasBenchmarkData: boolean;
@@ -929,18 +930,26 @@ export type UpdateUserAvatarRequest = z.infer<typeof UpdateUserAvatarRequestSche
 // Training Rank Profile (input para cálculo)
 export interface TrainingRankProfile {
   /** Dados de volume (derivados de UserProgression) */
+  xp: number;
+  level: number;
   totalSessions: number;
   activeWeeks: number;
+  currentStreak: number;
   longestStreak: number;
+  lastActivityDate?: string | null;
+  latestBenchmarkDate?: string | null;
   /** Dados de skills (derivados de UserSkill) */
   unlockedSkills: number;
   unlockedSkillStages: number;
+  totalSkillReps: number;
   /** Dados de benchmarks (opcionais) */
   benchmarkResults?: {
     pushUpMaxReps?: number;
     squatMaxReps?: number;
     plankMaxSeconds?: number;
     sitUpMaxReps?: number;
-    skillStageScore?: number;
+    pullUpMaxReps?: number;
+    runDistanceKm?: number;
+    runTimeSeconds?: number;
   };
 }

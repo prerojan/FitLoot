@@ -15,6 +15,10 @@ import {
 
 type GamificationLifecycleDeps = {
   invalidateRankingCache: () => void;
+  syncTrainingRankState: (
+    db: D1Database,
+    userId: string,
+  ) => Promise<unknown>;
 };
 
 type GoalMissionRelevance = {
@@ -1407,6 +1411,15 @@ export function createGamificationLifecycleService(
       }
     } else if (xpDelta !== 0 || pointsDelta !== 0) {
       deps.invalidateRankingCache();
+    }
+
+    try {
+      await deps.syncTrainingRankState(db, userId);
+    } catch (trainingRankError) {
+      console.warn("[applyXpPointsAndResolveLevels][training-rank-sync]", {
+        userId,
+        message: getErrorMessage(trainingRankError),
+      });
     }
 
     return {

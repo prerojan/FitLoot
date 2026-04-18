@@ -42,7 +42,12 @@ type ProgressionRouteDeps = {
   authMiddleware: MiddlewareHandler<AppContext>;
   applyXpPointsAndResolveLevels: ApplyXpPointsAndResolveLevels;
   computeXpAndLevelAfterGain: ComputeXpAndLevelAfterGain;
+  invalidateRankingCache: () => void;
   parseProgressionXpLevel: ParseProgressionXpLevel;
+  syncTrainingRankState: (
+    db: D1Database,
+    userId: string,
+  ) => Promise<unknown>;
   unlockAchievementIfNeeded: (
     db: D1Database,
     userId: string,
@@ -92,7 +97,9 @@ export function registerProgressionRoutes(
     authMiddleware,
     applyXpPointsAndResolveLevels,
     computeXpAndLevelAfterGain,
+    invalidateRankingCache,
     parseProgressionXpLevel,
+    syncTrainingRankState,
     unlockAchievementIfNeeded,
     unlockTitleIfNeeded,
     listRewardNotifications,
@@ -177,6 +184,22 @@ export function registerProgressionRoutes(
         if (refreshed) {
           progression = refreshed;
         }
+      }
+
+      const hasPersistedTrainingRankState =
+        progression.training_rank != null &&
+        progression.training_rank_score != null &&
+        progression.training_rank_snapshot != null;
+      if (!hasPersistedTrainingRankState) {
+        await syncTrainingRankState(c.env.fitloot_db, user.id);
+        const refreshedWithRank = await c.env.fitloot_db
+          .prepare("SELECT * FROM user_progression WHERE user_id = ?")
+          .bind(user.id)
+          .first<Record<string, unknown>>();
+        if (refreshedWithRank) {
+          progression = refreshedWithRank;
+        }
+        invalidateRankingCache();
       }
 
       const responsePayload = {
@@ -551,6 +574,9 @@ export function registerProgressionRoutes(
         )}, updated_at = datetime('now') WHERE user_id = ?`;
         await c.env.fitloot_db.prepare(updateQuery).bind(...attributeValues, user.id).run();
       }
+
+      await syncTrainingRankState(c.env.fitloot_db, user.id);
+      invalidateRankingCache();
 
       const newBenchmark = result.meta.last_row_id
         ? await c.env.fitloot_db

@@ -246,6 +246,10 @@ type MissionRouteDeps = {
       limit?: number | undefined;
     },
   ) => Promise<RewardNotification[]>;
+  syncTrainingRankState: (
+    db: D1Database,
+    userId: string,
+  ) => Promise<unknown>;
   streamJsonArrayResponse: StreamJsonArrayResponse;
   totalSkillTableAttributeGain: (
     skill: Record<string, unknown>,
@@ -1625,6 +1629,8 @@ export function registerMissionRoutes(
           }
           completionPhase = "unlock_performance_variants";
           await deps.tryUnlockSkillsFromPerformance(c.env.fitloot_db, user.id);
+          completionPhase = "sync_training_rank";
+          await deps.syncTrainingRankState(c.env.fitloot_db, user.id);
           completionPhase = "completed";
         }, c.env);
 
