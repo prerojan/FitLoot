@@ -305,7 +305,12 @@ export type DailyMetrics = z.infer<typeof DailyMetricsSchema>;
 // Composite UI/API types
 export type SkillWithProgress = Skill & {
   total_reps: number;
+  total_time: number;
   best_reps: number;
+  unlocked_at?: string;
+  status?: string;
+  current_stage?: number;
+  total_stages?: number;
 };
 
 export type AchievementWithUnlock = Achievement & {
@@ -940,6 +945,7 @@ export interface TrainingRankProfile {
   latestBenchmarkDate?: string | null;
   /** Dados de skills (derivados de UserSkill) */
   unlockedSkills: number;
+  practicedSkills: number;
   unlockedSkillStages: number;
   totalSkillReps: number;
   /** Dados de benchmarks (opcionais) */

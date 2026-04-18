@@ -84,4 +84,28 @@ describe("trainingLevels", () => {
     expect(snapshot?.globalRank).toBe("ouro_2");
     expect(formatTrainingRankLabel(snapshot?.globalRank ?? "bronze_1")).toBe("Ouro II");
   });
+
+  it("does not treat unlocked placeholder skills as practiced skill data", () => {
+    const snapshot = getOrCalculateRankSnapshot(
+      {
+        xp: 500,
+        level: 5,
+        current_streak: 0,
+        best_streak: 0,
+        last_activity_date: null,
+        training_rank_snapshot: null,
+      },
+      [
+        {
+          skill_id: 1,
+          total_reps: 0,
+          total_time: 0,
+          best_reps: 0,
+        },
+      ],
+    );
+
+    expect(snapshot.hasSkillData).toBe(false);
+    expect(snapshot.factors.skillMasteryScore).toBe(0);
+  });
 });

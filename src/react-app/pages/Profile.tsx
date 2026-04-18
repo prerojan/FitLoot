@@ -27,6 +27,7 @@ import { Avatar } from "@/react-app/components/ui/avatar";
 import { ROUTE_PATHS } from "@/react-app/auth/constants";
 import { TrainingRankDisplay } from "@/react-app/components/TrainingRankDisplay";
 import { useTrainingRank } from "@/react-app/hooks/useTrainingRank";
+import { hasTrackedSkillPractice } from "@/shared/trainingLevels";
 import {
   clearFriendsCache,
 } from "@/react-app/services/friendsService";
@@ -152,32 +153,26 @@ export default function Profile() {
       runTimeSeconds?: number;
     } = {};
     
-    if (latest.pushups_max) result.pushUpMaxReps = Number(latest.pushups_max);
-    if (latest.squats_max) result.squatMaxReps = Number(latest.squats_max);
-    if (latest.plank_seconds) result.plankMaxSeconds = Number(latest.plank_seconds);
-    if (latest.situps_max) result.sitUpMaxReps = Number(latest.situps_max);
-    if (latest.pullups_max) result.pullUpMaxReps = Number(latest.pullups_max);
-    if (latest.run_distance_km) result.runDistanceKm = Number(latest.run_distance_km);
-    if (latest.run_time_seconds) result.runTimeSeconds = Number(latest.run_time_seconds);
+    if (latest.pushups_max != null) result.pushUpMaxReps = Number(latest.pushups_max);
+    if (latest.squats_max != null) result.squatMaxReps = Number(latest.squats_max);
+    if (latest.plank_seconds != null) result.plankMaxSeconds = Number(latest.plank_seconds);
+    if (latest.situps_max != null) result.sitUpMaxReps = Number(latest.situps_max);
+    if (latest.pullups_max != null) result.pullUpMaxReps = Number(latest.pullups_max);
+    if (latest.run_distance_km != null) result.runDistanceKm = Number(latest.run_distance_km);
+    if (latest.run_time_seconds != null) result.runTimeSeconds = Number(latest.run_time_seconds);
     
     return result;
   }, [benchmarks]);
 
-  // Mescla habilidades desbloqueadas e bloqueadas para exibicao.
-  const getAllSkillsWithProgress = useCallback(() => {
-    if (availableSkills.length === 0) return skills;
+  const practicedSkills = useMemo(
+    () => skills.filter((skill) => hasTrackedSkillPractice(skill)),
+    [skills],
+  );
 
-    const unlockedSkillIds = new Set(skills.map((skill) => skill.id));
-    const lockedAvailableSkills = availableSkills
-      .filter((availableSkill) => !unlockedSkillIds.has(availableSkill.id))
-      .map((availableSkill) => ({
-        ...availableSkill,
-        total_reps: 0,
-        best_reps: 0,
-      }));
-
-    return [...skills, ...lockedAvailableSkills];
-  }, [availableSkills, skills]);
+  const unlockedWithoutPractice = useMemo(
+    () => skills.filter((skill) => !hasTrackedSkillPractice(skill)),
+    [skills],
+  );
 
   // Calcula o rank de treino sem alterar o estado do perfil.
   const { snapshot: trainingRank, isLoading: rankLoading, error: rankError } = useTrainingRank(
@@ -189,7 +184,7 @@ export default function Profile() {
       updated_at: '',
       skill_id: skill.id,
       total_reps: skill.total_reps,
-      total_time: 0,
+      total_time: skill.total_time,
       best_reps: skill.best_reps,
       unlocked_at: ''
     })),
@@ -884,50 +879,175 @@ export default function Profile() {
                   <h3 className="text-sm font-bold uppercase tracking-widest" style={{ color: "var(--fl-color-text)" }}>Arvore de Habilidades</h3>
                 </header>
 
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-6 gap-4">
-                  {getAllSkillsWithProgress().length === 0 ? (
-                    <div className="fl-theme-surface col-span-full rounded-3xl border border-dashed py-12 text-center" style={{ borderColor: "var(--fl-border-soft)" }}>
+                <div className="space-y-8">
+                  {skills.length === 0 && availableSkills.length === 0 ? (
+                    <div className="fl-theme-surface rounded-3xl border border-dashed py-12 text-center" style={{ borderColor: "var(--fl-border-soft)" }}>
                       <p className="text-xs font-bold text-slate-600 uppercase tracking-widest">Nenhuma skill disponivel.</p>
                     </div>
-                  ) : getAllSkillsWithProgress().map((skill) => {
-                    const isUnlocked = skill.total_reps > 0;
-                    return (
-                      <div 
-                        key={skill.id}
-                        className={`group relative flex flex-col items-center gap-4 rounded-3xl border p-5 transition-all duration-500 ${isUnlocked ? 'hover:scale-105 shadow-lg shadow-primary/5' : 'grayscale opacity-50'}`}
-                        style={{
-                          borderColor: isUnlocked
-                            ? "color-mix(in srgb, var(--app-primary-color) 22%, var(--fl-border-soft))"
-                            : "var(--fl-border-soft)",
-                          backgroundColor: isUnlocked
-                            ? "color-mix(in srgb, var(--app-primary-color) 8%, var(--fl-surface-strong))"
-                            : "color-mix(in srgb, var(--fl-surface-muted) 78%, transparent)",
-                        }}
-                      >
+                  ) : (
+                    <>
+                      <section className="space-y-4">
+                        <div className="flex items-center justify-between gap-4">
+                          <div>
+                            <p className="text-[10px] font-bold uppercase tracking-[0.22em]" style={{ color: "var(--fl-color-text-muted)" }}>
+                              Skills desbloqueadas
+                            </p>
+                            <p className="mt-2 text-[11px]" style={{ color: "var(--fl-color-text-muted)" }}>
+                              {practicedSkills.length} com pratica registrada e {unlockedWithoutPractice.length} aguardando primeiro treino.
+                            </p>
+                          </div>
+                          <div
+                            className="rounded-full border px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em]"
+                            style={{
+                              borderColor: "color-mix(in srgb, var(--app-primary-color) 24%, var(--fl-border-soft))",
+                              color: "var(--app-primary-color)",
+                            }}
+                          >
+                            {skills.length}
+                          </div>
+                        </div>
 
-                         <div
-                           className="size-14 rounded-2xl flex items-center justify-center transition-all duration-500"
-                           style={{
-                             backgroundColor: isUnlocked
-                               ? "color-mix(in srgb, var(--app-primary-color) 18%, transparent)"
-                               : "color-mix(in srgb, var(--fl-surface-strong) 92%, transparent)",
-                             color: isUnlocked ? "var(--app-primary-color)" : "var(--fl-color-text-soft)",
-                           }}
-                         >
-                            {isUnlocked ? <Zap className="size-7" /> : <Lock className="size-6" />}
-                         </div>
-                         <div className="text-center min-w-0 w-full">
-                           <span className="block truncate text-[9px] font-black uppercase tracking-widest" style={{ color: isUnlocked ? 'var(--app-primary-color)' : 'var(--fl-color-text-muted)' }}>{skill.name}</span>
-                         </div>
-                         {isUnlocked && (
-                           <div className="absolute top-2 right-2 flex size-6 items-center justify-center rounded-full bg-primary text-[10px] font-black shadow-lg" style={{ backgroundColor: 'var(--app-primary-color)', color: 'var(--fl-nav-item-active-text)' }}>
-                              L{Math.floor(skill.total_reps / 50) + 1}
-                           </div>
-                         )}
-                      </div>
-                    )
-                  })}
+                        {skills.length === 0 ? (
+                          <div className="fl-theme-surface rounded-3xl border border-dashed py-10 text-center" style={{ borderColor: "var(--fl-border-soft)" }}>
+                            <p className="text-[10px] font-bold uppercase tracking-[0.2em]" style={{ color: "var(--fl-color-text-muted)" }}>
+                              Nenhuma skill desbloqueada ainda.
+                            </p>
+                          </div>
+                        ) : (
+                          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-6">
+                            {skills.map((skill) => {
+                              const isPracticed = hasTrackedSkillPractice(skill);
+                              const progressLabel =
+                                skill.total_reps > 0
+                                  ? `${skill.total_reps} reps`
+                                  : skill.total_time > 0
+                                    ? `${Math.max(1, Math.floor(skill.total_time / 60))} min`
+                                    : "Sem treino";
 
+                              return (
+                                <div
+                                  key={skill.id}
+                                  className={`group relative flex flex-col items-center gap-4 rounded-3xl border p-5 transition-all duration-500 ${isPracticed ? "hover:scale-105 shadow-lg shadow-primary/5" : ""}`}
+                                  style={{
+                                    borderColor: isPracticed
+                                      ? "color-mix(in srgb, var(--app-primary-color) 24%, var(--fl-border-soft))"
+                                      : "color-mix(in srgb, var(--app-secondary-color) 16%, var(--fl-border-soft))",
+                                    backgroundColor: isPracticed
+                                      ? "color-mix(in srgb, var(--app-primary-color) 8%, var(--fl-surface-strong))"
+                                      : "color-mix(in srgb, var(--fl-surface-muted) 72%, var(--fl-surface-strong))",
+                                  }}
+                                >
+                                  <div
+                                    className="flex size-14 items-center justify-center rounded-2xl transition-all duration-500"
+                                    style={{
+                                      backgroundColor: isPracticed
+                                        ? "color-mix(in srgb, var(--app-primary-color) 18%, transparent)"
+                                        : "color-mix(in srgb, var(--fl-surface-strong) 92%, transparent)",
+                                      color: isPracticed ? "var(--app-primary-color)" : "var(--fl-color-text-soft)",
+                                    }}
+                                  >
+                                    {isPracticed ? <Zap className="size-7" /> : <Shield className="size-6" />}
+                                  </div>
+
+                                  <div className="min-w-0 w-full text-center">
+                                    <span
+                                      className="block truncate text-[9px] font-black uppercase tracking-widest"
+                                      style={{ color: isPracticed ? "var(--app-primary-color)" : "var(--fl-color-text)" }}
+                                    >
+                                      {skill.name}
+                                    </span>
+                                    <p
+                                      className="mt-2 text-[9px] font-bold uppercase tracking-[0.14em]"
+                                      style={{ color: isPracticed ? "var(--app-primary-color)" : "var(--fl-color-text-muted)" }}
+                                    >
+                                      {isPracticed ? "Praticada" : "Desbloqueada"}
+                                    </p>
+                                    <p className="mt-1 text-[10px]" style={{ color: "var(--fl-color-text-muted)" }}>
+                                      {progressLabel}
+                                    </p>
+                                  </div>
+
+                                  <div
+                                    className="absolute top-2 right-2 rounded-full px-2 py-1 text-[9px] font-black uppercase tracking-[0.12em] shadow-lg"
+                                    style={{
+                                      backgroundColor: isPracticed
+                                        ? "var(--app-primary-color)"
+                                        : "color-mix(in srgb, var(--fl-surface-strong) 96%, transparent)",
+                                      color: isPracticed ? "var(--fl-nav-item-active-text)" : "var(--fl-color-text-muted)",
+                                    }}
+                                  >
+                                    {isPracticed ? `L${Math.floor(skill.total_reps / 50) + 1}` : "Nova"}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </section>
+
+                      {availableSkills.length > 0 ? (
+                        <section className="space-y-4">
+                          <div className="flex items-center justify-between gap-4">
+                            <div>
+                              <p className="text-[10px] font-bold uppercase tracking-[0.22em]" style={{ color: "var(--fl-color-text-muted)" }}>
+                                Disponiveis para desbloquear
+                              </p>
+                              <p className="mt-2 text-[11px]" style={{ color: "var(--fl-color-text-muted)" }}>
+                                Estas skills estao acessiveis, mas ainda nao entraram no seu inventario de treino.
+                              </p>
+                            </div>
+                            <div
+                              className="rounded-full border px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em]"
+                              style={{
+                                borderColor: "var(--fl-border-soft)",
+                                color: "var(--fl-color-text-muted)",
+                              }}
+                            >
+                              {availableSkills.length}
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-6">
+                            {availableSkills.map((skill) => (
+                              <div
+                                key={skill.id}
+                                className="group relative flex flex-col items-center gap-4 rounded-3xl border p-5 opacity-75 transition-all duration-500"
+                                style={{
+                                  borderColor: "var(--fl-border-soft)",
+                                  backgroundColor: "color-mix(in srgb, var(--fl-surface-muted) 78%, transparent)",
+                                }}
+                              >
+                                <div
+                                  className="flex size-14 items-center justify-center rounded-2xl"
+                                  style={{
+                                    backgroundColor: "color-mix(in srgb, var(--fl-surface-strong) 92%, transparent)",
+                                    color: "var(--fl-color-text-soft)",
+                                  }}
+                                >
+                                  <Lock className="size-6" />
+                                </div>
+
+                                <div className="min-w-0 w-full text-center">
+                                  <span
+                                    className="block truncate text-[9px] font-black uppercase tracking-widest"
+                                    style={{ color: "var(--fl-color-text-muted)" }}
+                                  >
+                                    {skill.name}
+                                  </span>
+                                  <p className="mt-2 text-[9px] font-bold uppercase tracking-[0.14em]" style={{ color: "var(--fl-color-text-muted)" }}>
+                                    Disponivel agora
+                                  </p>
+                                  <p className="mt-1 text-[10px]" style={{ color: "var(--fl-color-text-muted)" }}>
+                                    {skill.category}
+                                  </p>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </section>
+                      ) : null}
+                    </>
+                  )}
                 </div>
               </div>
             )}

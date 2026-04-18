@@ -21,6 +21,7 @@ type ProgressionTrainingRankRow = {
 type UserSkillAggregateRow = {
   user_id: string;
   unlocked_skills: number | string | null;
+  practiced_skills: number | string | null;
   unlocked_skill_stages: number | string | null;
   total_skill_reps: number | string | null;
 };
@@ -75,6 +76,7 @@ function buildTrainingRankProfile(
   const totalSessions = Math.floor(xp / 50);
   const activeWeeks = Math.min(Math.floor(totalSessions / 3), 52);
   const unlockedSkills = Math.floor(toNonNegativeNumber(skillAggregate?.unlocked_skills));
+  const practicedSkills = Math.floor(toNonNegativeNumber(skillAggregate?.practiced_skills));
   const unlockedSkillStages = Math.floor(toNonNegativeNumber(skillAggregate?.unlocked_skill_stages));
   const totalSkillReps = Math.floor(toNonNegativeNumber(skillAggregate?.total_skill_reps));
 
@@ -117,6 +119,7 @@ function buildTrainingRankProfile(
     lastActivityDate: progression.last_activity_date,
     latestBenchmarkDate: latestBenchmark?.test_date ?? latestBenchmark?.created_at ?? null,
     unlockedSkills,
+    practicedSkills,
     unlockedSkillStages,
     totalSkillReps,
     ...(benchmarkResults ? { benchmarkResults } : {}),
@@ -190,7 +193,23 @@ async function loadSkillAggregates(
       `SELECT
         user_id,
         COUNT(*) AS unlocked_skills,
-        SUM(CASE WHEN total_reps >= 100 THEN 1 ELSE 0 END) AS unlocked_skill_stages,
+        SUM(
+          CASE
+            WHEN COALESCE(total_reps, 0) > 0
+              OR COALESCE(total_time, 0) > 0
+              OR COALESCE(best_reps, 0) > 0
+            THEN 1
+            ELSE 0
+          END
+        ) AS practiced_skills,
+        SUM(
+          CASE
+            WHEN COALESCE(total_reps, 0) >= 100
+              OR COALESCE(total_time, 0) >= 300
+            THEN 1
+            ELSE 0
+          END
+        ) AS unlocked_skill_stages,
         SUM(COALESCE(total_reps, 0)) AS total_skill_reps
       FROM user_skills
       WHERE user_id IN (${placeholders})

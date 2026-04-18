@@ -463,6 +463,12 @@ function roundScore(value: number): number {
   return Math.round(value);
 }
 
+type SkillPracticeLike = {
+  total_reps?: number | null;
+  total_time?: number | null;
+  best_reps?: number | null;
+};
+
 function interpolatePiecewise(value: number, points: readonly PiecewisePoint[]): number {
   if (points.length === 0) return 0;
   const firstPoint = points[0];
@@ -490,6 +496,31 @@ function interpolatePiecewise(value: number, points: readonly PiecewisePoint[]):
   }
 
   return lastPoint[1];
+}
+
+export function hasTrackedSkillPractice(skill: SkillPracticeLike): boolean {
+  return (
+    Math.max(0, Number(skill.total_reps) || 0) > 0 ||
+    Math.max(0, Number(skill.total_time) || 0) > 0 ||
+    Math.max(0, Number(skill.best_reps) || 0) > 0
+  );
+}
+
+export function countPracticedSkills(skills: readonly SkillPracticeLike[]): number {
+  return skills.filter((skill) => hasTrackedSkillPractice(skill)).length;
+}
+
+function countProgressedSkillStages(skills: readonly SkillPracticeLike[]): number {
+  return skills.filter((skill) => {
+    if (!hasTrackedSkillPractice(skill)) {
+      return false;
+    }
+
+    return (
+      Math.max(0, Number(skill.total_reps) || 0) >= 100 ||
+      Math.max(0, Number(skill.total_time) || 0) >= 300
+    );
+  }).length;
 }
 
 function parseDate(value?: string | null): Date | null {
@@ -603,11 +634,11 @@ export function calculateRankConsistencyScore(activeWeeks: number, longestStreak
  * Calcula score de domínio de skills
  */
 export function calculateSkillMasteryScore(input: {
-  unlockedSkills: number;
+  practicedSkills: number;
   unlockedSkillStages: number;
   totalSkillReps: number;
 }): number {
-  const unlockedSkillsScore = interpolatePiecewise(Math.max(0, input.unlockedSkills), [
+  const practicedSkillsScore = interpolatePiecewise(Math.max(0, input.practicedSkills), [
     [0, 0],
     [3, 20],
     [6, 45],
@@ -633,7 +664,7 @@ export function calculateSkillMasteryScore(input: {
   ]);
 
   return clamp(roundScore(
-    unlockedSkillsScore + unlockedStagesScore + totalSkillRepsScore,
+    practicedSkillsScore + unlockedStagesScore + totalSkillRepsScore,
   ), 0, 220);
 }
 
@@ -807,7 +838,7 @@ export function calculateTrainingRankSnapshot(profile: TrainingRankProfile): Tra
   const consistencyScore = calculateRankConsistencyScore(profile.activeWeeks, profile.longestStreak);
   const benchmarkScore = calculateRankBenchmarkScore(profile);
   const skillMasteryScore = calculateSkillMasteryScore({
-    unlockedSkills: profile.unlockedSkills,
+    practicedSkills: profile.practicedSkills,
     unlockedSkillStages: profile.unlockedSkillStages,
     totalSkillReps: profile.totalSkillReps,
   });
@@ -829,7 +860,7 @@ export function calculateTrainingRankSnapshot(profile: TrainingRankProfile): Tra
     profile.benchmarkResults.runTimeSeconds != null
   );
   const hasSkillData =
-    profile.unlockedSkills > 0 ||
+    profile.practicedSkills > 0 ||
     profile.unlockedSkillStages > 0 ||
     profile.totalSkillReps > 0;
   const fallbackUsed = !hasBenchmarkData;
@@ -866,7 +897,7 @@ export function adaptExistingDataToRankProfile(
     best_streak: number;
     last_activity_date?: string | null;
   },
-  userSkills: Array<{ skill_id: number; total_reps: number; best_reps: number }>,
+  userSkills: Array<{ skill_id: number; total_reps: number; total_time?: number; best_reps: number }>,
   benchmarkResults?: {
     pushUpMaxReps?: number;
     squatMaxReps?: number;
@@ -879,6 +910,7 @@ export function adaptExistingDataToRankProfile(
 ): TrainingRankProfile {
   const totalSessions = Math.floor(userProgression.xp / 50);
   const activeWeeks = Math.min(Math.floor(totalSessions / 3), 52);
+  const practicedSkills = countPracticedSkills(userSkills);
   const totalSkillReps = userSkills.reduce(
     (total, skill) => total + Math.max(0, Number(skill.total_reps) || 0),
     0,
@@ -893,7 +925,8 @@ export function adaptExistingDataToRankProfile(
     longestStreak: userProgression.best_streak,
     lastActivityDate: userProgression.last_activity_date ?? null,
     unlockedSkills: userSkills.length,
-    unlockedSkillStages: userSkills.filter(skill => skill.total_reps >= 100).length,
+    practicedSkills,
+    unlockedSkillStages: countProgressedSkillStages(userSkills),
     totalSkillReps,
     ...(benchmarkResults ? { benchmarkResults } : {}),
   };
@@ -979,7 +1012,7 @@ export function getOrCalculateRankSnapshot(
     last_activity_date?: string | null;
     training_rank_snapshot?: string | null;
   },
-  userSkills: Array<{ skill_id: number; total_reps: number; best_reps: number }>,
+  userSkills: Array<{ skill_id: number; total_reps: number; total_time?: number; best_reps: number }>,
   benchmarkResults?: {
     pushUpMaxReps?: number;
     squatMaxReps?: number;

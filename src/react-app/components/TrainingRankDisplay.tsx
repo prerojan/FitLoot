@@ -107,7 +107,10 @@ export function TrainingRankDisplay({
   const rankMeta = getTrainingRankMeta(snapshot.globalRank);
   const nextRankMeta = getNextTrainingRankMeta(snapshot.globalRank);
   const config = rankTierConfig[rankMeta.tier];
-  const shouldShowFallbackWarning = snapshot.fallbackUsed && snapshot.hasSkillData;
+  const shouldShowFallbackWarning = snapshot.fallbackUsed;
+  const fallbackMessage = snapshot.hasSkillData
+    ? "Rank parcial: faltam benchmarks fisicos para o calculo completo."
+    : "Rank inicial: registre treinos e benchmarks para liberar a avaliacao completa.";
   const rankBandSpan = Math.max(1, rankMeta.maxScore - rankMeta.minScore);
   const rankBandProgress = Math.max(
     0,
@@ -139,7 +142,7 @@ export function TrainingRankDisplay({
           <div className="flex items-center gap-1">
             <AlertTriangle className="h-3 w-3 opacity-60" />
             <span className="text-xs" style={{ color: "var(--fl-color-text-muted)" }}>
-              Dados incompletos
+              Rank parcial
             </span>
           </div>
         ) : null}
@@ -216,11 +219,7 @@ export function TrainingRankDisplay({
         >
           <div className="flex items-center gap-2 text-xs">
             <AlertTriangle className="h-3 w-3" />
-            <span>
-              {snapshot.hasBenchmarkData && snapshot.hasSkillData
-                ? "Rank calculado com dados estimados - complete benchmarks para maior precisao"
-                : "Continue treinando para desbloquear ranking completo"}
-            </span>
+            <span>{fallbackMessage}</span>
           </div>
         </div>
       ) : null}
