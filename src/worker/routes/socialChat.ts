@@ -630,10 +630,11 @@ async function hydrateConversationPreviews(
   const participantsByConversation = await listConversationParticipants(db, ids);
 
   return rows.map((row) => {
-    const participants = participantsByConversation.get(row.id) ?? [];
+    const conversationId = toNonNegativeNumber(row.id);
+    const participants = participantsByConversation.get(conversationId) ?? [];
     const display = resolveConversationDisplay(row, participants, userId);
     return {
-      id: toNonNegativeNumber(row.id),
+      id: conversationId,
       conversation_kind: normalizeConversationKind(row.conversation_kind),
       title: row.title ?? null,
       display_title: display.displayTitle,
@@ -665,6 +666,42 @@ async function getConversationPreviewById(
 
   const previews = await hydrateConversationPreviews(db, userId, rows);
   return previews[0] ?? null;
+}
+
+async function readConversationMessagesPayload(
+  db: D1Database,
+  userId: string,
+  conversationId: number,
+  limit: number,
+  beforeMessageId: number | null,
+): Promise<{
+  conversation: SocialConversationPreview;
+  messages: SocialConversationMessage[];
+}> {
+  return runWithTransientDatabaseRetry(async () => {
+    await assertConversationMember(db, conversationId, userId);
+    await assertConversationWriteAllowed(db, conversationId, userId);
+
+    const conversation = await getConversationPreviewById(db, userId, conversationId);
+    if (!conversation) {
+      const error = new Error("CONVERSATION_NOT_FOUND");
+      error.name = "ConversationNotFoundError";
+      throw error;
+    }
+
+    const messages = await listConversationMessages(
+      db,
+      userId,
+      conversationId,
+      limit,
+      beforeMessageId,
+    );
+
+    return {
+      conversation,
+      messages,
+    };
+  });
 }
 
 async function listSocialHubBundle(
@@ -1958,14 +1995,7 @@ export function registerSocialChatRoutes(
     }
 
     try {
-      await assertConversationMember(c.env.fitloot_db, conversationId, user.id);
-      await assertConversationWriteAllowed(c.env.fitloot_db, conversationId, user.id);
-      const conversation = await getConversationPreviewById(c.env.fitloot_db, user.id, conversationId);
-      if (!conversation) {
-        return c.json({ error: "Conversa nao encontrada." }, 404);
-      }
-
-      const messages = await listConversationMessages(
+      const payload = await readConversationMessagesPayload(
         c.env.fitloot_db,
         user.id,
         conversationId,
@@ -1973,10 +2003,7 @@ export function registerSocialChatRoutes(
         beforeMessageId,
       );
 
-      return c.json({
-        conversation,
-        messages,
-      });
+      return c.json(payload);
     } catch (error) {
       if (error instanceof Error && error.name === "ConversationNotFoundError") {
         return c.json({ error: "Conversa nao encontrada." }, 404);
@@ -1988,7 +2015,7 @@ export function registerSocialChatRoutes(
         return c.json({ error: "Esta conversa nao esta disponivel agora." }, 403);
       }
 
-      console.error("[/api/social/conversations/:id/messages]", {
+      console.error("[/api/social/conversations/:id/messages][get]", {
         message: getErrorMessage(error),
         userId: user.id,
         conversationId,
@@ -2219,7 +2246,7 @@ export function registerSocialChatRoutes(
           return c.json({ error: "Esta conversa nao esta disponivel agora." }, 403);
         }
 
-        console.error("[/api/social/conversations/:id/messages]", {
+        console.error("[/api/social/conversations/:id/messages][post]", {
           message: getErrorMessage(error),
           userId: user.id,
           conversationId,

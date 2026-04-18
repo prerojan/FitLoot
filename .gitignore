@@ -22,6 +22,9 @@ android/local.properties
 # Logs
 *.log
 logs/
+tail_capture.out.log
+tail_capture.err.log
+.codex_tail_bootstrap.log
 
 # Sistema operacional
 .DS_Store
@@ -52,3 +55,7 @@ worker-configuration.d.ts
 !.dev.vars.example
 .vercel
 /.npm-temp-cache
+/supabase/.temp/
+/tmp_*
+/tmp-*.log
+/tmp_cookie*

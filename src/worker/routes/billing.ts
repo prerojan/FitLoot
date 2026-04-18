@@ -9,6 +9,8 @@ import { resolveWebhookSecret } from "../services/cakto";
 import {
   databaseNotInitializedResponse,
   hasCoreSchema,
+  isTransientDatabaseError,
+  runWithTransientDatabaseRetry,
 } from "../core/database";
 import {
   getErrorMessage,
@@ -101,37 +103,6 @@ type BillingRouteDeps = {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function isTransientDatabaseError(error: unknown): boolean {
-  const message = getErrorMessage(error).toLowerCase();
-  return (
-    message.includes("query read timeout") ||
-    message.includes("timeout exceeded when trying to connect") ||
-    message.includes("read etimedout") ||
-    message.includes("socket hang up") ||
-    message.includes("connection terminated")
-  );
-}
-
-async function runWithTransientRetry<T>(
-  task: () => Promise<T>,
-  maxAttempts = 2,
-): Promise<T> {
-  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    try {
-      return await task();
-    } catch (error) {
-      if (!isTransientDatabaseError(error) || attempt >= maxAttempts) {
-        throw error;
-      }
-      await new Promise((resolve) => {
-        setTimeout(resolve, 160 * attempt);
-      });
-    }
-  }
-
-  throw new Error("TRANSIENT_RETRY_EXHAUSTED");
 }
 
 const PENDING_RECONCILE_COOLDOWN_MS = 30_000;
@@ -323,8 +294,9 @@ export function registerBillingRoutes(
 
       try {
         const data = c.req.valid("json");
-        const onboardingReady = await runWithTransientRetry(() =>
-          hasOnboardingCheckoutState(c.env.fitloot_db, user.id),
+        const onboardingReady = await runWithTransientDatabaseRetry(
+          () => hasOnboardingCheckoutState(c.env.fitloot_db, user.id),
+          { maxAttempts: 2, baseDelayMs: 160 },
         );
 
         if (!onboardingReady) {
@@ -452,13 +424,13 @@ export function registerBillingRoutes(
     let usedTransientSnapshot = false;
 
     try {
-      [latestSubscription, refreshedUser] = await runWithTransientRetry(
+      [latestSubscription, refreshedUser] = await runWithTransientDatabaseRetry(
         () =>
           Promise.all([
             getLatestSubscriptionByUser(c.env.fitloot_db, user.id),
             getUserAuthRecordById(c.env.fitloot_db, user.id),
           ]),
-        3,
+        { maxAttempts: 3, baseDelayMs: 160 },
       );
     } catch (error) {
       if (!isTransientDatabaseError(error)) {

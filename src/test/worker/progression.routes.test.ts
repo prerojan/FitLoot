@@ -24,10 +24,13 @@ function createProgressionDeps() {
       level: 1,
       levelsGained: 0,
     })),
+    invalidateRankingCache: vi.fn(() => undefined),
+    onRankingUpdate: vi.fn(async () => undefined),
     parseProgressionXpLevel: vi.fn(() => ({
       xp: 0,
       level: 1,
     })),
+    syncTrainingRankState: vi.fn(async () => undefined),
     unlockAchievementIfNeeded: vi.fn(async () => undefined),
     unlockTitleIfNeeded: vi.fn(async () => undefined),
     listRewardNotifications: vi.fn(async () => []),

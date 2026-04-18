@@ -23,6 +23,7 @@ import {
 import type { AppContext, AuthUser } from "../core/types";
 import type { WithTransaction } from "./contracts";
 import { ensurePortugueseExerciseLabel } from "../services/instructionLocalization";
+import { applyTrainingRankingMilestones } from "../services/trainingRankingMilestones";
 import {
   DEFAULT_SETTLED_MISSION_RETENTION_MODIFIER,
   SETTLED_MISSION_RETENTION_MODIFIER_BY_PERIOD,
@@ -196,6 +197,11 @@ type MissionRouteDeps = {
     db: D1Database,
     userId: string,
     progressPercent: number,
+  ) => Promise<void>;
+  onRankingUpdate: (
+    db: D1Database,
+    userId: string,
+    position: number,
   ) => Promise<void>;
   onMissionComplete: (
     db: D1Database,
@@ -1628,11 +1634,36 @@ export function registerMissionRoutes(
             );
           }
           completionPhase = "unlock_performance_variants";
-          await deps.tryUnlockSkillsFromPerformance(c.env.fitloot_db, user.id);
-          completionPhase = "sync_training_rank";
-          await deps.syncTrainingRankState(c.env.fitloot_db, user.id);
-          completionPhase = "completed";
-        }, c.env);
+            await deps.tryUnlockSkillsFromPerformance(c.env.fitloot_db, user.id);
+            completionPhase = "sync_training_rank";
+            await deps.syncTrainingRankState(c.env.fitloot_db, user.id);
+            completionPhase = "ranking_milestones";
+            try {
+              await applyTrainingRankingMilestones(c.env.fitloot_db, user.id, {
+                onRankingUpdate: deps.onRankingUpdate,
+                unlockAchievementIfNeeded: (
+                  db,
+                  rankedUserId,
+                  achievementName,
+                  progressCurrent = 1,
+                  progressRequired = 1,
+                ) =>
+                  deps.unlockAchievementIfNeeded(
+                    db,
+                    rankedUserId,
+                    achievementName,
+                    progressCurrent,
+                    progressRequired,
+                  ),
+              });
+            } catch (rankingMilestoneError) {
+              console.warn("[/api/missions/complete][ranking-milestones]", {
+                userId: user.id,
+                message: getErrorMessage(rankingMilestoneError),
+              });
+            }
+            completionPhase = "completed";
+          }, c.env);
 
         try {
           // Limpa os caches dependentes da lista e do ranking logo após a conclusão confirmada.

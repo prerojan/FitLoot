@@ -12,6 +12,7 @@ import {
   conditioningOrder,
   skillTierOrder,
 } from "./gamificationCatalog";
+import { applyTrainingRankingMilestones } from "./trainingRankingMilestones";
 
 type GamificationLifecycleDeps = {
   invalidateRankingCache: () => void;
@@ -1413,13 +1414,29 @@ export function createGamificationLifecycleService(
       deps.invalidateRankingCache();
     }
 
+    let trainingRankStateSynced = true;
     try {
       await deps.syncTrainingRankState(db, userId);
     } catch (trainingRankError) {
+      trainingRankStateSynced = false;
       console.warn("[applyXpPointsAndResolveLevels][training-rank-sync]", {
         userId,
         message: getErrorMessage(trainingRankError),
       });
+    }
+
+    if (trainingRankStateSynced) {
+      try {
+        await applyTrainingRankingMilestones(db, userId, {
+          onRankingUpdate,
+          unlockAchievementIfNeeded,
+        });
+      } catch (rankingMilestoneError) {
+        console.warn("[applyXpPointsAndResolveLevels][ranking-milestones]", {
+          userId,
+          message: getErrorMessage(rankingMilestoneError),
+        });
+      }
     }
 
     return {

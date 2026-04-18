@@ -6,6 +6,10 @@ import {
   isMissingSchemaError,
   schemaMismatchResponse,
 } from "../core/errors";
+import {
+  isTransientDatabaseError,
+  runWithTransientDatabaseRetry,
+} from "../core/database";
 import type { AppContext } from "../core/types";
 
 type PresenceRouteDeps = {
@@ -50,36 +54,6 @@ function normalizeCurrentActivity(value: unknown): string | null {
   return trimmed.slice(0, 120);
 }
 
-function isTransientDatabaseError(error: unknown): boolean {
-  const message = getErrorMessage(error).toLowerCase();
-  return (
-    message.includes("query read timeout") ||
-    message.includes("timeout exceeded when trying to connect") ||
-    message.includes("read etimedout") ||
-    message.includes("socket hang up") ||
-    message.includes("connection terminated")
-  );
-}
-
-async function runWithTransientRetry(
-  task: () => Promise<void>,
-  maxAttempts = 2,
-): Promise<void> {
-  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    try {
-      await task();
-      return;
-    } catch (error) {
-      if (!isTransientDatabaseError(error) || attempt >= maxAttempts) {
-        throw error;
-      }
-      await new Promise((resolve) => {
-        setTimeout(resolve, 140 * attempt);
-      });
-    }
-  }
-}
-
 // Registers lightweight user presence heartbeat routes used by friends online status.
 export function registerPresenceRoutes(
   app: Hono<AppContext>,
@@ -95,7 +69,7 @@ export function registerPresenceRoutes(
     const sessionId = getSessionIdFromCookieHeader(c.req.header("Cookie"));
 
     try {
-      await runWithTransientRetry(async () => {
+      await runWithTransientDatabaseRetry(async () => {
         await c.env.fitloot_db
           .prepare(
             `INSERT INTO user_presence (
@@ -130,7 +104,7 @@ export function registerPresenceRoutes(
           )
           .bind(user.id, visibility, sessionId, currentActivity)
           .run();
-      }, 1);
+      }, { maxAttempts: 1, baseDelayMs: 140 });
 
       const runtimeDb = resolveRuntimeFriendCacheDb(c);
       if (runtimeDb) {
@@ -167,7 +141,7 @@ export function registerPresenceRoutes(
     if (!user) return c.json({ error: "Unauthorized" }, 401);
 
     try {
-      await runWithTransientRetry(async () => {
+      await runWithTransientDatabaseRetry(async () => {
         await c.env.fitloot_db
           .prepare(
             `UPDATE user_presence
@@ -178,7 +152,7 @@ export function registerPresenceRoutes(
           )
           .bind(user.id)
           .run();
-      }, 1);
+      }, { maxAttempts: 1, baseDelayMs: 140 });
 
       const runtimeDb = resolveRuntimeFriendCacheDb(c);
       if (runtimeDb) {

@@ -1,0 +1,2 @@
+CREATE INDEX IF NOT EXISTS idx_conversation_message_media_uploaded_by_user
+  ON conversation_message_media(uploaded_by_user_id);

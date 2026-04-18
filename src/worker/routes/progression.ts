@@ -14,6 +14,7 @@ import {
   readRuntimeDashboardProjection,
   upsertRuntimeDashboardProjection,
 } from "../core/runtimeUserProjectionStore";
+import { applyTrainingRankingMilestones } from "../services/trainingRankingMilestones";
 import type {
   AppContext,
   PhysicalBenchmarkDelta,
@@ -44,6 +45,11 @@ type ProgressionRouteDeps = {
   computeXpAndLevelAfterGain: ComputeXpAndLevelAfterGain;
   invalidateRankingCache: () => void;
   parseProgressionXpLevel: ParseProgressionXpLevel;
+  onRankingUpdate: (
+    db: D1Database,
+    userId: string,
+    position: number,
+  ) => Promise<void>;
   syncTrainingRankState: (
     db: D1Database,
     userId: string,
@@ -98,6 +104,7 @@ export function registerProgressionRoutes(
     applyXpPointsAndResolveLevels,
     computeXpAndLevelAfterGain,
     invalidateRankingCache,
+    onRankingUpdate,
     parseProgressionXpLevel,
     syncTrainingRankState,
     unlockAchievementIfNeeded,
@@ -576,6 +583,17 @@ export function registerProgressionRoutes(
       }
 
       await syncTrainingRankState(c.env.fitloot_db, user.id);
+      try {
+        await applyTrainingRankingMilestones(c.env.fitloot_db, user.id, {
+          onRankingUpdate,
+          unlockAchievementIfNeeded,
+        });
+      } catch (rankingMilestoneError) {
+        console.warn("[/api/benchmarks][ranking-milestones]", {
+          userId: user.id,
+          message: getErrorMessage(rankingMilestoneError),
+        });
+      }
       invalidateRankingCache();
 
       const newBenchmark = result.meta.last_row_id

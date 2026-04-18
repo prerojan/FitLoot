@@ -7,7 +7,11 @@ import {
   type ConditioningLevel,
   type OnboardingProfileSeedRequest,
 } from "../../shared/types";
-import { hasTableColumn, purgeUserAccountData } from "../core/database";
+import {
+  hasTableColumn,
+  purgeUserAccountData,
+  runWithTransientDatabaseRetry,
+} from "../core/database";
 import {
   getErrorMessage,
   isInvalidPromoCodeError,
@@ -493,36 +497,6 @@ function respondOnboardingPersistenceError(
   return null;
 }
 
-function isTransientDatabaseError(error: unknown): boolean {
-  const message = getErrorMessage(error).toLowerCase();
-  return (
-    message.includes("query read timeout") ||
-    message.includes("timeout exceeded when trying to connect") ||
-    message.includes("read etimedout") ||
-    message.includes("socket hang up") ||
-    message.includes("connection terminated")
-  );
-}
-
-async function runWithTransientRetry(
-  task: () => Promise<void>,
-): Promise<void> {
-  const maxAttempts = 2;
-  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    try {
-      await task();
-      return;
-    } catch (error) {
-      if (!isTransientDatabaseError(error) || attempt >= maxAttempts) {
-        throw error;
-      }
-      await new Promise((resolve) => {
-        setTimeout(resolve, 150 * attempt);
-      });
-    }
-  }
-}
-
 // Registers the onboarding pipeline that persists profile state, training plans, and checkout intent.
 export function registerOnboardingRoutes(
   app: Hono<AppContext>,
@@ -566,7 +540,7 @@ export function registerOnboardingRoutes(
       }
 
       try {
-        await runWithTransientRetry(async () => {
+        await runWithTransientDatabaseRetry(async () => {
           await withTransaction(c.env.fitloot_db, async () => {
             await persistOnboardingProfileState({
               env: c.env,
@@ -584,7 +558,7 @@ export function registerOnboardingRoutes(
               upsertTrainingPlan,
             });
           }, c.env);
-        });
+        }, { maxAttempts: 2, baseDelayMs: 150 });
         await syncRuntimeUserAuthSnapshot({
           env: c.env,
           runtimeSessionDb,
@@ -651,7 +625,7 @@ export function registerOnboardingRoutes(
       try {
         let onboardingSnapshot: PersistedOnboardingSnapshot | null = null;
 
-        await runWithTransientRetry(async () => {
+        await runWithTransientDatabaseRetry(async () => {
           await withTransaction(c.env.fitloot_db, async () => {
             onboardingSnapshot = await persistOnboardingProfileState({
               env: c.env,
@@ -694,7 +668,7 @@ export function registerOnboardingRoutes(
               amount: checkoutResult.amount,
             });
           }, c.env);
-        });
+        }, { maxAttempts: 2, baseDelayMs: 150 });
         await syncRuntimeUserAuthSnapshot({
           env: c.env,
           runtimeSessionDb,

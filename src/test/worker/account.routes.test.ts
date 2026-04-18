@@ -46,6 +46,7 @@ function createAccountDeps(overrides: Record<string, unknown> = {}) {
     onAppOpen: vi.fn(async () => undefined),
     onProfileCustomization: vi.fn(async () => undefined),
     shouldPurgeUserOnLogout: vi.fn(() => false),
+    syncTrainingRankState: vi.fn(async () => undefined),
     unlockAchievementIfNeeded: vi.fn(async () => undefined),
     ...overrides,
   };
@@ -141,8 +142,9 @@ describe("account routes", () => {
       app_open_degraded: false,
     });
     expect(profileReads).toBe(2);
-    expect(progressionReads).toBe(2);
+    expect(progressionReads).toBe(3);
     expect(attributeReads).toBe(2);
+    expect(deps.syncTrainingRankState).toHaveBeenCalledWith(db, TEST_USER.id);
   });
 
   it("keeps profile patch successful when telemetry hook fails", async () => {

@@ -12,6 +12,8 @@ import {
 
 vi.mock("../../worker/core/database", () => ({
   hasTableColumn: vi.fn(async () => false),
+  isTransientDatabaseError: vi.fn(() => false),
+  runWithTransientDatabaseRetry: vi.fn(async (task: () => Promise<unknown>) => await task()),
 }));
 
 import { registerOnboardingRoutes } from "../../worker/routes/onboarding";

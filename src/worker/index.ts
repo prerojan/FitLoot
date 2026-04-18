@@ -1,12 +1,8 @@
 ﻿import { Hono } from "hono";
-import { zValidator } from "@hono/zod-validator";
 import {
-  MiniGameChallengeRequestSchema,
-  MiniGameCompleteRequestSchema,
   ConditioningLevel,
   MissionMetricType,
   CircuitTask,
-  type TrainingRank,
 } from "../shared/types";
 import {
   resolveExerciseDisplayNamePt,
@@ -19,9 +15,6 @@ import {
   localizeMissionText,
 } from "../shared/missionLocalization";
 import {
-  deserializeRankSnapshot,
-  getLowestTrainingRank,
-  isTrainingRank,
 } from "../shared/trainingLevels";
 import {
   getMissionMetricType,
@@ -102,6 +95,8 @@ import { registerAiRoutes } from "./routes/ai";
 import { registerAuthRoutes } from "./routes/auth";
 import { registerMapRoutes } from "./routes/maps";
 import { registerSocialChatRoutes } from "./routes/socialChat";
+import { registerRankingRoutes } from "./routes/ranking";
+import { registerMiniGameRoutes } from "./routes/miniGames";
 import {
   createMissionGenerationService,
   type StructuredGenerationOptions,
@@ -109,10 +104,12 @@ import {
 import { createBackgroundProcessingService } from "./services/backgroundProcessing";
 import { createMissionMaterializationService } from "./services/missionMaterialization";
 import {
-  needsTrainingRankSync,
   syncTrainingRankStateForUser,
-  syncTrainingRankStatesForUsers,
 } from "./services/trainingRank";
+import {
+  loadTrainingRankingRows,
+  type RankingRow,
+} from "./services/trainingRanking";
 import {
   applyMissionMetricContext,
   buildCircuitTasks,
@@ -1916,6 +1913,7 @@ registerProgressionRoutes(app, {
   computeXpAndLevelAfterGain,
   invalidateRankingCache,
   listRewardNotifications,
+  onRankingUpdate,
   parseProgressionXpLevel,
   syncTrainingRankState: (db, userId) => syncTrainingRankStateForUser(db, userId),
   unlockAchievementIfNeeded,
@@ -2993,6 +2991,7 @@ registerMissionRoutes(
     normalizeMissionMetricType,
     normalizeMissionRow: (row) => normalizeMissionRow(row),
     onGoalProgress,
+    onRankingUpdate,
     onMissionComplete,
     onStreakContinued,
     repairActivatedProfileState: ({ db, env, user }) =>
@@ -3053,37 +3052,9 @@ registerMetricsRoutes(app, {
   updateMonthlyMissionProgress,
 });
 
-type RankingRow = {
-  user_id: string;
-  username: string;
-  full_name: string;
-  avatar_url: string | null;
-  level: number;
-  xp: number;
-  current_streak: number;
-  points: number;
-  training_rank: TrainingRank;
-  training_rank_score: number;
-};
-
-type TrainingRankingSourceRow = {
-  user_id: string;
-  username: string;
-  full_name: string;
-  avatar_url: string | null;
-  level: number | string | null;
-  xp: number | string | null;
-  current_streak: number | string | null;
-  points: number | string | null;
-  training_rank: string | null;
-  training_rank_score: number | string | null;
-  training_rank_snapshot: string | null;
-};
-
 const RANKING_CACHE_TTL_MS = 15_000;
 let rankingCacheEntry: { rows: RankingRow[]; expiresAt: number } | null = null;
 
-// Mantém o ranking global barato sem perder atualização frequente.
 function readRankingCache(): RankingRow[] | null {
   if (!rankingCacheEntry) return null;
   if (rankingCacheEntry.expiresAt <= Date.now()) {
@@ -3104,151 +3075,12 @@ function invalidateRankingCache(): void {
   rankingCacheEntry = null;
 }
 
-function normalizeNonNegativeNumber(value: unknown, fallback = 0): number {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) {
-    return fallback;
-  }
-  return Math.max(0, parsed);
-}
-
-function normalizeTrainingRankingRow(
-  row: TrainingRankingSourceRow,
-  syncedSnapshots: ReadonlyMap<string, { globalRank: TrainingRank; globalScore: number }> = new Map(),
-): RankingRow {
-  const level = Math.max(1, normalizeNonNegativeNumber(row.level, 1));
-  const xp = normalizeNonNegativeNumber(row.xp);
-  const currentStreak = normalizeNonNegativeNumber(row.current_streak);
-  const syncedSnapshot = syncedSnapshots.get(row.user_id);
-  const storedSnapshot = deserializeRankSnapshot(row.training_rank_snapshot);
-  const resolvedSnapshot = syncedSnapshot ?? storedSnapshot;
-  const storedRank = isTrainingRank(row.training_rank) ? row.training_rank : null;
-  const storedScoreRaw = Number(row.training_rank_score);
-  const storedScore = Number.isFinite(storedScoreRaw) ? Math.max(0, storedScoreRaw) : null;
-  const trainingRank = storedRank ?? resolvedSnapshot?.globalRank ?? getLowestTrainingRank();
-  const trainingRankScore = storedScore ?? resolvedSnapshot?.globalScore ?? 0;
-
-  return {
-    user_id: row.user_id,
-    username: row.username,
-    full_name: row.full_name,
-    avatar_url: row.avatar_url ?? null,
-    level,
-    xp,
-    current_streak: currentStreak,
-    points: normalizeNonNegativeNumber(row.points),
-    training_rank: trainingRank,
-    training_rank_score: trainingRankScore,
-  };
-}
-
-function sortTrainingRankingRows(rows: RankingRow[]): RankingRow[] {
-  return [...rows].sort((left, right) => {
-    if (right.training_rank_score !== left.training_rank_score) {
-      return right.training_rank_score - left.training_rank_score;
-    }
-    if (right.level !== left.level) {
-      return right.level - left.level;
-    }
-    if (right.xp !== left.xp) {
-      return right.xp - left.xp;
-    }
-    return left.username.localeCompare(right.username, "pt-BR", {
-      sensitivity: "base",
-    });
-  });
-}
-
-async function loadTrainingRankingRows(
-  db: D1Database,
-  whereClause?: string,
-  bindings: unknown[] = [],
-): Promise<RankingRow[]> {
-  const ranking = await db.prepare(
-    `SELECT
-      up.user_id,
-      up.username,
-      up.full_name,
-      u.avatar_url,
-      pr.level,
-      pr.xp,
-      pr.current_streak,
-      pr.points,
-      pr.training_rank,
-      pr.training_rank_score,
-      pr.training_rank_snapshot
-    FROM user_profiles up
-    LEFT JOIN users u
-      ON u.id = up.user_id
-    INNER JOIN user_progression pr
-      ON up.user_id = pr.user_id
-    ${whereClause ? `WHERE ${whereClause}` : ""}`,
-  ).bind(...bindings).all<TrainingRankingSourceRow>();
-
-  const sourceRows = Array.isArray(ranking.results) ? ranking.results : [];
-  const missingStateUserIds = sourceRows
-    .filter((row) =>
-      needsTrainingRankSync({
-        training_rank: row.training_rank,
-        training_rank_score: row.training_rank_score,
-        training_rank_snapshot: row.training_rank_snapshot,
-      }),
-    )
-    .map((row) => row.user_id);
-
-  const syncedSnapshots = missingStateUserIds.length > 0
-    ? await syncTrainingRankStatesForUsers(db, missingStateUserIds)
-    : new Map();
-
-  return sortTrainingRankingRows(
-    sourceRows.map((row) => normalizeTrainingRankingRow(row, syncedSnapshots)),
-  );
-}
-
-app.get("/api/ranking/global", authMiddleware, async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-  let rankingRows = readRankingCache();
-  if (!rankingRows) {
-    rankingRows = (await loadTrainingRankingRows(c.env.fitloot_db)).slice(0, 100);
-    writeRankingCache(rankingRows);
-  }
-
-  const position = rankingRows.findIndex((row) => row.user_id === user.id) + 1;
-  if (position > 0) {
-    await ensureUserCounterRow(c.env.fitloot_db, user.id);
-    await onRankingUpdate(c.env.fitloot_db, user.id, position);
-    if (position <= 100) await unlockAchievementIfNeeded(c.env.fitloot_db, user.id, 'Na Disputa', 100 - position + 1, 100);
-    if (position <= 10) await unlockAchievementIfNeeded(c.env.fitloot_db, user.id, 'Elite', 10 - position + 1, 10);
-    if (position === 1) await unlockAchievementIfNeeded(c.env.fitloot_db, user.id, 'O Escolhido', 1, 1);
-  }
-
-  const sanitized = rankingRows.map((row) => {
-    const sanitized = { ...(row as Record<string, unknown>) };
-    delete sanitized.user_id;
-    return sanitized;
-  });
-  return streamJsonArrayResponse(sanitized);
-});
-
-app.get("/api/ranking/friends", authMiddleware, async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-  c.header("Cache-Control", "no-store");
-
-  const rankingRows = await loadTrainingRankingRows(
-    c.env.fitloot_db,
-    `up.user_id = ? OR up.user_id IN (
-      SELECT COALESCE(friend_id, friend_user_id)
-      FROM friendships
-      WHERE user_id = ?
-    )`,
-    [user.id, user.id],
-  );
-
-  return streamJsonArrayResponse(rankingRows);
+registerRankingRoutes(app, {
+  authMiddleware,
+  loadTrainingRankingRows,
+  readRankingCache,
+  streamJsonArrayResponse,
+  writeRankingCache,
 });
 
 registerFriendsRoutes(app, {
@@ -3262,268 +3094,16 @@ registerSocialChatRoutes(app, {
   withTransaction,
 });
 
-// Consolida counters e recompensas do ciclo de mini-games.
-async function registerMiniGameResult(db: D1Database, userId: string, didWin: boolean) {
-  await ensureUserCounterRow(db, userId);
-
-  await db.prepare(
-    `UPDATE user_event_counters
-      SET minigames_played = COALESCE(minigames_played, 0) + 1,
-          minigames_won = COALESCE(minigames_won, 0) + ?,
-          minigame_win_streak = CASE
-            WHEN ? = 1 THEN COALESCE(minigame_win_streak, 0) + 1
-            ELSE 0
-          END,
-          updated_at = datetime('now')
-      WHERE user_id = ?`
-  ).bind(didWin ? 1 : 0, didWin ? 1 : 0, userId).run();
-
-  const counters = await db.prepare(
-    "SELECT minigames_played, minigames_won, minigame_win_streak FROM user_event_counters WHERE user_id = ?"
-  ).bind(userId).first<{ minigames_played: number; minigames_won: number; minigame_win_streak: number }>();
-
-  const played = Number(counters?.minigames_played ?? 0);
-  const won = Number(counters?.minigames_won ?? 0);
-  const winStreak = Number(counters?.minigame_win_streak ?? 0);
-
-  if (played >= 1) {
-    await unlockAchievementIfNeeded(db, userId, "Jogador", played, 1);
-  }
-  if (won >= 10) {
-    await unlockAchievementIfNeeded(db, userId, "Competidor", won, 10);
-  }
-  if (winStreak >= 50) {
-    await unlockAchievementIfNeeded(db, userId, "Imbat\u00edvel", winStreak, 50);
-  }
-}
-
-// Expõe o fluxo de desafio rápido separado do domínio principal de missões.
-app.post("/api/mini-games/challenge", authMiddleware, zValidator("json", MiniGameChallengeRequestSchema), async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-  const data = c.req.valid("json");
-
-  let challengedUserId = data.challenged_user_id;
-
-  // Sorteia um oponente com faixa de nível próxima quando o desafio é aleatório.
-  if (data.opponent_type === 'random') {
-    const progression = await c.env.fitloot_db.prepare(
-      "SELECT level FROM user_progression WHERE user_id = ?"
-    ).bind(user.id).first();
-
-    const level = Number(progression?.level || 1);
-    const minLevel = Math.max(1, level - 5);
-    const maxLevel = level + 5;
-
-    const randomUser = await c.env.fitloot_db.prepare(
-      `SELECT user_id FROM user_progression 
-      WHERE user_id != ? AND level BETWEEN ? AND ?
-      ORDER BY RANDOM()
-      LIMIT 1`
-    ).bind(user.id, minLevel, maxLevel).first();
-
-    if (!randomUser) {
-      return c.json({ error: "No suitable opponent found" }, 404);
-    }
-
-    challengedUserId = randomUser.user_id as string;
-  }
-
-  if (!challengedUserId) {
-    return c.json({ error: "Opponent not specified" }, 400);
-  }
-
-  if (challengedUserId === user.id) {
-    return c.json({ error: "Cannot challenge yourself" }, 400);
-  }
-
-  const [targetUser, skill] = await Promise.all([
-    c.env.fitloot_db.prepare("SELECT user_id FROM user_profiles WHERE user_id = ?").bind(challengedUserId).first<{ user_id: string }>(),
-    c.env.fitloot_db.prepare("SELECT id FROM skills WHERE id = ?").bind(data.skill_id).first<{ id: number }>(),
-  ]);
-
-  if (!targetUser) {
-    return c.json({ error: "Opponent not found" }, 404);
-  }
-
-  if (!skill) {
-    return c.json({ error: "Skill not found" }, 404);
-  }
-
-  const existingGame = await c.env.fitloot_db.prepare(
-    `SELECT id FROM mini_games
-      WHERE skill_id = ?
-      AND status IN ('pending', 'active')
-      AND ((challenger_user_id = ? AND challenged_user_id = ?) OR (challenger_user_id = ? AND challenged_user_id = ?))`
-  ).bind(data.skill_id, user.id, challengedUserId, challengedUserId, user.id).first<{ id: number }>();
-
-  if (existingGame?.id) {
-    return c.json({ error: "Existing challenge in progress" }, 409);
-  }
-
-  // Mantém a regra atual de recompensa proporcional à dificuldade do desafio.
-  const xpReward = data.target_reps * 5;
-  const pointsReward = data.target_reps;
-  const deadline = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
-
-  await c.env.fitloot_db.prepare(
-    `INSERT INTO mini_games (challenger_user_id, challenged_user_id, skill_id, 
-    target_reps, status, xp_reward, points_reward, deadline, updated_at)
-    VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, datetime('now'))`
-  ).bind(user.id, challengedUserId, data.skill_id, data.target_reps, xpReward, pointsReward, deadline).run();
-
-  return c.json({ success: true }, 201);
-});
-
-app.get("/api/mini-games/active", authMiddleware, async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
-  const limit = Math.min(Math.max(Number(c.req.query("limit") ?? 120), 1), 250);
-
-  const games = await c.env.fitloot_db.prepare(
-    `SELECT mg.*, 
-    s.name as skill_name,
-    up1.username as challenger_username,
-    up2.username as challenged_username
-    FROM mini_games mg
-    INNER JOIN skills s ON mg.skill_id = s.id
-    INNER JOIN user_profiles up1 ON mg.challenger_user_id = up1.user_id
-    INNER JOIN user_profiles up2 ON mg.challenged_user_id = up2.user_id
-    WHERE (mg.challenger_user_id = ? OR mg.challenged_user_id = ?)
-    ORDER BY 
-      CASE mg.status 
-        WHEN 'active' THEN 1 
-        WHEN 'pending' THEN 2 
-        ELSE 3 
-      END,
-      mg.created_at DESC
-    LIMIT ?`
-  ).bind(user.id, user.id, limit).all();
-
-  return c.json(games.results);
-});
-
-app.post("/api/mini-games/:id/accept", authMiddleware, async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-  const gameId = Number(c.req.param("id"));
-  if (!Number.isInteger(gameId) || gameId <= 0) {
-    return c.json({ error: "Invalid game id" }, 400);
-  }
-
-  const accepted = await c.env.fitloot_db.prepare(
-    `UPDATE mini_games SET status = 'active', updated_at = datetime('now')
-      WHERE id = ? AND challenged_user_id = ? AND status = 'pending'`
-  ).bind(gameId, user.id).run();
-
-  const changes = Number((accepted as { meta?: { changes?: number } }).meta?.changes ?? 0);
-  if (changes === 0) {
-    return c.json({ error: "Game not found" }, 404);
-  }
-
-  return c.json({ success: true });
-});
-
-app.post("/api/mini-games/:id/complete", authMiddleware, zValidator("json", MiniGameCompleteRequestSchema), async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-  const gameId = Number(c.req.param("id"));
-  if (!Number.isInteger(gameId) || gameId <= 0) {
-    return c.json({ error: "Invalid game id" }, 400);
-  }
-
-  const data = c.req.valid("json");
-
-  const game = await c.env.fitloot_db.prepare(
-    `SELECT id, challenger_user_id, challenged_user_id, target_reps, xp_reward, points_reward
-      FROM mini_games
-      WHERE id = ? AND status = 'active'`
-  ).bind(gameId).first<{
-    id: number;
-    challenger_user_id: string;
-    challenged_user_id: string;
-    target_reps: number;
-    xp_reward: number;
-    points_reward: number;
-  }>();
-
-  if (!game) {
-    return c.json({ error: "Game not found" }, 404);
-  }
-
-  const isParticipant = game.challenger_user_id === user.id || game.challenged_user_id === user.id;
-  if (!isParticipant) {
-    return c.json({ error: "Forbidden" }, 403);
-  }
-
-  if (Number(data.reps_completed) < Number(game.target_reps ?? 0)) {
-    return c.json({ error: "Target reps not reached" }, 400);
-  }
-
-  const winnerUserId = user.id;
-  const loserUserId = winnerUserId === game.challenger_user_id ? game.challenged_user_id : game.challenger_user_id;
-  const rewardNotificationCursor = await getRewardNotificationCursor(
-    c.env.fitloot_db,
-    winnerUserId,
-  );
-
-  const completeUpdate = await c.env.fitloot_db.prepare(
-    `UPDATE mini_games
-      SET status = 'completed', winner_user_id = ?, updated_at = datetime('now')
-      WHERE id = ? AND status = 'active'`
-  ).bind(winnerUserId, gameId).run();
-
-  const completeChanges = Number((completeUpdate as { meta?: { changes?: number } }).meta?.changes ?? 0);
-  if (completeChanges === 0) {
-    return c.json({ error: "Game already completed" }, 409);
-  }
-
-  const winnerXp = Number(game.xp_reward ?? 0);
-  const winnerPoints = Number(game.points_reward ?? 0);
-  const loserXp = Math.floor(winnerXp / 2);
-  const loserPoints = Math.floor(winnerPoints / 2);
-
-  await Promise.all([
-    applyXpPointsAndResolveLevels(c.env.fitloot_db, winnerUserId, winnerXp, winnerPoints),
-    applyXpPointsAndResolveLevels(c.env.fitloot_db, loserUserId, loserXp, loserPoints),
-    registerMiniGameResult(c.env.fitloot_db, winnerUserId, true),
-    registerMiniGameResult(c.env.fitloot_db, loserUserId, false),
-    logUserEvent(c.env.fitloot_db, winnerUserId, "onMiniGameComplete", {
-      gameId,
-      won: true,
-      reps_completed: data.reps_completed,
-      time_seconds: data.time_seconds,
-    }),
-    logUserEvent(c.env.fitloot_db, loserUserId, "onMiniGameComplete", {
-      gameId,
-      won: false,
-      reps_completed: data.reps_completed,
-      time_seconds: data.time_seconds,
-    }),
-  ]);
-  invalidateRankingCache();
-
-  const rewardEvents = await listRewardNotifications(
-    c.env.fitloot_db,
-    winnerUserId,
-    {
-      afterId: rewardNotificationCursor,
-      pendingOnly: true,
-      limit: 25,
-    },
-  );
-
-  return c.json({
-    success: true,
-    winner: winnerUserId,
-    xp_gained: winnerXp,
-    points_gained: winnerPoints,
-    leveledUp: rewardEvents.some((event) => event.type === "level_up"),
-    reward_events: rewardEvents,
-  });
+registerMiniGameRoutes(app, {
+  applyXpPointsAndResolveLevels,
+  authMiddleware,
+  ensureUserCounterRow,
+  getRewardNotificationCursor,
+  invalidateRankingCache,
+  listRewardNotifications,
+  logUserEvent,
+  unlockAchievementIfNeeded,
+  withTransaction,
 });
 
 const MISSION_METRIC_RULES_PROMPT = [

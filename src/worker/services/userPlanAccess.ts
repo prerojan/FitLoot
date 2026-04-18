@@ -1,5 +1,8 @@
 import { PLAN_GUARD_EXEMPT_PATHS } from "../core/constants";
-import { hasTableColumn } from "../core/database";
+import {
+  hasTableColumn,
+  isTransientDatabaseError,
+} from "../core/database";
 import type {
   CheckoutPaymentMethod,
   PlanId,
@@ -122,20 +125,6 @@ function isMissingColumnError(error: unknown): boolean {
     (message.includes("column") && message.includes("does not exist")) ||
     message.includes("no such column") ||
     message.includes("missing plan columns")
-  );
-}
-
-function isTransientDatabaseError(error: unknown): boolean {
-  const message = (error instanceof Error ? error.message : String(error))
-    .toLowerCase()
-    .trim();
-  return (
-    message.includes("query read timeout") ||
-    message.includes("timeout exceeded when trying to connect") ||
-    message.includes("connection terminated") ||
-    message.includes("connect etimedout") ||
-    message.includes("read etimedout") ||
-    message.includes("socket hang up")
   );
 }
 
