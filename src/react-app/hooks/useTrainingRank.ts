@@ -15,6 +15,44 @@ type BenchmarkResults = {
   runTimeSeconds?: number;
 };
 
+function hasCurrentTrainingEvidence(
+  userProgression: UserProgression | null,
+  userSkills: UserSkill[],
+  benchmarkResults?: BenchmarkResults,
+): boolean {
+  const hasProgressionEvidence =
+    (Number(userProgression?.xp ?? 0) > 0) ||
+    (Number(userProgression?.current_streak ?? 0) > 0) ||
+    (Number(userProgression?.best_streak ?? 0) > 0);
+
+  const hasSkillEvidence = userSkills.some((skill) =>
+    Number(skill.total_reps ?? 0) > 0 ||
+    Number(skill.total_time ?? 0) > 0 ||
+    Number(skill.best_reps ?? 0) > 0,
+  );
+
+  const hasBenchmarkEvidence = Boolean(
+    benchmarkResults &&
+    Object.values(benchmarkResults).some((value) => typeof value === "number"),
+  );
+
+  return hasProgressionEvidence || hasSkillEvidence || hasBenchmarkEvidence;
+}
+
+function isEmptyFallbackSnapshot(snapshot: TrainingRankSnapshot): boolean {
+  return (
+    snapshot.fallbackUsed &&
+    !snapshot.hasBenchmarkData &&
+    !snapshot.hasSkillData &&
+    snapshot.globalScore === 0 &&
+    snapshot.factors.volumeScore === 0 &&
+    snapshot.factors.consistencyScore === 0 &&
+    snapshot.factors.benchmarkScore === 0 &&
+    snapshot.factors.skillMasteryScore === 0 &&
+    snapshot.factors.momentumScore === 0
+  );
+}
+
 export function useTrainingRank(
   userProgression: UserProgression | null,
   userSkills: UserSkill[],
@@ -36,7 +74,12 @@ export function useTrainingRank(
         const existingSnapshot = deserializeRankSnapshot(
           userProgression?.training_rank_snapshot || null,
         );
-        if (existingSnapshot) {
+        const shouldIgnoreExistingSnapshot =
+          existingSnapshot != null &&
+          isEmptyFallbackSnapshot(existingSnapshot) &&
+          hasCurrentTrainingEvidence(userProgression, userSkills, benchmarkResults);
+
+        if (existingSnapshot && !shouldIgnoreExistingSnapshot) {
           setSnapshot(existingSnapshot);
           return;
         }
@@ -58,9 +101,10 @@ export function useTrainingRank(
                 best_streak: 0,
                 last_activity_date: null,
                 training_rank_snapshot: null,
-              },
+          },
           userSkills,
           benchmarkResults,
+          shouldIgnoreExistingSnapshot,
         );
 
         setSnapshot(rankSnapshot);

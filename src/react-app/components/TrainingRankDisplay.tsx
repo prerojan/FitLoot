@@ -10,6 +10,18 @@ interface TrainingRankDisplayProps {
   compact?: boolean;
 }
 
+function hasMeaningfulTrainingEvidence(snapshot: TrainingRankSnapshot): boolean {
+  return (
+    snapshot.hasBenchmarkData ||
+    snapshot.hasSkillData ||
+    snapshot.globalScore > 0 ||
+    snapshot.factors.volumeScore > 0 ||
+    snapshot.factors.consistencyScore > 0 ||
+    snapshot.factors.skillMasteryScore > 0 ||
+    snapshot.factors.momentumScore > 0
+  );
+}
+
 const rankTierConfig = {
   bronze: {
     accent: "#b87333",
@@ -107,10 +119,9 @@ export function TrainingRankDisplay({
   const rankMeta = getTrainingRankMeta(snapshot.globalRank);
   const nextRankMeta = getNextTrainingRankMeta(snapshot.globalRank);
   const config = rankTierConfig[rankMeta.tier];
-  const shouldShowFallbackWarning = snapshot.fallbackUsed;
-  const fallbackMessage = snapshot.hasSkillData
-    ? "Rank parcial: faltam benchmarks fisicos para o calculo completo."
-    : "Rank inicial: registre treinos e benchmarks para liberar a avaliacao completa.";
+  const shouldShowFallbackWarning =
+    snapshot.fallbackUsed && !hasMeaningfulTrainingEvidence(snapshot);
+  const fallbackMessage = "Continue treinando para desbloquear ranking completo";
   const rankBandSpan = Math.max(1, rankMeta.maxScore - rankMeta.minScore);
   const rankBandProgress = Math.max(
     0,
